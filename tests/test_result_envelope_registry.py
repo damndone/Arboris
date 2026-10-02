@@ -1,13 +1,18 @@
 """v1.8.10 step 1b: one declaration per family, read the same way everywhere.
 
-Three tables used to decide what a family's evidence was -- the Agent's, the
-report stage's and the run-detail route's -- and a family missing from one was
-invisible there. Callaway-Sant'Anna, Sun-Abraham and dCDH were in none.
+Separate tables decided what a family's evidence was -- the Agent's, the
+report stage's, the run-detail route's -- and a family missing from one was
+invisible there. Callaway-Sant'Anna, Sun-Abraham and dCDH were in none. The
+Agent, the report stage and the report writer's citable facts now read the
+declaration. The run-detail route's merge list and the Table and Report views'
+per-family renderers still name four families; they go with the v1.9.0
+interface rework.
 """
 
 from __future__ import annotations
 
 import ast
+import asyncio
 import json
 import math
 from pathlib import Path
@@ -16,7 +21,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from workbench.agent.context_tools import InspectResultSummaryRequest, NodeOperationContextProvider
+from workbench.agent.context_tools import NodeOperationContextProvider
+from workbench.agent.tools import ToolRegistry
 from workbench.artifacts import read_json
 from workbench.contracts.model.result_envelope_registry import (
     EVIDENCE_KINDS,
@@ -36,9 +42,16 @@ def test_every_model_family_and_every_model_handler_has_a_declaration() -> None:
     from workbench.engine.registry import MODEL_REGISTRY
 
     bootstrap_builtin_packs()
+    # Other tests register throwaway handlers in the same process; the
+    # question is about the handlers the product ships.
+    shipped = {
+        model_type
+        for model_type, handler in MODEL_REGISTRY.items()
+        if getattr(handler.fit, "__module__", "").startswith("workbench.")
+    }
     missing = sorted(
         model_type
-        for model_type in {*MODEL_FAMILY_CONTRACTS, *MODEL_REGISTRY}
+        for model_type in {*MODEL_FAMILY_CONTRACTS, *shipped}
         if declaration_for(model_type) is None
     )
     assert missing == [], f"no result envelope declaration for {missing}"
@@ -134,13 +147,29 @@ def _run(tmp_path: Path, frame: pd.DataFrame, model_type: str, kwargs: dict) -> 
 
 
 def _agent_summary(project_root: Path, run_root: Path, model_type: str) -> dict:
-    provider = NodeOperationContextProvider(project_root)
-    return provider.inspect_result_summary(
-        InspectResultSummaryRequest(
-            request_id="envelope-test", owner_run_id=run_root.name,
-            op_node_id=f"model:{model_type}_1", active_head_run_id=run_root.name,
-        )
-    )["result_summary"]
+    """What the Agent receives: the tool as registered, under its output budget.
+
+    Reading the provider directly skips the budget projection the Agent's copy
+    goes through, and that projection is where the CS evidence was lost.
+    """
+    registry = ToolRegistry()
+    for definition in NodeOperationContextProvider(project_root).tool_definitions(
+        chain_id=f"chain:{run_root.name}", session_id="envelope-test"
+    ):
+        registry.register(definition)
+    result = asyncio.run(registry.execute(
+        {
+            "tool_call_id": "envelope-test",
+            "tool_id": "inspect_result_summary",
+            "arguments": {
+                "owner_run_id": run_root.name, "op_node_id": f"model:{model_type}_1",
+                "active_head_run_id": run_root.name,
+            },
+        },
+        session_id="envelope-test",
+    ))
+    assert result.ok, result.error_details
+    return result.output["result_summary"]
 
 
 @pytest.mark.parametrize(("model_type", "frame", "kwargs"), DID_CASES)
@@ -160,8 +189,13 @@ def test_the_agent_can_read_the_did_estimators_it_could_not_read_before(
         # dCDH reports its overall effect without an interval and marks it
         # experimental; the projection must not invent one.
         assert "ci" not in overall and overall["experimental"] is True
+        assert att.get("ci_lower") is None and att.get("ci_upper") is None
     else:
         assert len(overall["ci"]) == 2 and overall["ci"][0] < overall["estimate"] < overall["ci"][1]
+        # The coefficient row and the family document are two copies of one
+        # result; an Agent shown both must not see an interval in one and
+        # "not reported" in the other.
+        assert [att["ci_lower"], att["ci_upper"]] == pytest.approx(overall["ci"], rel=1e-12)
 
     rows = evidence["event_study"]["rows"]
     assert 0 < len(rows) <= 24
@@ -185,3 +219,44 @@ def test_bounds_keep_the_agent_projection_small(tmp_path: Path) -> None:
     project_root, run_root = _run(tmp_path, frame(), model_type, kwargs)
     evidence = _agent_summary(project_root, run_root, model_type)["model_family_evidence"]
     assert len(json.dumps(evidence)) < 16_000
+
+
+def test_the_agent_reads_the_cs_evidence_of_the_shipped_example_within_its_budget(tmp_path: Path) -> None:
+    """Found in the step-1 browser acceptance: on the example dataset the
+    summary is larger than the tool's budget, and the family evidence -- the
+    interval and the event study the user asked about -- was cut without a
+    word, while a run-level ANOVA nobody asked for stayed."""
+    example = Path(__file__).resolve().parent.parent / "examples" / "datasets" / "cs_did_staggered.csv"
+    project_root, run_root = _run(tmp_path, pd.read_csv(example), "cs_did", {
+        "y": "outcome", "x": ["policy_intensity"], "entity_col": "state", "time_col": "year",
+        "did_mode": "cohort", "did_cohort_col": "first_treated_year",
+        "cs_control_group": "never", "cs_est_method": "dr",
+    })
+    summary = _agent_summary(project_root, run_root, "cs_did")
+    evidence = summary.get("model_family_evidence")
+    assert isinstance(evidence, dict), "the Agent's copy lost the Callaway-Sant'Anna evidence"
+
+    document = read_json(run_root / "cs_did.json")
+    overall = evidence["overall"]
+    assert overall["estimate"] == pytest.approx(document["aggregations"]["simple"]["overall"], rel=1e-12)
+    assert len(overall["ci"]) == 2
+    expected_rows = len(document["aggregations"]["dynamic"]["event_time"])
+    rows = evidence["event_study"]["rows"]
+    assert len(rows) == expected_rows, "event-study rows were dropped to fit the budget"
+
+
+def test_the_report_writer_receives_the_same_family_projection_as_the_agent(tmp_path: Path) -> None:
+    """The report writer cites only facts the page hands it. Before v1.8.10
+    those came from the graph and the coefficient row, so a written report
+    could quote the ATT and nothing of the event study the Agent could read."""
+    from fastapi.testclient import TestClient
+
+    from workbench.api import app
+
+    model_type, frame, kwargs = DID_CASES[0]
+    project_root, run_root = _run(tmp_path, frame(), model_type, kwargs)
+    detail = TestClient(app).get(
+        f"/runs/{run_root.name}", params={"project_root": str(project_root)}
+    ).json()
+    agent = _agent_summary(project_root, run_root, model_type)["model_family_evidence"]
+    assert detail["family_evidence"] == agent

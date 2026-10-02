@@ -245,6 +245,9 @@ export type RunDetail = RunSummary & {
     value_labels?: Record<string, Record<string, string>>;
   };
   model_family_evidence?: Record<string, unknown> | null;
+  /** v1.8.10: the declared, bounded family projection -- the same object the
+   * Agent's result summary carries -- for the report writer's citable facts. */
+  family_evidence?: Record<string, unknown> | null;
 };
 
 export type CoefficientRecord = {

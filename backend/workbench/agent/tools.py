@@ -22,30 +22,123 @@ def _json_size(value: Any) -> int:
     return len(json.dumps(value, ensure_ascii=False, sort_keys=True))
 
 
+_STRING_MARKER = "… [truncated]"
+
+
+def _truncation_note(original: Any, projected: Any) -> str:
+    if isinstance(original, list) and isinstance(projected, list):
+        return f"kept {len(projected)} of {len(original)}"
+    return "shortened"
+
+
+def _is_empty_projection(value: Any) -> bool:
+    if isinstance(value, (Mapping, list)):
+        return not value
+    return isinstance(value, str) and value in {"", _STRING_MARKER}
+
+
+def _fit_entries(
+    entries: list[tuple[str, Any]],
+    budget: int,
+    *,
+    omitted_key: str,
+    truncated_key: str,
+    fixed: Mapping[str, Any] | None = None,
+    already_omitted: list[str] | None = None,
+) -> dict[str, Any]:
+    """Fit named sections into ``budget``, naming every section that was cut.
+
+    Sections small enough for an equal share are kept whole first, so a large
+    early section cannot crowd out a status flag after it. The remaining room
+    then goes to the large sections in order, each taking what is left: the
+    caller's order is its priority. A section that does not fit whole is
+    shortened or omitted, and the result says which, so the reader never takes
+    a cut section for an absent one.
+    """
+
+    order = [key for key, _ in entries]
+    share = budget // max(len(entries), 1)
+    kept: dict[str, Any] = {key: item for key, item in entries if _json_size({key: item}) <= share}
+    large = [(key, item) for key, item in entries if key not in kept]
+    # Every large section starts as omitted, so the room its name needs in the
+    # marker is reserved before any section is allowed to use it.
+    omitted = [key for key, _ in large]
+    truncated: dict[str, str] = {}
+
+    def assemble() -> dict[str, Any]:
+        out: dict[str, Any] = dict(fixed or {})
+        out.update((key, kept[key]) for key in order if key in kept)
+        names = [*(already_omitted or []), *omitted]
+        if names or omitted_key in (fixed or {}):
+            out[omitted_key] = names
+        if truncated:
+            out[truncated_key] = dict(truncated)
+        return out
+
+    for key, item in large:
+        omitted.remove(key)
+        whole_room = budget - _json_size(assemble()) - len(json.dumps(key, ensure_ascii=False)) - 2
+        if _json_size(item) <= whole_room:
+            kept[key] = item
+            continue
+        # Leave room for this section's own entry in the truncation marker.
+        note_room = len(json.dumps({key: "kept 99999 of 99999"}, ensure_ascii=False)) + len(truncated_key) + 6
+        room = whole_room - note_room
+        projected = _project_value(item, room) if room > 16 else None
+        if projected is None or _is_empty_projection(projected):
+            omitted.append(key)
+            continue
+        kept[key] = projected
+        truncated[key] = _truncation_note(item, projected)
+
+    result = assemble()
+    # The reservations above are estimates; drop sections from the end until
+    # the envelope fits, recording each one.
+    for key in reversed(order):
+        if _json_size(result) <= budget:
+            break
+        if key in kept:
+            del kept[key]
+            truncated.pop(key, None)
+            omitted.append(key)
+            result = assemble()
+    return result
+
+
 def _project_value(value: Any, budget: int) -> Any:
-    """Recursively keep a useful prefix of an oversized JSON value."""
+    """Recursively keep a useful prefix of an oversized JSON value.
+
+    A mapping that loses keys or shortens values names them under
+    ``_omitted_keys`` and ``_truncated_keys``; a shortened list keeps a prefix
+    and its parent says how many items were kept.
+    """
 
     if _json_size(value) <= budget:
         return value
     if isinstance(value, Mapping):
-        projected: dict[str, Any] = {}
-        for key, item in value.items():
-            candidate = dict(projected)
-            candidate[str(key)] = _project_value(item, max(budget // 2, 64))
-            if _json_size(candidate) <= budget:
-                projected[str(key)] = candidate[str(key)]
-        return projected
+        return _fit_entries(
+            [(str(key), item) for key, item in value.items()],
+            budget,
+            omitted_key="_omitted_keys",
+            truncated_key="_truncated_keys",
+        )
     if isinstance(value, list):
         projected: list[Any] = []
         for item in value:
-            candidate = [*projected, _project_value(item, max(budget // 2, 64))]
-            if _json_size(candidate) > budget:
+            room = budget - _json_size(projected) - 2
+            if room <= 2:
                 break
-            projected.append(candidate[-1])
+            candidate = _project_value(item, room)
+            if _json_size([*projected, candidate]) > budget:
+                break
+            # Rows are kept whole; only a list whose first row is already too
+            # large shows a shortened one, so the reader sees its shape.
+            if projected and candidate is not item:
+                break
+            projected.append(candidate)
         return projected
     if isinstance(value, str):
-        marker = "… [truncated]"
-        return value[: max(0, budget - len(json.dumps(marker, ensure_ascii=False))) - 2] + marker
+        return value[: max(0, budget - len(json.dumps(_STRING_MARKER, ensure_ascii=False))) - 2] + _STRING_MARKER
     return value
 
 
@@ -58,7 +151,8 @@ def _bounded_tool_output(value: Any, budget: int) -> Any:
         return _project_value(value, budget)
 
     # Keep identifiers and lifecycle facts first; large tables/previews are
-    # omitted as named sections so the Agent can request a narrower inspection.
+    # omitted or shortened as named sections so the Agent can request a
+    # narrower inspection.
     priority = (
         "request_id",
         "tool_id",
@@ -70,23 +164,23 @@ def _bounded_tool_output(value: Any, budget: int) -> Any:
         "result_summary",
         "time_series_summary",
     )
-    projected: dict[str, Any] = {"status": "partial", "omitted_sections": []}
-    omitted: list[str] = []
     keys = [key for key in priority if key in value]
     keys.extend(key for key in value if key not in keys and key not in {"status", "omitted_sections"})
-    for key in keys:
-        candidate_value = _project_value(value[key], max(budget // 2, 64))
-        candidate = dict(projected)
-        candidate[str(key)] = candidate_value
-        if _json_size(candidate) <= budget:
-            projected[str(key)] = candidate_value
-        else:
-            omitted.append(str(key))
-    projected["omitted_sections"] = omitted
+    # Sections the tool itself left out stay listed after the budget cut.
+    declared = value.get("omitted_sections")
+    already_omitted = [str(item) for item in declared] if isinstance(declared, list) else []
+    projected = _fit_entries(
+        [(str(key), value[key]) for key in keys],
+        budget,
+        omitted_key="omitted_sections",
+        truncated_key="truncated_sections",
+        fixed={"status": "partial", "omitted_sections": []},
+        already_omitted=already_omitted,
+    )
     if _json_size(projected) > budget:
         # The normal tool budgets are large enough for this envelope. Keep a
         # deterministic last-resort response for unusually small test budgets.
-        projected = {"status": "partial", "omitted_sections": omitted}
+        projected = {"status": "partial", "omitted_sections": [*already_omitted, *map(str, keys)]}
     return projected
 
 

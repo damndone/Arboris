@@ -12,6 +12,7 @@ import { useWorkbenchOptional } from "../workbench/WorkbenchStateProvider";
 import { REPORT_REVIEW_TAB_ID } from "../workbench/state/tabsSchema";
 import {
   buildFactTable,
+  buildFamilyEvidenceFacts,
   buildFigureFacts,
   buildPostEstimationFacts,
   buildTimeSeriesFacts,
@@ -301,6 +302,7 @@ export function ReportWorkspaceProvider({
   const [postEstimation, setPostEstimation] = useState<PostEstimationResult[]>([]);
   const [predictionEvidence, setPredictionEvidence] = useState<PredictionResearchEvidence | null>(null);
   const [modelResults, setModelResults] = useState<ModelResult[]>([]);
+  const [familyEvidence, setFamilyEvidence] = useState<Record<string, unknown> | null>(null);
   const [familyEvidenceArtifacts, setFamilyEvidenceArtifacts] = useState<Record<string, unknown>>({});
 
   useEffect(() => {
@@ -310,6 +312,7 @@ export function ReportWorkspaceProvider({
       setPostEstimation([]);
       setPredictionEvidence(null);
       setModelResults([]);
+      setFamilyEvidence(null);
       setPostEstimationLoadError(null);
       return;
     }
@@ -321,6 +324,7 @@ export function ReportWorkspaceProvider({
           setPostEstimation(detail.post_estimation_results ?? []);
           setPredictionEvidence(detail.prediction_evidence ?? null);
           setModelResults(detail.model_results ?? []);
+          setFamilyEvidence(detail.family_evidence ?? null);
           setPostEstimationLoadError(null);
         }
       })
@@ -329,6 +333,7 @@ export function ReportWorkspaceProvider({
           setPostEstimation([]);
           setPredictionEvidence(null);
           setModelResults([]);
+          setFamilyEvidence(null);
           const message = err instanceof Error ? err.message : "server-owned result evidence is unavailable";
           setPostEstimationLoadError(
             `Unable to load server-owned result evidence; report generation is disabled: ${message}`,
@@ -539,9 +544,29 @@ export function ReportWorkspaceProvider({
     ),
     [figureFacts.length, postEstimation, table?.facts.length, timeSeriesFacts.length],
   );
+  const familyProvenance = useMemo(() => {
+    const modelType = typeof familyEvidence?.model_type === "string" ? familyEvidence.model_type : null;
+    const runModels = forest?.forest.nodes.filter(
+      (node) => (node.runs ?? []).includes(forest.activeRunId ?? "") && node.kind === "model",
+    ) ?? [];
+    const modelNode = runModels.find((node) => node.opType === modelType) ?? runModels[0];
+    return modelNode
+      ? { nodeKey: modelNode.nodeKey, nodeLabel: modelNode.title }
+      : { nodeKey: `model:${modelType ?? "primary"}`, nodeLabel: modelType ?? "Primary model" };
+  }, [familyEvidence, forest]);
+  const familyEvidenceFacts = useMemo(
+    () => buildFamilyEvidenceFacts(
+      familyEvidence,
+      (table?.facts.length ?? 0) + figureFacts.length + timeSeriesFacts.length + postEstimationFacts.length,
+      familyProvenance,
+    ),
+    [familyEvidence, familyProvenance, figureFacts.length, postEstimationFacts.length, table?.facts.length, timeSeriesFacts.length],
+  );
   const allFacts = useMemo(
-    () => (table ? [...table.facts, ...figureFacts, ...timeSeriesFacts, ...postEstimationFacts] : []),
-    [figureFacts, postEstimationFacts, table, timeSeriesFacts],
+    () => (table
+      ? [...table.facts, ...figureFacts, ...timeSeriesFacts, ...postEstimationFacts, ...familyEvidenceFacts]
+      : []),
+    [familyEvidenceFacts, figureFacts, postEstimationFacts, table, timeSeriesFacts],
   );
   const includedFigures = includedReportFigures(reportFigures, [...excludedFigureIds]);
   const includedFacts = includedReportFacts(allFacts, [...excludedIds], [...excludedFigureIds]);

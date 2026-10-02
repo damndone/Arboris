@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from typing import Any
 
@@ -298,7 +299,7 @@ def _fit_cs_did(ctx, env):
         "r_squared": None,
         "coefficients": {"ATT": {
             "estimate": simple["overall"], "std_error": simple["overall_se"],
-            "p_value": None,
+            "p_value": None, **_aggregate_interval(simple),
             "source_id": "model_results.cs_did_1.coefficients.ATT"}},
         "warnings": result["warnings"],
     }
@@ -307,6 +308,21 @@ def _fit_cs_did(ctx, env):
         estimate=simple["overall"], std_error=simple["overall_se"], nobs=primary["nobs"],
     )
     return "cs_did_1", primary, None     # no fitted object; diagnostics reads _cs_did_result
+
+
+def _aggregate_interval(simple):
+    """The overall ATT's pointwise interval as the coefficient row carries it.
+
+    The aggregation document already reports it; without this the row said
+    "not reported" for an interval the same run had computed.
+    """
+    interval = simple.get("overall_pointwise_ci")
+    if (
+        isinstance(interval, (list, tuple)) and len(interval) == 2
+        and all(isinstance(bound, (int, float)) and math.isfinite(bound) for bound in interval)
+    ):
+        return {"ci_lower": float(interval[0]), "ci_upper": float(interval[1])}
+    return {}
 
 
 def _fit_sa_did(ctx, env):
@@ -336,7 +352,8 @@ def _fit_sa_did(ctx, env):
     primary = {"schema_version": 1, "model_id": "sa_did_1", "model_type": "sa_did",
         "engine": "workbench", "nobs": int(result["metadata"]["n_units"]), "r_squared": None,
         "coefficients": {"ATT": {"estimate": simple["overall"], "std_error": simple["overall_se"],
-            "p_value": None, "source_id": "model_results.sa_did_1.coefficients.ATT"}},
+            "p_value": None, **_aggregate_interval(simple),
+            "source_id": "model_results.sa_did_1.coefficients.ATT"}},
         "warnings": result["warnings"]}
     record_single_estimate_kernel(
         ctx, model_id="sa_did_1", model_type="sa_did", name="ATT",

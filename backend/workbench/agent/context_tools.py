@@ -3972,10 +3972,13 @@ def _bounded_result_summary(
             else None
         ),
         "run_status": run_status if isinstance(run_status, dict) else None,
-        "persisted_models": _bounded_persisted_model_facts(model_results),
-        "statistical_evidence": statistical_evidence,
-        "regression_table": regression_table,
+        # Order is priority when the tool's output budget cuts (agent/tools.py):
+        # the selected model's own evidence first, then the coefficient tables,
+        # then run-level tests, which also have their own tool.
         "model_family_evidence": model_family_evidence,
+        "persisted_models": _bounded_persisted_model_facts(model_results),
+        "regression_table": regression_table,
+        "statistical_evidence": statistical_evidence,
     }
 
 

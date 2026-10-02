@@ -28,6 +28,7 @@ from ..api_errors import (
     ERROR_REPORT_NOT_FOUND,
     WorkbenchAPIError,
 )
+from ..agent.family_evidence import bounded_model_family_evidence
 from ..agent.workflow_runtime import collect_post_estimation_results, count_post_estimation_results
 from ..artifacts import read_json
 from ..config import load_config
@@ -571,6 +572,9 @@ def get_run_endpoint(run_id: str, project_root: str) -> dict:
             diagnostic_summary.get("labels", {"variable_labels": {}, "value_labels": {}}),
         ),
         "model_family_evidence": model_family_evidence,
+        # v1.8.10: the declared, bounded projection the Agent reads, so the
+        # report writer's citable facts and the Agent quote the same numbers.
+        "family_evidence": bounded_model_family_evidence(run_root, model_results),
         "prediction_evidence": prediction_evidence,
         # Serve-time projection of already-durable evidence: a declared
         # post-estimation step answers a question, and this is what lets the

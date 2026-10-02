@@ -43,7 +43,7 @@ export interface ReportCapabilityManifestEntry {
  */
 export const EVIDENCE_GROUPS: readonly EvidenceGroupDefinition[] = [
   { id: "data-sample", label: "Data and sample", prefixes: ["sample:", "data:", "ts:data:"], capability: "data", provider_id: "evidence.data.v1" },
-  { id: "model-estimation", label: "Model and estimation", prefixes: ["param:", "metric:", "coef:"], capability: "model.estimation", provider_id: "evidence.estimation.v1" },
+  { id: "model-estimation", label: "Model and estimation", prefixes: ["param:", "metric:", "coef:", "family:"], capability: "model.estimation", provider_id: "evidence.estimation.v1" },
   { id: "diagnostics-robustness", label: "Diagnostics and robustness", prefixes: ["coef_se:", "coef_p:", "diagnostic:", "decision:"], capability: "diagnostics.robustness", provider_id: "evidence.diagnostics.v1" },
   { id: "time-series", label: "Time series", prefixes: ["ts:"], capability: "time_series", provider_id: "evidence.time_series.v1" },
   { id: "figures", label: "Figures", prefixes: ["figure:"] },
