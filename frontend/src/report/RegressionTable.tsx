@@ -1,4 +1,5 @@
 import type { CoefficientRecord, ModelResult } from "../api";
+import { formatEstimate, formatInterval, formatPValue } from "../format/numbers";
 
 export type SignificanceLevels = Record<string, number>;
 
@@ -99,16 +100,8 @@ function significanceMarker(
   return orderedCutoffs.find(([, cutoff]) => pValue < cutoff)?.[0] ?? "";
 }
 
-function displayValue(value: number | null | undefined): string {
-  return value === null || value === undefined ? "—" : String(value);
-}
-
 function displayInterval(cell: RegressionCell): string {
-  if (cell.ci_lower === null || cell.ci_lower === undefined
-    || cell.ci_upper === null || cell.ci_upper === undefined) {
-    return "—";
-  }
-  return `[${cell.ci_lower}, ${cell.ci_upper}]`;
+  return formatInterval(cell.ci_lower, cell.ci_upper);
 }
 
 export function RegressionTable({
@@ -158,15 +151,15 @@ export function RegressionTable({
                 const cell = row.models[model.id];
                 return [
                   <td key={`${model.id}-${row.term}-estimate`} style={{ padding: "2px 10px" }}>
-                    {cell ? displayValue(cell.estimate) : "—"}{cell?.significance ? ` ${cell.significance}` : ""}
+                    {cell ? formatEstimate(cell.estimate) : "—"}{cell?.significance ? ` ${cell.significance}` : ""}
                     {cell?.source_id && (
                       <small style={{ display: "block", color: "var(--label-tertiary)" }}>
                         source: {cell.source_id}
                       </small>
                     )}
                   </td>,
-                  <td key={`${model.id}-${row.term}-se`} style={{ padding: "2px 10px" }}>{cell ? displayValue(cell.std_error) : "—"}</td>,
-                  <td key={`${model.id}-${row.term}-p`} style={{ padding: "2px 10px" }}>{cell ? displayValue(cell.p_value) : "—"}</td>,
+                  <td key={`${model.id}-${row.term}-se`} style={{ padding: "2px 10px" }}>{cell ? formatEstimate(cell.std_error) : "—"}</td>,
+                  <td key={`${model.id}-${row.term}-p`} style={{ padding: "2px 10px" }}>{cell ? formatPValue(cell.p_value) : "—"}</td>,
                   <td key={`${model.id}-${row.term}-ci`} style={{ padding: "2px 10px" }}>{cell ? displayInterval(cell) : "—"}</td>,
                 ];
               })}

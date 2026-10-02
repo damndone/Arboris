@@ -56,6 +56,7 @@ import { DatasetExportPanel } from "./DatasetExportPanel";
 import { StatisticalExplorationTable } from "./StatisticalExplorationTable";
 import { resolveTableRunScope } from "./tableRunScope";
 import { PredictionResearchEvidenceCard } from "../../runResult/PredictionResearchEvidenceCard";
+import { formatEstimate, formatPValue } from "../../format/numbers";
 
 /** Run ids look like 20260703_065622_030010_92222fe1 — the last hex segment is
  *  the unique tail, matching the run-rail's short label so the two line up. */
@@ -64,10 +65,7 @@ function shortRunId(id: string): string {
   return tail.slice(0, 8);
 }
 
-function fmt(n: number | null | undefined): string {
-  if (n === null || n === undefined || Number.isNaN(n)) return "—";
-  return String(Number(n.toPrecision(4)));
-}
+const fmt = formatEstimate;
 
 function confidenceIntervalText(coefficient: {
   ci_lower?: number | null;
@@ -430,7 +428,7 @@ function StatisticalEvidenceTable({ packet }: { packet: StatisticalEvidencePacke
                 <td style={{ padding: "2px 8px" }}>{evidenceTestLabel(result.test_type)}</td>
                 <td style={{ padding: "2px 8px" }}>{result.nobs ?? "—"}</td>
                 <td style={{ padding: "2px 8px" }}>{result.statistic == null ? "—" : fmt(result.statistic)}</td>
-                <td style={{ padding: "2px 8px" }}>{result.p_value == null ? "—" : fmt(result.p_value)}</td>
+                <td style={{ padding: "2px 8px" }}>{result.p_value == null ? "—" : formatPValue(result.p_value)}</td>
                 <td style={{ padding: "2px 8px" }}>{evidenceEffectValue(result.effect_size)}</td>
                 <td style={{ padding: "2px 8px", whiteSpace: "nowrap" }}>{result.source_id ?? "—"}</td>
               </tr>
@@ -536,7 +534,7 @@ function CoefficientTable({
               <td style={{ padding: "2px 8px" }}>{fmt(c.estimate)}</td>
               <td style={{ padding: "2px 8px" }}>{fmt(c.std_error)}</td>
               <td style={{ padding: "2px 8px" }}>
-                {("p_value_display" in c ? c.p_value_display : undefined) ?? fmt(c.p_value)}
+                {("p_value_display" in c ? c.p_value_display : undefined) ?? formatPValue(c.p_value)}
               </td>
               <td style={{ padding: "2px 8px", whiteSpace: "nowrap" }}>{confidenceIntervalText(c)}</td>
             </tr>
@@ -1031,6 +1029,9 @@ function RunResultsPanel({
   )?.artifact_id;
   const otherArtifacts = artifacts.filter((a) =>
     a.artifact_type !== "figure"
+      // Read by post-estimation, not by people; listing it would show an
+      // internal file name next to the results.
+      && a.artifact_type !== "inference_kernel"
       && !loadedExplorationIds.has(a.artifact_id)
       && a.artifact_id !== statisticalEvidenceArtifactId,
   );
