@@ -55,6 +55,6 @@ from a neighbouring record.
 ## Relationship to the design charter
 
 The normative C1 charter is
-[`2026-07-19-time-series-diagnostics-design.md`](../../../specs/2026-07-19-time-series-diagnostics-design.md).
+[`2026-07-19-time-series-diagnostics-design.md`](../../../archive/specs/2026-07-19-time-series-diagnostics-design.md).
 This register makes its seven blocking decisions auditable; it does not replace
 the charter or relax any of its non-goals.

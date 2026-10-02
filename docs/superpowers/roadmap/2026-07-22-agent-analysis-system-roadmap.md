@@ -81,7 +81,7 @@ Artifact / Compare / Diagnostic），叙事顺序为：
 节点 Merkle identity 和 `node_index`。stale 判定是复用既有内容寻址，不是新基建，
 而且与 Compare 判"样本是否变了"用同一套哈希，天然一致。
 
-详见 `specs/2026-07-22-v1.8.1-agent-notebook-analysis-option.md`。
+详见 `archive/specs/2026-07-22-v1.8.1-agent-notebook-analysis-option.md`。
 
 ### 选中文本交互
 
@@ -216,7 +216,7 @@ v1.8.1 的输出契约只匹配 `artifact_id + artifact_type + count`（DEC-ART-
 > devline 的 Context Pack 里，没有任何一层回答「这个版本整体交付什么」。
 >
 > 本节内容顺延 v1.8.5，范围与裁定以
-> [`v1.8.5 设计文档`](../specs/2026-07-31-v1.8.5-typed-memory-and-model-family-design.md) 为准。
+> [`v1.8.5 设计文档`](../archive/specs/2026-07-31-v1.8.5-typed-memory-and-model-family-design.md) 为准。
 > 其中 apply_mode 只做 `inform_only` + `suggest_default`，执行者做运行时判定 + gate
 > preflight 两层，**六层检索链明确排除在 v1.8.5 之外**。
 

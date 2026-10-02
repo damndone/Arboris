@@ -67,7 +67,7 @@ Codex 的 v1.8.9 spec 与 11 份计划为“部分采纳”，每份文件顶部
 发布说明见 `docs/releases/v1.8.6-release-notes.md`。
 
 **下一版 v1.8.7 = 复杂抽样设计（引擎优先）+ 测量级别声明**，2026-08-04 拍板，
-设计见 `specs/2026-08-04-v1.8.7-survey-design-and-measurement-level-design.md`。
+设计见 `archive/specs/2026-08-04-v1.8.7-survey-design-and-measurement-level-design.md`。
 单轴：对标 SPSS/Stata。核心是**引擎优先、族是声明**——设计方差引擎做一次，
 模型族通过 `ModelFamilyContract` 一条声明接入，并拆掉两张枚举天花板
 （「族 × 设计」支持表、`result_shape` 封闭枚举）。
@@ -110,7 +110,7 @@ Codex 的 v1.8.9 spec 与 11 份计划为“部分采纳”，每份文件顶部
   三种权重语义显式化、FeatureRecipe 与数据操作、变量与值标签、报告审阅工作区。
   本版开放欠账见 §1 表 `V1.8.6-*` 五条。
 - v1.8.7：**进行中**。复杂抽样设计（引擎优先）+ 测量级别声明。见 §0 与
-  `specs/2026-08-04-v1.8.7-survey-design-and-measurement-level-design.md`。
+  `archive/specs/2026-08-04-v1.8.7-survey-design-and-measurement-level-design.md`。
 
 ---
 
@@ -123,19 +123,19 @@ Codex 的 v1.8.9 spec 与 11 份计划为“部分采纳”，每份文件顶部
 
 | 优先级 | ID | 债务（一句话） | 类别 | 修法 / 下一步 | 阻塞 | 详情 |
 |---|---|---|---|---|---|---|
-| 🟢 已收口 | V1.7.3-R | Report/Operations：真实 DeepSeek、8 图展开/导出、39 cite chips、timeout regression 已完成 | 独立版本工作包 | 保留既有完成证据；不重复运行真实 provider | 否 | `plans/2026-07-18-v1.7.3-report-ops-closeout.md` |
+| 🟢 已收口 | V1.7.3-R | Report/Operations：真实 DeepSeek、8 图展开/导出、39 cite chips、timeout regression 已完成 | 独立版本工作包 | 保留既有完成证据；不重复运行真实 provider | 否 | `archive/plans/2026-07-18-v1.7.3-report-ops-closeout.md` |
 | 🟢 已收口 | V1.7.3-LMM-LOCAL | 本机 LMM/Agent/UI：显式 local_contained、真实 Seatbelt canary、已知真值 HTTP/浏览器流程和导出 | 独立版本工作包 | 完整 gate 与精确产品提交证据写入 release ledger | 否 | `release-trains/v1.7.3/release-ledger.json` |
 | 🔵 事件触发 | C2-HOSTILE-EXTENSIONS | 敌对插件、第三方模型包或外部候选代码的冻结执行与独立认证 | 长期安全边界 | 只有产品出现对应信任边界时，从新威胁模型和目标宿主重新立项 | 否 | `roadmap/architecture-debt.md#d7-敌对扩展第三方模型包的冻结执行边界未来需求当前不实现` |
-| 🟢 下一版本 | V1.8-TS-C1 | Time Series Diagnostics：先锁 Facts/Assessment/Advisory 合同、统一“结论不充分”与条件化建议；不注册运行时能力 | 合同冲刺 | C1 锁定后再从同一提交并行创建 Pack、Agent、UI、Evaluation；预测另列后续工作包 | 否 | `plans/2026-07-19-time-series-diagnostics-c1-contract-lock-plan.md` |
-| 🟢 主线 | V1.8.1-NOTEBOOK | Agent Notebook（Graph 的叙事视图）+ 选中文本四类操作；备选方案存为带上下文指纹的 typed proposal，不预建空分支 | 主线 | 见 `specs/2026-07-22-v1.8.1-agent-notebook-analysis-option.md` | 否 | roadmap §2 |
+| 🟢 下一版本 | V1.8-TS-C1 | Time Series Diagnostics：先锁 Facts/Assessment/Advisory 合同、统一“结论不充分”与条件化建议；不注册运行时能力 | 合同冲刺 | C1 锁定后再从同一提交并行创建 Pack、Agent、UI、Evaluation；预测另列后续工作包 | 否 | `archive/plans/2026-07-19-time-series-diagnostics-c1-contract-lock-plan.md` |
+| 🟢 主线 | V1.8.1-NOTEBOOK | Agent Notebook（Graph 的叙事视图）+ 选中文本四类操作；备选方案存为带上下文指纹的 typed proposal，不预建空分支 | 主线 | 见 `archive/specs/2026-07-22-v1.8.1-agent-notebook-analysis-option.md` | 否 | roadmap §2 |
 | 🟡 横向基础 | V1.8.2-EVAL | 评测工装：已知真值、参考实现对照、错误注入、lineage 检查、结论忠实度、proposal replay | 测试基建 | **必须照"实现与测试合谋"这一失败模式设计**：fixture 一律从真实持久化响应提取，禁止手写；replay 之外须含真 provider 探索性运行 | 否 | roadmap §3 |
 | 🟡 后续模型核心 | V1.8.2-JOINT-ARMA-GARCH-MLE | 含 MA 的 ARMA(p,q)-ARCH/GARCH 目前顺序估计，无法对齐 Stata 联合条件 MLE 与联合 IC。**但联合估计只在联合设定正确时更有效**；设定有误时误差会沿似然传遍所有参数，顺序估计反而更稳健（有限信息 vs 全信息） | 独立估计核心 | 冻结版本化 Stata oracle 做 parity；**同时交付 typed recommendation**（当前建议/原因/升级条件/预期收益/额外风险），由 Agent 依方差诊断给出建议而非直接切换估计器 | 否（若不宣称数值复现） | §2-V1.8.2-JOINT-ARMA-GARCH-MLE |
 | 🟡 基础设施 | ARTIFACT-SCHEMA-REGISTRY | artifact 不声明 payload 符合哪个 schema 版本（`register_artifact` 只有 `artifact_id`/`artifact_type`/`step`）。v1.8.1 已按 DEC-ART-001 明确排除，**不得声称已校验** | 契约基建 | schema registry + 命名版本规则 + producer 声明 + validator + 兼容性判定 + 旧 artifact 迁移 + 消费者版本协商；表格/模型对象/图形元数据 payload 规则各异 | 否 | spec §5、DEC-ART-FUTURE-001 |
 | 🔵 待立项 | V1.8.3-CAPABILITY-EXT | Agent 提议扩展能力（依赖或自研）；**运行时禁止任意安装**。缺一层判据：无 oracle 时如何验证 | 能力扩展 | 分层判据：有 oracle→逐元素对照；无 oracle 但有可推导性质→性质/模拟回收检验；两者皆无→**只能停在 experimental，永不升 verified**。⛔ **被 `ARTIFACT-SCHEMA-REGISTRY` 阻塞晋升 verified**：只知道"它产出一个 table"不足以信任外部 Adapter 的产物 | 否 | roadmap §4 |
-| ✅ 已完成 | V1.8.5-TYPED-MEMORY | 分级 typed memory（`project_domain_fact`、`apply_mode`、`vocabulary_version`、`verifier`、`last_validated_at`）+ 模型族契约（`ModelFamilyContract`，workflow-executable 扩到 cs_did/sa_did/dcdh）。**原标 v1.8.4，2026-07-31 改标**——实际 v1.8.4 是 Agent Model Composition，版本号被复用 | Agent 记忆 / 工作流 | 本机实现、Settings 管理、Notebook registry/admission、独立 GLM/IV/2SLS/TWFE DID 与 memory default 浏览器证据、4398/8/1 full-suite 证据已完成；外部部署 signer/scanner、ML/量化和六层检索链不在本版 | 否 | `specs/2026-07-31-v1.8.5-typed-memory-and-model-family-design.md` |
+| ✅ 已完成 | V1.8.5-TYPED-MEMORY | 分级 typed memory（`project_domain_fact`、`apply_mode`、`vocabulary_version`、`verifier`、`last_validated_at`）+ 模型族契约（`ModelFamilyContract`，workflow-executable 扩到 cs_did/sa_did/dcdh）。**原标 v1.8.4，2026-07-31 改标**——实际 v1.8.4 是 Agent Model Composition，版本号被复用 | Agent 记忆 / 工作流 | 本机实现、Settings 管理、Notebook registry/admission、独立 GLM/IV/2SLS/TWFE DID 与 memory default 浏览器证据、4398/8/1 full-suite 证据已完成；外部部署 signer/scanner、ML/量化和六层检索链不在本版 | 否 | `archive/specs/2026-07-31-v1.8.5-typed-memory-and-model-family-design.md` |
 | 🟠 本版遗留 | V1.8.4-OPEN | v1.8.4 仅剩 **2 条** open：`notebook_load_not_found`（legacy fixture 走加载/编译路径未复现原故障）、`chain_agent_proposal_upstream_error`（provider 上游故障未取得可归因复现）。2026-07-31 重开的 6 条已完成第二轮核验：5 条核实为 baseline `6607c2d` 已满足（带 commit:file:line 引用），`proposal_ready_budget_terminal_error` 原诊断不复现，记 not_applicable；**均不计为 v1.8.4 交付**。 | Agent/Notebook | 两条都不猜根因：legacy 需可确定性复现的 fixture，provider 需可观测的复现窗口 | 否 | `.agent/devlines/v1-8-4-reopened-incident-truth/events.jsonl` |
 | 🟠 本版遗留 | V1.8.4-TIMER-EVIDENCE | 规划计时器跨组件重挂的修复仍只有确定性测试证据，无真机复现（需在真实规划调用进行中触发重挂） | 验收证据 | 下次真机 Notebook 验收时顺手构造一次重挂；不要补写为已验收 | 否 | `docs/superpowers/archive/handoff/2026-07-30-v1.8.4-remediation-handoff.md` §未完成 |
-| 🟢 v1.8.7 在做 | V1.8.6-SVY-DESIGN | `sampling_weight` fail-closed，`strata`/`PSU` 只存在于错误信息里。复杂抽样调查数据（CGSS/CFPS/CHARLS/NHANES）得不到正确方差估计。**且现有错误信息建议用 `entity_col + covariance=clustered` 代替，这个建议本身是错的**（聚类稳健 SE 忽略分层带来的方差缩减、无设计自由度） | 统计正确性 | v1.8.7 A1：设计方差引擎（Taylor + 重复权重）+ 族按声明接入 | 是（对该类数据） | `specs/2026-08-04-v1.8.7-survey-design-and-measurement-level-design.md` |
+| 🟢 v1.8.7 在做 | V1.8.6-SVY-DESIGN | `sampling_weight` fail-closed，`strata`/`PSU` 只存在于错误信息里。复杂抽样调查数据（CGSS/CFPS/CHARLS/NHANES）得不到正确方差估计。**且现有错误信息建议用 `entity_col + covariance=clustered` 代替，这个建议本身是错的**（聚类稳健 SE 忽略分层带来的方差缩减、无设计自由度） | 统计正确性 | v1.8.7 A1：设计方差引擎（Taylor + 重复权重）+ 族按声明接入 | 是（对该类数据） | `archive/specs/2026-08-04-v1.8.7-survey-design-and-measurement-level-design.md` |
 | 🟢 v1.8.7 在做 | V1.8.6-ORDINAL-ROUTING | 整数编码量表（李克特 1–4）被判为计数型静默路由到 Poisson；`YKind.ORDINAL` 仅由 ordered Categorical 产生。用户看不出来 | 路由/元数据 | v1.8.7 A2：测量级别声明 + 未声明时显式 advisory + Agent 批量提议。**不改自动路由**（区别在测量方式不在数值，自动跳只会换一批受害者） | 否 | 同上 |
 | 🟢 v1.8.7 在做 | V1.8.6-FAMILY-ORACLE | `ordinal_logit` / `multinomial_logit` / `quantile_regression` 仅内部一致性——复核用的 statsmodels 正是执行引擎，等于自己批自己的卷子。`survival_cox` 已对 R 验证但 R 数值硬编码在测试里，无可重跑生成脚本 | 验证等级 | v1.8.7 A3：五个 `.R` 生成脚本 + fixture + 逐位对照，照 `tests/fixtures/{cs_did,dcdh,sa_did,honest_did}/generate_oracle.R` 范式 | 否 | 同上 |
 | 🟠 v1.8.8 | V1.8.6-COLUMN-LOOKAHEAD | **列级前视无法检测**。无 availability/provenance 声明时系统判断不了某列是否偷看未来；时序标成 IID 时一个显式未来位移特征可跑出 r²>0.9 而不被拦。`AvailabilitySpecV1` 字段已在，但唯一构造点 `prediction.py:147` 把 `kind`/`validation_status` 硬编码为 `declared`，无列级信息、无校验 | 静默正确性 | 填空不是重建：补生产者与校验；`test_future_shift_leakage_decoy_v186.py` 现钉为已知行为，落地后应收紧为拒绝 | 否 | v1.8.7 设计 §5 明确顺延 |

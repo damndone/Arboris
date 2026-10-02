@@ -2,7 +2,7 @@
 
 Make the Failure-Memory and Development-Efficiency systems enforce their own
 use and begin to improve themselves, per
-docs/superpowers/specs/2026-07-22-development-control-evolution.md.
+docs/superpowers/archive/specs/2026-07-22-development-control-evolution.md.
 
 E1  gate refuses feature changes not covered by a non-drifted devline Context Pack.
 E2  severity fast-path: a high-severity event promotes one occurrence earlier.

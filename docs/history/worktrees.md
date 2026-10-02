@@ -74,11 +74,11 @@
 | `workbench-v1.7.2` | `workbench-v1.7.2` | `1b8eda06` | — | `archive/worktree/workbench-v1.7.2` | `archive/leftovers/workbench-v1.7.2`（6 项） | v1.7.2 真实 DeepSeek 验收工作日志 + 构建产物 | 已移除工作目录 |
 | `workbench-v1.7.3` | `workbench-v1.7.3` | `edfa8557` | — | `archive/worktree/workbench-v1.7.3` | — |  | 已移除工作目录 |
 | `workbench-v1.8.1` | `workbench-v1.8.1` | `d86bf301` | — | `archive/worktree/workbench-v1.8.1` | — |  | 已移除工作目录 |
-| `workbench-v1.8.2` | `workbench-v1.8.2` | `867dc6e0` | — | `archive/worktree/workbench-v1.8.2` | `archive/leftovers/workbench-v1.8.2`（10 项） | 构思讨论示意页；结论见 `docs/superpowers/specs/2026-07-24-v1.8.2-statistical-variable-picker-design.md` 等 7/24–25 设计 | 已移除工作目录 |
+| `workbench-v1.8.2` | `workbench-v1.8.2` | `867dc6e0` | — | `archive/worktree/workbench-v1.8.2` | `archive/leftovers/workbench-v1.8.2`（10 项） | 构思讨论示意页；结论见 `docs/superpowers/archive/specs/2026-07-24-v1.8.2-statistical-variable-picker-design.md` 等 7/24–25 设计 | 已移除工作目录 |
 | `workbench-v1.8.3` | `workbench-v1.8.3` | `36fce68b` | — | `archive/worktree/workbench-v1.8.3` | — |  | 已移除工作目录 |
 | `workbench-v1.8.4` | `workbench-v1.8.4` | `efbfb7bc` | — | `archive/worktree/workbench-v1.8.4` | `archive/leftovers/workbench-v1.8.4`（13 项） | devline 事件草稿（13 份，均已写入正式日志） | 已移除工作目录 |
 | `workbench-v1.8.5` | `workbench-v1.8.5` | `318784a2` | — | `archive/worktree/workbench-v1.8.5` | `archive/leftovers/workbench-v1.8.5`（5 项） | devline 事件草稿（5 份，均已写入正式日志） | 常驻 |
-| `workbench-v1.8.6` | `workbench-v1.8.6` | `ce635370` | — | `archive/worktree/workbench-v1.8.6` | `archive/leftovers/workbench-v1.8.6`（11 项） | 构思讨论示意页；结论见 `docs/superpowers/specs/2026-08-04-v1.8.6-report-review-workspace-design.md`、`2026-08-03-v1.8.6-report-evidence-editing-design.md` | 常驻 |
+| `workbench-v1.8.6` | `workbench-v1.8.6` | `ce635370` | — | `archive/worktree/workbench-v1.8.6` | `archive/leftovers/workbench-v1.8.6`（11 项） | 构思讨论示意页；结论见 `docs/superpowers/archive/specs/2026-08-04-v1.8.6-report-review-workspace-design.md`、`2026-08-03-v1.8.6-report-evidence-editing-design.md` | 常驻 |
 | `workbench-v1.8.7` | `workbench-v1.8.7` | `2a312d42` | — | `archive/worktree/workbench-v1.8.7` | — |  | 常驻 |
 | `workbench-v1.8.8` | `workbench-v1.8.8` | `ebba33f1` | — | `archive/worktree/workbench-v1.8.8` | — |  | 已移除工作目录 |
 | `workbench-v1.8.8-final` | `workbench-v1.8.8-final` | `f564de63` | `v1.8.8` | `archive/worktree/workbench-v1.8.8-final` | — |  | 常驻 |
@@ -95,7 +95,7 @@
 
 | 目录 | 存档 tag | 说明 |
 |---|---|---|
-| `workbench-v1.8.0` | `archive/leftovers/workbench-v1.8.0`（7 项） | （失效的 worktree 目录，已跟踪内容与 tag v1.8.0 逐字相同）构思讨论示意页；结论见 `docs/superpowers/specs/2026-07-20-time-series-graph-native-workbench-design.md` |
+| `workbench-v1.8.0` | `archive/leftovers/workbench-v1.8.0`（7 项） | （失效的 worktree 目录，已跟踪内容与 tag v1.8.0 逐字相同）构思讨论示意页；结论见 `docs/superpowers/archive/specs/2026-07-20-time-series-graph-native-workbench-design.md` |
 | `workbench-v1.8.3-cf4-notebook-planner-projection-r1` | `archive/leftovers/workbench-v1.8.3-cf4-notebook-planner-projection-r1`（1 项） | （失效目录）一份 devline 事件草稿，已在正式日志 |
 
 ## 主目录里 Codex v1.8.9 计划的未跟踪资料

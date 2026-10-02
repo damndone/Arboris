@@ -67,7 +67,7 @@ Agent 在找到正确参数前发生了多次 `ValueError` 重试；这是效率
 ## Report / Operations 独立证据
 
 独立收口记录位于
-`docs/superpowers/plans/2026-07-18-v1.7.3-report-ops-closeout.md`：91 项聚焦后端、
+`docs/superpowers/archive/plans/2026-07-18-v1.7.3-report-ops-closeout.md`：91 项聚焦后端、
 132 个前端文件 / 1168 项测试、2126 项后端通过 / 8 项跳过、604.89 秒真实
 honest-DiD 基线，以及真实 DeepSeek 报告的 8 张图、39 个验证引用、0 个裸引用
 标记和 HTTP 200 导出。
