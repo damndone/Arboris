@@ -139,7 +139,13 @@ def postestimation_step_contracts() -> dict[str, Any]:
         summary, fields, required, types = _STEP_SHAPES[operation]
         families = sorted({family for family, op in VALIDATED if op == operation})
         contracts[postestimation_operation_id(operation)] = StepSpecContract(
-            summary=summary + f" Validated for: {', '.join(families)}.",
+            summary=(
+                summary + f" Offered for: {', '.join(families)}, the families where it has been "
+                "checked against a reference implementation; for any other family say it is not "
+                "offered yet because that check is missing, not because the model cannot. Plan the workflow on the "
+                "dataset node the model was estimated from (its parent stage, such as "
+                "stage:cleaned), not on the model node; name the model in model_ref."
+            ),
             fields=fields,
             required=required,
             field_types=types,
