@@ -5,6 +5,9 @@
     ],
     "boxplots": [],
     "category_counts": [],
+    "checks_poisson_1": [
+      "cleaned_dataset"
+    ],
     "cleaned_dataset": [
       "raw_data.csv"
     ],

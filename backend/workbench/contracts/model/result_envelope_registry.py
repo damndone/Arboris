@@ -16,7 +16,7 @@ family name.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import Any
 
@@ -95,6 +95,10 @@ class ResultEnvelopeDeclaration:
     #: family's prediction needs more than the coefficients and the regressors
     #: (an exposure, thresholds, several equations) and is not declared yet.
     inverse_link: str | None = None
+    #: What the estimator is (§3.1 of the v1.8.10 design): its outcome, its
+    #: estimation method and its design. Checks, post-estimation and
+    #: combinators match on these, never on the family's name.
+    traits: frozenset[str] = frozenset()
 
     @property
     def model_types(self) -> tuple[str, ...]:
@@ -251,9 +255,60 @@ _DECLARATIONS: tuple[ResultEnvelopeDeclaration, ...] = (
 )
 
 
+#: The closed vocabulary of traits. A trait outside it is a typo, refused at
+#: import rather than silently matching nothing.
+TRAIT_VOCABULARY = frozenset({
+    "outcome.continuous", "outcome.binary", "outcome.count", "outcome.ordinal",
+    "outcome.categorical", "outcome.survival", "outcome.time_series", "outcome.effect",
+    "method.least_squares", "method.maximum_likelihood", "method.instrumental_variables",
+    "method.quantile", "method.partial_likelihood", "method.aggregation", "method.mixed",
+    "design.linear_predictor", "design.instruments", "design.panel", "design.grouped",
+    # The variance equals the mean (Poisson-type); overdispersion breaks it.
+    "dispersion.fixed",
+})
+
+_LINEAR = "design.linear_predictor"
+_LS = ("outcome.continuous", "method.least_squares", _LINEAR)
+_ML = ("method.maximum_likelihood", _LINEAR)
+FAMILY_TRAITS: Mapping[str, frozenset[str]] = MappingProxyType({
+    family: frozenset(traits) for family, traits in {
+        "ols": _LS,
+        "anova": _LS,
+        "panel_ols": (*_LS, "design.panel"),
+        "did": (*_LS, "design.panel"),
+        "logit": ("outcome.binary", *_ML),
+        "probit": ("outcome.binary", *_ML),
+        "glm:binomial": ("outcome.binary", *_ML),
+        "poisson": ("outcome.count", "dispersion.fixed", *_ML),
+        "poisson_rate": ("outcome.count", "dispersion.fixed", *_ML),
+        "negative_binomial": ("outcome.count", *_ML),
+        "glm:poisson": ("outcome.count", "dispersion.fixed", *_ML),
+        "glm:negative_binomial": ("outcome.count", *_ML),
+        "ordinal_logit": ("outcome.ordinal", *_ML),
+        "multinomial_logit": ("outcome.categorical", *_ML),
+        "iv_2sls": ("outcome.continuous", "method.instrumental_variables", _LINEAR, "design.instruments"),
+        "linear_mixed_effects": ("outcome.continuous", "method.mixed", _LINEAR, "design.grouped"),
+        "quantile_regression": ("outcome.continuous", "method.quantile", _LINEAR),
+        "survival_cox": ("outcome.survival", "method.partial_likelihood", _LINEAR),
+        "cs_did": ("outcome.effect", "method.aggregation", "design.panel"),
+        "sa_did": ("outcome.effect", "method.aggregation", "design.panel"),
+        "dcdh": ("outcome.effect", "method.aggregation", "design.panel"),
+        "time_series.ets": ("outcome.time_series", "method.maximum_likelihood"),
+        "time_series.arma_garch": ("outcome.time_series", "method.maximum_likelihood"),
+    }.items()
+})
+
+
 def _index(declarations: tuple[ResultEnvelopeDeclaration, ...]) -> Mapping[str, ResultEnvelopeDeclaration]:
     index: dict[str, ResultEnvelopeDeclaration] = {}
     for declaration in declarations:
+        traits = FAMILY_TRAITS.get(declaration.family)
+        if traits is None:
+            raise ValueError(f"family {declaration.family!r} declares no traits")
+        unknown = traits - TRAIT_VOCABULARY
+        if unknown:
+            raise ValueError(f"family {declaration.family!r} declares unknown traits {sorted(unknown)}")
+        declaration = replace(declaration, traits=traits)
         for model_type in declaration.model_types:
             if model_type in index:
                 raise ValueError(f"model type {model_type!r} is declared twice")

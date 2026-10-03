@@ -70,7 +70,7 @@
       <h3>{{ diag_id }}</h3>
       {% set vif_data = diag.get("vif") %}
       {% if vif_data %}
-      <h4>Multicollinearity (VIF)</h4>
+      <h4>Multicollinearity (VIF; GVIF^(1/df) for factors)</h4>
       <table>
         <thead><tr><th>Variable</th><th>VIF</th></tr></thead>
         <tbody>
@@ -80,7 +80,7 @@
             <td>{{ var }}</td>
             <td>
               {% if vif is none %}—{% else %}{{ "%.1f"|format(vif) }}{% endif %}
-              {% if vif is not none and vif > 10 %}⚠️ high{% elif vif is not none and vif > 5 %}⚡ moderate{% endif %}
+              {% if vif is not none and vif > 10 %}⚠️ above 10 (Fox &amp; Monette, 1992){% endif %}
             </td>
           </tr>
           {% endif %}

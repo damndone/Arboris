@@ -1,0 +1,131 @@
+{
+  "generator": "tests/fixtures/checks/generate_oracle.R",
+  "environment": {
+    "r_version": "4.6.0",
+    "platform": "aarch64-apple-darwin24.6.0",
+    "lib_paths": ["/opt/homebrew/lib/R/4.6/site-library", "/opt/homebrew/Cellar/r/4.6.0/lib/R/library"],
+    "packages": {
+      "car": "3.1.5",
+      "detectseparation": "0.4.0",
+      "jsonlite": "2.0.0"
+    }
+  },
+  "cross_section_two": {
+    "education": {
+      "gvif": 75.6666666666662,
+      "df": 1,
+      "gvif_adjusted": 8.69865890046657
+    },
+    "experience": {
+      "gvif": 75.6666666666662,
+      "df": 1,
+      "gvif_adjusted": 8.69865890046657
+    }
+  },
+  "cross_section_region": {
+    "education": {
+      "gvif": 75.7037037037017,
+      "df": 1,
+      "gvif_adjusted": 8.70078753353406
+    },
+    "experience": {
+      "gvif": 75.6666666666646,
+      "df": 1,
+      "gvif_adjusted": 8.69865890046648
+    },
+    "region": {
+      "gvif": 1.03703703703703,
+      "df": 2,
+      "gvif_adjusted": 1.0091333680117
+    }
+  },
+  "factor_frame": {
+    "x1": {
+      "gvif": 5.6264597211289,
+      "df": 1,
+      "gvif_adjusted": 2.37201596139843
+    },
+    "x2": {
+      "gvif": 5.63724604207292,
+      "df": 1,
+      "gvif_adjusted": 2.37428853387134
+    },
+    "x3": {
+      "gvif": 1.02552607660527,
+      "df": 1,
+      "gvif_adjusted": 1.01268261395428
+    },
+    "x4": {
+      "gvif": 1.58451256987396,
+      "df": 1,
+      "gvif_adjusted": 1.25877423308311
+    },
+    "grp": {
+      "gvif": 1.61542903031326,
+      "df": 3,
+      "gvif_adjusted": 1.08321495472353
+    }
+  },
+  "separation": {
+    "complete_logit": {
+      "separated": true,
+      "coefficients": {
+        "(Intercept)": 0,
+        "x1": "Inf",
+        "x2": 0
+      }
+    },
+    "complete_probit": {
+      "separated": true,
+      "coefficients": {
+        "(Intercept)": 0,
+        "x1": "Inf",
+        "x2": 0
+      }
+    },
+    "quasi_logit": {
+      "separated": true,
+      "coefficients": {
+        "(Intercept)": 0,
+        "x1": "Inf",
+        "x2": 0
+      }
+    },
+    "quasi_probit": {
+      "separated": true,
+      "coefficients": {
+        "(Intercept)": 0,
+        "x1": "Inf",
+        "x2": 0
+      }
+    },
+    "overlap_logit": {
+      "separated": false,
+      "coefficients": {
+        "(Intercept)": 0,
+        "x1": 0,
+        "x2": 0
+      }
+    },
+    "overlap_probit": {
+      "separated": false,
+      "coefficients": {
+        "(Intercept)": 0,
+        "x1": 0,
+        "x2": 0
+      }
+    }
+  },
+  "overdispersion": {
+    "over": {
+      "alpha": 0.50788342086487,
+      "t": 4.44654661815154,
+      "p_value": 6.15787647760832e-06
+    },
+    "equi": {
+      "alpha": 0.0550607264067685,
+      "t": 1.11724348787734,
+      "p_value": 0.132393584186892
+    }
+  }
+}

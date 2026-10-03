@@ -1892,6 +1892,7 @@ def test_selected_model_result_summary_keeps_public_fit_and_interval_facts(
             "r_squared": 0.42,
             "r_squared_adj": 0.41,
             "inference": None,  # no inference evidence recorded in this packet
+            "inference_suppressed": None,
             "coefficients": [{"term": "share", "estimate": 1.2, "std_error": None, "p_value": None, "ci_lower": 0.61, "ci_upper": 1.79}],
         }
     ]

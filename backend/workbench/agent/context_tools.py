@@ -3976,6 +3976,8 @@ def _bounded_result_summary(
         # the selected model's own evidence first, then the coefficient tables,
         # then run-level tests, which also have their own tool.
         "model_family_evidence": model_family_evidence,
+        # v1.8.10 check library: what the assumption checks found, with status.
+        "checks": _bounded_checks(run_root, model_results),
         "persisted_models": _bounded_persisted_model_facts(model_results),
         "regression_table": regression_table,
         "statistical_evidence": statistical_evidence,
@@ -4074,10 +4076,29 @@ def _bounded_persisted_model_facts(
                 "r_squared": _public_stat_number(result.get("r_squared")),
                 "r_squared_adj": _public_stat_number(result.get("r_squared_adj")),
                 "inference": _bounded_inference(result),
+                "inference_suppressed": result.get("inference_suppressed"),
                 "coefficients": rows,
             }
         )
     return projected
+
+
+def _bounded_checks(run_root: Path, model_results: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
+    """The primary model's check results: id, status and the one-line finding."""
+    primary = next((item for item in model_results if isinstance(item, dict)), None)
+    model_id = primary.get("model_id") if primary else None
+    path = run_root / "model_results" / f"checks_{model_id}.json"
+    if not model_id or not path.is_file():
+        return None
+    try:
+        payload = read_json(path)
+    except (OSError, ValueError):
+        return None
+    return [
+        {"check_id": item.get("check_id"), "status": item.get("status"), "blinding": item.get("blinding"),
+         "summary": str(item.get("summary") or "")[:300]}
+        for item in payload.get("checks", []) if isinstance(item, dict)
+    ]
 
 
 _INFERENCE_FIELDS = (

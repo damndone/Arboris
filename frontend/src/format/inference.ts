@@ -41,3 +41,11 @@ export function describeInference(result: unknown): string | null {
   }
   return parts.join(" · ");
 }
+
+/** Why a result shows no standard errors, tests or intervals, if it does not. */
+export function describeSuppressedInference(result: unknown): string | null {
+  const model = record(result);
+  const suppressed = record(model?.inference_suppressed);
+  const reason = suppressed?.reason;
+  return typeof reason === "string" && reason ? `Inference not shown: ${reason}` : null;
+}

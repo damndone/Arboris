@@ -155,7 +155,7 @@ def test_logit_perfect_separation_raises():
         "y": [0, 0, 0, 1, 1, 1],
         "x": [1, 2, 3, 10, 11, 12],
     })
-    with pytest.raises(ValueError, match="perfect separation|failed to fit"):
+    with pytest.raises(ValueError, match="separated by|failed to fit"):
         run_logit(frame, y="y", x=["x"], model_id="sep_test")
 
 

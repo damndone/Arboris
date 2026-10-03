@@ -42,5 +42,9 @@ sandwich        # vcovHC -- HC1 covariance for the robust Wald oracle
 marginaleffects # avg_slopes / slopes -- average and at-means marginal effects
 mice            # pool -- Rubin's rules for the multiple-imputation combinator (step 5)
 
+# --- check library (v1.8.10 step 3) ---
+detectseparation # detect_separation -- linear-programming separation check (Konis 2007)
+ivmodel          # AR.test -- Anderson-Rubin confidence set for weak instruments
+
 # --- shared ---
 jsonlite        # every generator writes JSON fixtures

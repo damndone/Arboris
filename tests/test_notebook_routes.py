@@ -345,6 +345,8 @@ def test_dataset_notebook_confirmation_executes_a_source_pinned_composed_workflo
         {
             "response": [
                 16.0 + 1.5 * value - 0.11 * value**2 + (1.0 if index % 2 else -1.0)
+                # v1.8.10: keeps the fit from being exact (no inference otherwise).
+                + 0.25 * ((index * 7) % 5 - 2)
                 for index, value in enumerate(values)
             ],
             "exposure": values,

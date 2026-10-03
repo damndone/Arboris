@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { describeInference } from "./inference";
+import { describeInference, describeSuppressedInference } from "./inference";
 
 describe("describeInference", () => {
   it("names clusters and t(G - 1) for clustered OLS", () => {
@@ -26,5 +26,13 @@ describe("describeInference", () => {
 
   it("says nothing when a result records no inference", () => {
     expect(describeInference({ model_type: "logit" })).toBeNull();
+  });
+});
+
+describe("describeSuppressedInference", () => {
+  it("states why inference is withheld", () => {
+    expect(describeSuppressedInference({ inference_suppressed: { check_id: "fit.perfect", reason: "The model fits the data exactly." } }))
+      .toBe("Inference not shown: The model fits the data exactly.");
+    expect(describeSuppressedInference({})).toBeNull();
   });
 });

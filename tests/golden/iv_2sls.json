@@ -4,6 +4,9 @@
       "data_profile"
     ],
     "boxplots": [],
+    "checks_iv_2sls_1": [
+      "cleaned_dataset"
+    ],
     "cleaned_dataset": [
       "raw_data.csv"
     ],

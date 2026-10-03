@@ -4,6 +4,9 @@
       "data_profile"
     ],
     "boxplots": [],
+    "checks_ols_1": [
+      "cleaned_dataset"
+    ],
     "cleaned_dataset": [
       "raw_data.csv"
     ],
@@ -56,7 +59,9 @@
       "cleaned_dataset"
     ]
   },
-  "error_codes": [],
+  "error_codes": [
+    "CHECK_FIT_PERFECT"
+  ],
   "models": {
     "ols_1": {
       "coef_keys": [

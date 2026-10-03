@@ -957,11 +957,13 @@ def run_logit(
     try:
         fitted = smf.logit(formula=formula, data=frame).fit(disp=False, maxiter=100)
     except Exception as exc:
+        _raise_if_separated("Logit", model_id, smf.logit(formula=formula, data=frame))
         raise ValueError(
-            f"Logit model {model_id} failed to fit (possible perfect separation). "
+            f"Logit model {model_id} failed to fit. "
             f"Try OLS (Linear Probability Model) instead."
         ) from exc
     if not getattr(fitted, "converged", True):
+        _raise_if_separated("Logit", model_id, fitted.model)
         raise ValueError(
             f"Logit model {model_id} did not converge. "
             f"Try OLS (Linear Probability Model) instead."
@@ -970,6 +972,18 @@ def run_logit(
     result["model_type"] = "logit"
     _attach_average_marginal_effects(result, fitted)
     return _add_engine(result), fitted
+
+
+def _raise_if_separated(label: str, model_id: str, model: Any) -> None:
+    """Name separation as the reason a binary fit failed, when it is."""
+    from ..checks.fit_checks import separation_reason
+
+    try:
+        reason = separation_reason(model)
+    except Exception:  # noqa: BLE001 - the original failure message still stands
+        return
+    if reason:
+        raise ValueError(f"{label} model {model_id} cannot be estimated: {reason}.")
 
 
 def run_probit(
@@ -986,11 +1000,13 @@ def run_probit(
     try:
         fitted = smf.probit(formula=formula, data=frame).fit(disp=False, maxiter=100)
     except Exception as exc:
+        _raise_if_separated("Probit", model_id, smf.probit(formula=formula, data=frame))
         raise ValueError(
             f"Probit model {model_id} failed to fit. "
             f"Check binary outcome values and predictors.{_root_cause_suffix(exc)}"
         ) from exc
     if not getattr(fitted, "converged", True):
+        _raise_if_separated("Probit", model_id, fitted.model)
         raise ValueError(f"Probit model {model_id} did not converge.")
     result = normalize_statsmodels_result(fitted, model_id)
     result["model_type"] = "probit"
