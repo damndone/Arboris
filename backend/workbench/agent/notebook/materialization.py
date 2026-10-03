@@ -32,9 +32,11 @@ from ...services.draft_materialization import (
 from ..context_compiler import NotebookPlanningContextV1
 from ..trace import TraceWriter
 from ..workflow_contracts import (
+    GENESIS_RUN_LEVEL_FIELDS,
     MODEL_FAMILY_SPEC_FIELDS,
     OperationValidationError,
     family_context_columns,
+    genesis_run_params,
     model_family_contract,
     validate_model_genesis_spec,
 )
@@ -667,6 +669,7 @@ class NotebookOptionMaterializer:
             "time_col",
             "cohort_col",
             "treatment_path_col",
+            *GENESIS_RUN_LEVEL_FIELDS,
         }
         model_type = model_params.get("model_type")
         if not isinstance(model_type, str) or not model_type:
@@ -823,7 +826,7 @@ class NotebookOptionMaterializer:
                     {"branch_id": "notebook", "outcome": y, "predictors": list(x)}
                 ],
             }
-            for field_name in MODEL_FAMILY_SPEC_FIELDS:
+            for field_name in (*MODEL_FAMILY_SPEC_FIELDS, *GENESIS_RUN_LEVEL_FIELDS):
                 if field_name in model_params:
                     family_spec[field_name] = model_params[field_name]
             if "covariance" in model_params:
@@ -840,6 +843,12 @@ class NotebookOptionMaterializer:
                     "genesis family fields contain columns absent from the verified dataset",
                     columns=missing_family_columns,
                 )
+        # Run-level declarations travel as the run's own parameters (for
+        # multiple imputation: the `imputation` request), never as model fields;
+        # they were validated with the family spec above.
+        run_level = {key: model_params[key] for key in GENESIS_RUN_LEVEL_FIELDS if key in model_params}
+        if run_level and family_contract is None:
+            raise _fail("genesis run-level declarations need a model family contract")
         if family_builds_native_params:
             model_params = family_contract.build_model_params(
                 family_spec,
@@ -847,6 +856,8 @@ class NotebookOptionMaterializer:
                 list(x),
                 str(model_params.get("covariance", "unadjusted")),
             )
+        model_params = {key: value for key, value in model_params.items() if key not in run_level}
+        model_params.update(genesis_run_params(run_level))
         draft = create_genesis_draft(
             self.service.project_root,
             upload_sha256=source.upload_sha256 or "",

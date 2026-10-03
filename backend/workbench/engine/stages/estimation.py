@@ -30,6 +30,25 @@ from ...contracts.model.ols import (
 )
 
 
+def _fit_pooled(handler, ctx, env, handles, validation_error):
+    """Multiple imputation: fit every dataset and pool (stages/mi_pooling.py)."""
+    from ...combinators.multiple_imputation import MultipleImputationRefusal
+    from .mi_pooling import fit_multiply_imputed, kernel_resolver
+
+    resolve = kernel_resolver(
+        ctx, handler.model_type, kernel_source=_kernel_source_packet,
+        recorded=recorded_inference_kernel, public_name=_public_term,
+    )
+    try:
+        return fit_multiply_imputed(handler, ctx, env, handles, kernel_for=resolve)
+    except MultipleImputationRefusal as refusal:
+        raise validation_error(
+            f"MI_{refusal.code}", refusal.message,
+            {"model_type": handler.model_type, "imputation_count": len(handles),
+             "source_artifacts": [handle.artifact_id for handle in handles]},
+        ) from refusal
+
+
 def _validate_model_family_weights(
     model_type: str,
     *,
@@ -978,7 +997,10 @@ class EstimationStage:
         run_root = env.run_root
         run_id = env.run_id
         recorder = env.recorder
-        model_input_ids = [ctx.data.artifact_id]
+        # With multiple imputation the model reads every imputed dataset.
+        model_input_ids = list(ctx.artifacts.get("_model_input_ids") or [ctx.data.artifact_id])
+        mi_handles = ctx.artifacts.get("_imputation_handles") or []
+        mi_pooling_attempted = False
         model_options = ctx.artifacts.get("_model_options", {})
         model_options_binding = ctx.artifacts.get("_model_options_binding")
 
@@ -1094,7 +1116,11 @@ class EstimationStage:
             if handler.model_type == "linear_mixed_effects":
                 if env.lmm_execution_admission is None:
                     raise ModelOptionsValidationError("LMM_EXECUTION_BINDING_REQUIRED", "LMM requires a live admission.")
-            model_id, primary, fitted = handler.fit(ctx, env)
+            if len(mi_handles) > 1:
+                mi_pooling_attempted = True
+                model_id, primary, fitted = _fit_pooled(handler, ctx, env, mi_handles, WorkflowValidationError)
+            else:
+                model_id, primary, fitted = handler.fit(ctx, env)
             primary_inputs = ctx.artifacts.get("_primary_model_input_ids")
             if primary_inputs is not None:
                 if not isinstance(primary_inputs, list) or not all(
@@ -1221,7 +1247,8 @@ class EstimationStage:
                 issue_code = "MODEL_FIT_FAILED"
 
             issue_dicts.append(GuardrailIssue(
-                Severity.BLOCKER if (model_type != "auto" or is_model_options_error) else Severity.WARNING,
+                Severity.BLOCKER if (model_type != "auto" or is_model_options_error or mi_pooling_attempted)
+                else Severity.WARNING,
                 issue_code,
                 str(exc),
                 failure_evidence,
@@ -1229,9 +1256,10 @@ class EstimationStage:
             write_json(run_root / "errors.json", {"issues": issue_dicts})
             env.step("estimation", "blocked", f"Model fit failed: {exc}")
 
-            if model_type != "auto" or is_model_options_error:
+            if model_type != "auto" or is_model_options_error or mi_pooling_attempted:
                 # 1.5.3.2 CONTRACT: explicit failure => structured `failed`.
-                # NO silent OLS fallback.
+                # NO silent OLS fallback (nor a single-dataset fit for a
+                # multiple-imputation request).
                 _write_manifest(
                     run_root,
                     run_id,

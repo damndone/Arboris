@@ -22,6 +22,10 @@ def _run_mice_workflow(tmp_path: Path) -> Path:
         index=False,
     )
     project = create_project(tmp_path, "demo")
+    (project.root / "config.yml").write_text(
+        "imputation_method: mice\nimputation_m: 1\nimputation_max_iter: 2\n",
+        encoding="utf-8",
+    )
     result = run_workflow(
         project.root,
         [source],
@@ -42,8 +46,19 @@ def test_imputation_summary_json_is_written(tmp_path: Path):
     assert summary["schema_version"] == 1
     assert summary["method"] == "mice"
     assert summary["status"] == "completed"
+    assert summary["m"] == 1
+    assert summary["mode"] == "single_imputation"
+    assert summary["persisted_datasets"] == 1
+    assert summary["pooled_estimates"] is False
     assert summary["input_artifact"] == "cleaned_dataset"
     assert summary["output_artifact"] == "imputed_dataset"
+    assert not (run_root / "processed" / "imputed_dataset_0001.parquet").exists()
+    artifact_ids = {
+        artifact["artifact_id"]
+        for artifact in read_json(run_root / "artifacts_index.json")["artifacts"]
+    }
+    assert "mice_manifest" not in artifact_ids
+    assert not any(artifact_id.startswith("imputed_dataset_") for artifact_id in artifact_ids)
 
 
 def test_imputation_summary_is_registered_as_artifact(tmp_path: Path):

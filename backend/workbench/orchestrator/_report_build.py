@@ -36,6 +36,24 @@ def _model_summary(
     exposure_col: str | None,
     fallback_n: int,
 ) -> str | None:
+    label = _family_summary(
+        model_type, result, robust_se_dp=robust_se_dp, exposure_col=exposure_col, fallback_n=fallback_n
+    )
+    pooled = result.get("multiple_imputation")
+    if label is not None and isinstance(pooled, dict) and pooled.get("m"):
+        # Every reader of the overview must see that these are pooled figures.
+        return f"{label[:-1]}, pooled from m = {pooled['m']} imputations)"
+    return label
+
+
+def _family_summary(
+    model_type: str,
+    result: dict[str, Any],
+    *,
+    robust_se_dp: Any,
+    exposure_col: str | None,
+    fallback_n: int,
+) -> str | None:
     n = int(result.get("nobs", fallback_n))
     if model_type in ("ols", "ols_robust"):
         if robust_se_dp is not None and robust_se_dp.reason is not None:
@@ -101,18 +119,6 @@ def _write_inference_kernel(
         "inference_kernel",
         "econometrics",
         inputs,
-    )
-
-
-def _mice_imputation_fact(imputation: dict[str, Any]) -> str:
-    columns = imputation.get("imputed_columns", [])
-    columns_text = ", ".join(str(column) for column in columns) if columns else "none"
-    persisted = imputation.get("persisted_datasets", 0)
-    persisted_text = "one" if persisted == 1 else str(persisted)
-    pooled = "were produced" if imputation.get("pooled_estimates") else "were not produced"
-    return (
-        f"MICE imputation: {persisted_text} persisted imputed dataset; "
-        f"imputed columns: {columns_text}; pooled estimates {pooled}."
     )
 
 

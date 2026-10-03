@@ -3475,6 +3475,7 @@ def _public_requested_model_coefficients(
                     if isinstance(coefficient.get("source_id"), str)
                     else None
                 ),
+                **_pooled_coefficient_fields(coefficient),
             }
         )
 
@@ -3533,6 +3534,7 @@ def _public_requested_model_coefficients(
                 else None
             ),
         },
+        "multiple_imputation": _bounded_multiple_imputation(result),
         "coefficients": public_coefficients,
         "missing_terms": missing_terms,
         # When a requested term is absent, name the terms that do exist, so a
@@ -4069,6 +4071,7 @@ def _bounded_persisted_model_facts(
                     "p_value": _public_stat_number(coefficient.get("p_value")),
                     "ci_lower": _public_stat_number(coefficient.get("ci_lower")),
                     "ci_upper": _public_stat_number(coefficient.get("ci_upper")),
+                    **_pooled_coefficient_fields(coefficient),
                 }
             )
         projected.append(
@@ -4085,10 +4088,33 @@ def _bounded_persisted_model_facts(
                 # the family does not use is never shown as if it had run.
                 "covariance_executed": _executed_covariance(run_root, model_id),
                 "inference_suppressed": result.get("inference_suppressed"),
+                "multiple_imputation": _bounded_multiple_imputation(result),
                 "coefficients": rows,
             }
         )
     return projected
+
+
+def _pooled_coefficient_fields(coefficient: Mapping[str, Any]) -> dict[str, Any]:
+    """A pooled multiple-imputation coefficient's own Barnard-Rubin df and
+    fraction of missing information; nothing for an ordinary fit."""
+    if "fmi" not in coefficient:
+        return {}
+    return {"df": _public_stat_number(coefficient.get("df")), "fmi": _public_stat_number(coefficient.get("fmi"))}
+
+
+def _bounded_multiple_imputation(result: Mapping[str, Any]) -> dict[str, Any] | None:
+    """m and the pooling rule, so the Agent says how the figures were combined."""
+    block = result.get("multiple_imputation")
+    if not isinstance(block, Mapping):
+        return None
+    return {
+        "m": block.get("m"),
+        "method": "Rubin's rules, Barnard-Rubin df per coefficient",
+        "complete_data_df": block.get("dfcom"),
+        "not_reported": "R-squared, residuals and diagnostics (they describe one imputed dataset)",
+        "post_estimation": "joint tests on pooled estimates are not available yet (needs D1)",
+    }
 
 
 def _executed_covariance(run_root: Path | None, model_id: Any) -> str | None:

@@ -258,6 +258,10 @@ export type CoefficientRecord = {
   ci_lower?: number | null;
   ci_upper?: number | null;
   source_id?: string;
+  /** Pooled multiple imputation: this coefficient's Barnard-Rubin df (null when
+   * infinite) and fraction of missing information. */
+  df?: number | null;
+  fmi?: number | null;
 };
 
 export type ModelResult = {

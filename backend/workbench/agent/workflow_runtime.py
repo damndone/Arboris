@@ -1350,7 +1350,7 @@ def _execute_imputation_step(
         frame,
         run_root,
         list(step.spec["columns"]),
-        m=int(step.spec.get("m", 5)),
+        m=int(step.spec.get("m", 1)),
         max_iter=int(step.spec.get("max_iter", 10)),
         random_seed=int(step.spec.get("random_seed", 20260429)),
         max_missing_rate=float(step.spec.get("max_missing_rate", 0.4)),

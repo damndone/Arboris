@@ -591,6 +591,11 @@ def genesis_run_params(spec: Mapping[str, Any]) -> dict[str, Any]:
     labels = spec.get("labels")
     if isinstance(labels, Mapping) and labels:
         params["labels"] = dict(labels)
+    # Multiple imputation changes how every number is computed, not the model:
+    # it travels with the run like a sampling design does.
+    m = spec.get("multiple_imputations")
+    if type(m) is int:
+        params["imputation"] = json.dumps({"method": "mice", "m": m})
     return params
 
 
@@ -1307,6 +1312,12 @@ MODEL_FAMILY_SPEC_FIELDS = frozenset(
     for field_name in contract.context_spec_fields
 )
 
+#: Run-level declarations a single-model Genesis (a Notebook option, not a
+#: workflow step) may carry beside the family's own fields. Planning validates
+#: them through `validate_model_genesis_spec` and materialization admits the
+#: same set, so an option cannot pass one and fail the other.
+GENESIS_RUN_LEVEL_FIELDS = ("multiple_imputations",)
+
 
 def notebook_workflow_capability_ids() -> tuple[str, ...]:
     """Return the native capabilities admitted to the Notebook planner.
@@ -1371,6 +1382,29 @@ def family_context_columns(
     return tuple(dict.fromkeys(values))
 
 
+def _validate_multiple_imputations(spec: Mapping[str, Any], family: str) -> None:
+    m = spec.get("multiple_imputations")
+    if m is None:
+        return
+    from ..combinators.multiple_imputation import (
+        MAX_IMPUTATIONS, MI_VALIDATED, MIN_IMPUTATIONS, validated_text,
+    )
+
+    if type(m) is not int or not MIN_IMPUTATIONS <= m <= MAX_IMPUTATIONS:
+        raise OperationValidationError(
+            f"model.genesis multiple_imputations must be an integer from {MIN_IMPUTATIONS} to {MAX_IMPUTATIONS}"
+        )
+    if family not in {validated_family for validated_family, _ in MI_VALIDATED}:
+        raise OperationValidationError(
+            f"model.genesis multiple imputation is not offered for {family} yet: pooling it has not "
+            f"been checked against a reference implementation. Offered for: {validated_text()}."
+        )
+    if any(str(spec.get(key) or "").strip() for key in ("sampling_weight", "survey_strata_col", "survey_psu_col")):
+        raise OperationValidationError(
+            "model.genesis multiple imputation with a sampling design is not supported yet"
+        )
+
+
 def validate_model_genesis_spec(spec: Mapping[str, Any]) -> ModelFamilyContract:
     """Validate family-owned Genesis semantics and return its exact contract."""
 
@@ -1379,6 +1413,7 @@ def validate_model_genesis_spec(spec: Mapping[str, Any]) -> ModelFamilyContract:
 
     contract = model_family_contract(spec.get("model_family"))
     _validate_family_options(spec, contract)
+    _validate_multiple_imputations(spec, contract.family)
     weight_kind = spec.get("weight_kind")
     if weight_kind is not None:
         if weight_kind not in {"sampling", "analysis", "frequency"}:
@@ -1503,6 +1538,20 @@ def _workflow_executable_family_sentence() -> str:
         "Registered workflow-executable model family: "
         + ", ".join(families)
         + ". Every branch in one step uses this same family."
+    )
+
+
+def _multiple_imputation_sentence() -> str:
+    """Read off the pooling registry, so the offer cannot outgrow the validation."""
+    from ..combinators.multiple_imputation import MAX_IMPUTATIONS, MIN_IMPUTATIONS, validated_text
+
+    return (
+        f"Optional m ({MIN_IMPUTATIONS}-{MAX_IMPUTATIONS}) for multiple imputation: missing values in "
+        "the outcome and predictors are imputed m times by chained equations (MICE), the model is "
+        "fitted to each completed dataset, and the estimates are pooled by Rubin's rules with "
+        f"Barnard-Rubin degrees of freedom. Offered for: {validated_text()}. Refused with a "
+        "sampling design. Pooled results report no R-squared or residual diagnostics, and joint "
+        "tests on them are not available yet."
     )
 
 
@@ -1754,7 +1803,10 @@ def data_preparation_workflow_step_contracts() -> dict[str, StepSpecContract]:
             summary=str(entry["description"]),
             fields={
                 "columns": "Numeric columns selected for the imputation method.",
-                "m": "Number of imputed datasets requested by the method.",
+                "m": (
+                    "Must be 1: this step prepares one completed dataset. For pooled "
+                    "multiple-imputation estimates set multiple_imputations on model.genesis."
+                ),
                 "max_iter": "Maximum imputation iterations.",
                 "random_seed": "Deterministic imputation seed.",
                 "max_missing_rate": "Maximum accepted missing-rate threshold.",
@@ -2167,6 +2219,7 @@ WORKFLOW_STEP_SPEC_CONTRACTS: WorkflowStepContractRegistry = WorkflowStepContrac
                 "model should contain it."
             ),
             "context_columns": "Extra columns to carry into the model context.",
+            "multiple_imputations": _multiple_imputation_sentence(),
         },
         required=("model_family", "branches"),
         field_types={
@@ -2188,6 +2241,7 @@ WORKFLOW_STEP_SPEC_CONTRACTS: WorkflowStepContractRegistry = WorkflowStepContrac
             "categorical": "list",
             "polynomials": "list",
             "context_columns": "list",
+            "multiple_imputations": "integer",
         },
         semantic_validator_key="model.genesis",
         reference_resolver_key="workflow.source_columns",
@@ -3161,6 +3215,12 @@ def _validate_step_spec(operation_id: str, spec: Mapping[str, Any]) -> None:
         if len(set(columns)) != len(columns):
             raise OperationValidationError(f"{operation_id} columns must not contain duplicates")
         _validate_positive_integer_field(operation_id, spec, "m")
+        if spec.get("m", 1) != 1:
+            raise OperationValidationError(
+                f"{operation_id} prepares one completed dataset, so m must be 1. A model fitted to "
+                "it treats imputed values as observed; for pooled estimates across m imputations, "
+                "set multiple_imputations on model.genesis instead."
+            )
         _validate_positive_integer_field(operation_id, spec, "max_iter")
         _validate_nonnegative_integer_field(operation_id, spec, "random_seed")
         _validate_fraction_field(operation_id, spec, "max_missing_rate", inclusive=True)

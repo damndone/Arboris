@@ -71,9 +71,13 @@ def test_invariant_imputation_flips_model_and_diagnostics_lineage_together(tmp_p
     xs = [float(i) if i % 7 else None for i in range(40)]
     frame = pd.DataFrame({"y": ys, "x": xs, "firm_id": list(range(100, 140))})
     run_root, res = _run(tmp_path, frame, y="y", x=["x"],
-                         config_overrides={"imputation_method": "mice"})
+                         config_overrides={"imputation_method": "mice", "imputation_m": 1})
     ids = _artifact_ids(run_root)
     assert "imputed_dataset" in ids, "imputation did not fire — fixture broken"
+    summary = read_json(run_root / "imputation" / "mice_summary.json")
+    assert summary["m"] == 1
+    assert summary["persisted_datasets"] == 1
+    assert summary["pooled_estimates"] is False
     # Model + diagnostics point at imputed_dataset.
     assert _inputs_of(run_root, "ols_1") == ["imputed_dataset"]
     assert _inputs_of(run_root, "diagnostics_ols_1") == ["imputed_dataset"]

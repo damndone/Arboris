@@ -41,6 +41,9 @@ def _imputed_bytes(run_root):
 def test_mice_hit_reused_and_run_dir_complete(tmp_path, monkeypatch):
     monkeypatch.setenv("WORKBENCH_INCREMENTAL_CACHE", "1")
     project = create_project(tmp_path, "demo")
+    (project.root / "config.yml").write_text(
+        "imputation_method: mice\nimputation_m: 1\n", encoding="utf-8"
+    )
     src = FIX / "forest_min_missing.csv"
 
     r1 = _run(project.root, src, imputation={"method": "mice"})
@@ -62,6 +65,9 @@ def test_mice_hit_reused_and_run_dir_complete(tmp_path, monkeypatch):
 def test_force_full_matches_cache_hit(tmp_path, monkeypatch):
     monkeypatch.setenv("WORKBENCH_INCREMENTAL_CACHE", "1")
     project = create_project(tmp_path, "demo")
+    (project.root / "config.yml").write_text(
+        "imputation_method: mice\nimputation_m: 1\n", encoding="utf-8"
+    )
     src = FIX / "forest_min_missing.csv"
 
     r1 = _run(project.root, src, imputation={"method": "mice"})        # miss → materialize

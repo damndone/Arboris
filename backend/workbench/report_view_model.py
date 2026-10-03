@@ -59,6 +59,7 @@ def build_regression_table(
                 # on. A table pasted into a paper without them reports a
                 # precision the analysis did not have.
                 "survey_design": _design_summary(model_result.get("survey_design")),
+                "multiple_imputation": model_result.get("multiple_imputation"),
             }
         )
         coefficients = model_result.get("coefficients", {})
@@ -328,11 +329,21 @@ def _mice_imputation_fact(imputation: dict[str, Any]) -> str:
     columns = imputation.get("imputed_columns", [])
     columns_text = ", ".join(str(column) for column in columns) if columns else "none"
     persisted = imputation.get("persisted_datasets", 0)
-    persisted_text = "one" if persisted == 1 else str(persisted)
-    pooled = "were produced" if imputation.get("pooled_estimates") else "were not produced"
+    if persisted == 1:
+        return (
+            f"MICE imputation: one imputed dataset, fitted as if it were observed; imputed "
+            f"columns: {columns_text}. Standard errors do not reflect the uncertainty of the "
+            "imputation."
+        )
+    if imputation.get("pooled_estimates"):
+        return (
+            f"Multiple imputation (MICE): m = {persisted} imputed datasets; imputed columns: "
+            f"{columns_text}. Each dataset was fitted separately and the estimates pooled by "
+            "Rubin's rules with Barnard–Rubin degrees of freedom."
+        )
     return (
-        f"MICE imputation: {persisted_text} persisted imputed dataset; "
-        f"imputed columns: {columns_text}; pooled estimates {pooled}."
+        f"Multiple imputation (MICE): {persisted} imputed datasets; imputed columns: "
+        f"{columns_text}; pooled estimates were not produced."
     )
 
 

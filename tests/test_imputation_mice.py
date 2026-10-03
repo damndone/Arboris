@@ -30,7 +30,7 @@ def test_mice_imputation_writes_artifacts_without_overwriting_cleaned_dataset(tm
         frame,
         run.root,
         columns=["y", "x", "mostly_missing", "group", "missing_column"],
-        m=2,
+        m=1,
         max_iter=2,
         random_seed=123,
         max_missing_rate=0.4,
@@ -53,13 +53,15 @@ def test_mice_imputation_writes_artifacts_without_overwriting_cleaned_dataset(tm
 
     assert summary["status"] == "completed"
     assert summary["method"] == "mice"
-    assert summary["m"] == 2
+    assert summary["m"] == 1
+    assert summary["mode"] == "single_imputation"
     assert "group" in summary["skipped_columns"]
     assert "mostly_missing" in summary["skipped_columns"]
     assert any("group" in warning for warning in summary["warnings"])
     assert summary["persisted_datasets"] == 1
     assert summary["pooled_estimates"] is False
-    assert any("pooled multiple-imputation estimates" in warning for warning in summary["warnings"])
+    assert any("standard errors do not reflect" in warning for warning in summary["warnings"])
+    assert not (run.root / "processed" / "imputed_dataset_0001.parquet").exists()
     assert summary["selected_columns"] == ["y", "x"]
     persisted_summary = read_json(summary_path)
     decisions = read_json(decisions_path)
@@ -75,6 +77,80 @@ def test_mice_imputation_writes_artifacts_without_overwriting_cleaned_dataset(tm
         for artifact in read_json(run.root / "artifacts_index.json")["artifacts"]
     }
     assert {"imputed_dataset", "mice_summary", "mice_decisions"}.issubset(artifact_ids)
+    assert "mice_manifest" not in artifact_ids
+    assert not any(artifact_id.startswith("imputed_dataset_") for artifact_id in artifact_ids)
+
+
+def test_mice_multiple_imputation_persists_ordered_dataset_artifacts_and_manifest(
+    tmp_path: Path,
+):
+    project = create_project(tmp_path, "demo")
+    run = create_run(project.root, mode="auto")
+    processed_dir = run.root / "processed"
+    processed_dir.mkdir(parents=True, exist_ok=True)
+    cleaned_path = processed_dir / "cleaned_dataset.parquet"
+    frame = pd.DataFrame(
+        {
+            "y": [1.0, 2.0, np.nan, 4.0, 5.0],
+            "x": [2.0, np.nan, 6.0, 8.0, 10.0],
+        }
+    )
+    frame.to_parquet(cleaned_path, index=False)
+    original_cleaned = cleaned_path.read_bytes()
+
+    np.random.seed(991)
+    random_state_before = np.random.get_state()
+    summary = run_mice_imputation(
+        frame,
+        run.root,
+        columns=["y", "x"],
+        m=2,
+        max_iter=2,
+        random_seed=123,
+    )
+    random_state_after = np.random.get_state()
+    assert random_state_after[0] == random_state_before[0]
+    assert np.array_equal(random_state_after[1], random_state_before[1])
+    assert random_state_after[2:] == random_state_before[2:]
+    # Keep the existing safety boundary explicit: imputation may only add artifacts.
+    assert cleaned_path.read_bytes() == original_cleaned
+    assert summary["persisted_datasets"] == 2
+    assert len(summary["derived_seeds"]) == 2
+    assert summary["derived_seeds"][0] == 123
+    assert summary["derived_seeds"][0] != summary["derived_seeds"][1]
+    assert summary["pooled_estimates"] is False
+    assert not (run.root / "processed" / "imputed_dataset.parquet").exists()
+
+    expected_artifacts = [
+        ("imputed_dataset_0001", "processed/imputed_dataset_0001.parquet"),
+        ("imputed_dataset_0002", "processed/imputed_dataset_0002.parquet"),
+    ]
+    artifact_records = read_json(run.root / "artifacts_index.json")["artifacts"]
+    artifact_ids = {artifact["artifact_id"] for artifact in artifact_records}
+    assert "imputed_dataset" not in artifact_ids
+    assert {"imputed_dataset_0001", "imputed_dataset_0002"} <= artifact_ids
+    assert "mice_manifest" in artifact_ids
+    dataset_records = [
+        (artifact["artifact_id"], artifact["path"])
+        for artifact in artifact_records
+        if artifact["artifact_id"].startswith("imputed_dataset")
+    ]
+    assert dataset_records == expected_artifacts
+    assert all((run.root / path).is_file() for _, path in expected_artifacts)
+
+    # Wished-for manifest API: ordered artifact identity is persisted separately
+    # from the summary so downstream stages cannot silently select the first file.
+    manifest = read_json(run.root / "imputation" / "mice_manifest.json")
+    assert manifest["count"] == 2
+    assert manifest["mode"] == "multiple_imputation"
+    assert manifest["datasets"] == [
+        {"artifact_id": artifact_id, "path": path}
+        for artifact_id, path in expected_artifacts
+    ]
+    assert manifest["seed_bindings"] == [
+        {"artifact_id": "imputed_dataset_0001", "seed": 123},
+        {"artifact_id": "imputed_dataset_0002", "seed": summary["derived_seeds"][1]},
+    ]
 
 
 def test_mice_imputation_skips_when_no_numeric_columns(tmp_path: Path):
@@ -82,7 +158,7 @@ def test_mice_imputation_skips_when_no_numeric_columns(tmp_path: Path):
     run = create_run(project.root, mode="auto")
     frame = pd.DataFrame({"group": ["a", None, "b"]})
 
-    summary = run_mice_imputation(frame, run.root, columns=["group"])
+    summary = run_mice_imputation(frame, run.root, columns=["group"], m=1)
 
     assert summary["status"] == "skipped"
     assert summary["selected_columns"] == []
@@ -111,7 +187,7 @@ def test_mice_imputation_skips_single_numeric_column_with_missing_values(tmp_pat
 def test_workflow_uses_mice_only_when_configured(tmp_path: Path):
     project = create_project(tmp_path, "demo")
     (project.root / "config.yml").write_text(
-        "imputation_method: mice\nimputation_m: 2\nimputation_max_iter: 2\n",
+        "imputation_method: mice\nimputation_m: 1\nimputation_max_iter: 2\n",
         encoding="utf-8",
     )
     y_values = [float(1 + 2 * i) for i in range(40)]
@@ -149,8 +225,8 @@ def test_workflow_uses_mice_only_when_configured(tmp_path: Path):
     )
     assert diagnostics_record["inputs"] == ["imputed_dataset"]
     report_html = (run_root / "reports" / "report.html").read_text(encoding="utf-8")
-    assert "MICE imputation: one persisted imputed dataset" in report_html
-    assert "pooled estimates were not produced" in report_html
+    assert "MICE imputation: one imputed dataset, fitted as if it were observed" in report_html
+    assert "Standard errors do not reflect the uncertainty of the imputation" in report_html
 
 
 def test_workflow_does_not_impute_by_default(tmp_path: Path):

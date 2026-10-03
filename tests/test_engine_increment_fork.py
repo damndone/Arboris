@@ -54,6 +54,9 @@ def _imputed_bytes(run_root):
 def test_model_fork_identity_incrementality(tmp_path, monkeypatch):
     monkeypatch.setenv("WORKBENCH_INCREMENTAL_CACHE", "1")
     project = create_project(tmp_path, "demo")
+    (project.root / "config.yml").write_text(
+        "imputation_method: mice\nimputation_m: 1\n", encoding="utf-8"
+    )
     src = FIX / "forest_min_missing.csv"
 
     rA = _run(project.root, src, imputation={"method": "mice"}, covariance="robust")

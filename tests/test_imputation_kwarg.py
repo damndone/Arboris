@@ -26,6 +26,7 @@ def _write_missing_data(tmp_path: Path) -> Path:
 
 def test_run_workflow_imputation_kwarg_triggers_mice(tmp_path: Path):
     project = create_project(tmp_path, "demo")
+    (project.root / "config.yml").write_text("imputation_m: 1\n", encoding="utf-8")
     source = _write_missing_data(tmp_path)
 
     result = run_workflow(
@@ -40,7 +41,11 @@ def test_run_workflow_imputation_kwarg_triggers_mice(tmp_path: Path):
     run_root = project.root / "runs" / result["run_id"]
     assert result["status"] == "completed"
     assert (run_root / "processed" / "imputed_dataset.parquet").exists()
-    assert read_json(run_root / "imputation" / "mice_summary.json")["status"] == "completed"
+    summary = read_json(run_root / "imputation" / "mice_summary.json")
+    assert summary["status"] == "completed"
+    assert summary["m"] == 1
+    assert summary["persisted_datasets"] == 1
+    assert summary["pooled_estimates"] is False
 
 
 def test_run_workflow_imputation_none_preserves_default_config_path(tmp_path: Path):

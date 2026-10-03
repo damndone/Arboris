@@ -564,6 +564,13 @@ def _validate_imputation_request(operation_id: str, request: Mapping[str, Any]) 
             f"{operation_id} column_bindings contains unsupported field(s): {', '.join(unknown)}"
         )
     options = normalized["options"]
+    if "m" in options:
+        # This step publishes one completed dataset; a model fitted to it treats
+        # imputed values as observed. Pooling belongs to the model step.
+        raise WorkflowCapabilityAdapterError(
+            f"{operation_id} prepares one completed dataset and takes no m; for pooled "
+            "multiple-imputation estimates set multiple_imputations on model.genesis"
+        )
     unknown_options = sorted(set(options) - _declared_request_properties(operation_id, "options"))
     if unknown_options:
         raise WorkflowCapabilityAdapterError(

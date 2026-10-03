@@ -24,6 +24,19 @@ describe("describeInference", () => {
     })).toBe("Standard errors: Robust (HC1) · Inference: z (legacy asymptotic; rerun for finite-sample t)");
   });
 
+  it("names the pooling rule for a multiple-imputation result", () => {
+    expect(describeInference({
+      multiple_imputation: { m: 5 },
+      covariance_evidence: {
+        covariance: "robust", effective_df: null, inference_distribution: "t", df_method: "barnard_rubin",
+        inference_version: "workbench.inference.v2",
+      },
+    })).toBe(
+      "Standard errors: Robust (HC1) · Inference: t, Barnard–Rubin df per coefficient · " +
+        "Pooled from m = 5 imputations (Rubin's rules)",
+    );
+  });
+
   it("says nothing when a result records no inference", () => {
     expect(describeInference({ model_type: "logit" })).toBeNull();
   });

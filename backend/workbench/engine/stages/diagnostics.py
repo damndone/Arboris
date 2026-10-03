@@ -176,6 +176,30 @@ class DiagnosticsStage:
         diag_x = [v for v in normalized_x if v != exposure_col] if exposure_col else normalized_x
         exog = modeling_frame[diag_x] if diag_x else pd.DataFrame(index=modeling_frame.index)
         diagnostic_artifacts: dict[str, dict[str, Any]] = {}
+        mi_pooling = ctx.artifacts.get("_mi_pooling")
+        if mi_pooling:
+            # A pooled result has no single fit: residuals, influence and the
+            # check library's fit checks belong to one imputed dataset each, and
+            # showing imputation 1's would present them as the pooled model's.
+            for model_id, result in model_results:
+                diag = {
+                    "model_id": model_id,
+                    "model_type": result.get("model_type", "ols"),
+                    "status": "unavailable",
+                    "reason_code": "MI_DIAGNOSTIC_NOT_POOLED",
+                    "residual_diagnostics_withheld": (
+                        f"This result pools m = {mi_pooling['m']} imputed datasets; residual "
+                        "diagnostics, collinearity and fit checks describe a single dataset and "
+                        "are not reported for the pooled model."
+                    ),
+                }
+                diag_path = run_root / "model_results" / f"diagnostics_{model_id}.json"
+                write_json(diag_path, diag)
+                register_artifact(
+                    run_root, f"diagnostics_{model_id}", diag_path, "model_diagnostic", "econometrics",
+                    model_input_ids,
+                )
+                diagnostic_artifacts[model_id] = diag
         for model_id, fitted in fitted_models.items():
             result_dict = dict(model_results)
             result = result_dict.get(model_id, {})

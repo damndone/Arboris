@@ -32,7 +32,11 @@ export function describeInference(result: unknown): string | null {
   const clusters = count(evidence.cluster_count);
   if (covariance === "clustered" && clusters !== null) parts.push(`Clusters: ${clusters}`);
   const df = count(evidence.effective_df);
-  if (evidence.inference_distribution === "t") {
+  const pooledFrom = count(record(model?.multiple_imputation)?.m);
+  if (evidence.df_method === "barnard_rubin") {
+    parts.push("Inference: t, Barnard–Rubin df per coefficient");
+    if (pooledFrom !== null) parts.push(`Pooled from m = ${pooledFrom} imputations (Rubin's rules)`);
+  } else if (evidence.inference_distribution === "t") {
     parts.push(df !== null ? `Inference: t(${Math.round(df)})` : "Inference: t");
   } else if (evidence.inference_version === undefined && (covariance === "robust" || covariance === "clustered")) {
     parts.push("Inference: z (legacy asymptotic; rerun for finite-sample t)");

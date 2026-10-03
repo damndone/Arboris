@@ -68,6 +68,11 @@ function shortRunId(id: string): string {
 
 const fmt = formatEstimate;
 
+function pooledDf(coefficient: object): string {
+  const df = (coefficient as { df?: number | null }).df;
+  return typeof df === "number" ? df.toFixed(1) : "∞";
+}
+
 function confidenceIntervalText(coefficient: {
   ci_lower?: number | null;
   ci_upper?: number | null;
@@ -494,6 +499,8 @@ function CoefficientTable({
   const rows = repeatedMeasures.kind === "complete"
     ? [[repeatedMeasures.primaryCoefficient.result_id, repeatedMeasures.primaryCoefficient] as const]
     : Object.entries(model.coefficients ?? {});
+  // Pooled multiple-imputation results carry a df and FMI per coefficient.
+  const pooled = rows.some(([, c]) => typeof (c as { fmi?: unknown }).fmi === "number");
   const diagnostics = repeatedMeasures.kind === "complete"
     ? repeatedMeasures.diagnostics.map((diagnostic) => diagnostic.code)
     : [];
@@ -532,6 +539,8 @@ function CoefficientTable({
             <th style={{ padding: "2px 8px" }}>std. error</th>
             <th style={{ padding: "2px 8px" }}>p-value</th>
             <th style={{ padding: "2px 8px" }}>95% CI</th>
+            {pooled ? <th style={{ padding: "2px 8px" }} title="Barnard-Rubin degrees of freedom">df</th> : null}
+            {pooled ? <th style={{ padding: "2px 8px" }} title="Fraction of missing information">FMI</th> : null}
           </tr>
         </thead>
         <tbody>
@@ -548,6 +557,8 @@ function CoefficientTable({
                 {("p_value_display" in c ? c.p_value_display : undefined) ?? formatPValue(c.p_value)}
               </td>
               <td style={{ padding: "2px 8px", whiteSpace: "nowrap" }}>{confidenceIntervalText(c)}</td>
+              {pooled ? <td style={{ padding: "2px 8px" }}>{pooledDf(c)}</td> : null}
+              {pooled ? <td style={{ padding: "2px 8px" }}>{fmt((c as { fmi?: number | null }).fmi)}</td> : null}
             </tr>
           ))}
         </tbody>

@@ -809,13 +809,13 @@ def _run_workflow(
     return {"run_id": run_id, "status": ctx.terminal_status}
 
 
+from ..report_view_model import _mice_imputation_fact
 from ._report_build import (
     _build_descriptive_stats,
     _build_variable_importance,
     _coefficient_rows,
     _coefficient_rows_for_models,
     _importance_sort_key,
-    _mice_imputation_fact,
     _model_summary,
     _variable_summary,
     _write_inference_kernel,

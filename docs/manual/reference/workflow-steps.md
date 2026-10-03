@@ -420,6 +420,7 @@ Estimate one or more models from the source table.
 | `categorical` |  | Per branch: list of column names to expand into dummy indicators. One level is dropped as the reference category to avoid perfect collinearity with the intercept; the lowest sorted level is the reference. A column listed here must NOT also appear in `predictors`. |
 | `polynomials` |  | Per branch: list of {column, degree}. degree 2 adds the square, 3 adds square and cube, and so on; generated columns are named {column}_pow2, {column}_pow3. The linear term is not added implicitly — list the column in `predictors` as well when the model should contain it. |
 | `context_columns` |  | Extra columns to carry into the model context. |
+| `multiple_imputations` |  | Optional m (2-100) for multiple imputation: missing values in the outcome and predictors are imputed m times by chained equations (MICE), the model is fitted to each completed dataset, and the estimates are pooled by Rubin's rules with Barnard-Rubin degrees of freedom. Offered for: ols with covariance unadjusted, robust or clustered; logit (its model-based covariance). Refused with a sampling design. Pooled results report no R-squared or residual diagnostics, and joint tests on them are not available yet. |
 
 ## `model.joint_f_test`
 

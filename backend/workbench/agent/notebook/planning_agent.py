@@ -39,6 +39,7 @@ from .workflow_artifacts import (
     workflow_result_artifact_id,
 )
 from ..workflow_contracts import (
+    GENESIS_RUN_LEVEL_FIELDS,
     MODEL_FAMILY_SPEC_FIELDS,
     OperationValidationError as WorkflowOperationValidationError,
     family_context_columns,
@@ -2254,7 +2255,7 @@ class NotebookPlanningAgent:
                             }
                         ],
                     }
-                    for field_name in MODEL_FAMILY_SPEC_FIELDS:
+                    for field_name in (*MODEL_FAMILY_SPEC_FIELDS, *GENESIS_RUN_LEVEL_FIELDS):
                         if field_name in model_params:
                             family_spec[field_name] = model_params[field_name]
                     if "covariance" in model_params:
