@@ -59,7 +59,9 @@
       "cleaned_dataset"
     ]
   },
-  "error_codes": [],
+  "error_codes": [
+    "CHECK_IV_EXCLUSION_RESTRICTION"
+  ],
   "models": {
     "iv_2sls_1": {
       "coef_keys": [
