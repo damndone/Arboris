@@ -55,7 +55,6 @@
     "time_trend": []
   },
   "error_codes": [
-    "PANEL_POOLED_MODEL",
     "VARIABLE_DROPPED"
   ],
   "models": {

@@ -49,3 +49,11 @@ export function describeSuppressedInference(result: unknown): string | null {
   const reason = suppressed?.reason;
   return typeof reason === "string" && reason ? `Inference not shown: ${reason}` : null;
 }
+
+/** " units (120 rows)" when n counts units rather than rows, else "". */
+export function nobsBasis(result: unknown): string {
+  const model = record(result);
+  if (model?.nobs_basis !== "units") return "";
+  const rows = count(model.n_rows);
+  return rows !== null ? ` units (${rows} rows)` : " units";
+}

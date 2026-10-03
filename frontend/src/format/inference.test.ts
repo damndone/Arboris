@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { describeInference, describeSuppressedInference } from "./inference";
+import { describeInference, describeSuppressedInference, nobsBasis } from "./inference";
 
 describe("describeInference", () => {
   it("names clusters and t(G - 1) for clustered OLS", () => {
@@ -34,5 +34,12 @@ describe("describeSuppressedInference", () => {
     expect(describeSuppressedInference({ inference_suppressed: { check_id: "fit.perfect", reason: "The model fits the data exactly." } }))
       .toBe("Inference not shown: The model fits the data exactly.");
     expect(describeSuppressedInference({})).toBeNull();
+  });
+});
+
+describe("nobsBasis", () => {
+  it("says when n counts units", () => {
+    expect(nobsBasis({ nobs: 12, nobs_basis: "units", n_rows: 120 })).toBe(" units (120 rows)");
+    expect(nobsBasis({ nobs: 300 })).toBe("");
   });
 });

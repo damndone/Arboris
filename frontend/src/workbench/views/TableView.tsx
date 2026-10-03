@@ -57,7 +57,7 @@ import { StatisticalExplorationTable } from "./StatisticalExplorationTable";
 import { resolveTableRunScope } from "./tableRunScope";
 import { PredictionResearchEvidenceCard } from "../../runResult/PredictionResearchEvidenceCard";
 import { formatEstimate, formatPValue } from "../../format/numbers";
-import { describeInference, describeSuppressedInference } from "../../format/inference";
+import { describeInference, describeSuppressedInference, nobsBasis } from "../../format/inference";
 
 /** Run ids look like 20260703_065622_030010_92222fe1 — the last hex segment is
  *  the unique tail, matching the run-rail's short label so the two line up. */
@@ -504,7 +504,7 @@ function CoefficientTable({
         {model.model_type ? ` · ${model.model_type}` : ""}
       </div>
       <div style={{ fontSize: 11, color: "var(--label-tertiary)", marginBottom: 6 }}>
-        {model.nobs !== undefined ? `n=${model.nobs}` : null}
+        {model.nobs !== undefined ? `n=${model.nobs}${nobsBasis(model)}` : null}
         {model.r_squared != null ? ` · R²=${fmt(model.r_squared)}` : null}
         {model.r_squared_adj != null ? ` · adj. R²=${fmt(model.r_squared_adj)}` : null}
       </div>

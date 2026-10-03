@@ -3978,7 +3978,7 @@ def _bounded_result_summary(
         "model_family_evidence": model_family_evidence,
         # v1.8.10 check library: what the assumption checks found, with status.
         "checks": _bounded_checks(run_root, model_results),
-        "persisted_models": _bounded_persisted_model_facts(model_results),
+        "persisted_models": _bounded_persisted_model_facts(model_results, run_root),
         "regression_table": regression_table,
         "statistical_evidence": statistical_evidence,
     }
@@ -4041,6 +4041,7 @@ def _bounded_family_diagnostic(value: Any) -> dict[str, Any]:
 
 def _bounded_persisted_model_facts(
     model_results: list[dict[str, Any]],
+    run_root: Path | None = None,
 ) -> list[dict[str, Any]]:
     """Project the public facts needed to answer a selected model question.
 
@@ -4073,14 +4074,33 @@ def _bounded_persisted_model_facts(
         projected.append(
             {
                 "model_id": model_id,
+                # What n counts: rows, or units for estimators that aggregate
+                # over units (v1.8.10: CS reported 12 units beside 120 rows).
+                "nobs": result.get("nobs") if isinstance(result.get("nobs"), int) else None,
+                "nobs_basis": result.get("nobs_basis") or "rows",
                 "r_squared": _public_stat_number(result.get("r_squared")),
                 "r_squared_adj": _public_stat_number(result.get("r_squared_adj")),
                 "inference": _bounded_inference(result),
+                # The estimator that ran, from the kernel; a requested default
+                # the family does not use is never shown as if it had run.
+                "covariance_executed": _executed_covariance(run_root, model_id),
                 "inference_suppressed": result.get("inference_suppressed"),
                 "coefficients": rows,
             }
         )
     return projected
+
+
+def _executed_covariance(run_root: Path | None, model_id: Any) -> str | None:
+    if run_root is None or not isinstance(model_id, str):
+        return None
+    from ..contracts.model.inference_kernel import kernel_relative_path
+
+    path = run_root / kernel_relative_path(model_id)
+    try:
+        return read_json(path).get("covariance_estimator") if path.is_file() else None
+    except (OSError, ValueError):
+        return None
 
 
 def _bounded_checks(run_root: Path, model_results: list[dict[str, Any]]) -> list[dict[str, Any]] | None:

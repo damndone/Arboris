@@ -774,11 +774,15 @@ def _submit_run(
     if model_options_binding is not None:
         executable_payload["model_options_binding"] = model_options_binding
         confirmed_payload["model_options_binding"] = model_options_binding
+    from ..orchestrator import _family_takes_covariance
+
     contract_summary = {
         "contract_version": "ols_result_contract_v1" if model_type == "ols" else None,
         "model": "ols" if model_type == "ols" else model_type,
         "model_type": model_type,
-        "covariance": wire_covariance,
+        # v1.8.10: recorded only for families that take the option.
+        "covariance": wire_covariance if _family_takes_covariance(model_type) else None,
+        "covariance_applies": _family_takes_covariance(model_type),
         "covariance_explicit": bool(requested_covariance),
         "entity_col": form_for_persist.get("entity_col", ""),
         "y": form_for_persist.get("y", ""),

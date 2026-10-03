@@ -294,7 +294,7 @@ def _fit_cs_did(ctx, env):
     ctx.artifacts["_cs_did_result"] = result          # Task 12 (diagnostics) reads this
     simple = result["aggregations"]["simple"]
     primary = {
-        "schema_version": 1, "model_id": "cs_did_1", "model_type": "cs_did",
+        "schema_version": 1, "model_id": "cs_did_1", "model_type": "cs_did", "nobs_basis": "units", "n_rows": int(len(norm.frame)),
         "engine": "workbench", "nobs": int(result["metadata"]["n_units"]),
         "r_squared": None,
         "coefficients": {"ATT": {
@@ -349,7 +349,7 @@ def _fit_sa_did(ctx, env):
     )
     ctx.artifacts["_sa_did_result"] = result
     simple = result["aggregations"]["simple"]
-    primary = {"schema_version": 1, "model_id": "sa_did_1", "model_type": "sa_did",
+    primary = {"schema_version": 1, "model_id": "sa_did_1", "model_type": "sa_did", "nobs_basis": "units", "n_rows": int(len(norm.frame)),
         "engine": "workbench", "nobs": int(result["metadata"]["n_units"]), "r_squared": None,
         "coefficients": {"ATT": {"estimate": simple["overall"], "std_error": simple["overall_se"],
             "p_value": None, **_aggregate_interval(simple),
@@ -380,7 +380,7 @@ def _fit_dcdh(ctx, env):
     )
     ctx.artifacts["_dcdh_result"] = result
     oa = result["overall_att"]
-    primary = {"schema_version": 1, "model_id": "dcdh_1", "model_type": "dcdh",
+    primary = {"schema_version": 1, "model_id": "dcdh_1", "model_type": "dcdh", "nobs_basis": "units", "n_rows": int(len(norm.frame)),
         "engine": "workbench", "nobs": int(result["metadata"]["n_units"]), "r_squared": None,
         "coefficients": {"ATT": {"estimate": oa["estimate"], "std_error": oa["se"],
             "p_value": None, "source_id": "model_results.dcdh_1.coefficients.ATT"}},

@@ -75,7 +75,7 @@ class ReliabilityStage:
             run_root,
             encoded_categorical_vars=categorical_vars,
         )
-        if routing["kind"] == "panel" and primary_type not in ("fixed_effects", "panel_ols"):
+        if routing["kind"] == "panel" and _pools_a_panel(run_root, model_results, primary_type):
             issue_dicts.append(GuardrailIssue(
                 Severity.INFO,
                 "PANEL_POOLED_MODEL",
@@ -93,3 +93,26 @@ class ReliabilityStage:
         ctx.artifacts["_suspicious_vars"] = suspicious_vars
         ctx.artifacts["_effective_exposure_col"] = effective_exposure_col
         return ctx
+
+
+def _pools_a_panel(run_root, model_results, primary_type: str) -> bool:
+    """Whether the primary model ignores the panel structure.
+
+    A family that declares the panel trait (panel OLS, DID estimators) models
+    it; a fit with a clustered covariance accounts for within-unit correlation.
+    Only a pooled fit with neither is worth the note (v1.8.10: it used to fire
+    on any family but fixed effects, including Callaway-Sant'Anna).
+    """
+    from ...artifacts import read_json
+    from ...contracts.model.inference_kernel import kernel_relative_path
+    from ...contracts.model.result_envelope_registry import declaration_for
+
+    declaration = declaration_for(primary_type)
+    if declaration is not None and "design.panel" in declaration.traits:
+        return False
+    model_id = model_results[0][0] if model_results else None
+    kernel_path = run_root / kernel_relative_path(str(model_id)) if model_id else None
+    if kernel_path is not None and kernel_path.is_file():
+        if read_json(kernel_path).get("covariance_estimator") == "cluster":
+            return False
+    return True

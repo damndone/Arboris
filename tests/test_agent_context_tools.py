@@ -1889,9 +1889,12 @@ def test_selected_model_result_summary_keeps_public_fit_and_interval_facts(
     assert output["result_summary"]["persisted_models"] == [
         {
             "model_id": "ols_1",
+            "nobs": 100,
+            "nobs_basis": "rows",
             "r_squared": 0.42,
             "r_squared_adj": 0.41,
             "inference": None,  # no inference evidence recorded in this packet
+            "covariance_executed": None,  # no kernel in this fixture
             "inference_suppressed": None,
             "coefficients": [{"term": "share", "estimate": 1.2, "std_error": None, "p_value": None, "ci_lower": 0.61, "ci_upper": 1.79}],
         }

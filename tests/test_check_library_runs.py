@@ -128,3 +128,50 @@ def test_a_moderately_strong_instrument_gets_a_caution_and_the_anderson_rubin_se
     assert [region["lower"], region["upper"]] == pytest.approx(oracle["robust"], abs=1e-7)
     assert "Anderson-Rubin" in strength["summary"]
     assert checks["iv.exclusion_restriction"]["status"] == "needs_reason"
+
+
+PANEL = ROOT / "examples" / "datasets" / "cs_did_staggered.csv"
+
+
+def _issue_codes(run_root: Path) -> set[str]:
+    return {issue["code"] for issue in read_json(run_root / "errors.json")["issues"]}
+
+
+def test_a_panel_estimator_is_not_called_pooled(tmp_path) -> None:
+    """Found in the step-1 acceptance: CS DID was told it ignored the panel."""
+    outcome, run_root = _run(
+        tmp_path, "cs", PANEL, model_type="cs_did", y="outcome", x=["policy_intensity"], entity_col="state",
+        time_col="year", did_mode="cohort", did_cohort_col="first_treated_year", cs_control_group="never",
+        cs_est_method="dr",
+    )
+    assert outcome["status"] == "completed"
+    assert "PANEL_POOLED_MODEL" not in _issue_codes(run_root)
+
+
+def test_pooled_ols_with_clustered_errors_is_not_called_unclustered(tmp_path) -> None:
+    _, run_root = _run(
+        tmp_path, "olsc", PANEL, model_type="ols", y="outcome", x=["policy_intensity"], entity_col="state",
+        time_col="year", covariance="clustered",
+    )
+    assert "PANEL_POOLED_MODEL" not in _issue_codes(run_root)
+
+
+def test_pooled_ols_on_a_panel_without_clustering_is_still_told(tmp_path) -> None:
+    _, run_root = _run(
+        tmp_path, "ols", PANEL, model_type="ols", y="outcome", x=["policy_intensity"], entity_col="state",
+        time_col="year", covariance="robust",
+    )
+    assert "PANEL_POOLED_MODEL" in _issue_codes(run_root)
+
+
+def test_a_family_without_a_covariance_option_records_none_and_reports_what_ran(tmp_path) -> None:
+    """Found in the step-2 acceptance: a logit run recorded the OLS default
+    'robust' and the Agent warned twice that its inference did not match."""
+    from workbench.agent.context_tools import _bounded_persisted_model_facts
+
+    _, run_root = _run(tmp_path, "logit", SEPARATION, model_type="logit", y="overlap", x=["x1", "x2"])
+    summary = read_json(run_root / "run_inputs.json")["contract_summary"]
+    assert summary["covariance"] is None and summary["covariance_applies"] is False
+    packet = read_json(run_root / "model_results" / "logit_1.json")
+    [facts] = _bounded_persisted_model_facts([packet], run_root)
+    assert facts["covariance_executed"] == "nonrobust"

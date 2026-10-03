@@ -171,6 +171,18 @@ _Y_TYPE_TO_ATTEMPTED_MODEL: dict[str, str] = {
 }
 
 
+def _family_takes_covariance(model_type: str) -> bool:
+    """Whether the requested covariance option applies to this family.
+
+    Unknown here (auto routing picks the family later) counts as applying, so
+    the request is recorded; the executed estimator is in the kernel.
+    """
+    from ..agent.workflow_contracts import MODEL_FAMILY_CONTRACTS
+
+    contract = MODEL_FAMILY_CONTRACTS.get(model_type)
+    return True if contract is None else bool(contract.allows_covariance)
+
+
 def run_workflow(
     project_root: Path,
     input_files: list[Path],
@@ -357,7 +369,10 @@ def run_workflow(
             "contract_version": "ols_result_contract_v1" if model_type == "ols" else None,
             "model": "ols" if model_type == "ols" else model_type,
             "model_type": model_type,
-            "covariance": wire_covariance,
+            # v1.8.10: a family that does not take a covariance option does not
+            # get the OLS default recorded as if it had used it.
+            "covariance": wire_covariance if _family_takes_covariance(model_type) else None,
+            "covariance_applies": _family_takes_covariance(model_type),
             "covariance_explicit": bool(requested_covariance),
             "entity_col": entity_col,
             "y": y,
