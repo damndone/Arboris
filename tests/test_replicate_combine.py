@@ -1,0 +1,1160 @@
+from __future__ import annotations
+
+import json
+import hashlib
+import math
+from dataclasses import FrozenInstanceError, replace
+from typing import Any
+
+import pytest
+
+from workbench.contracts.model.replicate_combine import (
+    COMBINER_IDS,
+    MAX_EVIDENCE_SCALARS,
+    MAX_FAILURES,
+    MAX_REQUESTED_REPLICATES,
+    REPLICATE_COMBINE_CONTRACT,
+    REPLICATE_COMBINE_CONTRACT_VERSION,
+    REPLICATE_KINDS,
+    ReplicateContractError,
+    ReplicatePlan,
+)
+from workbench.engine.replicate_combine import (
+    ReplicateAdapter,
+    ReplicateBatch,
+    ReplicateCombiner,
+    ReplicateCombinedResult,
+    ReplicateCombineError,
+    ReplicateEvidence,
+    ReplicateExecutionError,
+    ReplicateRegistry,
+    ReplicateStrategy,
+    dispatch_combiner,
+    execute,
+    execute_and_combine,
+)
+
+
+_STRATEGY_ID = "test.deterministic_scalar.v1"
+_ADAPTER_ID = "test.scalar_evidence.v1"
+_RAW_SENTINEL = 918273645.125
+_ALLOWED_PROVENANCE_FIELDS = {
+    "strategy_id",
+    "adapter_id",
+    "base_seed",
+    "derived_seeds",
+    "replicate_order",
+    "evidence_scalar_count",
+    "evidence_commitment",
+    "provenance_commitment",
+}
+
+
+class _DeterministicStrategy(ReplicateStrategy):
+    strategy_id = _STRATEGY_ID
+
+    def __init__(self) -> None:
+        self.received_seeds: list[int] = []
+
+    def generate(
+        self,
+        *,
+        plan: ReplicatePlan,
+        replicate_index: int,
+        seed: int,
+    ) -> ReplicateEvidence:
+        self.received_seeds.append(seed)
+        # The runner may hash these bounded scalar values, but must not publish
+        # the per-replicate evidence as rows/values in its provenance envelope.
+        return ReplicateEvidence(
+            scalars={
+                "score": _RAW_SENTINEL + float(seed % 97),
+                "replicate_index": float(replicate_index),
+            }
+        )
+
+
+class _ScalarAdapter(ReplicateAdapter):
+    adapter_id = _ADAPTER_ID
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, int]] = []
+        self.output_scalar_counts: list[int] = []
+
+    def adapt(
+        self,
+        evidence: ReplicateEvidence,
+        *,
+        plan: ReplicatePlan,
+        replicate_index: int,
+    ) -> ReplicateEvidence:
+        self.calls.append((plan.kind, replicate_index))
+        assert plan.kind in REPLICATE_KINDS
+        assert replicate_index >= 0
+        assert set(evidence.scalars) == {"score", "replicate_index"}
+        assert all(
+            type(value) is float and math.isfinite(value)
+            for value in evidence.scalars.values()
+        )
+        transformed = ReplicateEvidence(
+            scalars={"adapter_score": evidence.scalars["score"]}
+        )
+        self.output_scalar_counts.append(len(transformed.scalars))
+        return transformed
+
+
+class _OffsetScalarAdapter(_ScalarAdapter):
+    def __init__(self, offset: float) -> None:
+        super().__init__()
+        self.offset = offset
+
+    def adapt(
+        self,
+        evidence: ReplicateEvidence,
+        *,
+        plan: ReplicatePlan,
+        replicate_index: int,
+    ) -> ReplicateEvidence:
+        transformed = super().adapt(
+            evidence,
+            plan=plan,
+            replicate_index=replicate_index,
+        )
+        return ReplicateEvidence(
+            scalars={
+                "adapter_score": transformed.scalars["adapter_score"] + self.offset
+            }
+        )
+
+
+class _ExplodingAdapter(_ScalarAdapter):
+    def adapt(
+        self,
+        evidence: ReplicateEvidence,
+        *,
+        plan: ReplicatePlan,
+        replicate_index: int,
+    ) -> ReplicateEvidence:
+        self.calls.append((plan.kind, replicate_index))
+        raise RuntimeError("private adapter detail must not escape the batch")
+
+
+class _TwoScalarAdapter(_ScalarAdapter):
+    def adapt(
+        self,
+        evidence: ReplicateEvidence,
+        *,
+        plan: ReplicatePlan,
+        replicate_index: int,
+    ) -> ReplicateEvidence:
+        self.calls.append((plan.kind, replicate_index))
+        return ReplicateEvidence(
+            scalars={
+                "adapter_score": float(evidence.scalars["score"]),
+                "adapter_index": float(replicate_index),
+            }
+        )
+
+
+class _MeanCombiner(ReplicateCombiner):
+    combiner_id = "distribution_ci"
+
+    def combine(
+        self,
+        evidence: tuple[ReplicateEvidence, ...],
+        *,
+        plan: ReplicatePlan,
+        batch: ReplicateBatch,
+    ) -> dict[str, float | int]:
+        assert plan.kind == "bootstrap"
+        assert batch.succeeded_count == len(evidence)
+        values = [float(item.scalars["adapter_score"]) for item in evidence]
+        return {
+            "replicate_count": len(values),
+            "mean": sum(values) / len(values),
+        }
+
+
+class _FailingStrategy(_DeterministicStrategy):
+    def __init__(self, fail_indices: frozenset[int] = frozenset()) -> None:
+        super().__init__()
+        self.fail_indices = fail_indices
+
+    def generate(
+        self,
+        *,
+        plan: ReplicatePlan,
+        replicate_index: int,
+        seed: int,
+    ) -> ReplicateEvidence:
+        if replicate_index in self.fail_indices:
+            self.received_seeds.append(seed)
+            raise ReplicateExecutionError(
+                reason_code="REPLICATE_STRATEGY_FAILED",
+                message="fixture strategy rejected this replicate",
+            )
+        return super().generate(
+            plan=plan,
+            replicate_index=replicate_index,
+            seed=seed,
+        )
+
+
+class _OrdinaryExceptionStrategy(_DeterministicStrategy):
+    def generate(
+        self,
+        *,
+        plan: ReplicatePlan,
+        replicate_index: int,
+        seed: int,
+    ) -> ReplicateEvidence:
+        self.received_seeds.append(seed)
+        raise RuntimeError("private strategy detail must not escape the batch")
+
+
+class _VectorEvidenceStrategy(_DeterministicStrategy):
+    def generate(
+        self,
+        *,
+        plan: ReplicatePlan,
+        replicate_index: int,
+        seed: int,
+    ) -> ReplicateEvidence:
+        # Deliberately violate the scalar-only evidence boundary.
+        return ReplicateEvidence(  # type: ignore[arg-type]
+            scalars={"raw_vector": [_RAW_SENTINEL, float(replicate_index)]}
+        )
+
+
+def _plan(**overrides: Any) -> ReplicatePlan:
+    values: dict[str, Any] = {
+        "kind": "multiple_imputation",
+        "requested_replicates": 4,
+        "seed": 123,
+        "strategy_id": _STRATEGY_ID,
+        "adapter_id": _ADAPTER_ID,
+        "combiner_id": "rubin_pool",
+        "max_failures": 1,
+        "max_evidence_scalars": 4,
+    }
+    values.update(overrides)
+    return ReplicatePlan(**values)
+
+
+def _registry(
+    strategy: ReplicateStrategy | None = None,
+    adapter: ReplicateAdapter | None = None,
+) -> tuple[ReplicateRegistry, _ScalarAdapter]:
+    registry = ReplicateRegistry()
+    resolved_adapter = adapter or _ScalarAdapter()
+    registry.register_strategy(strategy or _DeterministicStrategy())
+    registry.register_adapter(resolved_adapter)
+    return registry, resolved_adapter
+
+
+def _assert_reason(error: BaseException, reason_code: str) -> None:
+    assert isinstance(error, (ReplicateContractError, ReplicateCombineError))
+    assert getattr(error, "reason_code", None) == reason_code
+
+
+def _assert_recursive_json(value: Any) -> None:
+    if value is None or type(value) in (str, int, bool):
+        return
+    if type(value) is float:
+        assert math.isfinite(value)
+        return
+    if isinstance(value, list):
+        for item in value:
+            _assert_recursive_json(item)
+        return
+    if isinstance(value, dict):
+        assert all(type(key) is str for key in value)
+        for item in value.values():
+            _assert_recursive_json(item)
+        return
+    raise AssertionError(f"not JSON-safe: {type(value)!r}")
+
+
+def _assert_no_raw_replicate_values(payload: dict[str, Any]) -> None:
+    forbidden_keys = {
+        "rows",
+        "values",
+        "replicate_rows",
+        "replicate_values",
+        "raw_rows",
+        "raw_values",
+    }
+
+    def visit(value: Any) -> None:
+        if isinstance(value, dict):
+            assert not forbidden_keys.intersection(value)
+            for key, child in value.items():
+                assert key not in forbidden_keys
+                visit(child)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child)
+        else:
+            assert value != _RAW_SENTINEL
+
+    provenance = payload["provenance"]
+    _assert_recursive_json(provenance)
+    visit(provenance)
+
+
+def test_structured_raw_guard_allows_safe_metadata_names_containing_raw() -> None:
+    _assert_no_raw_replicate_values(
+        {"provenance": {"raw_digest": "0" * 64}}
+    )
+
+
+def test_typed_combiner_receives_internal_evidence_and_publishes_only_aggregate() -> None:
+    registry, _adapter = _registry()
+    registry.register_combiner(_MeanCombiner())
+    plan = _plan(
+        kind="bootstrap",
+        combiner_id="distribution_ci",
+        requested_replicates=4,
+    )
+
+    combined = execute_and_combine(plan, registry=registry)
+
+    assert isinstance(combined, ReplicateCombinedResult)
+    assert combined.batch.status == "completed"
+    assert combined.result["replicate_count"] == 4
+    assert "replicate_values" not in json.dumps(combined.to_dict())
+    assert "raw_data" not in json.dumps(combined.to_dict())
+    assert ReplicateCombinedResult(
+        batch=combined.batch,
+        result=combined.result,
+    ).to_dict() == combined.to_dict()
+
+
+def test_typed_combiner_must_be_registered_before_execution() -> None:
+    registry, _adapter = _registry()
+    plan = _plan(kind="bootstrap", combiner_id="distribution_ci")
+
+    with pytest.raises(ReplicateCombineError) as caught:
+        execute_and_combine(plan, registry=registry)
+
+    _assert_reason(caught.value, "REPLICATE_COMBINER_NOT_REGISTERED")
+
+
+def test_typed_combiner_rejects_raw_replicate_fields() -> None:
+    class _UnsafeCombiner(_MeanCombiner):
+        def combine(self, evidence, *, plan, batch):
+            return {"replicate_values": [1.0, 2.0]}
+
+    registry, _adapter = _registry()
+    registry.register_combiner(_UnsafeCombiner())
+    plan = _plan(kind="bootstrap", combiner_id="distribution_ci")
+
+    with pytest.raises(ReplicateCombineError) as caught:
+        execute_and_combine(plan, registry=registry)
+
+    _assert_reason(caught.value, "REPLICATE_RAW_VALUES_FORBIDDEN")
+
+
+def _assert_batch_provenance_schema(
+    batch: ReplicateBatch,
+    *,
+    plan: ReplicatePlan,
+    expected_derived_seeds: list[int],
+    expected_order: list[int],
+    expected_scalar_count: int,
+) -> dict[str, Any]:
+    payload = batch.to_dict()
+    provenance = payload["provenance"]
+
+    assert set(provenance) == _ALLOWED_PROVENANCE_FIELDS
+    _assert_recursive_json(provenance)
+    assert provenance["strategy_id"] == plan.strategy_id
+    assert provenance["adapter_id"] == plan.adapter_id
+    assert provenance["base_seed"] == plan.seed
+    assert provenance["derived_seeds"] == expected_derived_seeds
+    assert provenance["replicate_order"] == expected_order
+    assert provenance["evidence_scalar_count"] == expected_scalar_count
+    assert provenance["evidence_scalar_count"] <= plan.max_evidence_scalars
+    commitment = provenance["evidence_commitment"]
+    assert type(commitment) is str
+    assert len(commitment) == 64
+    assert all(character in "0123456789abcdef" for character in commitment)
+    provenance_commitment = provenance["provenance_commitment"]
+    assert type(provenance_commitment) is str
+    assert len(provenance_commitment) == 64
+    assert all(character in "0123456789abcdef" for character in provenance_commitment)
+    assert type(provenance["strategy_id"]) is str
+    assert type(provenance["adapter_id"]) is str
+    assert type(provenance["base_seed"]) is int
+    assert type(provenance["evidence_scalar_count"]) is int
+    for list_name in ("derived_seeds", "replicate_order"):
+        assert type(provenance[list_name]) is list
+        assert all(type(item) is int for item in provenance[list_name])
+    _assert_no_raw_replicate_values(payload)
+    assert ReplicateBatch.from_dict(payload).to_dict() == payload
+
+    if batch.status == "failed":
+        assert payload["digest"] is None
+    else:
+        assert isinstance(payload["digest"], str)
+        assert len(payload["digest"]) == 64
+    return payload
+
+
+def test_replicate_plan_is_versioned_immutable_and_json_safe() -> None:
+    plan = _plan()
+
+    assert REPLICATE_COMBINE_CONTRACT == "replicate_combine.plan"
+    assert REPLICATE_COMBINE_CONTRACT_VERSION == "1.0"
+    assert plan.to_dict() == {
+        "contract": REPLICATE_COMBINE_CONTRACT,
+        "contract_version": REPLICATE_COMBINE_CONTRACT_VERSION,
+        "kind": "multiple_imputation",
+        "requested_replicates": 4,
+        "seed": 123,
+        "strategy_id": _STRATEGY_ID,
+        "adapter_id": _ADAPTER_ID,
+        "combiner_id": "rubin_pool",
+        "max_failures": 1,
+        "max_evidence_scalars": 4,
+    }
+
+    serialized = json.loads(json.dumps(plan.to_dict(), allow_nan=False))
+    assert ReplicatePlan.from_dict(serialized) == plan
+
+    with pytest.raises(FrozenInstanceError):
+        plan.seed = 999  # type: ignore[misc]
+
+
+@pytest.mark.parametrize(
+    "kind",
+    ["multiple_imputation", "bootstrap", "permutation", "survey_replicate"],
+)
+def test_replicate_plan_accepts_only_the_declared_replicate_kinds(kind: str) -> None:
+    assert REPLICATE_KINDS == frozenset(
+        {"multiple_imputation", "bootstrap", "permutation", "survey_replicate"}
+    )
+    assert _plan(kind=kind).kind == kind
+
+
+@pytest.mark.parametrize("kind", ["jackknife", "", None, 1, True])
+def test_replicate_plan_rejects_unknown_or_non_string_kind(kind: Any) -> None:
+    with pytest.raises(ReplicateContractError) as caught:
+        _plan(kind=kind)
+    _assert_reason(caught.value, "REPLICATE_INVALID_KIND")
+
+
+@pytest.mark.parametrize("requested", [0, -1, 1.5, True, "4"])
+def test_replicate_plan_requires_a_positive_exact_integer_count(requested: Any) -> None:
+    with pytest.raises(ReplicateContractError) as caught:
+        _plan(requested_replicates=requested)
+    _assert_reason(caught.value, "REPLICATE_INVALID_REQUESTED_COUNT")
+
+
+def test_replicate_plan_rejects_a_count_above_the_hard_limit() -> None:
+    assert MAX_REQUESTED_REPLICATES > 0
+    with pytest.raises(ReplicateContractError) as caught:
+        _plan(requested_replicates=MAX_REQUESTED_REPLICATES + 1)
+    _assert_reason(caught.value, "REPLICATE_REQUESTED_COUNT_EXCEEDS_LIMIT")
+
+
+def test_replicate_plan_allows_zero_failure_and_evidence_budgets() -> None:
+    assert _plan(max_failures=0).max_failures == 0
+    assert _plan(max_evidence_scalars=0).max_evidence_scalars == 0
+
+
+@pytest.mark.parametrize(
+    ("field_name", "reason_code"),
+    [
+        ("max_failures", "REPLICATE_INVALID_FAILURE_BUDGET"),
+        ("max_evidence_scalars", "REPLICATE_INVALID_EVIDENCE_BUDGET"),
+    ],
+)
+@pytest.mark.parametrize("value", [-1, 1.5, True, "0", None])
+def test_replicate_plan_requires_exact_non_negative_budget_integers(
+    field_name: str, reason_code: str, value: Any
+) -> None:
+    with pytest.raises(ReplicateContractError) as caught:
+        _plan(**{field_name: value})
+    _assert_reason(caught.value, reason_code)
+
+
+@pytest.mark.parametrize(
+    ("field_name", "limit", "reason_code"),
+    [
+        (
+            "max_failures",
+            MAX_FAILURES,
+            "REPLICATE_FAILURE_BUDGET_EXCEEDS_LIMIT",
+        ),
+        (
+            "max_evidence_scalars",
+            MAX_EVIDENCE_SCALARS,
+            "REPLICATE_EVIDENCE_BUDGET_EXCEEDS_LIMIT",
+        ),
+    ],
+)
+def test_replicate_plan_rejects_budget_above_each_public_hard_limit(
+    field_name: str, limit: int, reason_code: str
+) -> None:
+    assert limit > 0
+    with pytest.raises(ReplicateContractError) as caught:
+        _plan(**{field_name: limit + 1})
+    _assert_reason(caught.value, reason_code)
+
+
+@pytest.mark.parametrize(
+    ("field_name", "reason_code"),
+    [
+        ("max_failures", "REPLICATE_INVALID_FAILURE_BUDGET"),
+        ("max_evidence_scalars", "REPLICATE_INVALID_EVIDENCE_BUDGET"),
+    ],
+)
+@pytest.mark.parametrize("value", [True, 1.5, "1", None, -1])
+def test_plan_from_dict_rejects_each_invalid_budget_value(
+    field_name: str, reason_code: str, value: Any
+) -> None:
+    payload = _plan().to_dict()
+    payload[field_name] = value
+
+    with pytest.raises(ReplicateContractError) as caught:
+        ReplicatePlan.from_dict(payload)
+    _assert_reason(caught.value, reason_code)
+
+
+@pytest.mark.parametrize("field_name", ["max_failures", "max_evidence_scalars"])
+def test_plan_from_dict_preserves_the_explicit_zero_budget_boundary(field_name: str) -> None:
+    payload = _plan(**{field_name: 0}).to_dict()
+
+    assert ReplicatePlan.from_dict(payload).to_dict() == payload
+
+
+@pytest.mark.parametrize(
+    ("field_name", "limit", "reason_code"),
+    [
+        (
+            "max_failures",
+            MAX_FAILURES,
+            "REPLICATE_FAILURE_BUDGET_EXCEEDS_LIMIT",
+        ),
+        (
+            "max_evidence_scalars",
+            MAX_EVIDENCE_SCALARS,
+            "REPLICATE_EVIDENCE_BUDGET_EXCEEDS_LIMIT",
+        ),
+    ],
+)
+def test_plan_from_dict_rejects_each_budget_above_its_public_limit(
+    field_name: str, limit: int, reason_code: str
+) -> None:
+    payload = _plan().to_dict()
+    payload[field_name] = limit + 1
+
+    with pytest.raises(ReplicateContractError) as caught:
+        ReplicatePlan.from_dict(payload)
+    _assert_reason(caught.value, reason_code)
+
+
+@pytest.mark.parametrize(
+    ("field_name", "limit"),
+    [("max_failures", MAX_FAILURES), ("max_evidence_scalars", MAX_EVIDENCE_SCALARS)],
+)
+def test_plan_from_dict_accepts_each_exact_public_budget_limit(
+    field_name: str, limit: int
+) -> None:
+    payload = _plan().to_dict()
+    payload[field_name] = limit
+
+    assert ReplicatePlan.from_dict(payload).to_dict() == payload
+
+
+@pytest.mark.parametrize("seed", [-1, 1.5, True, "123"])
+def test_replicate_plan_requires_an_explicit_non_negative_integer_seed(seed: Any) -> None:
+    with pytest.raises(ReplicateContractError) as caught:
+        _plan(seed=seed)
+    _assert_reason(caught.value, "REPLICATE_INVALID_SEED")
+
+
+@pytest.mark.parametrize("field_name", ["strategy_id", "adapter_id", "combiner_id"])
+@pytest.mark.parametrize("value", ["", " ", None, 1, True, "../python.path"])
+def test_replicate_plan_rejects_invalid_strategy_adapter_and_combiner_ids(
+    field_name: str, value: Any
+) -> None:
+    with pytest.raises(ReplicateContractError) as caught:
+        _plan(**{field_name: value})
+    _assert_reason(caught.value, "REPLICATE_INVALID_ID")
+
+
+def test_replicate_plan_rejects_an_undeclared_combiner_id() -> None:
+    assert COMBINER_IDS == frozenset(
+        {"rubin_pool", "distribution_ci", "permutation_null", "replicate_covariance"}
+    )
+    with pytest.raises(ReplicateContractError) as caught:
+        _plan(combiner_id="not_a_declared_combiner")
+    _assert_reason(caught.value, "REPLICATE_UNKNOWN_COMBINER")
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [
+        ("callback", lambda value: value),
+        ("callable", lambda value: value),
+        ("formula", "mean(x)"),
+        ("python", "__import__('os')"),
+        ("import_path", "os.system"),
+        ("shell", "rm -rf /"),
+        ("command", "python -c 'print(1)'"),
+        ("expression", "x + 1"),
+    ],
+)
+def test_serialized_plan_rejects_executable_fields(
+    field_name: str, value: Any
+) -> None:
+    payload = _plan().to_dict()
+    payload[field_name] = value
+
+    with pytest.raises(ReplicateContractError) as caught:
+        ReplicatePlan.from_dict(payload)
+    _assert_reason(caught.value, "REPLICATE_UNSAFE_EXECUTION_FIELD")
+
+
+@pytest.mark.parametrize("field_name", ["extra", "options", "user_metadata"])
+def test_serialized_plan_rejects_unknown_fields(field_name: str) -> None:
+    payload = _plan().to_dict()
+    payload[field_name] = True
+
+    with pytest.raises(ReplicateContractError) as caught:
+        ReplicatePlan.from_dict(payload)
+    _assert_reason(caught.value, "REPLICATE_UNKNOWN_FIELD")
+
+
+@pytest.mark.parametrize("field_name", ["replicate_rows", "replicate_values", "raw_data"])
+def test_serialized_plan_rejects_raw_replicate_payloads(field_name: str) -> None:
+    payload = _plan().to_dict()
+    payload[field_name] = [[_RAW_SENTINEL]]
+
+    with pytest.raises(ReplicateContractError) as caught:
+        ReplicatePlan.from_dict(payload)
+    _assert_reason(caught.value, "REPLICATE_RAW_VALUES_FORBIDDEN")
+
+
+def test_serialized_plan_rejects_wrong_contract_version() -> None:
+    payload = _plan().to_dict()
+    payload["contract_version"] = "0.1"
+
+    with pytest.raises(ReplicateContractError) as caught:
+        ReplicatePlan.from_dict(payload)
+    _assert_reason(caught.value, "REPLICATE_UNSUPPORTED_CONTRACT_VERSION")
+
+
+@pytest.mark.parametrize(
+    "combiner_id",
+    ["rubin_pool", "distribution_ci", "permutation_null", "replicate_covariance"],
+)
+def test_combiner_dispatch_resolves_only_declared_ids_without_doing_combiner_math(
+    combiner_id: str,
+) -> None:
+    descriptor = dispatch_combiner(combiner_id)
+
+    assert descriptor.combiner_id == combiner_id
+    assert descriptor.combiner_id in COMBINER_IDS
+
+
+def test_combiner_dispatch_rejects_unknown_ids_with_a_stable_reason_code() -> None:
+    with pytest.raises(ReplicateCombineError) as caught:
+        dispatch_combiner("rubin_pool;__import__('os')")
+    _assert_reason(caught.value, "REPLICATE_UNKNOWN_COMBINER")
+
+
+def test_registry_rejects_a_callback_instead_of_treating_it_as_a_strategy() -> None:
+    registry = ReplicateRegistry()
+
+    with pytest.raises(ReplicateCombineError) as caught:
+        registry.register_strategy(lambda **kwargs: kwargs)
+    _assert_reason(caught.value, "REPLICATE_STRATEGY_NOT_TYPED")
+
+    with pytest.raises(ReplicateCombineError) as caught:
+        registry.register_adapter(lambda value: value)
+    _assert_reason(caught.value, "REPLICATE_ADAPTER_NOT_TYPED")
+
+
+def test_execute_requires_registered_strategy_and_adapter_ids() -> None:
+    registry = ReplicateRegistry()
+
+    with pytest.raises(ReplicateCombineError) as caught:
+        execute(_plan(), registry=registry)
+    _assert_reason(caught.value, "REPLICATE_STRATEGY_NOT_REGISTERED")
+
+    registry.register_strategy(_DeterministicStrategy())
+    with pytest.raises(ReplicateCombineError) as caught:
+        execute(_plan(), registry=registry)
+    _assert_reason(caught.value, "REPLICATE_ADAPTER_NOT_REGISTERED")
+
+
+@pytest.mark.parametrize(
+    ("kind", "combiner_id"),
+    [
+        ("multiple_imputation", "rubin_pool"),
+        ("bootstrap", "distribution_ci"),
+        ("permutation", "permutation_null"),
+        ("survey_replicate", "replicate_covariance"),
+    ],
+)
+def test_execute_success_exposes_counts_and_bounded_scalar_provenance(
+    kind: str, combiner_id: str
+) -> None:
+    plan = _plan(kind=kind, combiner_id=combiner_id)
+    strategy = _DeterministicStrategy()
+    registry, adapter = _registry(strategy=strategy)
+    batch = execute(plan, registry=registry)
+
+    assert batch.status == "completed"
+    assert batch.reason_code == "REPLICATE_COMPLETED"
+    assert batch.kind == kind
+    assert batch.requested_count == 4
+    assert batch.succeeded_count == 4
+    assert batch.failed_count == 0
+    assert batch.failure_reasons == {}
+    assert adapter.calls == [(kind, index) for index in range(4)]
+    assert adapter.output_scalar_counts == [1] * plan.requested_replicates
+    provenance = batch.provenance
+    assert provenance["derived_seeds"] == strategy.received_seeds
+    assert len(provenance["derived_seeds"]) == plan.requested_replicates
+    assert len(set(provenance["derived_seeds"])) == plan.requested_replicates
+    assert provenance["evidence_scalar_count"] == sum(adapter.output_scalar_counts)
+    _assert_batch_provenance_schema(
+        batch,
+        plan=plan,
+        expected_derived_seeds=strategy.received_seeds,
+        expected_order=list(range(plan.requested_replicates)),
+        expected_scalar_count=sum(adapter.output_scalar_counts),
+    )
+
+
+def test_execute_is_deterministic_for_same_plan_and_typed_registry() -> None:
+    plan = _plan()
+
+    first_strategy = _DeterministicStrategy()
+    second_strategy = _DeterministicStrategy()
+    first_registry, first_adapter = _registry(strategy=first_strategy)
+    second_registry, second_adapter = _registry(strategy=second_strategy)
+    first = execute(plan, registry=first_registry)
+    second = execute(plan, registry=second_registry)
+
+    assert first.to_dict() == second.to_dict()
+    assert first.digest == second.digest
+    assert first.provenance == second.provenance
+    assert first_strategy.received_seeds == first.provenance["derived_seeds"]
+    assert second_strategy.received_seeds == second.provenance["derived_seeds"]
+    assert len(first_strategy.received_seeds) == plan.requested_replicates
+    assert len(set(first_strategy.received_seeds)) == plan.requested_replicates
+    assert first_adapter.calls == second_adapter.calls == [
+        (plan.kind, index) for index in range(plan.requested_replicates)
+    ]
+
+    changed_strategy = _DeterministicStrategy()
+    changed_registry, _ = _registry(strategy=changed_strategy)
+    changed_seed = execute(
+        replace(plan, seed=124),
+        registry=changed_registry,
+    )
+    assert changed_strategy.received_seeds != first_strategy.received_seeds
+    assert changed_seed.provenance["derived_seeds"] != first.provenance["derived_seeds"]
+    assert changed_seed.digest != first.digest
+
+
+def test_adapter_consumed_scalar_change_changes_digest_for_same_plan_and_strategy() -> None:
+    plan = _plan()
+    first_strategy = _DeterministicStrategy()
+    second_strategy = _DeterministicStrategy()
+    first_registry, first_adapter = _registry(
+        strategy=first_strategy,
+        adapter=_OffsetScalarAdapter(offset=0.0),
+    )
+    second_registry, second_adapter = _registry(
+        strategy=second_strategy,
+        adapter=_OffsetScalarAdapter(offset=1.0),
+    )
+
+    first = execute(plan, registry=first_registry)
+    second = execute(plan, registry=second_registry)
+
+    assert first.provenance["strategy_id"] == second.provenance["strategy_id"]
+    assert first_strategy.received_seeds == second_strategy.received_seeds
+    assert first_adapter.calls == second_adapter.calls == [
+        (plan.kind, index) for index in range(plan.requested_replicates)
+    ]
+    assert first_adapter.output_scalar_counts == second_adapter.output_scalar_counts == [
+        1
+    ] * plan.requested_replicates
+    assert first.provenance["evidence_scalar_count"] == plan.requested_replicates
+    assert second.provenance["evidence_scalar_count"] == plan.requested_replicates
+    assert (
+        first.provenance["evidence_commitment"]
+        != second.provenance["evidence_commitment"]
+    )
+    assert first.digest != second.digest
+    _assert_batch_provenance_schema(
+        first,
+        plan=plan,
+        expected_derived_seeds=first_strategy.received_seeds,
+        expected_order=list(range(plan.requested_replicates)),
+        expected_scalar_count=plan.requested_replicates,
+    )
+    _assert_batch_provenance_schema(
+        second,
+        plan=plan,
+        expected_derived_seeds=second_strategy.received_seeds,
+        expected_order=list(range(plan.requested_replicates)),
+        expected_scalar_count=plan.requested_replicates,
+    )
+
+
+def test_batch_serialization_is_versioned_roundtrippable_and_excludes_raw_values() -> None:
+    registry, _ = _registry()
+    batch = execute(_plan(), registry=registry)
+    payload = batch.to_dict()
+
+    assert set(payload) == {
+        "contract",
+        "contract_version",
+        "kind",
+        "requested_count",
+        "succeeded_count",
+        "failed_count",
+        "seed",
+        "status",
+        "reason_code",
+        "failure_reasons",
+        "provenance",
+        "digest",
+    }
+    assert payload["contract"] == "replicate_combine.batch"
+    assert payload["contract_version"] == REPLICATE_COMBINE_CONTRACT_VERSION
+    assert payload["kind"] == "multiple_imputation"
+    assert payload["requested_count"] == 4
+    assert payload["succeeded_count"] == 4
+    assert payload["failed_count"] == 0
+    assert payload["seed"] == 123
+    assert isinstance(payload["digest"], str)
+    assert len(payload["digest"]) == 64
+    assert all(character in "0123456789abcdef" for character in payload["digest"])
+
+    assert set(payload["provenance"]) == _ALLOWED_PROVENANCE_FIELDS
+    _assert_recursive_json(payload["provenance"])
+    _assert_no_raw_replicate_values(payload)
+    assert json.loads(json.dumps(payload, allow_nan=False)) == payload
+    assert ReplicateBatch.from_dict(payload).to_dict() == payload
+
+
+def test_batch_from_dict_rejects_wrong_version_unknown_field_and_tampered_digest() -> None:
+    registry, _ = _registry()
+    payload = execute(_plan(), registry=registry).to_dict()
+
+    wrong_version = dict(payload)
+    wrong_version["contract_version"] = "0.1"
+    with pytest.raises(ReplicateContractError) as caught:
+        ReplicateBatch.from_dict(wrong_version)
+    _assert_reason(caught.value, "REPLICATE_UNSUPPORTED_CONTRACT_VERSION")
+
+    unknown_field = dict(payload)
+    unknown_field["unexpected"] = True
+    with pytest.raises(ReplicateContractError) as caught:
+        ReplicateBatch.from_dict(unknown_field)
+    _assert_reason(caught.value, "REPLICATE_UNKNOWN_FIELD")
+
+    tampered_digest = dict(payload)
+    tampered_digest["digest"] = "0" * 64
+    with pytest.raises(ReplicateContractError) as caught:
+        ReplicateBatch.from_dict(tampered_digest)
+    _assert_reason(caught.value, "REPLICATE_DIGEST_MISMATCH")
+
+
+@pytest.mark.parametrize("state", ["partial", "failed"])
+def test_batch_from_dict_rejects_nested_provenance_unknown_fields_for_failure_states(
+    state: str,
+) -> None:
+    plan = _plan(max_failures=1)
+    fail_indices = frozenset({1}) if state == "partial" else frozenset({0, 1})
+    strategy = _FailingStrategy(fail_indices=fail_indices)
+    registry, _ = _registry(strategy=strategy)
+    batch = execute(plan, registry=registry)
+
+    payload = batch.to_dict()
+    payload["provenance"] = dict(payload["provenance"])
+    payload["provenance"]["unexpected"] = True
+
+    with pytest.raises(ReplicateContractError) as caught:
+        ReplicateBatch.from_dict(payload)
+    _assert_reason(caught.value, "REPLICATE_UNKNOWN_FIELD")
+
+
+def test_failed_batch_from_dict_rejects_digest_injection_when_digest_is_none() -> None:
+    plan = _plan(max_failures=1)
+    strategy = _FailingStrategy(fail_indices=frozenset({0, 1}))
+    registry, _ = _registry(strategy=strategy)
+    payload = execute(plan, registry=registry).to_dict()
+
+    assert payload["status"] == "failed"
+    assert payload["digest"] is None
+    payload["digest"] = "0" * 64
+
+    with pytest.raises(ReplicateContractError) as caught:
+        ReplicateBatch.from_dict(payload)
+    _assert_reason(caught.value, "REPLICATE_DIGEST_MISMATCH")
+
+
+@pytest.mark.parametrize(
+    "status",
+    ["completed", "completed_with_failures", "failed"],
+)
+@pytest.mark.parametrize(
+    "tamper",
+    ["nested_unknown", "provenance_count", "commitment", "digest"],
+)
+def test_batch_from_dict_rejects_provenance_tampering_for_every_status(
+    status: str, tamper: str
+) -> None:
+    plan = _plan(max_failures=1)
+    fail_indices = {
+        "completed": frozenset(),
+        "completed_with_failures": frozenset({1}),
+        "failed": frozenset({0, 1}),
+    }[status]
+    strategy = _FailingStrategy(fail_indices=fail_indices)
+    registry, _ = _registry(strategy=strategy)
+    batch = execute(plan, registry=registry)
+    assert batch.status == status
+
+    payload = batch.to_dict()
+    if tamper == "nested_unknown":
+        payload["provenance"] = dict(payload["provenance"])
+        payload["provenance"]["unexpected"] = True
+        expected_reason = "REPLICATE_UNKNOWN_FIELD"
+    elif tamper == "provenance_count":
+        payload["provenance"] = dict(payload["provenance"])
+        payload["provenance"]["evidence_scalar_count"] += 1
+        expected_reason = (
+            "REPLICATE_PROVENANCE_MISMATCH"
+            if status == "failed"
+            else "REPLICATE_DIGEST_MISMATCH"
+        )
+    elif tamper == "commitment":
+        payload["provenance"] = dict(payload["provenance"])
+        payload["provenance"]["evidence_commitment"] = (
+            "not-a-commitment" if status == "failed" else "0" * 64
+        )
+        expected_reason = (
+            "REPLICATE_INVALID_COMMITMENT"
+            if status == "failed"
+            else "REPLICATE_DIGEST_MISMATCH"
+        )
+    else:
+        # A failed batch deliberately has digest=None; injecting any digest is
+        # still a tamper and must fail closed rather than become usable.
+        payload["digest"] = "0" * 64
+        expected_reason = "REPLICATE_DIGEST_MISMATCH"
+
+    with pytest.raises(ReplicateContractError) as caught:
+        ReplicateBatch.from_dict(payload)
+    _assert_reason(caught.value, expected_reason)
+
+
+def test_execute_reports_allowed_replicate_failures_by_stable_reason_code() -> None:
+    plan = _plan(max_failures=1)
+    strategy = _FailingStrategy(fail_indices=frozenset({1}))
+
+    registry, adapter = _registry(strategy=strategy)
+    batch = execute(plan, registry=registry)
+
+    assert batch.status == "completed_with_failures"
+    assert batch.reason_code == "REPLICATE_PARTIAL_FAILURE"
+    assert batch.requested_count == 4
+    assert batch.succeeded_count == 3
+    assert batch.failed_count == 1
+    assert batch.failure_reasons == {"REPLICATE_STRATEGY_FAILED": 1}
+    assert adapter.calls == [(plan.kind, index) for index in (0, 2, 3)]
+    _assert_batch_provenance_schema(
+        batch,
+        plan=plan,
+        expected_derived_seeds=strategy.received_seeds,
+        expected_order=list(range(plan.requested_replicates)),
+        expected_scalar_count=sum(adapter.output_scalar_counts),
+    )
+
+
+def test_execute_fails_closed_when_failure_budget_is_exceeded() -> None:
+    plan = _plan(max_failures=1)
+    strategy = _FailingStrategy(fail_indices=frozenset({0, 1}))
+
+    registry, adapter = _registry(strategy=strategy)
+    batch = execute(plan, registry=registry)
+
+    assert batch.status == "failed"
+    assert batch.reason_code == "REPLICATE_FAILURE_BUDGET_EXCEEDED"
+    assert batch.requested_count == 4
+    assert batch.succeeded_count == 2
+    assert batch.failed_count == 2
+    assert batch.failure_reasons == {"REPLICATE_STRATEGY_FAILED": 2}
+    assert len(strategy.received_seeds) == plan.requested_replicates
+    assert adapter.calls == [(plan.kind, index) for index in (2, 3)]
+    _assert_batch_provenance_schema(
+        batch,
+        plan=plan,
+        expected_derived_seeds=strategy.received_seeds,
+        expected_order=list(range(plan.requested_replicates)),
+        expected_scalar_count=sum(adapter.output_scalar_counts),
+    )
+
+
+def test_execute_maps_ordinary_strategy_exceptions_to_a_stable_failure_reason() -> None:
+    plan = _plan(requested_replicates=1, max_failures=1, max_evidence_scalars=2)
+    strategy = _OrdinaryExceptionStrategy()
+
+    registry, adapter = _registry(strategy=strategy)
+    batch = execute(plan, registry=registry)
+
+    assert batch.status == "completed_with_failures"
+    assert batch.reason_code == "REPLICATE_PARTIAL_FAILURE"
+    assert batch.failure_reasons == {"REPLICATE_STRATEGY_EXCEPTION": 1}
+    assert adapter.calls == []
+    _assert_batch_provenance_schema(
+        batch,
+        plan=plan,
+        expected_derived_seeds=strategy.received_seeds,
+        expected_order=[0],
+        expected_scalar_count=0,
+    )
+
+
+def test_execute_fails_closed_when_scalar_evidence_budget_is_exceeded() -> None:
+    plan = _plan(max_evidence_scalars=0)
+    strategy = _DeterministicStrategy()
+    registry, adapter = _registry(strategy=strategy)
+
+    batch = execute(plan, registry=registry)
+
+    assert batch.status == "failed"
+    assert batch.reason_code == "REPLICATE_EVIDENCE_BUDGET_EXCEEDED"
+    assert batch.succeeded_count == 0
+    assert batch.failed_count == 0
+    assert strategy.received_seeds == []
+    assert adapter.calls == []
+    _assert_batch_provenance_schema(
+        batch,
+        plan=plan,
+        expected_derived_seeds=[],
+        expected_order=[],
+        expected_scalar_count=0,
+    )
+
+
+def test_execute_rejects_non_scalar_evidence_before_digesting_or_publishing_it() -> None:
+    plan = _plan()
+    registry, _ = _registry(strategy=_VectorEvidenceStrategy())
+
+    with pytest.raises(ReplicateCombineError) as caught:
+        execute(plan, registry=registry)
+    _assert_reason(caught.value, "REPLICATE_NON_SCALAR_EVIDENCE")
+
+
+def test_batch_constructor_reuses_public_validation_for_raw_provenance() -> None:
+    batch = execute(_plan(), registry=_registry()[0])
+    payload = batch.to_dict()
+    provenance = dict(payload["provenance"])
+    provenance["raw_values"] = [_RAW_SENTINEL]
+
+    with pytest.raises(ReplicateContractError) as caught:
+        ReplicateBatch(
+            kind=payload["kind"],
+            requested_count=payload["requested_count"],
+            succeeded_count=payload["succeeded_count"],
+            failed_count=payload["failed_count"],
+            seed=payload["seed"],
+            status=payload["status"],
+            reason_code=payload["reason_code"],
+            failure_reasons=payload["failure_reasons"],
+            provenance=provenance,
+            digest=payload["digest"],
+        )
+    _assert_reason(caught.value, "REPLICATE_UNKNOWN_FIELD")
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value", "reason_code"),
+    [
+        ("kind", "jackknife", "REPLICATE_INVALID_KIND"),
+        ("requested_count", MAX_REQUESTED_REPLICATES + 1, "REPLICATE_REQUESTED_COUNT_EXCEEDS_LIMIT"),
+    ],
+)
+def test_batch_from_dict_rejects_invalid_kind_and_request_boundaries(
+    field_name: str, value: Any, reason_code: str
+) -> None:
+    payload = execute(_plan(), registry=_registry()[0]).to_dict()
+    payload[field_name] = value
+
+    with pytest.raises(ReplicateContractError) as caught:
+        ReplicateBatch.from_dict(payload)
+    _assert_reason(caught.value, reason_code)
+
+
+def test_execute_maps_adapter_exception_to_a_stable_failure_reason() -> None:
+    strategy = _DeterministicStrategy()
+    adapter = _ExplodingAdapter()
+    registry, _ = _registry(strategy=strategy, adapter=adapter)
+    batch = execute(
+        _plan(requested_replicates=1, max_failures=1, max_evidence_scalars=2),
+        registry=registry,
+    )
+
+    assert batch.status == "completed_with_failures"
+    assert batch.failure_reasons == {"REPLICATE_ADAPTER_EXCEPTION": 1}
+    assert adapter.calls == [("multiple_imputation", 0)]
+
+
+def test_execute_rejects_cross_replicate_scalar_budget_overflow_with_stable_error() -> None:
+    strategy = _DeterministicStrategy()
+    adapter = _TwoScalarAdapter()
+    registry, _ = _registry(strategy=strategy, adapter=adapter)
+
+    with pytest.raises(ReplicateCombineError) as caught:
+        execute(_plan(max_evidence_scalars=1), registry=registry)
+    _assert_reason(caught.value, "REPLICATE_EVIDENCE_BUDGET_EXCEEDED")
+
+
+def test_failed_batch_preserves_variable_adapter_scalar_count_and_roundtrips() -> None:
+    strategy = _FailingStrategy(fail_indices=frozenset({0, 1}))
+    adapter = _TwoScalarAdapter()
+    registry, _ = _registry(strategy=strategy, adapter=adapter)
+    batch = execute(
+        _plan(max_failures=1, max_evidence_scalars=8),
+        registry=registry,
+    )
+
+    assert batch.status == "failed"
+    assert batch.provenance["evidence_scalar_count"] == 4
+    assert ReplicateBatch.from_dict(batch.to_dict()).to_dict() == batch.to_dict()
+
+
+def test_batch_from_dict_rejects_non_string_status_with_stable_reason() -> None:
+    payload = execute(_plan(), registry=_registry()[0]).to_dict()
+    payload["status"] = []
+
+    with pytest.raises(ReplicateContractError) as caught:
+        ReplicateBatch.from_dict(payload)
+    _assert_reason(caught.value, "REPLICATE_INVALID_BATCH_FIELD")
+
+
+def test_batch_from_dict_rejects_rehashed_public_provenance_tampering() -> None:
+    payload = execute(_plan(), registry=_registry()[0]).to_dict()
+    payload["provenance"] = dict(payload["provenance"])
+    payload["provenance"]["evidence_scalar_count"] += 1
+    unsigned = dict(payload)
+    unsigned.pop("digest")
+    payload["digest"] = hashlib.sha256(
+        json.dumps(unsigned, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+    ).hexdigest()
+
+    with pytest.raises(ReplicateContractError) as caught:
+        ReplicateBatch.from_dict(payload)
+    _assert_reason(caught.value, "REPLICATE_PROVENANCE_MISMATCH")
