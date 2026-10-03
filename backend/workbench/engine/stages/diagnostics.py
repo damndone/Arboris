@@ -219,6 +219,15 @@ class DiagnosticsStage:
                 diag["vif"] = {term: values.get("gvif_adjusted", 0) ** 2 for term, values in terms.items()}
                 diag["vif_basis"] = "collinearity.gvif: VIF, or GVIF^(1/df) for multi-column terms"
                 write_json(diag_path, diag)
+            # A degenerate fit (perfect fit, separation) makes residual-based
+            # diagnostics noise; they are withdrawn with the reason rather
+            # than reported beside a check that calls them not applicable.
+            withheld = next((item for item in check_results if item.get("suppresses_inference")), None)
+            if withheld is not None:
+                for key in ("breusch_pagan", "durbin_watson", "jarque_bera", "cooks_distance", "separation", "overdispersion"):
+                    diag.pop(key, None)
+                diag["residual_diagnostics_withheld"] = withheld["summary"]
+                write_json(diag_path, diag)
             issues_from_checks = check_issues(check_results, model_id)
             if issues_from_checks:
                 issue_dicts.extend(issues_from_checks)
@@ -237,7 +246,17 @@ class DiagnosticsStage:
             if iv_fitted is not None:
                 n_endog = len(ctx.artifacts.get("_iv_endog") or [])
                 n_instr = len(ctx.artifacts.get("_iv_instruments") or [])
-                iv_diag = build_iv_diagnostics(iv_fitted, n_endog, n_instr)
+                checks_path = run_root / "model_results" / "checks_iv_2sls_1.json"
+                strength = None
+                if checks_path.is_file():
+                    from ...artifacts import read_json as _read_json
+
+                    strength = next(
+                        (item for item in _read_json(checks_path).get("checks", [])
+                         if item.get("check_id") == "iv.first_stage_strength"),
+                        None,
+                    )
+                iv_diag = build_iv_diagnostics(iv_fitted, n_endog, n_instr, strength)
                 iv_diag_path = run_root / "iv_diagnostics.json"
                 write_json(iv_diag_path, iv_diag)
                 register_artifact(

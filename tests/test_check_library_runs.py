@@ -48,6 +48,9 @@ def test_a_perfect_fit_is_named_and_shows_no_inference(tmp_path) -> None:
     with pytest.raises(PostestimationRefusal, match="fits the data exactly"):
         wald_test(kernel, [{"terms": {"education": 1}, "value": 0}])
 
+    diag = read_json(run_root / "model_results" / "diagnostics_ols_1.json")
+    assert "breusch_pagan" not in diag and "fits the data exactly" in diag["residual_diagnostics_withheld"]
+
     summary = read_json(run_root / "diagnostic_summary.json")
     codes = {issue["code"] for bucket in ("warnings", "cautions") for issue in summary["diagnostics"][bucket]}
     assert {"CHECK_FIT_PERFECT", "CHECK_COLLINEARITY_GVIF"} <= codes

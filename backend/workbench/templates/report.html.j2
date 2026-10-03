@@ -88,6 +88,9 @@
         </tbody>
       </table>
       {% endif %}
+      {% if diag.get("residual_diagnostics_withheld") %}
+      <p>Residual diagnostics are not shown: {{ diag.residual_diagnostics_withheld }}</p>
+      {% endif %}
       {% set bp = diag.get("breusch_pagan", {}) %}
       {% if bp and bp.get("lm") is not none %}
       <p>Breusch-Pagan (heteroskedasticity): LM = {{ "%.2f"|format(bp.lm) }}, p {% if bp.p_value < 0.001 %}&lt; 0.001{% else %}= {{ "%.4f"|format(bp.p_value) }}{% endif %}</p>
