@@ -68,6 +68,27 @@ function shortRunId(id: string): string {
 
 const fmt = formatEstimate;
 
+type ByGroup = { column?: string; key?: string; n_groups?: number; not_estimable?: { key?: string; nobs?: number; reason?: string }[] };
+
+function byGroup(model: object): ByGroup | null {
+  const block = (model as { by_group?: unknown }).by_group;
+  return block !== null && typeof block === "object" ? (block as ByGroup) : null;
+}
+
+/** "region = east" for one group's result of a by-group run. */
+function groupLabel(model: object): string | null {
+  const block = byGroup(model);
+  return block?.column ? `${block.column} = ${block.key ?? ""}` : null;
+}
+
+/** Groups listed as not estimable, with their reasons; shown once, on the first group. */
+function notEstimableGroups(model: object): string | null {
+  const block = byGroup(model);
+  const skipped = block?.not_estimable ?? [];
+  if (!block || skipped.length === 0 || (model as { by_group?: { index?: number } }).by_group?.index !== 1) return null;
+  return skipped.map((item) => `Not estimated: ${block.column} = ${item.key} (${item.nobs} rows): ${item.reason}`).join(" ");
+}
+
 function pooledDf(coefficient: object): string {
   const df = (coefficient as { df?: number | null }).df;
   return typeof df === "number" ? df.toFixed(1) : "∞";
@@ -509,7 +530,13 @@ function CoefficientTable({
       <div style={{ fontSize: 13, fontWeight: 600, color: "var(--label)", marginBottom: 4 }}>
         {model.model_id}
         {model.model_type ? ` · ${model.model_type}` : ""}
+        {groupLabel(model) ? ` · ${groupLabel(model)}` : ""}
       </div>
+      {notEstimableGroups(model) ? (
+        <div data-testid="table-view-not-estimable-groups" role="note" style={{ fontSize: 11, color: "var(--label-tertiary)", marginBottom: 6 }}>
+          {notEstimableGroups(model)}
+        </div>
+      ) : null}
       <div style={{ fontSize: 11, color: "var(--label-tertiary)", marginBottom: 6 }}>
         {model.nobs !== undefined ? `n=${model.nobs}${nobsBasis(model)}` : null}
         {model.r_squared != null ? ` · R²=${fmt(model.r_squared)}` : null}

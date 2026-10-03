@@ -69,13 +69,19 @@ _THRESHOLD_AFTER = re.compile(r"^\s*(?:的)?\s*(?:水平|显著性水平|level|s
 
 @dataclass(frozen=True)
 class Finding:
-    """A reply number no result supports, with the closest real values."""
+    """A reply number no result supports, with the closest real values.
+
+    ``kind == "group_comparison"``: the reply compares groups of a by-group
+    result without citing the group-difference test (``text`` names the
+    groups, ``closest`` the test's statistics and p-values).
+    """
 
     text: str
     closest: tuple[str, ...] = ()
+    kind: str = "number"
 
     def to_dict(self) -> dict[str, Any]:
-        return {"text": self.text, "closest": list(self.closest)}
+        return {"text": self.text, "closest": list(self.closest), "kind": self.kind}
 
 
 class Evidence:
@@ -245,7 +251,87 @@ def check(reply: str, messages: Sequence[Mapping[str, Any]]) -> tuple[Finding, .
             continue
         seen.add(text)
         findings.append(Finding(text, evidence.closest(value)))
-    return tuple(findings)
+    return tuple(findings) + group_comparison_findings(reply, messages)
+
+
+# --- group comparisons -------------------------------------------------------
+#
+# Estimates of separate groups side by side are not a test of their difference.
+# When a by-group result is in the conversation and the reply compares two of
+# its groups (names both and uses comparative language), it must cite the
+# group-difference test: one of its statistics or p-values, as written.
+
+_COMPARATIVE = re.compile(
+    r"(不同(?!组|的组|分组)|差异|不一样|一样|相同|更大|更小|更高|更低|高于|低于|大于|小于|强于|弱于|更强|更弱"
+    r"|\bdiffer(?:s|ent|ence)?\b(?!\s+groups)|\bsame\b|\blarger\b|\bsmaller\b|\bhigher\b|\blower\b"
+    r"|\bgreater\b|\bstronger\b|\bweaker\b|\bbigger\b)",
+    re.IGNORECASE,
+)
+
+
+def _walk(value: Any):
+    if isinstance(value, Mapping):
+        yield value
+        for item in value.values():
+            yield from _walk(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _walk(item)
+
+
+def _group_evidence(messages: Sequence[Mapping[str, Any]]) -> tuple[set[str], list[float], bool]:
+    """Group names of by-group results, and the group-difference tests' values."""
+    groups: set[str] = set()
+    values: list[float] = []
+    by_group_seen = False
+    for message in messages:
+        if message.get("role") != "tool":
+            continue
+        text = _content_text(message.get("content"))
+        if "comparing_groups" not in text:
+            continue
+        try:
+            payload = json.loads(text)
+        except (TypeError, ValueError):
+            continue
+        for node in _walk(payload):
+            if "comparing_groups" in node:
+                by_group_seen = True
+            for key in ("group", "key"):
+                if isinstance(node.get(key), str) and ("comparing_groups" in node or "group_column" in node
+                                                       or "group_index" in node):
+                    groups.add(node[key])
+            if isinstance(node.get("group"), str) and "group_column" in node:
+                groups.add(node["group"])
+            if "comparing_groups" in node and isinstance(node.get("groups"), list):
+                groups.update(item["key"] for item in node["groups"]
+                              if isinstance(item, Mapping) and isinstance(item.get("key"), str))
+            tests = node.get("difference_tests")
+            if isinstance(tests, Mapping):
+                for test in tests.get("tests") or ():
+                    if isinstance(test, Mapping):
+                        values.extend(float(test[k]) for k in ("statistic", "p_value")
+                                      if isinstance(test.get(k), (int, float)))
+    return {group for group in groups if group}, values, by_group_seen
+
+
+def group_comparison_findings(reply: str, messages: Sequence[Mapping[str, Any]]) -> tuple[Finding, ...]:
+    groups, values, by_group_seen = _group_evidence(messages)
+    if not by_group_seen or not reply:
+        return ()
+    named = sorted(group for group in groups if group in reply)
+    if len(named) < 2 or not _COMPARATIVE.search(reply):
+        return ()
+    evidence = Evidence(_decimal(repr(value)) for value in values if math.isfinite(value))
+    for match in _REPLY_NUMBER.finditer(reply):
+        number = _reply_value(match)
+        if number is not None and len(evidence) and evidence.supports(abs(number)):
+            return ()
+    if any(value < 0.001 for value in values) and re.search(r"[<＜]\s*0?\.001", reply):
+        return ()
+    shown = tuple(_plain(Decimal(repr(value)).quantize(Decimal("0.0001"))) if abs(value) >= 0.0001
+                  else f"{value:.2e}" for value in values[:6])
+    return (Finding(", ".join(named), shown, kind="group_comparison"),)
 
 
 def _finding_line(finding: Finding, language: str) -> str:
@@ -257,9 +343,30 @@ def _finding_line(finding: Finding, language: str) -> str:
     return f"{finding.text} (closest result values: {closest})"
 
 
+def _group_comparison_correction(finding: Finding) -> str:
+    if finding.closest:
+        cite = f"Its statistics and p-values are: {', '.join(finding.closest)}."
+    else:
+        cite = "No group-difference test was run, so say the groups were estimated separately and not compared by a test."
+    return (
+        f"Your last answer compared groups ({finding.text}) without citing the group-difference test. "
+        "Estimates of separate groups side by side are not a test of their difference. Cite the test "
+        f"(its statistic and p-value) for every claim that groups differ or are alike. {cite}"
+    )
+
+
 def correction_message(findings: Sequence[Finding]) -> str:
     """What the model is told when its draft fails the check."""
 
+    comparisons = [finding for finding in findings if finding.kind == "group_comparison"]
+    findings = [finding for finding in findings if finding.kind != "group_comparison"]
+    if not findings:
+        return (
+            "[Workbench numeric check -- an automatic message, not from the user] "
+            + " ".join(_group_comparison_correction(finding) for finding in comparisons)
+            + " That answer has been withdrawn. Answer the user's question again, in full and in the "
+            "user's language. Do not mention this check."
+        )
     lines = "\n".join(f"- {_finding_line(finding, 'en')}" for finding in findings)
     return (
         "[Workbench numeric check -- an automatic message, not from the user] These numbers in your "
@@ -271,16 +378,31 @@ def correction_message(findings: Sequence[Finding]) -> str:
         "For a number derived from results -- a difference, ratio, percentage, sum or odds ratio -- "
         "call the calculate tool and quote its value. Leave out any number you cannot source. Do not "
         "mention this check."
+        + "".join(" " + _group_comparison_correction(finding) for finding in comparisons)
     )
 
 
 def unverified_note(findings: Sequence[Finding], language: str) -> str:
     """The warning shown with a reply whose rewrite still failed the check."""
 
+    comparisons = [finding for finding in findings if finding.kind == "group_comparison"]
+    findings = [finding for finding in findings if finding.kind != "group_comparison"]
+    notes = []
+    for finding in comparisons:
+        notes.append(
+            f"⚠️ Workbench 核对：本条回复比较了 {finding.text} 这几组，但没有引用组间差异检验；"
+            "各组分别估计的结果并排放着，不等于检验了它们的差异。"
+            if language == "zh" else
+            f"⚠️ Workbench check: this reply compares groups ({finding.text}) without citing the "
+            "group-difference test; separate estimates side by side are not a test of a difference."
+        )
+    if not findings:
+        return " ".join(notes)
     items = "; ".join(_finding_line(finding, language) for finding in findings)
+    prefix = (" ".join(notes) + " ") if notes else ""
     if language == "zh":
-        return f"⚠️ Workbench 数字核对：以下数字与任何计算结果都对不上，请勿引用：{items}。"
-    return f"⚠️ Workbench numeric check: these numbers do not match any computed result; do not rely on them: {items}."
+        return f"{prefix}⚠️ Workbench 数字核对：以下数字与任何计算结果都对不上，请勿引用：{items}。"
+    return f"{prefix}⚠️ Workbench numeric check: these numbers do not match any computed result; do not rely on them: {items}."
 
 
 def unchecked_note(language: str) -> str:

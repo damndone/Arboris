@@ -85,7 +85,13 @@ def disclosure(project_root: Path | str, run_id: str) -> dict[str, Any]:
     tests_by_authority: Counter[str] = Counter()
     for entry in completed:
         for step in entry.get("steps") or ():
-            step_counts[str(step.get("category"))] += 1
+            # A by-group step ran one analysis per group.
+            step_counts[str(step.get("category"))] += int(step.get("tests") or 1)
+        # A model run estimated by group is one model per estimated group; how
+        # many is known only once the run has executed, so it is read here.
+        groups = _estimated_groups(root, entry.get("produced_run_id"))
+        if groups > 1:
+            step_counts["model"] += groups - 1
         who = "agent_without_confirmation" if entry.get("authorized_by") == "read_only_policy" else (
             "agent_confirmed_by_user" if entry.get("actor") == "agent" else "user"
         )
@@ -110,6 +116,18 @@ def disclosure(project_root: Path | str, run_id: str) -> dict[str, Any]:
         "entries_omitted": max(len(entries) - _FULL_LIST_LIMIT, 0),
         "settings": read_settings(root),
     }
+
+
+def _estimated_groups(root: Path, run_id: Any) -> int:
+    if not run_id:
+        return 0
+    path = Path(root) / "runs" / str(run_id) / "model_results" / "collections" / "by_group.json"
+    try:
+        collection = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
+    except (OSError, ValueError):
+        return 0
+    members = collection.get("members") if isinstance(collection, dict) else None
+    return sum(1 for member in members or () if isinstance(member, dict) and member.get("status") == "estimated")
 
 
 def _who(entry: Mapping[str, Any]) -> str:

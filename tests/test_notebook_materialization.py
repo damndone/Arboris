@@ -886,6 +886,31 @@ def test_dataset_materialization_carries_multiple_imputation_as_the_run_request(
         materialize("probit")
 
 
+def test_dataset_materialization_carries_by_group_as_the_run_request(tmp_path: Path) -> None:
+    """v1.8.10 step 7, found in browser acceptance: the Genesis draft schema
+    refused the by_group request planning had accepted (NON_EDITABLE_PARAM)."""
+
+    import json
+
+    project = make_project(tmp_path)
+    service = NotebookService(project)
+    upload_sha = store_upload_bytes(
+        project, b"y,x1,region\n1.0,0.2,a\n2.0,0.4,b\n3.0,0.5,a\n", filename="bg.csv",
+    )
+    notebook = service.ensure_default_projection(
+        dataset={"kind": "dataset", "upload_sha256": upload_sha, "filename": "bg.csv", "sheet_names": []},
+        created_by="ui",
+    )
+    draft = NotebookOptionMaterializer(service)._materialize_dataset(
+        notebook,
+        {"operation_id": "model.genesis", "target": {"dataset_source_id": upload_sha},
+         "changes": {"model_params": {"model_type": "ols", "y": "y", "x": ["x1"], "by_group": "region"}}},
+        {"option_id": "opt_bg", "option_revision": "1"},
+    )
+    model = next(node for node in draft.draft["graph"]["nodes"] if node["node_type"] == "model")
+    assert json.loads(model["params"]["by_group"]) == {"column": "region"}
+
+
 def test_dataset_materialization_builds_a_native_did_draft_with_its_treatment_mode(
     tmp_path: Path,
 ) -> None:

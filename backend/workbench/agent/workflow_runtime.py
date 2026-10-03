@@ -1284,15 +1284,23 @@ def _execute_named_statistical_step(
 ) -> WorkflowStepResult:
     from ..statistical_tests import run_named_statistical_test
     family = str(step.operation_id).removeprefix("test.")
-    result = run_named_statistical_test(
-        frame,
-        family=family,
-        analysis_columns=list(step.spec["analysis_columns"]),
-        dataset_sha256=str(lineage["sha256"]),
-        lineage_parent=str(lineage["artifact_id"]),
-        reference_means=step.spec.get("reference_means"),
-        paired_columns=[tuple(pair) for pair in step.spec.get("paired_columns", []) or []],
-    )
+
+    def run_one(rows: pd.DataFrame) -> dict[str, Any]:
+        return run_named_statistical_test(
+            rows,
+            family=family,
+            analysis_columns=list(step.spec["analysis_columns"]),
+            dataset_sha256=str(lineage["sha256"]),
+            lineage_parent=str(lineage["artifact_id"]),
+            reference_means=step.spec.get("reference_means"),
+            paired_columns=[tuple(pair) for pair in step.spec.get("paired_columns", []) or []],
+        )
+
+    by_group = step.spec.get("by_group")
+    if by_group:
+        result = _named_test_by_group(frame, str(by_group), str(step.operation_id), run_one)
+    else:
+        result = run_one(frame)
     run_root = root / "runs" / str(draft.target["run_id"])
     fingerprint = str(step.fingerprint).replace(":", "_")
     artifact_id = f"statistical_tests_named_{family}_{fingerprint[:24]}"
@@ -1326,12 +1334,52 @@ def _execute_named_statistical_step(
         step=f"test.{family}",
         inputs=[str(lineage["artifact_id"])],
     )
+    row_counts = {"results": int(len(result.get("results", [])))}
+    if isinstance(result.get("by_group"), Mapping):
+        # One test per estimated group: the ledger counts each.
+        row_counts["ledger_count"] = int(result["by_group"]["estimated_groups"])
     return WorkflowStepResult(
         artifact_ids=[artifact_id],
-        row_counts={"results": int(len(result.get("results", [])))},
+        row_counts=row_counts,
         result_fingerprint=str(step.fingerprint),
         payload={"result": result, "execution_mode": "named"},
     )
+
+
+def _named_test_by_group(frame: pd.DataFrame, column: str, operation_id: str, run_one: Any) -> dict[str, Any]:
+    """A named test run in every group, with p-values adjusted across groups."""
+    from ..combinators.by_group import ByGroupRefusal, adjust_across_groups, run_by_group, semantics_for
+
+    try:
+        semantics_for(operation_id, design_declared=False)
+        outcomes = run_by_group(frame, column, run_one)
+    except ByGroupRefusal as refusal:
+        raise WorkflowExecutionError(refusal.message) from refusal
+    rows: list[dict[str, Any]] = []
+    template: dict[str, Any] = {}
+    for outcome in outcomes:
+        if outcome["status"] != "estimated":
+            continue
+        group_result = outcome.pop("result")
+        template = template or group_result
+        for row in group_result.get("results", []):
+            rows.append({**row, "group": outcome["key"], "group_column": column})
+    adjust_across_groups(rows)
+    groups = [{key: value for key, value in outcome.items() if key != "result"} for outcome in outcomes]
+    return {
+        **{key: value for key, value in template.items() if key != "results"},
+        "results": rows,
+        "by_group": {
+            "column": column,
+            "semantics": "subset",
+            "groups": groups,
+            "estimated_groups": sum(outcome["status"] == "estimated" for outcome in outcomes),
+            "adjustment_across_groups": "holm and benjamini_hochberg per test_id",
+            "comparing_groups": (
+                "Results of separate groups side by side are not a test of a difference between groups."
+            ),
+        },
+    }
 def _execute_imputation_step(
     *,
     root: Path,
@@ -2199,15 +2247,27 @@ def _execute_model_genesis_branches(
             raise WorkflowExecutionError(f"{model_family} branch {branch_id} did not complete")
         run_artifacts = _read_artifacts_index(run_root).get("artifacts", [])
         ids = [str(item["artifact_id"]) for item in run_artifacts if item.get("artifact_id")]
-        missing_artifacts = sorted(set(family_contract.expected_artifacts) - set(ids))
+        by_group = branch_spec.get("by_group")
+        # A by-group run writes one result per group (ols_1_g01, ...) and the
+        # collection that lists them, not the family's single primary result.
+        expected = (
+            {"by_group_collection", *family_contract.expected_artifacts[1:]}
+            if by_group else set(family_contract.expected_artifacts)
+        )
+        missing_artifacts = sorted(expected - set(ids))
         if missing_artifacts:
             raise WorkflowExecutionError(
                 f"{model_family} branch {branch_id} is missing required evidence: "
                 + ", ".join(missing_artifacts)
             )
-        model_result = read_json(
-            run_root / "model_results" / f"{primary_model_artifact_id}.json"
-        )
+        if by_group:
+            collection = read_json(run_root / "model_results" / "collections" / "by_group.json")
+            first = next(m for m in collection["members"] if m["status"] == "estimated")
+            model_result = read_json(run_root / first["result_ref"])
+        else:
+            model_result = read_json(
+                run_root / "model_results" / f"{primary_model_artifact_id}.json"
+            )
         if (
             family_contract.result_shape == "coefficient_intervals"
             and ("ci_lower" not in json.dumps(model_result) or "ci_upper" not in json.dumps(model_result))
@@ -2234,6 +2294,7 @@ def _execute_model_genesis_branches(
                     # recorded here the refit could only guess, and would
                     # report inference for a model nobody estimated.
                     "covariance": branch_covariance,
+                    **({"by_group": str(by_group)} if by_group else {}),
                     **{
                         field_name: branch_spec.get(field_name)
                         for field_name in family_contract.context_spec_fields
@@ -2414,6 +2475,11 @@ def _refit_completed_ols_branch(
             "completed model branch design no longer matches its declared provenance"
         )
     covariance = _branch_covariance(branch_spec)
+    if branch_spec.get("by_group"):
+        raise WorkflowExecutionError(
+            "this post-estimation step refits one model, but the branch was estimated separately by "
+            f"{branch_spec['by_group']}; its group-difference tests are already in the result"
+        )
     if covariance == "hac":
         # These steps refit the model; reproducing Newey-West here would need the
         # time order and lag, and the refit has not been extended to them.
@@ -2917,6 +2983,12 @@ def _branch_kernel(root: Path, branch: Mapping[str, Any]) -> dict[str, Any]:
     """The inference kernel the completed model branch's run persisted."""
     from ..contracts.model.inference_kernel import InferenceKernelError, validate_inference_kernel
 
+    spec = branch.get("branch_spec") if isinstance(branch.get("branch_spec"), Mapping) else {}
+    if spec.get("by_group"):
+        raise WorkflowExecutionError(
+            f"the branch was estimated separately by {spec['by_group']}, one result per group; its "
+            "group-difference tests are in the result, and a test within one group names that group's model"
+        )
     directory = root / "runs" / str(branch["run_id"]) / "model_results" / "inference_kernels"
     paths = sorted(directory.glob("*.json")) if directory.is_dir() else []
     if len(paths) != 1:

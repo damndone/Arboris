@@ -48,6 +48,7 @@ from ..orchestrator import (
     _lineage,
     _run_workflow,
     _write_manifest,
+    parse_by_group_request,
     parse_imputation_request,
 )
 from ..projects import create_run
@@ -720,6 +721,7 @@ def _submit_run(
 
     x_columns = parse_column_selector(form.get("x", ""), "x")
     imputation_request = parse_imputation_request(form.get("imputation", ""))
+    by_group_request = parse_by_group_request(form.get("by_group", ""))
     iv_endog_list = _parse_json_str_array(form.get("iv_endog", ""), "iv_endog")
     iv_instruments_list = _parse_json_str_array(form.get("iv_instruments", ""), "iv_instruments")
 
@@ -881,6 +883,7 @@ def _submit_run(
         form.get("survey_lonely_psu", ""),
         form.get("survey_weight_frame", ""),
         form.get("survey_subpop", ""),
+        by_group_request,
     )
     return {"run_id": run.run_id, "status": "running"}
 
@@ -941,6 +944,7 @@ def _bg_run(
     survey_lonely_psu: str = "",
     survey_weight_frame: str = "",
     survey_subpop: str = "",
+    by_group: dict | None = None,
 ) -> None:
     events = get_event_manager()
     config = load_config(_resolve_project_root(run_root) / "config.yml")
@@ -1022,6 +1026,7 @@ def _bg_run(
             survey_subpop=survey_subpop,
             labels=labels,
             statistical_tests=statistical_tests_request,
+            by_group=by_group,
             lmm_execution_admission=lmm_execution_admission,
             stop_reason=_stop_reason,
         )

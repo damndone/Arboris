@@ -3541,6 +3541,7 @@ def _public_requested_model_coefficients(
             ),
         },
         "multiple_imputation": _bounded_multiple_imputation(result),
+        "by_group": _bounded_by_group(result),
         "coefficients": public_coefficients,
         "missing_terms": missing_terms,
         # When a requested term is absent, name the terms that do exist, so a
@@ -3758,16 +3759,23 @@ def _bounded_statistics_evidence(
             "warnings",
             "correction",
             "family",
+            # By-group runs: which group, and the p-value adjusted across groups.
+            "group",
+            "group_column",
+            "p_value_holm_across_groups",
+            "p_value_bh_across_groups",
+            "groups_in_adjustment",
         ):
             if key not in row:
                 continue
-            if key in {"test_id", "test_version", "test_type", "family", "correction"}:
+            if key in {"test_id", "test_version", "test_type", "family", "correction", "group", "group_column"}:
                 # The correction method is what makes a post-hoc p-value
                 # interpretable, so it is a short label, not budgeted detail.
                 label = _bounded_label(row[key])
                 if label is not None:
                     bounded[key] = label
-            elif key in {"nobs", "statistic", "p_value", "p_value_corrected", "effect_size"}:
+            elif key in {"nobs", "statistic", "p_value", "p_value_corrected", "effect_size",
+                         "p_value_holm_across_groups", "p_value_bh_across_groups", "groups_in_adjustment"}:
                 number = _public_stat_number(row[key])
                 if number is not None:
                     bounded[key] = number
@@ -3794,6 +3802,8 @@ def _bounded_statistics_evidence(
         "dataset_ref": packet.get("dataset_ref"),
         "lineage_parent": packet.get("lineage_parent"),
         "correction_scope": packet.get("correction_scope"),
+        **({"by_group": _bounded_test_by_group(packet.get("by_group"))}
+           if isinstance(packet.get("by_group"), Mapping) else {}),
         "results": bounded_results,
         "result_count": len(raw_results),
         "results_omitted": max(len(raw_results) - len(bounded_results), 0),
@@ -4060,7 +4070,10 @@ def _bounded_persisted_model_facts(
     """
 
     projected: list[dict[str, Any]] = []
-    for result in model_results[:2]:
+    # A by-group run is one result per group; two would hide the rest. Each
+    # projected group still states n_groups, and the coefficient tool returns all.
+    grouped = any(isinstance(result.get("by_group"), Mapping) for result in model_results if isinstance(result, dict))
+    for result in model_results[: _MAX_GROUPS_PROJECTED if grouped else 2]:
         model_id = result.get("model_id")
         coefficients = result.get("coefficients")
         if not isinstance(model_id, str) or not isinstance(coefficients, dict):
@@ -4095,10 +4108,68 @@ def _bounded_persisted_model_facts(
                 "covariance_executed": _executed_covariance(run_root, model_id),
                 "inference_suppressed": result.get("inference_suppressed"),
                 "multiple_imputation": _bounded_multiple_imputation(result),
+                "by_group": _bounded_by_group(result),
                 "coefficients": rows,
             }
         )
     return projected
+
+
+_MAX_GROUPS_PROJECTED = 12
+
+
+def _bounded_test_by_group(block: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "column": block.get("column"),
+        "estimated_groups": block.get("estimated_groups"),
+        "groups": [
+            {key: group.get(key) for key in ("key", "nobs", "status", "reason") if group.get(key) is not None}
+            for group in (block.get("groups") or [])[:_MAX_GROUPS_PROJECTED] if isinstance(group, Mapping)
+        ],
+        "adjustment_across_groups": block.get("adjustment_across_groups"),
+        "comparing_groups": block.get("comparing_groups"),
+    }
+
+
+def _bounded_by_group(result: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Which group this result is, the groups not estimated, and how to compare them."""
+    block = result.get("by_group")
+    if not isinstance(block, Mapping):
+        return None
+    return {
+        "column": block.get("column"),
+        "group": block.get("key"),
+        "group_index": block.get("index"),
+        "n_groups": block.get("n_groups"),
+        "semantics": block.get("semantics"),
+        "not_estimable": [
+            {"group": item.get("key"), "nobs": item.get("nobs"), "reason": str(item.get("reason") or "")[:300]}
+            for item in (block.get("not_estimable") or [])[:10] if isinstance(item, Mapping)
+        ],
+        "difference_tests": _bounded_difference_tests(block.get("difference_tests")),
+        "comparing_groups": (
+            "Coefficients of separate groups side by side are not a test of a difference; "
+            "cite the group-difference test before saying groups differ."
+        ),
+    }
+
+
+def _bounded_difference_tests(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, Mapping):
+        return None
+    if value.get("status") != "estimated":
+        return {"status": value.get("status"), "reason": str(value.get("reason") or "")[:300]}
+    return {
+        "status": "estimated",
+        "method": value.get("method"),
+        "reference_group": value.get("reference_group"),
+        "covariance_estimator": value.get("covariance_estimator"),
+        "tests": [
+            {key: test.get(key) for key in ("label", "statistic", "df_num", "df_den", "p_value", "distribution",
+                                             "status", "reason") if test.get(key) is not None}
+            for test in (value.get("tests") or [])[:12] if isinstance(test, Mapping)
+        ],
+    }
 
 
 def _pooled_coefficient_fields(coefficient: Mapping[str, Any]) -> dict[str, Any]:
@@ -4348,6 +4419,8 @@ def _public_operation_artifact_result(
         # A frequency table is an aggregate. Its entries are stored under
         # `rows` for the UI table, a key the projection withholds as raw data.
         result = {**{key: value for key, value in result.items() if key != "rows"}, "frequencies": result["rows"]}
+    if artifact_type == "statistical_test" and isinstance(result.get("by_group"), Mapping):
+        return _public_test_by_group(result), ["raw_artifact_payloads", "raw_rows", "test_effect_details"]
     if artifact_type == "statistical_exploration":
         # Grouped statistics sit at groups[i].variables[name].percentiles --
         # one level deeper than any other result. Lifting each group's
@@ -4361,6 +4434,31 @@ def _public_operation_artifact_result(
             ["raw_artifact_payloads", "raw_rows"],
         )
     return _bounded_public_result_value(result), ["raw_artifact_payloads", "raw_rows"]
+
+
+_BY_GROUP_TEST_FIELDS = (
+    "test_id", "test_type", "group", "nobs", "statistic", "degrees_of_freedom", "p_value",
+    "p_value_holm_across_groups", "p_value_bh_across_groups",
+)
+_MAX_BY_GROUP_TEST_ROWS = 60
+
+
+def _public_test_by_group(result: Mapping[str, Any]) -> dict[str, Any]:
+    """Every group's row of every test, compactly: a generic budget dropped whole groups."""
+    rows = [row for row in result.get("results") or () if isinstance(row, Mapping)]
+    kept = rows[:_MAX_BY_GROUP_TEST_ROWS]
+    return {
+        "test_type": result.get("test_type"),
+        "by_group": _bounded_test_by_group(result["by_group"]),
+        "results": [
+            {key: (_public_stat_number(row[key]) if isinstance(row[key], (int, float)) and not isinstance(row[key], bool)
+                   else _bounded_label(row[key]))
+             for key in _BY_GROUP_TEST_FIELDS if row.get(key) is not None}
+            for row in kept
+        ],
+        "result_count": len(rows),
+        "results_omitted": max(len(rows) - len(kept), 0),
+    }
 
 
 def _lift_group_variables(group: Any) -> Any:

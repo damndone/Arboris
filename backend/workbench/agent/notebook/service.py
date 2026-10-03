@@ -164,7 +164,7 @@ from .evidence import (
     RunSource,
     compile_evidence_pack,
 )
-from .vocabulary import capability_artifact_types
+from .vocabulary import by_group_artifact_types, capability_artifact_types
 from .workflow_artifacts import (
     WORKFLOW_RESULT_ARTIFACT_TYPE,
     p7_capability_ids_from_steps,
@@ -3813,6 +3813,9 @@ class NotebookService:
                 ),
             )
         )
+        by_group_artifacts = by_group_artifact_types(proposal.operation_id, dict(proposal.changes))
+        if by_group_artifacts is not None:
+            additional_artifact_types = dict(by_group_artifacts)
         if proposal.operation_id == "operation.multi_step" and p7_capability_ids_from_steps(
             proposal.changes.get("steps")
         ):

@@ -116,10 +116,13 @@ class LedgerStep:
     operation_id: str
     category: str
     detail: str = ""
+    # How many tests the step ran: one, or one per group for a by-group step.
+    tests: int = 1
 
     @classmethod
-    def of(cls, operation_id: str, detail: str = "") -> "LedgerStep":
-        return cls(operation_id=operation_id, category=step_category(operation_id), detail=detail)
+    def of(cls, operation_id: str, detail: str = "", tests: int = 1) -> "LedgerStep":
+        return cls(operation_id=operation_id, category=step_category(operation_id), detail=detail,
+                   tests=max(int(tests), 1))
 
 
 @dataclass(frozen=True)
@@ -151,7 +154,7 @@ class LedgerEntry:
     def to_dict(self) -> dict[str, Any]:
         value = asdict(self)
         value["steps"] = [asdict(step) for step in self.steps]
-        value["inferential_steps"] = sum(1 for step in self.steps if step.category == "inferential")
+        value["inferential_steps"] = sum(step.tests for step in self.steps if step.category == "inferential")
         value["changes_data"] = bool(self.categories & CHANGING_CATEGORIES)
         return value
 

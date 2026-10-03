@@ -548,6 +548,7 @@ def _genesis_model_editor_schema(
         ("prediction_group_column", "column", "Prediction group column", list(columns)),
         ("prediction_time_column", "column", "Prediction time column", list(columns)),
         ("imputation", "json", "Imputation request", None),
+        ("by_group", "json", "By-group request", None),
     ):
         control = {"key": key, "kind": kind, "label": label, "required": False}
         if options is not None:

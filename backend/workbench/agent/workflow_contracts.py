@@ -600,6 +600,9 @@ def genesis_run_params(spec: Mapping[str, Any]) -> dict[str, Any]:
     m = spec.get("multiple_imputations")
     if type(m) is int:
         params["imputation"] = json.dumps({"method": "mice", "m": m})
+    by_group = spec.get("by_group")
+    if isinstance(by_group, str) and by_group.strip():
+        params["by_group"] = json.dumps({"column": by_group.strip()})
     return params
 
 
@@ -1324,7 +1327,15 @@ MODEL_FAMILY_SPEC_FIELDS = frozenset(
 #: workflow step) may carry beside the family's own fields. Planning validates
 #: them through `validate_model_genesis_spec` and materialization admits the
 #: same set, so an option cannot pass one and fail the other.
-GENESIS_RUN_LEVEL_FIELDS = ("multiple_imputations",)
+GENESIS_RUN_LEVEL_FIELDS = ("multiple_imputations", "by_group")
+
+#: The model parameters a single-model Genesis option may carry besides its
+#: family's own fields. Planning and materialization check against this one set,
+#: so an option planning accepts is never refused when it is materialized.
+NOTEBOOK_GENESIS_MODEL_PARAMS = frozenset({
+    "model_type", "y", "x", "focal_x", "covariance", "model_options",
+    "entity_col", "time_col", "cohort_col", "treatment_path_col", *GENESIS_RUN_LEVEL_FIELDS,
+})
 
 
 def notebook_workflow_capability_ids() -> tuple[str, ...]:
@@ -1413,6 +1424,32 @@ def _validate_multiple_imputations(spec: Mapping[str, Any], family: str) -> None
         )
 
 
+def _validate_by_group(spec: Mapping[str, Any], family: str) -> None:
+    column = spec.get("by_group")
+    if column is None:
+        return
+    from ..combinators.by_group import BY_GROUP_OPEN
+
+    if not isinstance(column, str) or not column.strip():
+        raise OperationValidationError("model.genesis by_group must name one grouping column")
+    if family not in BY_GROUP_OPEN:
+        offered = ", ".join(sorted(name for name in BY_GROUP_OPEN if "." not in name))
+        raise OperationValidationError(
+            f"model.genesis by_group is not offered for {family} yet. Offered for: {offered}."
+        )
+    if spec.get("multiple_imputations") is not None:
+        raise OperationValidationError(
+            "model.genesis by_group cannot be combined with multiple_imputations yet"
+        )
+    for branch in spec.get("branches") or ():
+        if isinstance(branch, Mapping) and (
+            branch.get("outcome") == column or column in (branch.get("predictors") or ())
+        ):
+            raise OperationValidationError(
+                f"model.genesis by_group column {column} cannot also be the outcome or a predictor"
+            )
+
+
 def validate_model_genesis_spec(spec: Mapping[str, Any]) -> ModelFamilyContract:
     """Validate family-owned Genesis semantics and return its exact contract."""
 
@@ -1422,6 +1459,7 @@ def validate_model_genesis_spec(spec: Mapping[str, Any]) -> ModelFamilyContract:
     contract = model_family_contract(spec.get("model_family"))
     _validate_family_options(spec, contract)
     _validate_multiple_imputations(spec, contract.family)
+    _validate_by_group(spec, contract.family)
     weight_kind = spec.get("weight_kind")
     if weight_kind is not None:
         if weight_kind not in {"sampling", "analysis", "frequency"}:
@@ -1577,6 +1615,21 @@ def _multiple_imputation_sentence() -> str:
     )
 
 
+def _by_group_sentence() -> str:
+    """Read off the by-group registry, so the offer cannot outgrow the invariance test."""
+    from ..combinators.by_group import BY_GROUP_OPEN, MAX_GROUPS
+
+    families = ", ".join(sorted(name for name in BY_GROUP_OPEN if "." not in name))
+    return (
+        "Optional grouping column: the model is estimated separately within each group (a "
+        f"missing value is a group of its own; at most {MAX_GROUPS} groups; under a sampling "
+        "design each group is a domain of the full design). Each group gets its own result; a "
+        "group below the check library's sample minimum is listed as not estimable. The run also "
+        "tests whether the groups' coefficients differ (Wald on the fully interacted pooled "
+        f"model): cite that test before saying groups differ. Offered for: {families}."
+    )
+
+
 def _genesis_survey_fields() -> dict[str, str]:
     """The sampling-design declarations, described where they are declared.
 
@@ -1702,12 +1755,19 @@ def statistical_workflow_step_contracts() -> dict[str, StepSpecContract]:
                     "Optional list of explicit two-column before/after pairs for "
                     "the evidence family."
                 ),
+                "by_group": (
+                    "Optional grouping column: the test runs separately within each group "
+                    "(a missing value is a group of its own; at most 50 groups), and each "
+                    "test's p-values are also adjusted across groups (Holm and "
+                    "Benjamini-Hochberg). Groups side by side are not a test of a difference."
+                ),
             },
             required=("analysis_columns",),
             field_types={
                 "analysis_columns": "list",
                 "reference_means": "object",
                 "paired_columns": "list",
+                "by_group": "string",
             },
             semantic_validator_key="statistical.named_test",
             reference_resolver_key="workflow.source_columns",
@@ -2242,6 +2302,7 @@ WORKFLOW_STEP_SPEC_CONTRACTS: WorkflowStepContractRegistry = WorkflowStepContrac
             ),
             "context_columns": "Extra columns to carry into the model context.",
             "multiple_imputations": _multiple_imputation_sentence(),
+            "by_group": _by_group_sentence(),
         },
         required=("model_family", "branches"),
         field_types={
@@ -2264,6 +2325,7 @@ WORKFLOW_STEP_SPEC_CONTRACTS: WorkflowStepContractRegistry = WorkflowStepContrac
             "polynomials": "list",
             "context_columns": "list",
             "multiple_imputations": "integer",
+            "by_group": "string",
         },
         semantic_validator_key="model.genesis",
         reference_resolver_key="workflow.source_columns",
@@ -2798,6 +2860,8 @@ def _spec_columns(operation_id: str, spec: Mapping[str, Any]) -> set[str]:
         columns.update(
             family_context_columns(model_family_contract(spec.get("model_family")), spec)
         )
+        if isinstance(spec.get("by_group"), str) and spec["by_group"]:
+            columns.add(spec["by_group"])
         for branch in spec.get("branches", []) or []:
             if isinstance(branch, Mapping):
                 if branch.get("outcome"):
@@ -2826,6 +2890,8 @@ def _spec_columns(operation_id: str, spec: Mapping[str, Any]) -> set[str]:
             columns.update(str(item) for item in spec.get("inputs", []) or [])
     elif extractor_key == "statistical.named_test":
         columns.update(str(item) for item in spec.get("analysis_columns", []) or [])
+        if isinstance(spec.get("by_group"), str) and spec["by_group"]:
+            columns.add(spec["by_group"])
         for column in (spec.get("reference_means") or {}):
             columns.add(str(column))
         for pair in spec.get("paired_columns", []) or []:
@@ -3154,6 +3220,14 @@ def _validate_step_spec(operation_id: str, spec: Mapping[str, Any]) -> None:
                 "model.white_test branch_id must be a non-empty string"
             )
     elif validator_key == "statistical.named_test":
+        by_group = spec.get("by_group")
+        if by_group is not None:
+            if not isinstance(by_group, str) or not by_group.strip():
+                raise OperationValidationError(f"{operation_id} by_group must name one column")
+            if by_group in (spec.get("analysis_columns") or []):
+                raise OperationValidationError(
+                    f"{operation_id} by_group cannot also be an analysis column"
+                )
         analysis_columns = spec.get("analysis_columns")
         if not isinstance(analysis_columns, list) or not analysis_columns:
             raise OperationValidationError(

@@ -46,10 +46,9 @@ def build_regression_table(
         model_views.append(
             {
                 "id": model_key,
-                "label": (
-                    model_result.get("model_label")
-                    or model_result.get("model_type")
-                    or model_key
+                "label": _group_label(
+                    model_result.get("model_label") or model_result.get("model_type") or model_key,
+                    model_result.get("by_group"),
                 ),
                 "model_type": model_result.get("model_type"),
                 "nobs": model_result.get("nobs"),
@@ -60,6 +59,7 @@ def build_regression_table(
                 # precision the analysis did not have.
                 "survey_design": _design_summary(model_result.get("survey_design")),
                 "multiple_imputation": model_result.get("multiple_imputation"),
+                "by_group": model_result.get("by_group"),
             }
         )
         coefficients = model_result.get("coefficients", {})
@@ -323,6 +323,13 @@ def _build_facts_list(summary: dict[str, Any]) -> list[str]:
         names = ", ".join(e["variable"] for e in encoded)
         facts.append(f"Categorical variable(s): {names} (dummy-coded in model)")
     return facts
+
+
+def _group_label(label: str, by_group: Any) -> str:
+    """A by-group result's column header says which group it is."""
+    if isinstance(by_group, Mapping) and by_group.get("column"):
+        return f"{label} [{by_group['column']} = {by_group.get('key')}]"
+    return label
 
 
 def _mice_imputation_fact(imputation: dict[str, Any]) -> str:

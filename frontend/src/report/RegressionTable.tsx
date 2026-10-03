@@ -31,7 +31,47 @@ export type RegressionTablePacket = {
     cutoffs: SignificanceLevels;
     legend: string;
   };
+  /** Present when the columns are the groups of one by-group run. */
+  byGroup?: string[];
 };
+
+type DifferenceTest = { label?: string; statistic?: number; df_num?: number; df_den?: number | null; p_value?: number; distribution?: string; status?: string };
+type ByGroupBlock = {
+  column?: string;
+  key?: string;
+  n_groups?: number;
+  not_estimable?: Array<{ key?: string; nobs?: number; reason?: string }>;
+  difference_tests?: { status?: string; reason?: string; reference_group?: string; tests?: DifferenceTest[] };
+};
+
+/** What a reader of separate groups' columns must also see: the groups left out, and the tests of a difference. */
+function byGroupNotes(modelResults: readonly ModelResult[]): string[] | null {
+  const block = (modelResults.find((model) => (model as { by_group?: unknown }).by_group) as { by_group?: ByGroupBlock } | undefined)?.by_group;
+  if (!block?.column) return null;
+  const notes = [
+    `Estimated separately for each group of ${block.column} (${modelResults.length} of ${block.n_groups ?? modelResults.length} groups). Columns side by side are not a test of a difference.`,
+  ];
+  for (const item of block.not_estimable ?? []) {
+    notes.push(`Not estimated: ${block.column} = ${item.key} (${item.nobs} rows): ${item.reason}`);
+  }
+  const differences = block.difference_tests;
+  if (differences?.status === "estimated") {
+    for (const test of differences.tests ?? []) {
+      if (test.statistic === undefined) continue;
+      const df = test.distribution === "F" ? `F(${test.df_num}, ${test.df_den})` : `χ²(${test.df_num})`;
+      notes.push(`Group difference — ${test.label}: ${df} = ${formatEstimate(test.statistic)}, p ${formatPValue(test.p_value).startsWith("<") ? "" : "= "}${formatPValue(test.p_value)}`);
+    }
+  } else if (differences?.reason) {
+    notes.push(`Group-difference test not available: ${differences.reason}`);
+  }
+  return notes;
+}
+
+/** A by-group result's header names its group: "ols [language = English]". */
+function groupedLabel(label: string, model: object): string {
+  const block = (model as { by_group?: { column?: string; key?: string } }).by_group;
+  return block?.column ? `${label} [${block.column} = ${block.key ?? ""}]` : label;
+}
 
 export function buildRegressionTablePacket(
   modelResults: readonly ModelResult[],
@@ -46,7 +86,7 @@ export function buildRegressionTablePacket(
     const id = model.model_id;
     return {
       id,
-      label: labeledModel.model_label || model.model_type || id,
+      label: groupedLabel(labeledModel.model_label || model.model_type || id, model),
       nobs: model.nobs,
       r_squared: model.r_squared,
     };
@@ -71,10 +111,12 @@ export function buildRegressionTablePacket(
     });
   });
 
+  const byGroup = byGroupNotes(modelResults);
   return {
     payload_schema: "workbench.regression-table",
     schema_version: 1,
     models,
+    ...(byGroup ? { byGroup } : {}),
     rows: [...rowsByTerm.values()].map((row) => ({
       ...row,
       models: Object.fromEntries(
@@ -167,6 +209,13 @@ export function RegressionTable({
           ))}
         </tbody>
       </table>
+      {packet.byGroup ? (
+        <div data-testid="regression-by-group" role="note" style={{ fontSize: 11, color: "var(--label-secondary)", marginTop: 6 }}>
+          {packet.byGroup.map((note) => (
+            <div key={note}>{note}</div>
+          ))}
+        </div>
+      ) : null}
     </section>
   );
 }

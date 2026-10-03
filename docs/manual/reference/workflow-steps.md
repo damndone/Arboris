@@ -421,6 +421,7 @@ Estimate one or more models from the source table.
 | `polynomials` |  | Per branch: list of {column, degree}. degree 2 adds the square, 3 adds square and cube, and so on; generated columns are named {column}_pow2, {column}_pow3. The linear term is not added implicitly — list the column in `predictors` as well when the model should contain it. |
 | `context_columns` |  | Extra columns to carry into the model context. |
 | `multiple_imputations` |  | Optional m (2-100) for multiple imputation: missing values in the outcome and predictors are imputed m times by chained equations (MICE), the model is fitted to each completed dataset, and the estimates are pooled by Rubin's rules with Barnard-Rubin degrees of freedom. Offered for: ols with covariance unadjusted, robust or clustered; logit (its model-based covariance). Refused with a sampling design. Pooled results report no R-squared or residual diagnostics, and joint tests on them are not available yet. |
+| `by_group` |  | Optional grouping column: the model is estimated separately within each group (a missing value is a group of its own; at most 50 groups; under a sampling design each group is a domain of the full design). Each group gets its own result; a group below the check library's sample minimum is listed as not estimable. The run also tests whether the groups' coefficients differ (Wald on the fully interacted pooled model): cite that test before saying groups differ. Offered for: logit, ols, poisson, probit. |
 
 ## `model.joint_f_test`
 

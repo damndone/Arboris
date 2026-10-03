@@ -162,7 +162,25 @@ def wald_test(kernel: Mapping[str, Any], constraints: Sequence[Mapping[str, Any]
         )
     gap = restriction @ beta - target
     chi2 = float(gap @ np.linalg.solve(middle, gap))
-    if _uses_t(kernel):
+    adjustment = None
+    if _uses_t(kernel) and kernel.get("df_method") == "design" and q > 1:
+        # Under a sampling design the Wald statistic is referred to the
+        # Korn-Graubard (1990) adjusted F: (d - q + 1) / (d q) W on
+        # (q, d - q + 1) -- Stata's default after svy. For q = 1 it equals the
+        # unadjusted F.
+        design_df = float(kernel["df_resid"])
+        df_den = design_df - q + 1
+        if df_den <= 0:
+            raise PostestimationRefusal(
+                "TOO_FEW_DESIGN_DF",
+                f"{q} constraints need more than {design_df:g} design degrees of freedom for the "
+                "adjusted F test",
+            )
+        statistic = chi2 * df_den / (design_df * q)
+        p_value = float(stats.f.sf(statistic, q, df_den))
+        distribution = "F"
+        adjustment = "korn_graubard_adjusted_f"
+    elif _uses_t(kernel):
         df_den = float(kernel["df_resid"])
         statistic = chi2 / q
         p_value = float(stats.f.sf(statistic, q, df_den))
@@ -181,6 +199,7 @@ def wald_test(kernel: Mapping[str, Any], constraints: Sequence[Mapping[str, Any]
         "df_num": q,
         "df_den": df_den,
         "p_value": p_value,
+        **({"adjustment": adjustment} if adjustment else {}),
     }
 
 

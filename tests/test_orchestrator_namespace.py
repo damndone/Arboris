@@ -43,7 +43,7 @@ BASELINE_NAMES = frozenset({
     'create_run', 'datetime', 'detect_y_kind', 'dpf', 'export_pdf',
     'export_xlsx', 'has_blockers', 'infer_schema', 'infer_variable_roles',
     'ingest_files', 'json', 'load_config', 'normalize_column_name',
-    'parse_imputation_request', 'pd', 'profile_frame', 'read_json',
+    'parse_by_group_request', 'parse_imputation_request', 'pd', 'profile_frame', 'read_json',
     'register_artifact', 'render_html_report', 'run_batch_y_workflow',
     'run_cs_did', 'run_dcdh', 'run_did', 'run_event_study',
     'run_glm', 'run_iv_2sls', 'run_logit', 'run_mice_imputation',

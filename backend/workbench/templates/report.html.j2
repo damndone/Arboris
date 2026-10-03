@@ -161,6 +161,10 @@
           {% endfor %}
         </tbody>
       </table>
+      {% set grouped = view_model.regression_table.models | selectattr("by_group") | list %}
+      {% if grouped %}
+      <p>Estimated separately for each group of {{ grouped[0].by_group.column }} ({{ grouped | length }} of {{ grouped[0].by_group.n_groups }} groups). Coefficients side by side are not a test of a difference between groups.{% for item in grouped[0].by_group.not_estimable or [] %} Group {{ item.key }} ({{ item.nobs }} rows) was not estimated: {{ item.reason }}{% endfor %}</p>
+      {% endif %}
       {% for model in view_model.regression_table.models if model.multiple_imputation %}
       <p>{{ model.label }} ({{ model.id }}): estimates pooled from m = {{ model.multiple_imputation.m }} imputed datasets by Rubin's rules, with Barnard–Rubin degrees of freedom (df) per coefficient; FMI is the fraction of missing information. Fit statistics such as R² describe a single imputed dataset and are not reported.</p>
       {% endfor %}

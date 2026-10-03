@@ -1723,6 +1723,7 @@ def test_global_coefficient_inspector_returns_requested_persisted_intervals(
                     "cluster_entity": None,
                 },
                 "multiple_imputation": None,  # not a pooled result
+                "by_group": None,  # not a by-group result
                 "coefficients": [
                     {
                         "term": "share",
@@ -1898,6 +1899,7 @@ def test_selected_model_result_summary_keeps_public_fit_and_interval_facts(
             "covariance_executed": None,  # no kernel in this fixture
             "inference_suppressed": None,
             "multiple_imputation": None,  # not a pooled result
+            "by_group": None,  # not a by-group result
             "coefficients": [{"term": "share", "estimate": 1.2, "std_error": None, "p_value": None, "ci_lower": 0.61, "ci_upper": 1.79}],
         }
     ]

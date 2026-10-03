@@ -244,6 +244,7 @@ async def run_endpoint(
     sheet_name: str = Form(""),
     transpose: str = Form("false"),
     imputation: str = Form(""),
+    by_group: str = Form(""),
     entity_col: str = Form(""),
     time_col: str = Form(""),
     covariance: str = Form(""),
@@ -318,6 +319,7 @@ async def run_endpoint(
         form: dict[str, Any] = {
             "mode": mode, "model_type": model_type, "y": y, "x": x,
             "sheet_name": sheet_name, "transpose": transpose, "imputation": imputation,
+            **({"by_group": by_group} if by_group.strip() else {}),
             "entity_col": entity_col, "time_col": time_col, "covariance": covariance,
             "prediction_model_type": prediction_model_type,
             "prediction_cv_folds": prediction_cv_folds,

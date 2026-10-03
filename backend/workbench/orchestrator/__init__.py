@@ -192,6 +192,7 @@ def run_workflow(
     x: list[str],
     model_type: str = "auto",
     imputation: dict | None = None,
+    by_group: dict | None = None,
     statistical_tests: dict | None = None,
     entity_col: str = "",
     time_col: str = "",
@@ -293,6 +294,7 @@ def run_workflow(
         "y": y,
         "x": ",".join(x),
         "imputation": json.dumps(imputation) if imputation is not None else "",
+        **({"by_group": json.dumps(by_group)} if by_group is not None else {}),
         "prediction_model_type": prediction_model_type,
         "prediction_cv_folds": str(prediction_cv_folds),
         "prediction_sampling_method": prediction_sampling_method,
@@ -406,6 +408,7 @@ def run_workflow(
             started_at,
             model_type=model_type,
             imputation=imputation,
+            by_group=by_group,
             statistical_tests=statistical_tests,
             entity_col=entity_col,
             time_col=time_col,
@@ -546,6 +549,17 @@ def parse_imputation_request(raw: str | dict | None) -> dict | None:
     return parsed
 
 
+def parse_by_group_request(raw: str | dict | None) -> dict | None:
+    """``{"column": <grouping column>}``; empty means no by-group execution."""
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return None
+    parsed = json.loads(raw) if isinstance(raw, str) else raw
+    if not isinstance(parsed, dict) or set(parsed) - {"column"} or not isinstance(parsed.get("column"), str) \
+            or not parsed["column"].strip():
+        raise ValueError('by_group must be a JSON object {"column": <grouping column>}')
+    return {"column": parsed["column"].strip()}
+
+
 def run_batch_y_workflow(
     project_root: Path,
     input_files: list[Path],
@@ -615,6 +629,7 @@ def _run_workflow(
     sheet_name: str | None = None,
     transpose: bool = False,
     imputation: dict | None = None,
+    by_group: dict | None = None,
     statistical_tests: dict | None = None,
     entity_col: str = "",
     time_col: str = "",
@@ -711,6 +726,7 @@ def _run_workflow(
     ctx.artifacts["_model_type"] = model_type
     ctx.artifacts["_started_at"] = started_at
     ctx.artifacts["_imputation_request"] = imputation
+    ctx.artifacts["_by_group_request"] = parse_by_group_request(by_group)
     ctx.artifacts["_statistical_tests_request"] = statistical_tests
     ctx.artifacts["_entity_col"] = entity_col
     ctx.artifacts["_time_col"] = time_col
@@ -775,6 +791,8 @@ def _run_workflow(
         "y": y,
         "x": list(x),
         "imputation": imputation,
+        # Only when set: an absent key keeps every other run's node hash.
+        **({"by_group": by_group} if by_group is not None else {}),
         "prediction_model_type": prediction_model_type,
         "prediction_cv_folds": prediction_cv_folds,
         "prediction_sampling_method": prediction_sampling_method,

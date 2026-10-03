@@ -31,6 +31,7 @@ from .vocabulary import (
     ARTIFACT_VOCABULARY_VERSION,
     CAPABILITY_ARTIFACT_VOCABULARY_VERSION,
     DECLARED_ARTIFACT_TYPES,
+    by_group_artifact_types,
     capability_artifact_types,
 )
 from .workflow_artifacts import (
@@ -41,6 +42,7 @@ from .workflow_artifacts import (
 from ..workflow_contracts import (
     GENESIS_RUN_LEVEL_FIELDS,
     MODEL_FAMILY_SPEC_FIELDS,
+    NOTEBOOK_GENESIS_MODEL_PARAMS,
     OperationValidationError as WorkflowOperationValidationError,
     family_context_columns,
     model_family_contract,
@@ -2170,6 +2172,24 @@ class NotebookPlanningAgent:
                     family_contract = None
                     requires_x = recipe_contract.requires_nonempty_predictors
                 else:
+                    try:
+                        declared_family = model_family_contract(model_type)
+                    except WorkflowOperationValidationError:
+                        declared_family = None
+                    allowed_params = set(NOTEBOOK_GENESIS_MODEL_PARAMS) | set(
+                        declared_family.context_spec_fields if declared_family is not None else ()
+                    )
+                    unknown_params = sorted(set(model_params) - allowed_params)
+                    if unknown_params:
+                        # The same set materialization admits: refusing here lets
+                        # the planner fix the option instead of the user meeting a
+                        # failure after confirming it.
+                        raise NotebookPlanningContractError(
+                            "model.genesis model_params contains unsupported field(s): "
+                            + ", ".join(unknown_params)
+                            + ". A single-model option estimates one model from y and x; "
+                            "propose one option per model, or a composed workflow for several."
+                        )
                     y = model_params.get("y")
                     if not isinstance(y, str) or not y:
                         raise NotebookPlanningContractError(
@@ -2398,6 +2418,11 @@ class NotebookPlanningAgent:
                 if operation_id == "operation.multi_step"
                 else self._published_artifact_types(submission.capability_id)
             )
+            by_group_artifacts = by_group_artifact_types(operation_id, dict(changes))
+            if by_group_artifacts is not None:
+                # A by-group run writes one result per group and the collection
+                # listing them, not the family's single primary result.
+                published_artifacts = dict(by_group_artifacts)
             canonical_expected_artifacts = submission.expected_artifacts
             if published_artifacts:
                 # Artifact ids and types are server output.  The provider may

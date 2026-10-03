@@ -34,6 +34,7 @@ from ..trace import TraceWriter
 from ..workflow_contracts import (
     GENESIS_RUN_LEVEL_FIELDS,
     MODEL_FAMILY_SPEC_FIELDS,
+    NOTEBOOK_GENESIS_MODEL_PARAMS,
     OperationValidationError,
     family_context_columns,
     genesis_run_params,
@@ -658,19 +659,7 @@ class NotebookOptionMaterializer:
         allowed_table = {"sheet_name", "transpose"}
         if set(table_params) - allowed_table:
             raise _fail("genesis materialization received unknown table params")
-        base_allowed_model = {
-            "model_type",
-            "y",
-            "x",
-            "focal_x",
-            "covariance",
-            "model_options",
-            "entity_col",
-            "time_col",
-            "cohort_col",
-            "treatment_path_col",
-            *GENESIS_RUN_LEVEL_FIELDS,
-        }
+        base_allowed_model = set(NOTEBOOK_GENESIS_MODEL_PARAMS)
         model_type = model_params.get("model_type")
         if not isinstance(model_type, str) or not model_type:
             raise _fail("genesis model_params requires model_type")
