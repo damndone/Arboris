@@ -73,3 +73,58 @@ def test_a_logit_that_cannot_be_fitted_names_the_separation(tmp_path) -> None:
     assert outcome["status"] == "failed"
     messages = [issue["message"] for issue in read_json(run_root / "errors.json")["issues"]]
     assert any("separated by x1" in message and "Firth" in message for message in messages), messages
+
+
+IV = ROOT / "examples" / "datasets" / "iv_returns_to_schooling.csv"
+
+
+@pytest.mark.parametrize(("case", "instruments"), [("one", ["dist"]), ("two", ["dist", "momeduc"])])
+@pytest.mark.parametrize(("covariance", "kind"), [("robust", "robust"), ("unadjusted", "homoskedastic")])
+def test_the_anderson_rubin_set_agrees_with_r(tmp_path, case, instruments, covariance, kind) -> None:
+    import json
+
+    from workbench.checks import build_context
+    from workbench.checks.iv_checks import _arrays, anderson_rubin_homoskedastic, anderson_rubin_robust
+
+    oracle = json.loads((ROOT / "tests" / "fixtures" / "checks" / "oracle.json").read_text())["anderson_rubin"][case]
+    outcome, run_root = _run(
+        tmp_path, f"iv-{case}-{covariance}", IV, model_type="iv_2sls", y="wage", x=["age"],
+        iv_endog=["educ"], iv_instruments=instruments, covariance=covariance,
+    )
+    assert outcome["status"] == "completed"
+    packet = read_json(run_root / "model_results" / "iv_2sls_1.json")
+    # The AR set does not depend on the run beyond its data; compute both
+    # versions from the fitted arrays of a direct fit of the same model.
+    from linearmodels.iv import IV2SLS
+    import pandas as pd
+
+    frame = pd.read_csv(IV)
+    formula = f"wage ~ 1 + age + [educ ~ {' + '.join(instruments)}]"
+    fitted = IV2SLS.from_formula(formula, data=frame).fit(cov_type=covariance)
+    arrays = _arrays(fitted)
+    if kind == "homoskedastic":
+        region = anderson_rubin_homoskedastic(arrays["y"], arrays["x"], arrays["z"], arrays["w"])
+    else:
+        region = anderson_rubin_robust(
+            arrays["y"], arrays["x"], arrays["z"], arrays["w"],
+            float(fitted.params["educ"]), float(fitted.std_errors["educ"]),
+        )
+    assert region["kind"] == "interval"
+    assert [region["lower"], region["upper"]] == pytest.approx(oracle[kind], abs=1e-7)
+    assert packet["coefficients"]["educ"]["estimate"] == pytest.approx(float(fitted.params["educ"]), abs=5e-7)
+
+
+def test_a_moderately_strong_instrument_gets_a_caution_and_the_anderson_rubin_set(tmp_path) -> None:
+    import json
+
+    oracle = json.loads((ROOT / "tests" / "fixtures" / "checks" / "oracle.json").read_text())["anderson_rubin"]["one"]
+    outcome, run_root = _run(
+        tmp_path, "iv-weakish", IV, model_type="iv_2sls", y="wage", x=["age"], iv_endog=["educ"], iv_instruments=["dist"],
+    )
+    checks = _checks(run_root, "iv_2sls_1")
+    strength = checks["iv.first_stage_strength"]
+    assert strength["status"] == "caution" and 10 < strength["evidence"]["first_stage_f"] < 104.7
+    region = strength["evidence"]["anderson_rubin_95"]
+    assert [region["lower"], region["upper"]] == pytest.approx(oracle["robust"], abs=1e-7)
+    assert "Anderson-Rubin" in strength["summary"]
+    assert checks["iv.exclusion_restriction"]["status"] == "needs_reason"

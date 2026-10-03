@@ -45,10 +45,13 @@ def build_iv_diagnostics(fitted: Any, n_endog: int, n_instruments: int) -> dict:
         "statistic": wh_stat,
         "pvalue": wh_p,
         "verdict": "endogenous" if wh_p < 0.05 else "exogenous",
+        # v1.8.10: a post-fit test may inform inference, not the choice of
+        # specification (design section 4.3), and not rejecting is not proof.
         "message": (
-            "Endogeneity confirmed (p < 0.05); IV is warranted."
+            "The Wu-Hausman test rejects exogeneity of the regressor (p < 0.05)."
             if wh_p < 0.05 else
-            "No endogeneity detected (p >= 0.05); OLS is consistent and more efficient."
+            "The Wu-Hausman test does not reject exogeneity (p >= 0.05); this does not show the "
+            "regressor is exogenous."
         ),
     }
 

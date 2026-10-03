@@ -13,6 +13,7 @@ from typing import Any
 from .context import CheckContext
 from .contracts import CheckOutcome, CheckSpec
 from .design_checks import COLLINEARITY, ROWS_PER_PARAMETER
+from .iv_checks import EXCLUSION_RESTRICTION, FIRST_STAGE_STRENGTH
 from .fit_checks import (
     CLUSTER_COUNT,
     EVENTS_PER_VARIABLE,
@@ -26,11 +27,13 @@ CHECKS: tuple[CheckSpec, ...] = (
     ROWS_PER_PARAMETER,
     COLLINEARITY,
     CLUSTER_COUNT,
+    FIRST_STAGE_STRENGTH,
     EVENTS_PER_VARIABLE,
     PERFECT_FIT,
     SEPARATION,
     HETEROSKEDASTICITY,
     OVERDISPERSION,
+    EXCLUSION_RESTRICTION,
 )
 
 

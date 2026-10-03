@@ -18,13 +18,18 @@
 # Schwendinger), the linear-programming method of Konis (2007); independent.
 # Overdispersion: the Cameron-Trivedi auxiliary regression exactly as
 # AER::dispersiontest(trafo = 1) writes it, run with R's lm.
+# Anderson-Rubin: ivmodel::AR.test for the homoskedastic set (independent);
+# the HC0 robust set is inverted here with sandwich + uniroot (independent
+# code, same definition: HC0 Wald of the instruments in y - b x on [W, Z]).
 
 source("tests/fixtures/_r_oracle_env.R")
-PKGS <- c("car", "detectseparation", "jsonlite")
+PKGS <- c("car", "detectseparation", "ivmodel", "sandwich", "jsonlite")
 require_oracle_packages(PKGS)
 suppressMessages({
   library(car)
   library(detectseparation)
+  library(ivmodel)
+  library(sandwich)
   library(jsonlite)
 })
 
@@ -85,6 +90,35 @@ cameron_trivedi <- function(outcome) {
   list(alpha = unname(coef(aux)[1]), t = t, p_value = pt(t, df.residual(aux), lower.tail = FALSE))
 }
 
+iv <- read.csv("examples/datasets/iv_returns_to_schooling.csv")
+ar_case <- function(instruments) {
+  Z <- as.matrix(iv[, instruments, drop = FALSE])
+  m <- ivmodel(Y = iv$wage, D = iv$educ, Z = Z, X = as.matrix(iv[, "age", drop = FALSE]))
+  homo <- AR.test(m)$ci
+  W <- cbind(1, iv$age)
+  R <- cbind(W, Z)
+  q <- ncol(Z)
+  crit <- qchisq(0.95, q)
+  stat <- function(b) {
+    fit <- lm.fit(R, iv$wage - b * iv$educ)
+    e <- fit$residuals
+    bread <- solve(crossprod(R))
+    v <- bread %*% crossprod(R * e) %*% bread
+    idx <- (ncol(W) + 1):ncol(R)
+    as.numeric(t(fit$coefficients[idx]) %*% solve(v[idx, idx]) %*% fit$coefficients[idx])
+  }
+  bhat <- {
+    xhat <- lm.fit(cbind(W, Z), iv$educ)$fitted.values
+    coef(lm(iv$wage ~ xhat + iv$age))[2]
+  }
+  grid <- seq(bhat - 5, bhat + 5, length.out = 4001)
+  inside <- vapply(grid, function(b) stat(b) <= crit, logical(1))
+  idx <- which(diff(inside) != 0)
+  bounds <- vapply(idx, function(i) uniroot(function(b) stat(b) - crit, c(grid[i], grid[i + 1]), tol = 1e-12)$root, numeric(1))
+  list(homoskedastic = unname(homo[1, ]), robust = bounds)
+}
+anderson_rubin <- list(one = ar_case("dist"), two = ar_case(c("dist", "momeduc")))
+
 cross <- read.csv("examples/datasets/cross_section.csv")
 oracle <- list(
   generator = "tests/fixtures/checks/generate_oracle.R",
@@ -93,7 +127,8 @@ oracle <- list(
   cross_section_region = gvif(lm(wage ~ education + experience + region, cross)),
   factor_frame = gvif(lm(y ~ x1 + x2 + x3 + x4 + grp, d)),
   separation = separation,
-  overdispersion = list(over = cameron_trivedi("over"), equi = cameron_trivedi("equi"))
+  overdispersion = list(over = cameron_trivedi("over"), equi = cameron_trivedi("equi")),
+  anderson_rubin = anderson_rubin
 )
 write_json(oracle, "tests/fixtures/checks/oracle.json", auto_unbox = TRUE, digits = NA, pretty = TRUE)
 cat("wrote tests/fixtures/checks/oracle.json\n")
