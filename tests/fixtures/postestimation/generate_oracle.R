@@ -62,6 +62,8 @@ util_b <- 0.2 + 0.7 * x1 - 0.3 * x2
 util_c <- -0.1 - 0.5 * x1 + 0.6 * x3
 u <- cbind(0, util_b, util_c) + matrix(-log(-log(runif(3 * n))), n, 3)
 d$ym <- c("a", "b", "c")[max.col(u)]
+# Cluster labels for the clustered-OLS case (16 clusters), drawn last.
+d$g <- sample(sprintf("c%02d", 1:16), n, replace = TRUE)
 write.csv(d, "tests/fixtures/postestimation/data.csv", row.names = FALSE)
 
 wald <- function(fit, hyp, test, vcov. = NULL) {
@@ -104,6 +106,25 @@ margins_case <- function(fit, vcov. = NULL) {
     average = pick(avg_slopes(fit, variables = c("x1", "x2"), vcov = v)),
     at_means = pick(slopes(fit, variables = c("x1", "x2"), newdata = "mean", vcov = v))
   )
+}
+
+# Inference engine v2: robust OLS tests against t(N - K) and F(q, N - K);
+# clustered OLS against t(G - 1) and F(q, G - 1), Stata's `regress` rules.
+coef_tests <- function(fit, vcov., df) {
+  ct <- coeftest(fit, vcov. = vcov., df = df)
+  ci <- coefci(fit, vcov. = vcov., df = df)
+  setNames(lapply(c("x1", "x2", "x3"), function(term) list(
+    estimate = ct[term, 1], std_error = ct[term, 2], statistic = ct[term, 3], p_value = ct[term, 4],
+    ci = unname(ci[term, ])
+  )), c("x1", "x2", "x3"))
+}
+
+cluster_wald <- function(fit, hyp, vcov., df_den) {
+  h <- linearHypothesis(fit, hyp, test = "Chisq", vcov. = vcov.)
+  q <- h[2, "Df"]
+  stat <- h[2, "Chisq"] / q
+  list(distribution = "F", statistic = stat, df_num = q, df_den = df_den,
+       p_value = pf(stat, q, df_den, lower.tail = FALSE))
 }
 
 family_case <- function(full, restricted, test, vcov. = NULL) {
@@ -203,9 +224,21 @@ oracle <- list(
   restricted_model = "outcome ~ x1",
   families = list(
     ols = family_case(ols, ols_r, "F"),
-    # Workbench reports HC1 robust inference on the normal scale, so the
-    # oracle's robust Wald is chi2 with the same HC1 covariance.
-    ols_robust = family_case(ols, NULL, "Chisq", vcovHC(ols, type = "HC1")),
+    # HC1 with t(N - K) and F(q, N - K): Stata's `regress, vce(robust)`.
+    ols_robust = c(family_case(ols, NULL, "F", vcovHC(ols, type = "HC1")),
+                   list(coef_tests = coef_tests(ols, vcovHC(ols, type = "HC1"), df.residual(ols)))),
+    # CR1 (G/(G-1) * (N-1)/(N-K)) with t(G - 1) and F(q, G - 1): Stata's
+    # `regress, vce(cluster g)`; sandwich's vcovCL type HC1 is the same matrix.
+    ols_cluster = local({
+      v <- vcovCL(ols, cluster = ~g, type = "HC1")
+      G <- length(unique(d$g))
+      list(
+        n_clusters = G,
+        wald_joint = cluster_wald(ols, H_JOINT, v, G - 1),
+        wald_shifted = cluster_wald(ols, H_SHIFTED, v, G - 1),
+        coef_tests = coef_tests(ols, v, G - 1)
+      )
+    }),
     logit = family_case(logit, logit_r, "Chisq"),
     probit = family_case(probit, probit_r, "Chisq", probit_oim_vcov(probit)),
     poisson = family_case(poisson, poisson_r, "Chisq"),

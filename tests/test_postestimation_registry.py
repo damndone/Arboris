@@ -29,6 +29,7 @@ ORACLE = json.loads((FIXTURES / "oracle.json").read_text())
 FAMILIES = {
     "ols": ("ols", "y", {"covariance": "unadjusted"}, ""),
     "ols_robust": ("ols", "y", {}, ""),
+    "ols_cluster": ("ols", "y", {"covariance": "clustered", "entity_col": "g"}, ""),
     "logit": ("logit", "yb", {}, ""),
     "probit": ("probit", "yb", {}, ""),
     "poisson": ("poisson", "yc", {}, ""),

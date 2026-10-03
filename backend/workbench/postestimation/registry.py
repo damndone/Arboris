@@ -66,10 +66,13 @@ OPERATIONS: Mapping[str, OperationSpec] = {
 
 #: (model_type, operation) -> oracle cases in ORACLE_FIXTURE that validate it.
 #: A case is "<family key>.<result key>"; `ols_robust` is the OLS fit with
-#: HC1 covariance, validated separately because its reference distribution
-#: differs.
+#: HC1 covariance and `ols_cluster` the CR1 fit, validated separately because
+#: their covariances and degrees of freedom differ.
 VALIDATED: Mapping[tuple[str, str], tuple[str, ...]] = {
-    ("ols", "wald"): ("ols.wald_joint", "ols.wald_shifted", "ols_robust.wald_joint", "ols_robust.wald_shifted"),
+    ("ols", "wald"): (
+        "ols.wald_joint", "ols.wald_shifted", "ols_robust.wald_joint", "ols_robust.wald_shifted",
+        "ols_cluster.wald_joint", "ols_cluster.wald_shifted",
+    ),
     ("ols", "lincom"): ("ols.lincom", "ols_robust.lincom"),
     ("ols", "nlcom"): ("ols.nlcom", "ols_robust.nlcom"),
     ("ols", "lr"): ("ols.lr_drop_x2_x3",),

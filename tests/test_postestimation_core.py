@@ -109,10 +109,13 @@ def test_lr_agrees_with_lmtest(kernels, family) -> None:
 
 
 def test_the_reference_distribution_follows_the_kernel(kernels) -> None:
-    """Same data, same hypothesis: F for the classical OLS fit, chi2 for the
-    HC1 fit that reports z p-values -- each matches the model's own p-values."""
+    """F for OLS under every covariance (inference engine v2), chi2 for the
+    maximum-likelihood families -- each matches the model's own p-values."""
     assert wald_test(kernels["ols"], JOINT)["distribution"] == "F"
-    assert wald_test(kernels["ols_robust"], JOINT)["distribution"] == "chi2"
+    assert wald_test(kernels["ols_robust"], JOINT)["distribution"] == "F"
+    assert wald_test(kernels["logit"], JOINT)["distribution"] == "chi2"
+    legacy = dict(kernels["ols_robust"], reference_distribution="z", df_method="asymptotic")
+    assert wald_test(legacy, JOINT)["distribution"] == "chi2"
     assert lincom(kernels["ols"], {"x1": 1})["distribution"] == "t"
     assert lincom(kernels["logit"], {"x1": 1})["distribution"] == "z"
 
@@ -227,3 +230,21 @@ def test_a_joint_test_over_300_parameters_stays_within_budget() -> None:
     lincom(kernel, dict.fromkeys(names, 1.0))
     assert time.perf_counter() - started < 0.5
     assert result["df_num"] == k
+
+
+def test_a_well_posed_test_is_not_refused_because_its_variances_are_small() -> None:
+    """Found when the joint F test moved onto the kernel: a rank check with an
+    absolute tolerance called a healthy covariance singular once the
+    coefficients' variances were below 1e-10."""
+    import numpy as np
+
+    from workbench.contracts.model.inference_kernel import build_inference_kernel
+
+    scale = 1e-7
+    kernel = build_inference_kernel(
+        model_id="ols_1", model_type="ols", param_names=["Intercept", "a", "b"], params=[1.0, 2e-7, -1e-7],
+        vcov=np.array([[4.0, 0.5, 0.1], [0.5, 2.0, 0.3], [0.1, 0.3, 1.5]]) * scale**2,
+        reference_distribution="t", df_resid=100.0, loglik=-1.0, nobs=103, covariance_estimator="HC1",
+    )
+    result = wald_test(kernel, [{"terms": {"a": 1}, "value": 0}, {"terms": {"b": 1}, "value": 0}])
+    assert result["df_num"] == 2 and result["statistic"] > 0

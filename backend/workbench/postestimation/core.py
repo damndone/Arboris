@@ -27,7 +27,6 @@ MODEL_BASED_COVARIANCES = frozenset({"nonrobust"})
 
 _NLCOM_FUNCTIONS = {"exp": np.exp, "log": np.log, "sqrt": np.sqrt}
 _MAX_EXPRESSION_LENGTH = 500
-_RANK_TOLERANCE = 1e-10
 
 
 class PostestimationRefusal(ValueError):
@@ -85,6 +84,8 @@ def _identity(kernel: Mapping[str, Any]) -> dict[str, Any]:
         "model_type": kernel["model_type"],
         "covariance_estimator": kernel.get("covariance_estimator"),
         "nobs": kernel.get("nobs"),
+        "df_method": kernel.get("df_method"),
+        "n_clusters": kernel.get("n_clusters"),
     }
 
 
@@ -146,13 +147,15 @@ def wald_test(kernel: Mapping[str, Any], constraints: Sequence[Mapping[str, Any]
     restriction = np.array([[terms.get(name, 0.0) for name in names] for terms, _ in parsed])
     target = np.array([value for _, value in parsed])
     q = len(parsed)
-    if np.linalg.matrix_rank(restriction, tol=_RANK_TOLERANCE) < q:
+    # numpy's default tolerance is relative to the largest singular value, so
+    # the check does not depend on the units the coefficients are measured in.
+    if np.linalg.matrix_rank(restriction) < q:
         raise PostestimationRefusal(
             "DEPENDENT_CONSTRAINTS",
             "the constraints are not linearly independent; remove the redundant ones",
         )
     middle = restriction @ vcov @ restriction.T
-    if np.linalg.matrix_rank(middle, tol=_RANK_TOLERANCE * max(1.0, float(np.abs(middle).max()))) < q:
+    if np.linalg.matrix_rank(middle) < q:
         raise PostestimationRefusal(
             "SINGULAR_COVARIANCE",
             "the covariance of the restricted combinations is singular, so the joint test is not defined",

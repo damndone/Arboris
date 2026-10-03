@@ -41,6 +41,9 @@ VCOV_SCOPES = ("full", "focal", "unavailable")
 #: How the estimation sample was weighted. A likelihood-ratio test is invalid
 #: under sampling (probability) weights, so post-estimation must know.
 WEIGHT_KINDS = ("none", "frequency", "analysis", "sampling")
+#: Where df_resid comes from: residual N - K, clusters G - 1, a survey design's
+#: degrees of freedom, or none (asymptotic, normal / chi-square).
+DF_METHODS = ("residual", "clusters_minus_one", "design", "asymptotic")
 
 _FIELDS = frozenset(
     {
@@ -54,6 +57,8 @@ _FIELDS = frozenset(
         "vcov_scope",
         "reference_distribution",
         "df_resid",
+        "df_method",
+        "n_clusters",
         "loglik",
         "nobs",
         "covariance_estimator",
@@ -127,6 +132,8 @@ def build_inference_kernel(
     covariance_estimator: str | None,
     estimation_sample_fingerprint: str | None = None,
     weights: str = "none",
+    df_method: str | None = None,
+    n_clusters: int | None = None,
     focal_param_names: Sequence[str] | None = None,
     unavailable: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
@@ -204,6 +211,8 @@ def build_inference_kernel(
         "vcov_scope": scope,
         "reference_distribution": reference_distribution,
         "df_resid": _finite_or_none(df_resid),
+        "df_method": df_method or ("residual" if reference_distribution == "t" else "asymptotic"),
+        "n_clusters": n_clusters,
         "loglik": loglik_value,
         "nobs": nobs,
         "covariance_estimator": covariance_estimator,
@@ -232,6 +241,8 @@ def unavailable_inference_kernel(
         "vcov_scope": "unavailable",
         "reference_distribution": None,
         "df_resid": None,
+        "df_method": None,
+        "n_clusters": None,
         "loglik": None,
         "nobs": nobs if isinstance(nobs, int) and not isinstance(nobs, bool) and nobs >= 0 else None,
         "covariance_estimator": None,
@@ -266,6 +277,11 @@ def validate_inference_kernel(kernel: Any) -> None:
             raise InferenceKernelError(
                 f"{interface} must be either provided or explained, not both or neither"
             )
+    if kernel["df_method"] is not None and kernel["df_method"] not in DF_METHODS:
+        raise InferenceKernelError("df_method is not recognised")
+    clusters = kernel["n_clusters"]
+    if clusters is not None and (not isinstance(clusters, int) or isinstance(clusters, bool) or clusters < 2):
+        raise InferenceKernelError("n_clusters must be an integer of at least 2")
     if kernel["weights"] not in WEIGHT_KINDS:
         raise InferenceKernelError("weights is not a recognised weight kind")
     if kernel["vcov_scope"] not in VCOV_SCOPES:
@@ -397,6 +413,18 @@ def kernel_from_fitted(
     if loglik is None:
         loglik = getattr(fitted, "loglikelihood", None)
     reasons = dict(unavailable or {})
+    # The degrees of freedom the reported inference used: a clustered fit
+    # tests against t(G - 1), not t(N - K).
+    clustered = str(getattr(fitted, "cov_type", "") or "") == "cluster"
+    inference_df = _finite_or_none(getattr(fitted, "df_resid_inference", None))
+    df_resid = inference_df if inference_df is not None else _finite_or_none(getattr(fitted, "df_resid", None))
+    if not use_t:
+        df_method = "asymptotic"
+    elif clustered and inference_df is not None:
+        df_method = "clusters_minus_one"
+    else:
+        df_method = "residual"
+    n_clusters = int(inference_df) + 1 if clustered and inference_df is not None else None
     try:
         return build_inference_kernel(
             model_id=model_id,
@@ -405,7 +433,9 @@ def kernel_from_fitted(
             params=flat.tolist(),
             vcov=np.asarray(covariance, dtype=float),
             reference_distribution="t" if use_t else "z",
-            df_resid=_finite_or_none(getattr(fitted, "df_resid", None)),
+            df_resid=df_resid,
+            df_method=df_method,
+            n_clusters=n_clusters,
             loglik=loglik,
             nobs=nobs,
             covariance_estimator=str(getattr(fitted, "cov_type", "") or "") or None,

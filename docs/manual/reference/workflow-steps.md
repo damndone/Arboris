@@ -637,6 +637,62 @@ Run the frozen nonparametric statistical operation through its typed, bounded ad
 | `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
 | `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
 
+## `postestimation.lincom`
+
+Estimate a linear combination of a completed model's coefficients, with its standard error, test and confidence interval. Offered for: logit, multinomial_logit, negative_binomial, ols, ordinal_logit, poisson, probit, the families where it has been checked against a reference implementation; for any other family say it is not offered yet because that check is missing, not because the model cannot. Plan the workflow on the dataset node the model was estimated from (its parent stage, such as stage:cleaned), not on the model node; name the model in model_ref.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `model_ref` | yes | Model node to read, as shown in the graph (`model:logit_1`, or its forest key); the model must belong to `model_run_id`, or to the workflow's target run when that is omitted. |
+| `model_run_id` |  | Run that owns `model_ref`; omit it for the workflow's target run. |
+| `terms` | yes | Object mapping coefficient names to weights. |
+| `constant` |  | Number added to the combination, default 0. |
+| `level` |  | Confidence level, default 0.95. |
+
+## `postestimation.lr`
+
+Likelihood-ratio test of a restricted model nested in a fuller one. Both must be estimated on the same rows with model-based (not robust or clustered) variance. Offered for: logit, ols, poisson, probit, the families where it has been checked against a reference implementation; for any other family say it is not offered yet because that check is missing, not because the model cannot. Plan the workflow on the dataset node the model was estimated from (its parent stage, such as stage:cleaned), not on the model node; name the model in model_ref.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `model_ref` | yes | The fuller model. Model node to read, as shown in the graph (`model:logit_1`, or its forest key); the model must belong to `model_run_id`, or to the workflow's target run when that is omitted. |
+| `model_run_id` |  | Run that owns `model_ref`; omit it for the workflow's target run. |
+| `restricted_model_ref` | yes | The restricted model nested in it. |
+| `restricted_model_run_id` |  | Run that owns the restricted model; omit for the target run. |
+
+## `postestimation.margins`
+
+Marginal effects of regressors on the predicted outcome: averaged over the estimation sample (`at: average`) or at the regressors' means (`at: means`). Offered for: logit, ols, poisson, probit, the families where it has been checked against a reference implementation; for any other family say it is not offered yet because that check is missing, not because the model cannot. Plan the workflow on the dataset node the model was estimated from (its parent stage, such as stage:cleaned), not on the model node; name the model in model_ref.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `model_ref` | yes | Model node to read, as shown in the graph (`model:logit_1`, or its forest key); the model must belong to `model_run_id`, or to the workflow's target run when that is omitted. |
+| `model_run_id` |  | Run that owns `model_ref`; omit it for the workflow's target run. |
+| `variables` | yes | Non-empty list of regressor names. |
+| `at` |  | `average` (default) or `means`. |
+| `level` |  | Confidence level, default 0.95. |
+
+## `postestimation.nlcom`
+
+Estimate a smooth function of a completed model's coefficients by the delta method. Offered for: logit, ols, poisson, probit, the families where it has been checked against a reference implementation; for any other family say it is not offered yet because that check is missing, not because the model cannot. Plan the workflow on the dataset node the model was estimated from (its parent stage, such as stage:cleaned), not on the model node; name the model in model_ref.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `model_ref` | yes | Model node to read, as shown in the graph (`model:logit_1`, or its forest key); the model must belong to `model_run_id`, or to the workflow's target run when that is omitted. |
+| `model_run_id` |  | Run that owns `model_ref`; omit it for the workflow's target run. |
+| `expression` | yes | Arithmetic over coefficient names: + - * / **, exp, log, sqrt; write a name that is not an identifier as b["name"]. Example: x1 / x2. |
+| `level` |  | Confidence level, default 0.95. |
+
+## `postestimation.wald`
+
+Jointly test linear restrictions on a completed model's coefficients (Wald). Reads the model's stored covariance; F or chi-square follows the model's own inference. Offered for: logit, multinomial_logit, negative_binomial, ols, ordinal_logit, poisson, probit, the families where it has been checked against a reference implementation; for any other family say it is not offered yet because that check is missing, not because the model cannot. Plan the workflow on the dataset node the model was estimated from (its parent stage, such as stage:cleaned), not on the model node; name the model in model_ref.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `model_ref` | yes | Model node to read, as shown in the graph (`model:logit_1`, or its forest key); the model must belong to `model_run_id`, or to the workflow's target run when that is omitted. |
+| `model_run_id` |  | Run that owns `model_ref`; omit it for the workflow's target run. |
+| `constraints` | yes | Non-empty list of {terms, value}: `terms` maps coefficient names to weights and the restriction is sum(weight * coefficient) = value. Joint significance of x1 and x2 is [{terms: {x1: 1}, value: 0}, {terms: {x2: 1}, value: 0}]. |
+
 ## `power_analysis.sensitivity_grid`
 
 Run the frozen power_analysis statistical operation through its typed, bounded adapter.

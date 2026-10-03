@@ -4073,10 +4073,36 @@ def _bounded_persisted_model_facts(
                 "model_id": model_id,
                 "r_squared": _public_stat_number(result.get("r_squared")),
                 "r_squared_adj": _public_stat_number(result.get("r_squared_adj")),
+                "inference": _bounded_inference(result),
                 "coefficients": rows,
             }
         )
     return projected
+
+
+_INFERENCE_FIELDS = (
+    "covariance", "covariance_estimator", "inference_distribution", "effective_df", "df_method",
+    "cluster_count", "inference_version",
+)
+
+
+def _bounded_inference(result: Mapping[str, Any]) -> dict[str, Any] | None:
+    """How the model's standard errors and p-values were computed.
+
+    A result without `inference_version` predates inference engine v2; with a
+    robust or clustered covariance its p-values used the normal distribution,
+    and the Agent has to be able to say so.
+    """
+    evidence = result.get("covariance_evidence") or result.get("inference_config")
+    if not isinstance(evidence, Mapping):
+        return None
+    out = {key: evidence.get(key) for key in _INFERENCE_FIELDS if evidence.get(key) is not None}
+    out["legacy_asymptotic"] = (
+        "inference_version" not in evidence
+        and evidence.get("inference_distribution") == "normal"
+        and evidence.get("covariance") in {"robust", "clustered"}
+    )
+    return out
 
 
 def _bounded_coefficient_row(row: dict[str, Any]) -> dict[str, Any]:

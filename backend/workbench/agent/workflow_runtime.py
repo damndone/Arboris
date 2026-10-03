@@ -2906,6 +2906,24 @@ def _persist_workflow_capability_result(
     )
 
 
+def _branch_kernel(root: Path, branch: Mapping[str, Any]) -> dict[str, Any]:
+    """The inference kernel the completed model branch's run persisted."""
+    from ..contracts.model.inference_kernel import InferenceKernelError, validate_inference_kernel
+
+    directory = root / "runs" / str(branch["run_id"]) / "model_results" / "inference_kernels"
+    paths = sorted(directory.glob("*.json")) if directory.is_dir() else []
+    if len(paths) != 1:
+        raise WorkflowExecutionError(
+            "the completed model branch has no single inference kernel; rerun the branch to test it"
+        )
+    kernel = read_json(paths[0])
+    try:
+        validate_inference_kernel(kernel)
+    except InferenceKernelError as exc:
+        raise WorkflowExecutionError(f"the branch's inference kernel is not usable: {exc}") from exc
+    return kernel
+
+
 def _execute_model_joint_f_test(
     root: Path,
     draft: WorkflowDraft,
@@ -2914,37 +2932,51 @@ def _execute_model_joint_f_test(
     step: Any,
     previous: Mapping[str, WorkflowStepResult],
 ) -> WorkflowStepResult:
+    """Joint test of declared term groups, read from the branch's kernel.
+
+    Inference engine v2: the test uses the covariance and the degrees of
+    freedom the branch reported (F(q, N - K) for unadjusted and robust,
+    F(q, G - 1) for clustered), so it cannot disagree with the coefficient
+    table, and nothing is refitted.
+    """
+    from ..postestimation import PostestimationRefusal, wald_test
+
     branch = _dependent_model_branch(step, previous)
     selectors = step.spec.get("term_selectors")
     if not isinstance(selectors, list):
         raise WorkflowExecutionError("joint F test term selectors are unavailable")
+    branch_spec = branch.get("branch_spec")
+    family = branch_spec.get("model_family") if isinstance(branch_spec, Mapping) else None
+    if family != "ols":
+        raise WorkflowExecutionError(
+            f"this post-estimation step is defined for OLS models only; branch "
+            f"{branch.get('branch_id')} was estimated as {family or 'an undeclared family'}"
+        )
     terms = _selected_model_terms(branch, selectors)
-    fitted, _predictor_columns, _analysis_frame = _refit_completed_ols_branch(
-        source_frame, branch
-    )
-    positions = _fitted_term_positions(fitted, terms)
-    restriction = np.zeros((len(positions), len(fitted.model.exog_names)))
-    for row, position in enumerate(positions):
-        restriction[row, position] = 1.0
-    test = fitted.f_test(restriction)
-    f_statistic = float(np.asarray(test.fvalue).squeeze())
-    p_value = float(np.asarray(test.pvalue).squeeze())
-    denominator_df = float(np.asarray(test.df_denom).squeeze())
-    numerator_df = float(np.asarray(test.df_num).squeeze())
-    if not all(math.isfinite(value) for value in (f_statistic, p_value, denominator_df, numerator_df)):
-        raise WorkflowExecutionError("joint F test produced a non-finite result")
+    kernel = _branch_kernel(root, branch)
+    try:
+        test = wald_test(kernel, [{"terms": {term: 1}, "value": 0} for term in terms])
+    except PostestimationRefusal as refusal:
+        raise WorkflowExecutionError(refusal.message) from refusal
+    if test["distribution"] != "F":
+        raise WorkflowExecutionError(
+            "the branch reports asymptotic inference, so its joint test is a chi-square Wald test; "
+            "use postestimation.wald"
+        )
     result = {
         "schema_version": "workbench.model.joint-f-test/v1",
         "test": "joint_f_test",
         "branch_id": str(branch["branch_id"]),
         "term_selectors": [dict(item) for item in selectors if isinstance(item, Mapping)],
         "coefficient_terms": terms,
-        "f_statistic": f_statistic,
-        "p_value": p_value,
-        "numerator_df": numerator_df,
-        "denominator_df": denominator_df,
-        "nobs": int(fitted.nobs),
-        "covariance": _branch_covariance(branch["branch_spec"]),
+        "f_statistic": float(test["statistic"]),
+        "p_value": float(test["p_value"]),
+        "numerator_df": float(test["df_num"]),
+        "denominator_df": float(test["df_den"]),
+        "distribution": test["distribution"],
+        "df_method": kernel.get("df_method"),
+        "nobs": int(kernel["nobs"]),
+        "covariance": _branch_covariance(branch_spec),
     }
     return _persist_model_post_estimation_result(
         root,

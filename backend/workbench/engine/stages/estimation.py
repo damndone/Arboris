@@ -620,6 +620,7 @@ def _apply_survey_design_variance(ctx, model_type: str, primary: dict) -> None:
             vcov=np.asarray(result.covariance, dtype=float)[np.ix_(positions, positions)],
             reference_distribution="t",
             df_resid=float(result.residual_degf),
+            df_method="design",
             loglik=None,
             nobs=nobs,
             covariance_estimator=f"survey_design_{result.method}",

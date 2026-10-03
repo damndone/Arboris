@@ -112,7 +112,7 @@ def test_build_plan_diff_canonicalizes_product_and_wire_patches() -> None:
     assert plan.plan_hash
     assert plan.logical_key
     assert plan.strategy_version
-    assert plan.policy_version == "ols_cluster_policy_v1"
+    assert plan.policy_version == "ols_cluster_policy_v2"
     assert plan.schema_version
 
 

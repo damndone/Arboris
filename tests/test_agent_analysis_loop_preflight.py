@@ -504,7 +504,7 @@ def test_recovery_registry_contains_exactly_one_action_and_maps_product_to_wire(
     assert action.required_fields == ("cluster_variable",)
     assert action.covariance_only is True
     assert action.field_mapping == {"cluster_variable": "entity_col"}
-    assert action.policy_version == "ols_cluster_policy_v1"
+    assert action.policy_version == "ols_cluster_policy_v2"
 
 
 def test_valid_intent_canonicalizes_cluster_variable_to_entity_col_without_side_effects() -> None:
@@ -647,7 +647,7 @@ def test_recovery_action_registry_rejects_duplicate_required_fields() -> None:
     object.__setattr__(malformed, "required_fields", ("cluster_variable", "cluster_variable"))
     object.__setattr__(malformed, "covariance_only", True)
     object.__setattr__(malformed, "field_mapping", {"cluster_variable": "entity_col"})
-    object.__setattr__(malformed, "policy_version", "ols_cluster_policy_v1")
+    object.__setattr__(malformed, "policy_version", "ols_cluster_policy_v2")
 
     with pytest.raises((TypeError, ValueError)):
         type(RECOVERY_ACTION_REGISTRY)((malformed,))
@@ -749,7 +749,7 @@ def test_new_contracts_round_trip_through_json_compatible_dicts() -> None:
 @pytest.mark.parametrize(
     ("factory", "field"),
     [
-        (lambda: {"action_id": "a", "operation_id": "model.rerun", "allowed_model": "ols", "source_covariance": "unadjusted", "target_covariance": "clustered", "required_fields": "cluster_variable", "covariance_only": True, "field_mapping": {"cluster_variable": "entity_col"}, "policy_version": "ols_cluster_policy_v1"}, "required_fields"),
+        (lambda: {"action_id": "a", "operation_id": "model.rerun", "allowed_model": "ols", "source_covariance": "unadjusted", "target_covariance": "clustered", "required_fields": "cluster_variable", "covariance_only": True, "field_mapping": {"cluster_variable": "entity_col"}, "policy_version": "ols_cluster_policy_v2"}, "required_fields"),
         (lambda: {"valid": True, "status": "pass", "severity": "info", "code": "OK", "evidence": {}, "reason_codes": "OK"}, "reason_codes"),
     ],
 )

@@ -516,6 +516,12 @@ def _attach_ols_result_contract(
     inference_distribution = "t" if use_t else "normal"
     p_value_method = "t" if use_t else "normal_z"
     confidence_interval_method = "t" if use_t else "normal_z"
+    # Where the inference degrees of freedom come from. Results written before
+    # inference engine v2 carry no `inference_version`: their robust and
+    # clustered p-values used the normal distribution.
+    df_method = (
+        ("clusters_minus_one" if covariance == "clustered" else "residual") if use_t else "asymptotic"
+    )
     evidence = {
         "covariance": covariance,
         "covariance_estimator": "cluster" if covariance == "clustered" else (
@@ -524,9 +530,13 @@ def _attach_ols_result_contract(
         "engine": "statsmodels",
         "library": "statsmodels",
         "library_version": statsmodels.__version__,
-        "small_sample_correction": covariance == "clustered",
+        # HC1 and CR1 both scale the sandwich for finite samples (N/(N-K);
+        # G/(G-1) * (N-1)/(N-K)).
+        "small_sample_correction": covariance in {"clustered", "robust"},
         "degrees_of_freedom_correction": covariance == "clustered",
         "use_t": use_t,
+        "inference_version": INFERENCE_ENGINE_VERSION,
+        "df_method": df_method,
         "inference_distribution": inference_distribution,
         "p_value_method": p_value_method,
         "confidence_interval_method": confidence_interval_method,
@@ -600,6 +610,11 @@ def _attach_ols_result_contract(
     return result
 
 
+#: Inference engine v2 (v1.8.10): robust and clustered OLS use Stata's
+#: finite-sample reference distributions instead of the normal.
+INFERENCE_ENGINE_VERSION = "workbench.inference.v2"
+
+
 def apply_ols_covariance(original: Any, covariance: str, *, groups: Any = None) -> Any:
     """Return the fit carrying `covariance`, from a plain OLS fit.
 
@@ -618,10 +633,13 @@ def apply_ols_covariance(original: Any, covariance: str, *, groups: Any = None) 
             groups=groups,
             use_correction=True,
             df_correction=True,
-            use_t=False,
+            # Inference engine v2 (v1.8.10): Stata's finite-sample rule,
+            # t(G - 1) for coefficients and F(q, G - 1) for joint tests.
+            use_t=True,
         )
     if covariance == "robust":
-        return original.get_robustcov_results(cov_type="HC1", use_t=False)
+        # HC1 with t(N - K), as Stata's `regress, vce(robust)`.
+        return original.get_robustcov_results(cov_type="HC1", use_t=True)
     if covariance == "unadjusted":
         return original
     raise ValueError(f"unsupported OLS covariance estimator: {covariance}")

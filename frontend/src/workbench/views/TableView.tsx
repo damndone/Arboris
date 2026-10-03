@@ -57,6 +57,7 @@ import { StatisticalExplorationTable } from "./StatisticalExplorationTable";
 import { resolveTableRunScope } from "./tableRunScope";
 import { PredictionResearchEvidenceCard } from "../../runResult/PredictionResearchEvidenceCard";
 import { formatEstimate, formatPValue } from "../../format/numbers";
+import { describeInference } from "../../format/inference";
 
 /** Run ids look like 20260703_065622_030010_92222fe1 — the last hex segment is
  *  the unique tail, matching the run-rail's short label so the two line up. */
@@ -507,6 +508,11 @@ function CoefficientTable({
         {model.r_squared != null ? ` · R²=${fmt(model.r_squared)}` : null}
         {model.r_squared_adj != null ? ` · adj. R²=${fmt(model.r_squared_adj)}` : null}
       </div>
+      {describeInference(model) ? (
+        <div data-testid="table-view-inference" style={{ fontSize: 11, color: "var(--label-tertiary)", marginBottom: 6 }}>
+          {describeInference(model)}
+        </div>
+      ) : null}
       <div
         className="wb-result-table-scroll"
         data-testid="table-view-coefficient-scroll"
