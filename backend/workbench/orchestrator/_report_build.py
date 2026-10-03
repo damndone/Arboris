@@ -55,7 +55,7 @@ def _family_summary(
     fallback_n: int,
 ) -> str | None:
     n = int(result.get("nobs", fallback_n))
-    if model_type in ("ols", "ols_robust"):
+    if model_type in ("ols", "ols_robust", "ols_hac"):
         if robust_se_dp is not None and robust_se_dp.reason is not None:
             se_type = robust_se_dp.reason.chosen_params.get("variant", robust_se_dp.selected)
         elif robust_se_dp is not None:

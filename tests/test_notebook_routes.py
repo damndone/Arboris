@@ -1069,13 +1069,17 @@ def test_real_planner_catalog_matches_model_family_covariance_contract(
     }
     assert planner.capability_catalog["ols"]["notebook_model_options_policy"] == {
         "supported": True,
-        "allowed_fields": ["covariance"],
+        # v1.8.10: HAC's time order and lag; panel_ols shares the vocabulary
+        # and its validator refuses hac with the reason.
+        "allowed_fields": ["covariance", "hac_lags", "time_order"],
         "forbidden_fields": [],
         "submission_rule": "use_published_fields",
     }
     assert planner.capability_catalog["panel_ols"]["notebook_model_options_policy"] == {
         "supported": True,
-        "allowed_fields": ["covariance"],
+        # v1.8.10: HAC's time order and lag; panel_ols shares the vocabulary
+        # and its validator refuses hac with the reason.
+        "allowed_fields": ["covariance", "hac_lags", "time_order"],
         "forbidden_fields": [],
         "submission_rule": "use_published_fields",
     }
@@ -1165,7 +1169,7 @@ def test_real_planner_uses_builtin_artifact_vocabulary_for_native_family(
     }
     assert planner.capability_catalog["ols"]["model_options_vocabulary"][
         "fields"
-    ]["covariance"]["allowed_values"] == ["robust", "clustered", "unadjusted"]
+    ]["covariance"]["allowed_values"] == ["robust", "clustered", "unadjusted", "hac"]
 
 
 def test_real_planner_binds_recipe_source_before_owner_validation(

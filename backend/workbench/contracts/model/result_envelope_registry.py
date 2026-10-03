@@ -148,7 +148,7 @@ _ORDINAL_DIAGNOSTICS = "model_results/diagnostics_ordinal_logit_1.json"
 _MULTINOMIAL_DIAGNOSTICS = "model_results/diagnostics_multinomial_logit_1.json"
 
 _DECLARATIONS: tuple[ResultEnvelopeDeclaration, ...] = (
-    _core("ols", "coefficient_intervals", "ols_robust", "ols_clustered", inverse_link="identity"),
+    _core("ols", "coefficient_intervals", "ols_robust", "ols_clustered", "ols_hac", inverse_link="identity"),
     _core("logit", inverse_link="logit"),
     _core("probit", inverse_link="probit"),
     _core("poisson", inverse_link="log"),

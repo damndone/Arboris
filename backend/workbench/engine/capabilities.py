@@ -264,6 +264,8 @@ COVARIANCE_UI = [
     {"key": "robust", "label": "Robust (default)", "default": True},
     {"key": "clustered", "label": "Clustered"},
     {"key": "unadjusted", "label": "Unadjusted"},
+    # Needs model_options.time_order; OLS only (validate_ols_model_options).
+    {"key": "hac", "label": "Newey-West (HAC)"},
 ]
 
 # U3 (v1.6.11): the default covariance is declared explicitly on the option, so

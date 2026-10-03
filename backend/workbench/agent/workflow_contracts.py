@@ -528,12 +528,16 @@ class ModelFamilyContract:
 def _build_ols_model_params(
     spec: Mapping[str, Any], branch: Mapping[str, Any], predictors: list[str], covariance: str
 ) -> dict[str, Any]:
+    from ..contracts.model.ols import OLS_HAC_FIELDS
+
+    options = spec.get("model_options") or {}
+    hac = {key: options[key] for key in OLS_HAC_FIELDS if key in options} if covariance == "hac" else {}
     return {
         "model_type": "ols",
         "y": branch["outcome"],
         "x": list(predictors),
         "covariance": covariance,
-        "model_options": {"covariance": covariance},
+        "model_options": {"covariance": covariance, **hac},
     }
 
 
@@ -962,6 +966,10 @@ MODEL_FAMILY_CONTRACTS: dict[str, ModelFamilyContract] = {
         expected_artifacts=("ols_1", "diagnostic_summary"),
         result_shape="coefficient_intervals",
         forbidden_spec_fields_message="model.genesis ols does not accept panel entity_col or time_col",
+        # HAC (Newey-West) takes its time order here, not as time_col: for OLS
+        # time_col would mean panel time effects, which OLS does not estimate.
+        model_options_fields=("time_order", "hac_lags"),
+        model_options_column_fields=("time_order",),
         allows_weights=("frequency", "analysis", "sampling"),
         supported_split_kinds=("iid", "grouped"),
         requires_branch_figures=True,
@@ -1507,6 +1515,20 @@ def validate_model_genesis_spec(spec: Mapping[str, Any]) -> ModelFamilyContract:
                 f"model branch {branch_id} covariance must be one of: "
                 + ", ".join(OLS_COVARIANCE_VALUES)
             )
+        if contract.allows_covariance:
+            # Covariance-specific options (HAC's time order) are checked with the
+            # covariance they belong to, by the one OLS option contract.
+            from ..contracts.model.ols import OLS_HAC_FIELDS, validate_ols_model_options
+
+            options = spec.get("model_options") or {}
+            try:
+                validate_ols_model_options(
+                    {"covariance": covariance or "robust",
+                     **{key: options[key] for key in OLS_HAC_FIELDS if key in options}},
+                    family=contract.family,
+                )
+            except ValueError as error:
+                raise OperationValidationError(f"model branch {branch_id}: {error}") from error
         if contract.cluster_requires_entity and covariance == "clustered" and not dimensions.get("entity_col"):
             raise OperationValidationError(
                 "model.genesis clustered panel_ols requires entity_col"

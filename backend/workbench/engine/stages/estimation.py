@@ -27,6 +27,7 @@ from ..registry import (
 from ...contracts.model.ols import (
     OLS_MODEL_OPTIONS_CONTRACT,
     validate_ols_model_options,
+    validate_panel_ols_model_options,
 )
 
 
@@ -420,6 +421,8 @@ def _ols_robust_se_decision(ctx):
         return dpf.ols_default_robust_se(variant="nonrobust", explicit=True)
     if covariance == "clustered":
         return dpf.ols_default_robust_se(variant="clustered", explicit=True)
+    if covariance == "hac":
+        return dpf.ols_default_robust_se(variant="HAC", explicit=True)
     return dpf.ols_default_robust_se(variant="HC1")
 
 
@@ -432,6 +435,11 @@ def _ols_covariance_plan(ctx) -> tuple[bool, str | None]:
     change the fit or fail closed.
     """
     covariance = (ctx.artifacts.get("_covariance") or "").strip() or "robust"
+    if covariance == "hac" and (ctx.artifacts.get("_entity_col") or "").strip():
+        raise ValueError(
+            "OLS_HAC_WITH_CLUSTERS: HAC (Newey-West) standard errors cannot be combined with "
+            "clustering; that is the Driscoll-Kraay estimator, which is not implemented yet."
+        )
     if covariance == "clustered":
         from ...cleaning import normalize_column_name
 
@@ -443,7 +451,7 @@ def _ols_covariance_plan(ctx) -> tuple[bool, str | None]:
                 "an entity field naming the cluster column."
             )
         return True, entity
-    return covariance != "unadjusted", None
+    return covariance not in {"unadjusted", "hac"}, None
 
 
 
@@ -514,6 +522,12 @@ def _fit_ols(ctx, env):
     except (FileNotFoundError, OSError, ValueError):
         persisted_form = {}
     requested_covariance = (ctx.artifacts.get("_covariance") or "").strip() or "robust"
+    options = ctx.artifacts.get("_model_options") or {}
+    hac_time_order = None
+    if requested_covariance == "hac" and options.get("time_order"):
+        from ...cleaning import normalize_column_name
+
+        hac_time_order = normalize_column_name(str(options["time_order"]))
     primary, fitted = _orch().run_ols(
         ctx.data.frame,
         y=ctx.artifacts["_normalized_y"],
@@ -535,6 +549,8 @@ def _fit_ols(ctx, env):
         fitted_sink=lambda covariance_fit: _record_fitted_kernel(
             ctx, covariance_fit, model_id="ols_1", model_type="ols"
         ),
+        hac_time_order=hac_time_order,
+        hac_lags=options.get("hac_lags") if requested_covariance == "hac" else None,
     )
     _apply_survey_design_variance(ctx, "ols", primary)
     return "ols_1", primary, fitted
@@ -841,7 +857,7 @@ CORE_PACK = AnalysisPack(
             "panel_ols_1",
             ("continuous",),
             _fit_panel_ols,
-            validate_model_options=validate_ols_model_options,
+            validate_model_options=validate_panel_ols_model_options,
             model_options_contract=OLS_MODEL_OPTIONS_CONTRACT,
         ),
         ModelHandler("probit", "probit_1", ("binary",), _fit_probit),

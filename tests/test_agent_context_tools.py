@@ -2737,12 +2737,15 @@ def test_ols_contract_publishes_its_bounded_option_vocabulary(tmp_path: Path) ->
 
     assert contract["op_type"] == "ols"
     vocabulary = contract["option_vocabulary"]
-    assert vocabulary["version"] == "ols-model-options/v1"
+    assert vocabulary["version"] == "ols-model-options/v2"
     assert vocabulary["fields"]["covariance"]["allowed_values"] == [
         "robust",
         "clustered",
         "unadjusted",
+        "hac",
     ]
+    # v1.8.10: HAC's own fields, valid only with covariance hac.
+    assert {"time_order", "hac_lags"} <= set(vocabulary["fields"])
 
 
 def test_the_arma_garch_contract_payload_fits_the_tool_output_budget(

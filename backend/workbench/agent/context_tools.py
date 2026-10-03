@@ -3533,6 +3533,12 @@ def _public_requested_model_coefficients(
                 if isinstance(covariance_evidence.get("cluster_entity"), bool)
                 else None
             ),
+            # Newey-West: kernel, lag, the rule that chose it, and the time order.
+            **(
+                {"hac": {key: covariance_evidence["hac"].get(key)
+                         for key in ("kernel", "lags", "lag_rule", "time_order")}}
+                if isinstance(covariance_evidence.get("hac"), dict) else {}
+            ),
         },
         "multiple_imputation": _bounded_multiple_imputation(result),
         "coefficients": public_coefficients,
@@ -4149,7 +4155,7 @@ def _bounded_checks(run_root: Path, model_results: list[dict[str, Any]]) -> list
 
 _INFERENCE_FIELDS = (
     "covariance", "covariance_estimator", "inference_distribution", "effective_df", "df_method",
-    "cluster_count", "inference_version",
+    "cluster_count", "inference_version", "hac",
 )
 
 

@@ -2260,6 +2260,17 @@ class NotebookPlanningAgent:
                             family_spec[field_name] = model_params[field_name]
                     if "covariance" in model_params:
                         family_spec["covariance"] = model_params["covariance"]
+                    # Options that belong to the covariance (HAC's time order) are checked
+                    # with it here, as the workflow step checks them, so planning and
+                    # materialization cannot disagree about them.
+                    covariance_options = model_params.get("model_options") or changes.get("model_options") or {}
+                    if family_contract.allows_covariance and isinstance(covariance_options, Mapping):
+                        declared_options = {
+                            key: value for key, value in covariance_options.items()
+                            if key in family_contract.model_options_fields
+                        }
+                        if declared_options:
+                            family_spec["model_options"] = declared_options
                     try:
                         validated_contract = validate_model_genesis_spec(family_spec)
                         declared_columns = family_context_columns(

@@ -24,6 +24,17 @@ describe("describeInference", () => {
     })).toBe("Standard errors: Robust (HC1) · Inference: z (legacy asymptotic; rerun for finite-sample t)");
   });
 
+  it("names the kernel, lag, its rule and the time order for Newey-West", () => {
+    expect(describeInference({
+      covariance_evidence: {
+        covariance: "hac", effective_df: 147, inference_distribution: "t", inference_version: "workbench.inference.v2",
+        hac: { kernel: "bartlett", lags: 4, lag_rule: "floor(4 * (T / 100) ** (2 / 9)) (Newey and West 1994)", time_order: "year" },
+      },
+    })).toBe(
+      "Standard errors: Newey–West (HAC) · Bartlett kernel, lag 4 (Newey–West 1994 rule), ordered by year · Inference: t(147)",
+    );
+  });
+
   it("names the pooling rule for a multiple-imputation result", () => {
     expect(describeInference({
       multiple_imputation: { m: 5 },

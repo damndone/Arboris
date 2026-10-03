@@ -204,7 +204,7 @@ def model_identity(
     if isinstance(x_vars, list):
         identity["x_variables"] = x_vars
         identity["x_variable_count"] = len(x_vars)
-    identity["standard_error_type"] = _standard_error_type(model_type)
+    identity["standard_error_type"] = _standard_error_type(model_type, primary)
     return identity
 
 
@@ -212,6 +212,7 @@ def _model_label(model_type: str) -> str:
     labels = {
         "ols": "OLS regression",
         "ols_robust": "OLS regression",
+        "ols_hac": "OLS regression",
         "logit": "Logistic regression",
         "poisson": "Poisson regression",
         "poisson_rate": "Poisson rate model",
@@ -219,7 +220,16 @@ def _model_label(model_type: str) -> str:
     return labels.get(model_type, str(model_type))
 
 
-def _standard_error_type(model_type: str) -> str:
+#: The covariance estimator a result declares -> the label shown here. Read off
+#: the result's evidence, not its family name, so a new estimator needs one row.
+_STANDARD_ERROR_TYPES = {"HC1": "robust", "HAC": "newey_west"}
+
+
+def _standard_error_type(model_type: str, primary: dict[str, Any]) -> str:
+    evidence = primary.get("covariance_evidence") if isinstance(primary, dict) else None
+    estimator = evidence.get("covariance_estimator") if isinstance(evidence, dict) else None
+    if estimator in _STANDARD_ERROR_TYPES:
+        return _STANDARD_ERROR_TYPES[estimator]
     if model_type == "ols_robust":
         return "robust"
     return "unavailable"

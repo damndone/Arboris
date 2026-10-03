@@ -696,7 +696,7 @@ def normalize_ols_genesis_model_params(model_params: Mapping[str, Any]) -> dict[
     options = dict(options)
     if options:
         try:
-            validate_ols_model_options(options)
+            validate_ols_model_options(options, family=str(normalized["model_type"]))
         except ValueError as exc:
             raise ValueError(getattr(exc, "error_code", str(exc))) from exc
     normalized["model_options"] = options

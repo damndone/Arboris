@@ -2414,6 +2414,13 @@ def _refit_completed_ols_branch(
             "completed model branch design no longer matches its declared provenance"
         )
     covariance = _branch_covariance(branch_spec)
+    if covariance == "hac":
+        # These steps refit the model; reproducing Newey-West here would need the
+        # time order and lag, and the refit has not been extended to them.
+        raise WorkflowExecutionError(
+            "this post-estimation step refits the model and does not support HAC (Newey-West) "
+            "standard errors yet; joint tests on the fitted model's inference kernel do"
+        )
     cluster_col: str | None = None
     if covariance == "clustered":
         entity_col = branch_spec.get("entity_col")

@@ -19,9 +19,20 @@ function count(value: unknown): number | null {
 
 const STANDARD_ERRORS: Record<string, string> = {
   clustered: "Cluster-robust (CR1)",
+  hac: "Newey–West (HAC)",
   robust: "Robust (HC1)",
   unadjusted: "Conventional",
 };
+
+/** "Bartlett kernel, lag 4 (Newey–West 1994 rule), ordered by year" */
+function hacDetail(evidence: Evidence): string | null {
+  const hac = record(evidence.hac);
+  const lags = count(hac?.lags);
+  if (!hac || lags === null) return null;
+  const rule = hac.lag_rule === "specified" ? "specified" : "Newey–West 1994 rule";
+  const order = typeof hac.time_order === "string" ? `, ordered by ${hac.time_order}` : "";
+  return `Bartlett kernel, lag ${lags} (${rule})${order}`;
+}
 
 export function describeInference(result: unknown): string | null {
   const model = record(result);
@@ -31,6 +42,8 @@ export function describeInference(result: unknown): string | null {
   const parts = [`Standard errors: ${STANDARD_ERRORS[covariance] ?? (covariance || "unspecified")}`];
   const clusters = count(evidence.cluster_count);
   if (covariance === "clustered" && clusters !== null) parts.push(`Clusters: ${clusters}`);
+  const hac = covariance === "hac" ? hacDetail(evidence) : null;
+  if (hac) parts.push(hac);
   const df = count(evidence.effective_df);
   const pooledFrom = count(record(model?.multiple_imputation)?.m);
   if (evidence.df_method === "barnard_rubin") {

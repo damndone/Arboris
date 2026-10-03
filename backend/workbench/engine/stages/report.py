@@ -155,6 +155,7 @@ class ReportStage:
         model_family_display = {
             "ols": "OLS",
             "ols_robust": "OLS (robust SE)",
+            "ols_hac": "OLS (Newey-West SE)",
             "logit": "Logit",
             "ordinal_logit": "Ordinal logit",
             "multinomial_logit": "Multinomial logit",
