@@ -6,24 +6,30 @@
 
 ## Final status
 
-STARTED
+RELEASED
 
 ## Metrics
 
-- Failure frequency: N/A (sample=0)
-- Repeat rate: N/A (sample=0)
-- Recurrence rate: N/A (sample=0)
-- MTTR: N/A (sample=0; unresolved=0)
+- Failure frequency: 15/30 (50.0%; 50.0 per 100 events)
+- Repeat rate: 1/15 (6.7%)
+- Recurrence rate: 1/14 (7.1%)
+- MTTR: median=0 ms (sample=11; unresolved=4)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: N/A (sample=0)
+- Gate waste rate: 0/2 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0)
 
 ## All failures
 
-- None recorded.
+- #3 2026-10-02T15:34:28.770Z `kernel_read_the_wrong_variance`; cause_status: `known`; cause: Extracting the inference kernel from the fitted object handed downstream gave the wrong covariance: run_ols returns the plain fit while the packet reports robust or clustered errors, and a survey design replaces the standard errors after the fit. Caught by a test comparing sqrt(diag(V)) with every reported standard error.; resolution: `resolved`; lesson: A kernel must come from the computation that produced the reported standard errors; check it against every reported standard error, not against the fitted object.
+- #4 2026-10-02T15:34:28.770Z `tests_pinned_to_removed_worktree`; cause_status: `known`; cause: tests/test_evaluator_harness_manifest.py pinned an absolute path to the v173-evaluation-harness worktree, removed by the 2026-09-28 archive cleanup; the two tests also fail on v1.8.9.; resolution: `resolved`; lesson: Tests read commits through the repository they run in, never through an absolute worktree path.
+- #5 2026-10-02T19:18:13.355Z `agent_copy_cut_by_output_budget`; cause_status: `known`; cause: inspect_result_summary has an 8 KB output budget; the trimmer gave each nested level half its parent's room and dropped nested keys silently. Family evidence was the last key, so the CS interval and event study never reached the Agent, and the 1b test read the provider directly, bypassing the registry budget.; resolution: `resolved`; lesson: Acceptance tests read results through the registered tool under its output budget, and any budget cut is named in the output.
+- #6 2026-10-02T19:18:13.355Z `two_copies_of_one_result_disagreed`; cause_status: `known`; cause: The CS and SA producers wrote the ATT coefficient row without the pointwise interval that cs_did.json / sa_did.json already carried.; resolution: `resolved`; lesson: Every persisted copy of one result carries the same inferential fields; a test compares them.
+- #15 2026-10-03T06:51:33.963Z `check_context_failed_iv_runs`; cause_status: `known`; cause: Building the check context read linearmodels' fitted object as if it were statsmodels' outside the runner's exception guard, so the first full suite showed every IV run failing.; resolution: `resolved`; lesson: Everything a check needs is gathered inside the same guard that turns failures into 'not checked'; a check never fails the run.
+- #16 2026-10-03T06:51:33.963Z `old_diagnostics_contradicted_checks`; cause_status: `known`; cause: The browser acceptance showed the report printing a Breusch-Pagan statistic on the zero residuals of a perfect fit, and the IV card calling F = 101.6 strong, beside check results saying the opposite.; resolution: `resolved`; lesson: When a new authority for a judgement is added, every older display of that judgement reads from it or is withdrawn; walk every surface that showed the old one.
+- #23 2026-10-03T15:11:56.504Z `subpop_point_estimate_full_sample`; cause_status: `known`; cause: With a declared survey subpopulation the OLS packet kept the full-sample WLS coefficients while the standard errors came from the design engine's subpopulation fit (since v1.8.7); fit statistics also described every row.; resolution: `resolved`; lesson: When one engine replaces part of a result (the variance), check that every number beside it describes the same sample; compare the whole row with a reference, not only the replaced column.
 
 ## All errors
 
@@ -31,7 +37,14 @@ STARTED
 
 ## All gaps
 
-- None recorded.
+- #7 2026-10-02T19:18:13.355Z `report_writer_lacked_family_evidence`; cause_status: `known`; cause: The report writer's citable facts were built in the frontend from the graph and the coefficient row only.; resolution: `resolved`; lesson: Every AI consumer reads the declared family projection; run detail serves it and the fact table flattens it by shape.
+- #8 2026-10-02T19:18:13.355Z `checks_applied_by_data_shape_not_estimator`; cause_status: `known`; cause: PANEL_POOLED_MODEL fires for CS DID although its influence function is entity-level and clustered by entity by default; result identity reports rows (120) and the packet reports units (12) both as n.; resolution: `open`; lesson: Check applicability is declared by estimator traits; sample sizes name their unit.
+- #11 2026-10-02T20:26:07.484Z `contract_summary_claims_unused_covariance`; cause_status: `known`; cause: The run contract summary records the default covariance 'robust' for a logit fit, which is estimated with model-based variance; the summary records the requested default, not what executed.; resolution: `open`; lesson: Provenance records the estimator that executed, read from the kernel, not the default that was requested.
+- #12 2026-10-02T20:26:07.484Z `agent_focus_does_not_follow_selection_across_runs`; cause_status: `known`; cause: Selecting a model node of another run in the graph left the Agent session bound to the previous run's model node.; resolution: `open`; lesson: The Agent's focus is the selected node, resolved through FocusRef, not the run the page was opened on.
+- #17 2026-10-03T06:51:33.963Z `separation_unvalidated_for_ordinal_multinomial`; cause_status: `known`; cause: Separation is checked by linear programming for binary outcomes against detectseparation; no validated definition is implemented for ordinal or multinomial outcomes.; resolution: `open`; lesson: Extend a check only with a validated definition and an oracle; until then say 'not checked'.
+- #21 2026-10-03T10:09:11.294Z `consumer_projection_not_verified`; cause_status: `known`; cause: Browser acceptance: the Global Agent reads inspect_project_model_coefficients and the overview label, not inspect_result_summary which was the one updated; it could not tell the result was pooled nor why a joint test was unavailable. Also the MI offer was worded 'default covariance' while the Agent's vocabulary is unadjusted/robust/clustered (product OLS default is robust), and the Notebook materialization allowlist refused a field planning had accepted.; resolution: `resolved`; lesson: When adding a field to results, enumerate every projection the Agent reads (result summary, project coefficient tool, overview label) and test them together; write offers in the request's own vocabulary; planning and materialization must share one field list.
+- #24 2026-10-03T15:11:56.504Z `planning_materialization_param_mismatch`; cause_status: `known`; cause: Notebook planning validated only family fields of model_params, while materialization refused any unknown key; the Agent put workflow-style branches into a single-model option and the failure surfaced only after the user confirmed. Same class as the step 5 multiple_imputations gap.; resolution: `resolved`; lesson: One field list, imported by every layer that checks the same payload; a second hand-written list is a future refusal after confirmation.
+- #27 2026-10-04T03:29:55.000Z `survey_df_convention`; cause_status: `known`; cause: Survey results kept the pre-design fit's covariance evidence (HC1, t(N-K)) that the table view and Agent read, and the step 7 Korn-Graubard F took degf-p+1 as d. Found while implementing the user's df decision (design df default, R convention optional).; resolution: `resolved`; lesson: Compare the reported test statistic, df and p with the oracle, not an intermediate quantity like W; and when one engine replaces variance, every reader of inference metadata must read the replacement.
 
 ## All waste
 
@@ -39,7 +52,20 @@ STARTED
 
 ## Root causes and solutions
 
-- None recorded.
+- `agent-focus-follows-selection`: occurrences=1; cause_status: `known`; root cause: Selecting a model node of another run in the graph left the Agent session bound to the previous run's model node.; solution: `open`
+- `checks-follow-estimator-traits`: occurrences=1; cause_status: `known`; root cause: PANEL_POOLED_MODEL fires for CS DID although its influence function is entity-level and clustered by entity by default; result identity reports rows (120) and the packet reports units (12) both as n.; solution: `open`
+- `checks-never-fail-the-run`: occurrences=1; cause_status: `known`; root cause: Building the check context read linearmodels' fitted object as if it were statsmodels' outside the runner's exception guard, so the first full suite showed every IV run failing.; solution: `resolved`
+- `compare-reported-statistics-not-intermediates`: occurrences=1; cause_status: `known`; root cause: Survey results kept the pre-design fit's covariance evidence (HC1, t(N-K)) that the table view and Agent read, and the step 7 Korn-Graubard F took degf-p+1 as d. Found while implementing the user's df decision (design df default, R convention optional).; solution: `resolved`
+- `every-consumer-projection-and-request-vocabulary`: occurrences=1; cause_status: `known`; root cause: Browser acceptance: the Global Agent reads inspect_project_model_coefficients and the overview label, not inspect_result_summary which was the one updated; it could not tell the result was pooled nor why a joint test was unavailable. Also the MI offer was worded 'default covariance' while the Agent's vocabulary is unadjusted/robust/clustered (product OLS default is robust), and the Notebook materialization allowlist refused a field planning had accepted.; solution: `resolved`
+- `extend-checks-only-with-validated-definitions`: occurrences=1; cause_status: `known`; root cause: Separation is checked by linear programming for binary outcomes against detectseparation; no validated definition is implemented for ordinal or multinomial outcomes.; solution: `open`
+- `kernel-must-carry-the-reported-variance`: occurrences=1; cause_status: `known`; root cause: Extracting the inference kernel from the fitted object handed downstream gave the wrong covariance: run_ols returns the plain fit while the packet reports robust or clustered errors, and a survey design replaces the standard errors after the fit. Caught by a test comparing sqrt(diag(V)) with every reported standard error.; solution: `resolved`
+- `one-allowlist-per-payload`: occurrences=1; cause_status: `known`; root cause: Notebook planning validated only family fields of model_params, while materialization refused any unknown key; the Agent put workflow-style branches into a single-model option and the failure surfaced only after the user confirmed. Same class as the step 5 multiple_imputations gap.; solution: `resolved`
+- `one-authority-per-judgement`: occurrences=1; cause_status: `known`; root cause: The browser acceptance showed the report printing a Breusch-Pagan statistic on the zero residuals of a perfect fit, and the IV card calling F = 101.6 strong, beside check results saying the opposite.; solution: `resolved`
+- `one-result-one-truth`: occurrences=1; cause_status: `known`; root cause: The CS and SA producers wrote the ATT coefficient row without the pointwise interval that cs_did.json / sa_did.json already carried.; solution: `resolved`
+- `provenance-records-what-executed`: occurrences=1; cause_status: `known`; root cause: The run contract summary records the default covariance 'robust' for a logit fit, which is estimated with model-based variance; the summary records the requested default, not what executed.; solution: `open`
+- `replaced-part-must-match-the-rest`: occurrences=1; cause_status: `known`; root cause: With a declared survey subpopulation the OLS packet kept the full-sample WLS coefficients while the standard errors came from the design engine's subpopulation fit (since v1.8.7); fit statistics also described every row.; solution: `resolved`
+- `tests-must-not-pin-worktree-paths`: occurrences=1; cause_status: `known`; root cause: tests/test_evaluator_harness_manifest.py pinned an absolute path to the v173-evaluation-harness worktree, removed by the 2026-09-28 archive cleanup; the two tests also fail on v1.8.9.; solution: `resolved`
+- `verify-through-the-consumers-path`: occurrences=2; cause_status: `known`; root cause: inspect_result_summary has an 8 KB output budget; the trimmer gave each nested level half its parent's room and dropped nested keys silently. Family evidence was the last key, so the CS interval and event study never reached the Agent, and the 1b test read the provider directly, bypassing the registry budget.; solution: `resolved`
 
 ## Added tests
 
@@ -47,12 +73,69 @@ STARTED
 
 ## New rules
 
-- No rule candidate recorded.
+- `agent-focus-follows-selection`: line experience occurrence(s)=1
+- `checks-follow-estimator-traits`: line experience occurrence(s)=1
+- `checks-never-fail-the-run`: line experience occurrence(s)=1
+- `compare-reported-statistics-not-intermediates`: line experience occurrence(s)=1
+- `every-consumer-projection-and-request-vocabulary`: line experience occurrence(s)=1
+- `extend-checks-only-with-validated-definitions`: line experience occurrence(s)=1
+- `kernel-must-carry-the-reported-variance`: line experience occurrence(s)=1
+- `one-allowlist-per-payload`: line experience occurrence(s)=1
+- `one-authority-per-judgement`: line experience occurrence(s)=1
+- `one-result-one-truth`: line experience occurrence(s)=1
+- `provenance-records-what-executed`: line experience occurrence(s)=1
+- `replaced-part-must-match-the-rest`: line experience occurrence(s)=1
+- `tests-must-not-pin-worktree-paths`: line experience occurrence(s)=1
+- `verify-through-the-consumers-path`: line experience occurrence(s)=2
 
 ## Future guidance
 
-- No guidance recorded.
+- A kernel must come from the computation that produced the reported standard errors; check it against every reported standard error, not against the fitted object.
+- A refusal enforced in the Agent planner must also be enforced in the pipeline; every entry point (HTTP, CLI, Agent) reaches the same stage.
+- Acceptance tests read results through the registered tool under its output budget, and any budget cut is named in the output.
+- Check applicability is declared by estimator traits; sample sizes name their unit.
+- Compare the reported test statistic, df and p with the oracle, not an intermediate quantity like W; and when one engine replaces variance, every reader of inference metadata must read the replacement.
+- Every AI consumer reads the declared family projection; run detail serves it and the fact table flattens it by shape.
+- Every persisted copy of one result carries the same inferential fields; a test compares them.
+- Everything a check needs is gathered inside the same guard that turns failures into 'not checked'; a check never fails the run.
+- Extend a check only with a validated definition and an oracle; until then say 'not checked'.
+- One field list, imported by every layer that checks the same payload; a second hand-written list is a future refusal after confirmation.
+- Provenance records the estimator that executed, read from the kernel, not the default that was requested.
+- Tests read commits through the repository they run in, never through an absolute worktree path.
+- The Agent's focus is the selected node, resolved through FocusRef, not the run the page was opened on.
+- When a new authority for a judgement is added, every older display of that judgement reads from it or is withdrawn; walk every surface that showed the old one.
+- When adding a field to results, enumerate every projection the Agent reads (result summary, project coefficient tool, overview label) and test them together; write offers in the request's own vocabulary; planning and materialization must share one field list.
+- When one engine replaces part of a result (the variance), check that every number beside it describes the same sample; compare the whole row with a reference, not only the replaced column.
 
 ## Event index
 
 - #1: `8cf2ad2c-751a-4abb-8f31-16682e1ad70c` | 2026-10-01T18:04:51.402Z | STATE_CHANGE/line_started | incident=`8284dcb5-647f-468f-a6fc-c8c219257bef` | lesson_key=`frozen-context-before-start` | event_sha256=`d7d8133de97b7718ca0c8b34a45564ab5c06066912529afcae5c3a2ec04d0542`
+- #2: `f25e1fd6-9da9-4578-8071-489461526eb5` | 2026-10-02T00:15:23.334Z | STATE_CHANGE/step0_docs_archived | incident=`7c892e59-c765-48ba-8690-eaeeb1bc04f0` | lesson_key=`keep-accepted-adrs-out-of-release-archive` | event_sha256=`72fe4716f4eaa5a54f40850542a27634337ccd7b4d0a8a19bda121382a59c5ed`
+- #3: `c44916fb-1ec6-42f7-806f-802075e6effa` | 2026-10-02T15:34:28.770Z | FAILURE/kernel_read_the_wrong_variance | incident=`e27ac431-62f8-4f05-9c94-8d8cfb5def0a` | lesson_key=`kernel-must-carry-the-reported-variance` | event_sha256=`c97b809fc58d5af6f3848276a89949b6a602d66e8f2974d851b388a125badb71`
+- #4: `c5d090a5-aefd-40af-8567-3f1d8a877b66` | 2026-10-02T15:34:28.770Z | FAILURE/tests_pinned_to_removed_worktree | incident=`2dfa10ad-12a8-4c72-91f3-258d4492a8d2` | lesson_key=`tests-must-not-pin-worktree-paths` | event_sha256=`8a14bc3e8a2d311b1b9fec3c34789f4b03be110cb87fd765ba99f1baa8fee48d`
+- #5: `053555ce-9ffb-461b-9fbb-e0806a3943d8` | 2026-10-02T19:18:13.355Z | FAILURE/agent_copy_cut_by_output_budget | incident=`07fd6aaf-bd78-40ee-be20-d893937297fe` | lesson_key=`verify-through-the-consumers-path` | event_sha256=`9ccaf06834a953f596b3bce7b516837f6dfd4e8c21462ecf3641ed138be45156`
+- #6: `df769fb0-2c06-410f-b894-feb1bf341a5d` | 2026-10-02T19:18:13.355Z | FAILURE/two_copies_of_one_result_disagreed | incident=`9363ee61-a05a-40b8-803f-de0f490ae3ff` | lesson_key=`one-result-one-truth` | event_sha256=`728b05b212ec295086ed13ac3a3d5e7d42d481a9fe96ca2606fbafee56791f0c`
+- #7: `3b58c814-ef70-4642-b16e-3696f8e698f7` | 2026-10-02T19:18:13.355Z | GAP/report_writer_lacked_family_evidence | incident=`c069750a-85e9-462a-bf4d-e94426878941` | lesson_key=`verify-through-the-consumers-path` | event_sha256=`31ce6ea546cb3b679b1b309b46261c53aae9f42479d09900ba490dd4bb28244a`
+- #8: `56af4aa2-54e3-47bc-95b9-cae063d080ad` | 2026-10-02T19:18:13.355Z | GAP/checks_applied_by_data_shape_not_estimator | incident=`be5c3b0d-9c2f-43e0-a6d4-440effa42446` | lesson_key=`checks-follow-estimator-traits` | event_sha256=`3892b04b21dbefa3d80299aef686388c72d4473c740fa8eae5ab0ec296e0d365`
+- #9: `70139739-03f8-4062-80f5-de43c74e1a33` | 2026-10-02T19:18:13.355Z | GATE/llm_acceptance_blocked_by_provider_balance | incident=`5f2ed3fe-031c-4353-8229-8bb0f4b2497a` | lesson_key=`check-provider-balance-before-live-acceptance` | event_sha256=`524e6d40cadd9386ea4ff54b2e457f030edc72f0f03ab06010b8efe80a1d1091`
+- #10: `4e258589-0743-4a2b-9b59-5d88a8798727` | 2026-10-02T19:53:46.572Z | STATE_CHANGE/step1_result_envelope_completed | incident=`bdedeb02-4f3c-41d7-a138-51cec0cf52c5` | lesson_key=`fresh-session-for-live-acceptance` | event_sha256=`a869ff236c64634c9534f806ba40d153f0aba46a53531f2aa0119e4988151081`
+- #11: `1aa13ae7-2bfb-49d0-bfda-69564a6342a0` | 2026-10-02T20:26:07.484Z | GAP/contract_summary_claims_unused_covariance | incident=`b648538e-7934-4a99-8548-60802d061942` | lesson_key=`provenance-records-what-executed` | event_sha256=`cff52d0614181ca37f920ebe11f9ac18a185b51eb41af7f52d07d2432860ecb0`
+- #12: `7d4239d7-f03a-4bf9-90f4-e746e2bdb6ba` | 2026-10-02T20:26:07.484Z | GAP/agent_focus_does_not_follow_selection_across_runs | incident=`b284f86c-89ce-4492-b1e2-8a4dc907e14e` | lesson_key=`agent-focus-follows-selection` | event_sha256=`b1fcad841ddd8236663fcdbde0cf5e424919fdcd959bea289a96aff380be4440`
+- #13: `3d04bc89-4aad-415d-84a0-6bad2a45eff9` | 2026-10-02T20:26:07.484Z | STATE_CHANGE/step2_postestimation_completed | incident=`4bbe7692-8694-485b-a445-b0143f0fa3ed` | lesson_key=`oracle-information-matrix-convention` | event_sha256=`6815bf0239077eab5fc9d19fc99279d05a4c36b68d7f29443ae1199cee8da3d6`
+- #14: `133e0e80-2844-4836-9693-c585bb9d377d` | 2026-10-03T04:00:46.961Z | STATE_CHANGE/inference_engine_v2_adopted | incident=`2438f6f8-2d9f-4315-8b83-d83f89db0eab` | lesson_key=`df-belongs-to-the-inference-context` | event_sha256=`dd9bbce115c8fcfb9ac02953953f0876efd1eddac048406e10ddc8edec6a8220`
+- #15: `1eb5f2b7-965f-40ab-bf70-2cecf48488a5` | 2026-10-03T06:51:33.963Z | FAILURE/check_context_failed_iv_runs | incident=`b97e0069-c95d-4013-aa89-5fc6614d0158` | lesson_key=`checks-never-fail-the-run` | event_sha256=`23586cf854a5d517a5b60614d42e4b9949b3ff4892b2353386a0fb4ce812698c`
+- #16: `63acd94b-32a5-49bc-8ab1-18430c9c574b` | 2026-10-03T06:51:33.963Z | FAILURE/old_diagnostics_contradicted_checks | incident=`9f8488ea-ea2c-4e5c-8175-32c7d6aac96b` | lesson_key=`one-authority-per-judgement` | event_sha256=`4202b4f670fd7f4810ed0e76dca85ce450898ce10e102f1b7c797ff79810ab91`
+- #17: `e5c97200-6e3a-4722-a3ac-eb1f53fcba3a` | 2026-10-03T06:51:33.963Z | GAP/separation_unvalidated_for_ordinal_multinomial | incident=`fcf24d29-94ed-4ca4-940d-52c7843bc7b5` | lesson_key=`extend-checks-only-with-validated-definitions` | event_sha256=`e085d18adb7b98d9bc9a700c490788626c967405970085e4276b656c9a677a52`
+- #18: `46789543-8c4b-46c4-a064-30a2e836b6c0` | 2026-10-03T06:51:33.963Z | STATE_CHANGE/step3_checks_and_admission_completed | incident=`36f5ad37-f937-4454-9243-ac146aa29f09` | lesson_key=`exact-formula-fixtures-are-degenerate` | event_sha256=`494f6d7845517bb044cc0526deb1a10a947e367c98c3f6d74eefa4eec6d287ca`
+- #19: `ab7f88e8-71c3-4cca-8d38-34bfdaee066d` | 2026-10-03T09:07:35.547Z | STATE_CHANGE/step4_p7_tests_ported | incident=`f762d685-6eef-432d-b92a-54329f470119` | lesson_key=`port-comparisons-not-placeholders` | event_sha256=`d1b5142497af4ea5be98bbae69621ebd3c0888293c6ba4270066f447a5568a6f`
+- #20: `b7c8c356-1676-434b-876c-81176f464fb0` | 2026-10-03T10:08:56.404Z | STATE_CHANGE/step5_multiple_imputation | incident=`e48cac77-3e77-4abb-9db8-49c6e59a6730` | lesson_key=`pooled-packet-keeps-only-what-fits-agree-on` | event_sha256=`edb1ec901b55c602eb3493b32a39c3420a45a12061864182547469731ba41ccd`
+- #21: `c17ad5e1-abc0-4585-b56b-fc435cbfdc0c` | 2026-10-03T10:09:11.294Z | GAP/consumer_projection_not_verified | incident=`1192b42e-e75a-4c64-a12d-02f352f09c93` | lesson_key=`every-consumer-projection-and-request-vocabulary` | event_sha256=`41d0e80d23d1d78a7874b499cfcda868b01eb21b87ebda2f72772a842eaaece8`
+- #22: `ab7f944c-df0b-4b07-8363-1e5481cea6d3` | 2026-10-03T10:40:21.534Z | STATE_CHANGE/step6_hac | incident=`1b548ec9-8252-4258-bdf1-67f9793c6f9e` | lesson_key=`align-defaults-before-oracle` | event_sha256=`831e898685e0ccf0cd0c1b2e0c0a1fc7c0bd8d5fef86aabd99344f298a090315`
+- #23: `a46eee6e-bd65-4aca-a1bf-ace94a773739` | 2026-10-03T15:11:56.504Z | FAILURE/subpop_point_estimate_full_sample | incident=`6bc4ff02-3a3d-4464-aefa-ce842f04842c` | lesson_key=`replaced-part-must-match-the-rest` | event_sha256=`fa5163f0c0a79f37a3d9659e555828dc457046b2ac08faf524d036f148f40b35`
+- #24: `b163278e-8705-429c-b1db-2e08432ba2cd` | 2026-10-03T15:11:56.504Z | GAP/planning_materialization_param_mismatch | incident=`f48a96a6-ff14-4687-814c-bff240eafe92` | lesson_key=`one-allowlist-per-payload` | event_sha256=`171d9fee41707ddc540ca5dca8f0d847e868be2463971959ac35ec6e7d735c0c`
+- #25: `d5079323-93c6-4a65-a2df-28a264e39847` | 2026-10-03T15:11:56.504Z | STATE_CHANGE/step7_by_group | incident=`1be58563-818e-4718-ba5e-c338177bb0eb` | lesson_key=`derive-counts-from-run-artifacts` | event_sha256=`88ecb91e39af524f937ce36fd1fa651cd80a97f76035c4ef9cf3987925a55038`
+- #26: `c32e74ef-a100-4dc6-98d0-df153ade8217` | 2026-10-04T02:49:40.000Z | STATE_CHANGE/step8_focus | incident=`73ec63b0-9b4b-43ec-a6eb-b784deadb8e9` | lesson_key=`latest-signal-wins-for-focus` | event_sha256=`d8b79f97923fc08756b839884de1a652bb46ad965f4ee6a26fc40f680d3d33d8`
+- #27: `0ddf05ec-d68c-4323-9b52-e3f48ce1654f` | 2026-10-04T03:29:55.000Z | GAP/survey_df_convention | incident=`c371c800-12aa-498c-8dfa-6804e8149ff1` | lesson_key=`compare-reported-statistics-not-intermediates` | event_sha256=`b952a79edc791b31475142873a4c0987f4f9c685c687e5c7205f15dd0fdb5506`
+- #28: `5d8db912-64a2-4778-809c-71e05c46ed5d` | 2026-10-04T10:57:08.000Z | REVIEW/independent_evaluation_steps_5_8 | incident=`d49c7bbf-20e9-4803-bbb3-ba4db999af94` | lesson_key=`enforce-refusals-in-the-pipeline-not-the-planner` | event_sha256=`860874bc04a481618a0cd1db8ca8d35cef0b299bb177e67ccebd02913c5ad561`
+- #29: `e853c747-12a1-42d2-8615-afd65480b9d3` | 2026-10-04T12:20:00.000Z | GATE/host_full_gate | incident=`8ebd7b32-ce5b-4178-b8a5-57515bb2953c` | lesson_key=`no-workspace-edits-during-gate` | event_sha256=`6a6e30fdda51102aebb8eaad7fb4baeb84a1ae83f12fc67ef491f41bb35a524d`
+- #30: `3eb94c80-aa96-4bc5-b282-64c9411e39ce` | 2026-10-04T12:37:36.000Z | STATE_CHANGE/release_approved | incident=`f2c83aaa-0474-46c5-ba55-9e8c10d3e343` | lesson_key=`record-release-events-at-release` | event_sha256=`83e5bf85c49b355bab48e4d1dc08f8d9628adfe3288f00a9e0573c95518afdde`
