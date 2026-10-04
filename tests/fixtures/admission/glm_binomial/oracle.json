@@ -1,0 +1,25 @@
+{
+  "meta": {
+    "generator": "tests/fixtures/admission/glm_binomial/generate_oracle.R",
+    "r_version": "R version 4.6.0 (2026-04-24)",
+    "seed": 20261003,
+    "n": 450,
+    "verification_level": "binomial logit GLM, default nonrobust covariance, dispersion=1, z inference"
+  },
+  "inference": {
+    "covariance_estimator": "nonrobust",
+    "df_method": "asymptotic",
+    "reference_distribution": "z",
+    "df_resid": 447
+  },
+  "coefficients": {
+    "Intercept": -0.432314443537798,
+    "x1": 0.694650002633791,
+    "x2": -0.42369903193953
+  },
+  "std_error": {
+    "Intercept": 0.103426661580712,
+    "x1": 0.118103985119511,
+    "x2": 0.106598646337927
+  }
+}
