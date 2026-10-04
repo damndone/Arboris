@@ -15,7 +15,32 @@
 
 ---
 
-## 0.0 最新：v1.8.9 状态与延后清单（2026-09-27）
+## 0.0 最新：v1.8.10 已发布（2026-10-04）
+
+**v1.8.10 = 扩展地基**，**已发布**（2026-10-04，main `b38740ec`，tag `v1.8.10`，发布说明
+`docs/releases/v1.8.10-release-notes.md`，证据 `evaluations/2026-10-04-v1.8.10-release-evaluation.md`）。
+立项 9 步全部交付；下方 §0.2 中已完成的项已删除（见 §3 留痕）。**下一版 v1.8.11 = 对标 Stata/SPSS**
+（用户 2026-10-04 决定，界面重做顺延一版）。
+
+### 0.3 v1.8.11 输入与 v1.8.10 新发现
+
+| ID | 级别 | 内容 | 现状 / 建议 | 来源 |
+|---|---|---|---|---|
+| V1810-FAMILY-ORACLES | F | 接入 Codex 工单 B 的 7 族对照：iv_2sls、glm:binomial、glm:poisson 一致，可登记准入并开放后估计 | 分支 `eval/v1811-admission-oracles`（tag `archive/local-only/eval-v1811-admission-oracles`），基线早于 v1.8.10；报告 `docs/superpowers/handoffs/2026-10-04-codex-v1811-admission-oracles-report.md`（在该分支） | Codex 工单 B |
+| V1810-PANEL-DID-KERNEL | F | panel_ols、did 的推断核心 `covariance_estimator=null` 且用 z；数值与 R 一致到 1e-15 | 补声明并定惯例（Stata `xtreg, fe vce(robust)`：按个体聚类 + t(G−1)） | Codex 工单 B |
+| V1810-NEGBIN | F | glm:negative_binomial 系数只准到约 1e-6（IRLS tol 1e-8 太松）；离散参数 α 固定为 1、未估计也未说明（静默降级） | 收紧收敛；改为像 `nbreg` 一样估计 α，固定 α 作高级选项并写明。需用户确认 | Codex 工单 B |
+| V1810-LMM-ORACLE | F | 线性混合效应只有 R 侧 REML 参考，Workbench 执行被本地隔离准入挡住 | 在准入环境里补对照后再登记 | Codex 工单 B |
+| V1810-AGENT-FIT-THEN-TEST | P | Agent 不能在一个方案里“先拟合模型、再对新模型做检验”（真机评测 LR 用例）；改变标准误类型时不说明原因，也不提在原模型上做 Wald | 增强 Agent 能力的首批项 | 真机评测 |
+| V1810-PROVIDER-MODEL-NAMES | P | 代码里的默认模型名仍是 `deepseek-v4-flash`（`llm/provider_store.py` 显示名表、`LlmProviderEditor.tsx` 默认值）；DeepSeek V4.1 Flash 的 API id 是 `deepseek-flash`，旧名目前仍被转发 | 本机配置已改（2026-10-04）；代码随 V189-MODEL-LIST-AUTODETECT 一起改，不再写死版本名 | 用户 |
+| V1810-FOCUS-REMAINING | P | 方案、报告两种焦点已登记未接页面；空白画布的项目 Agent 仍只读；焦点标签未移到输入框上方 | 界面重做那一版 | 第 8 步 |
+| V1810-KERNEL-CAP | D | 完整协方差上限从 500 降到 300 个参数（500 个约 4.8 MB > 2 MB 预算） | 需要更多参数时改为压缩存储或按需计算 | 第 1 步 |
+| V1810-MI-COMBOS | P | 合并结果上的后估计（D1）；多重插补与抽样设计或按组执行同用 | 现在明确拒绝 | 第 5、7 步 |
+| V1810-HAC-MORE | P | HAC 与聚类同用（Driscoll–Kraay）、其他族的 HAC | 现在明确拒绝 | 第 6 步 |
+| V1810-SURVEY-NODE-HASH | 观察 | 抽样设计字段（含 `survey_df`）不进节点哈希表单，只进运行输入 | 增量缓存目前只用于插补恢复，暂无影响；扩大缓存前要补 | 自由度惯例实现时发现 |
+
+---
+
+## 0.0（旧）v1.8.9 状态与延后清单（2026-09-27）
 
 > 本节是最新状态，覆盖下方 §0/§0.1 的旧结论（那两节记录到 v1.8.6/v1.8.7，未逐条清理）。
 
@@ -31,29 +56,22 @@ Codex 的 v1.8.9 spec 与 11 份计划为“部分采纳”，每份文件顶部
 
 | ID | 级别 | 内容 | 为什么延后 / 建议做法 | 来源 |
 |---|---|---|---|---|
-| V189-RESULT-ENVELOPE | F | 所有模型族与统计包统一结果信封：精确结果、诊断、图、警告、不可用原因、血缘绑定；Agent/Report/Table/Notebook 同源读取，漂移测试保证每个已登记能力都有 | 现为 `result_shapes` + `FAMILY_EVIDENCE_PROJECTIONS`，20 族中 17 族 Agent 可读；CS/SA/dCDH 只经诊断卡片；报告仅对 v1.8.6 四族有专门渲染。v1.8.10 首项 | Codex Evidence/Consumer Projection |
-| V189-POSTEST-REGISTRY | F | 按模型族的后估计注册表：GLM 的 Wald χ² / LR 检验、边际效应、lincom；去掉 `workflow_runtime.py` 中的 `"ols_1"` 字面量 | 现在非 OLS 一律 fail-closed 拒绝（正确但能力缺失） | Codex Workflow Truth Task 3 |
-| V189-MODEL-ACCEPTANCE-KIT | F | 新模型准入套件：声明 + R/Stata oracle fixture + 结果信封 + 台账分类 + 一条真机 Agent 评测用例，缺一不能合入 | 让之后每个复杂模型便宜且安全 | 新 |
+| V189-POSTEST-REGISTRY | F | 后估计扩到其余模型族：IV、面板、DID、混合效应、GLM（binomial/poisson/negbin）；之后有序、多项、负二项（nbreg） | v1.8.10 已对 OLS/logit/probit/Poisson 开放（按接口读推断核心，R 对照）；其余族的对照数据已由 Codex 工单 B 准备，见 §0.3 | v1.8.10 → v1.8.11 |
 | V189-TYPED-STEP-BINDING | F | 工作流步骤输出统一类型化绑定、唯一 runtime admission | 目前只有 `produced_dataset` 与 `model_branches` 可跨恢复消费，已够用；随 RESULT-ENVELOPE 再评估 | Codex Workflow Truth Task 1/2A |
-| V189-BY-GROUP | P | “分组分别执行”（替代 SPSS SPLIT FILE）：检验与模型按组各跑一遍，结果并排对比，检验数计入披露与多重比较 | 不做隐藏的全局模式：SPLIT FILE 忘了关是 SPSS 的经典错误源；改为每个分析显式的“按 X 分组” | objective 第 6 步 |
 | V189-ORDER-BY | P | 依赖行序的操作显式带排序键（去重保留 first/last 加 `order_by`；滞后已由 `data.tsset` 定序）；导出增加“按变量排序” | 统计结果与行序无关，单独的“排序节点”价值低；Data View 已支持浏览排序 | objective 第 6 步 |
 | V189-DATA-UI-GAPS | P | aggregate / lag / tsset 的界面入口；数据集级权重（WEIGHT BY）；批量重编码；面板里分组 summarize detail；Data View 单元格编辑（如做，须生成节点） | 目前这些只能经 Agent 或建模时指定 | Codex Data Consumer |
 | V189-SURVEY-FAMILIES | P | 复杂抽样推广到有序、多项、负二项、Cox、分位数等 | 现仅 OLS/logit/probit/Poisson | v1.8.7 限制 |
-| V189-SCRIPT-EXPORT | P | 可复现脚本导出（由血缘生成可重跑的脚本，对标 do-file / syntax） | 对 Stata 用户比新模型更实际；计划 v1.8.10 | 新 |
-| V189-PUBLICATION-TABLES | P | 出版级表格 / Custom Tables 式可配置结果表 | 计划 v1.8.10 | Codex P2/P3 |
+| V189-SCRIPT-EXPORT | P | 可复现脚本导出（由血缘生成可重跑的脚本，对标 do-file / syntax） | 对 Stata 用户比新模型更实际；提前到 v1.8.11（用户 2026-10-04 决定） | 新 |
+| V189-PUBLICATION-TABLES | P | 出版级表格 / Custom Tables 式可配置结果表 | 读结果信封；v1.8.10 信封已稳定，排期待定 | Codex P2/P3 |
 | V189-CLASSIFICATION-ML | E | 分类 ML：先 logistic + random forest 两个 adapter，严格 CV、校准、模型比较、调参；再树模型/提升/神经网络、解释性 | 现仅回归预测（固定参数的 Lasso/Ridge/RF 回归）；计划 v1.8.11，按 Codex 计划精简 | Codex P1 Classification |
 | V189-P2-FAMILIES | E | GEE/GLMM → Tobit/AFT/竞争风险 → SEM/CFA → RDD/动态面板 → 贝叶斯/空间回归/状态空间 | 均未实现（代码中已确认）；每个经 MODEL-ACCEPTANCE-KIT | Codex P2 |
 | V189-QUANT | E | 量化研究与策略验证平台（Quant Research Pack，先做 Level 1 因子研究最小闭环） | 路线与前置依赖见 `roadmap/2026-09-27-quant-research-direction.md`；已定：个人研究者；数据先用 FRED/ALFRED + Ken French（免费），个股因子再接 EDGAR + 免费行情 | 用户 |
-| V189-HAC | P | Newey–West / HAC 稳健标准误（时间序列回归、因子收益检验） | 未实现；通用计量与 Quant 都需要，建议并入 v1.8.10 | Quant 设计 |
 | V189-GRAPH-SCALE | F | 图的可扩展：集合节点（ExperimentSet/FactorSet/ParameterSweep）、trial 晋升制、有界投影 API（分页、单视图上限、`VIEW_TOO_LARGE`）、折叠与聚焦 | `GET /graph` 现一次返回全项目森林；影响持久化模型，需先于大规模参数搜索 | Quant 设计 |
 | V189-AGENT-COMPILER-IR | E | Plan IR / PortType / 两阶段发现 | 不采纳；仅当组合错误在真机评测中复现时重评 | Codex Agent Compiler |
 | V189-AUTO-TESTS-DISCLOSURE | D | 每次 run 自动计算的证据矩阵检验（t、卡方、相关…）目前不计入“分析路径”的检验数 | 要不要计入，是披露口径问题 | 新 |
 | V189-LOCAL-MODEL | D | 离线本地模型：作为服务商选项（Ollama/LM Studio），不打包、不分流；上线前用评测脚本测成功率 | 等用户定方向 | 用户 |
 | V189-MODEL-LIST-AUTODETECT | D | 服务商模型列表自动刷新（后端已有 `/llm/providers/{id}/models/refresh`），保留手填；去掉写死的版本名 | 等用户定方向 | 用户 |
 | V189-PROVIDER-FAILOVER | D | 主服务商连续失败时切备用服务商（需用户显式开启：数据会发往另一家） | 等用户定方向 | 新 |
-| V189-DATA-TAB-AGENT-SCOPE | P | Data 页的 Agent 应作用于正在查看的数据集（Chain 作用域），而不是只读的项目级 Agent | 现在从 Data 页提问得到的是不能运行分析的 Main Agent；验收发现 | 验收 |
-| V189-P7-TESTS-PORT | F | 从 P7 分支 `0ef1110c`（tag `archive/worktree/workbench-v1.8.8-p7-multivariate`）移植 main 缺失的独立契约与数值对照测试：replicate/combine、survey replicate adapter、bootstrap/permutation（含 R 对照）、IV/GMM、Scheffé/Games–Howell、非参数、空间统计、合成控制、GLM 扩展、模型诊断、P7 元数据、VECM/VAR/IRF；`test_matching_contract.py` 适配新合同，`test_matching_oracle.py` 只取增量断言，`test_statistical_extensions.py` 选择性提取 | Codex 2026-09-28 核查：分支 40 个提交未进 main，101 相同 / 25 不同 / 46 缺失；不能整批合并（main 已改进 matching、hurdle 近似推断标识）；无条件 skip 的占位测试不补。清单与 Codex 回复原文见 `archive/handoff/2026-09-28-codex-verification-request.md` | Codex 核查 |
-| V189-MI-POOLING-E2E | F | 多重插补端到端：按 m 生成多份数据与 manifest，每份分别拟合再 Rubin 合并，不以第一份的残差/拟合优度冒充合并结果，不支持的组合明确阻断 | main 的 `imputation.py` 只保存一份插补数据（`rubin_pool()` 已在 main，但端到端接线没有）。作为独立功能评审移植（imputation、engine stages、report 构建与相应测试），保留 main 之后的 survey 样本一致性修复与标签展示 | Codex 核查 |
 | V189-EVIDENCE-TRUST-TESTS | P | 结果防伪造测试：按现行可信边界验证来源（服务端身份/来源/摘要），而不是“所有旧结果不可显示” | Codex 8/19 的两份测试（`archive/stash/b065b0bd-…`）只凭 mock 名字判断，且与 v1.8.9 的展示行为冲突，不恢复原断言 | Codex 核查 |
 | V189-CLASSIFICATION-SEARCH-REF | E | v1.8.11 分类 ML 参考 Codex 的分类搜索 objective（OOF 选择、holdout 封存、预算与参数校验） | 在 `archive/leftovers/main-codex-v1.8.9-program` 的 `docs/superpowers/objectives/2026-08-21-v1.8.9-classification-search-objective.md`；实现在 `archive/v1.8.9-codex-wip` | Codex 核查 |
 | V189-V173-HARNESS-REF | 参考 | v1.7.3 评测 collector / strict runner 的 6 处未提交加固（selector 失败清理、隐藏 index flag 检查、fork/execve 防护、冻结执行器缺失拒绝启动） | `archive/leftovers/v173-evaluation-harness`；该 collector 当时处于阻塞状态，不直接并入 | Codex 核查 |
@@ -286,6 +304,7 @@ DetailHeader 渲染 `{runId} · {nodeKey}`（森林下 nodeKey 是 64-hex hash�
 
 > 保留一版可查阅，下次收尾整份冻结进 `archive/` 时一并带走。
 
+- **v1.8.10 已完成并删除的 §0.2 项**（2026-10-04）：V189-RESULT-ENVELOPE、V189-MODEL-ACCEPTANCE-KIT、V189-BY-GROUP、V189-HAC、V189-DATA-TAB-AGENT-SCOPE、V189-P7-TESTS-PORT、V189-MI-POOLING-E2E；V189-POSTEST-REGISTRY 已对 4 族完成，余下族保留在表中。
 - **v1.6.9 前置清债**：见 §1 表末「已清」块。
 - **v1.6.9 收尾卫生**：①6 个测试文件裸 `global.fetch=` 无恢复 → 统一 `vi.stubGlobal` + 只还原 fetch（`fe65cad`；注意 `vi.unstubAllGlobals()` 会连带清掉 setup 里一次性装的 ResizeObserver，故只还原 fetch）。②`did_mode` 值拼写核查 → UI 全对（DID `cohort/two_by_two/status`、CS `never/not_yet` 均正确），无需改；仅内部 `EstimatedEquationSection` 有个 `modelType.includes("twfe")` 的 OR 死分支（无 model_type 含 "twfe"，不给用户看、有家族测试钉着，不值得碰）。
 - **REV-3**（v1.5.0 滚入）已于 v1.6.9 清（`9c7f74d` + forest 路径去重 `820eb82` + Safari "Load failed" `fc4ef0c`）——更早版本滚入的债至此全部清空。

@@ -77,7 +77,7 @@
 | `workbench-v1.8.2` | `workbench-v1.8.2` | `867dc6e0` | — | `archive/worktree/workbench-v1.8.2` | `archive/leftovers/workbench-v1.8.2`（10 项） | 构思讨论示意页；结论见 `docs/superpowers/archive/specs/2026-07-24-v1.8.2-statistical-variable-picker-design.md` 等 7/24–25 设计 | 已移除工作目录 |
 | `workbench-v1.8.3` | `workbench-v1.8.3` | `36fce68b` | — | `archive/worktree/workbench-v1.8.3` | — |  | 已移除工作目录 |
 | `workbench-v1.8.4` | `workbench-v1.8.4` | `efbfb7bc` | — | `archive/worktree/workbench-v1.8.4` | `archive/leftovers/workbench-v1.8.4`（13 项） | devline 事件草稿（13 份，均已写入正式日志） | 已移除工作目录 |
-| `workbench-v1.8.5` | `workbench-v1.8.5` | `318784a2` | — | `archive/worktree/workbench-v1.8.5` | `archive/leftovers/workbench-v1.8.5`（5 项） | devline 事件草稿（5 份，均已写入正式日志） | 常驻 |
+| `workbench-v1.8.5` | `workbench-v1.8.5` | `318784a2` | — | `archive/worktree/workbench-v1.8.5` | `archive/leftovers/workbench-v1.8.5`（5 项） | devline 事件草稿（5 份，均已写入正式日志） | 已移除工作目录（2026-10-04 轮换出常驻） |
 | `workbench-v1.8.6` | `workbench-v1.8.6` | `ce635370` | — | `archive/worktree/workbench-v1.8.6` | `archive/leftovers/workbench-v1.8.6`（11 项） | 构思讨论示意页；结论见 `docs/superpowers/archive/specs/2026-08-04-v1.8.6-report-review-workspace-design.md`、`2026-08-03-v1.8.6-report-evidence-editing-design.md` | 常驻 |
 | `workbench-v1.8.7` | `workbench-v1.8.7` | `2a312d42` | — | `archive/worktree/workbench-v1.8.7` | — |  | 常驻 |
 | `workbench-v1.8.8` | `workbench-v1.8.8` | `ebba33f1` | — | `archive/worktree/workbench-v1.8.8` | — |  | 已移除工作目录 |
@@ -88,6 +88,9 @@
 | `workbench-v1.8.8-p7-multivariate` | `workbench-v1.8.8-p7-multivariate` | `0ef1110c` | — | `archive/worktree/workbench-v1.8.8-p7-multivariate` | `archive/leftovers/workbench-v1.8.8-p7-multivariate`（14 项） | P7 扩展的 2 条 devline 与 4 份设计/计划。**分支上 40 个提交未进 main**；Codex 核查结论：有遗漏（契约/数值对照测试、多重插补端到端接线），v1.8.10 选择性移植，见 BACKLOG | 已移除工作目录 |
 | `workbench-v1.8.9` | `workbench-v1.8.9` | `03fee6d8` | — | `archive/worktree/workbench-v1.8.9` | — |  | 常驻 |
 | `workbench-v1.8.9-hardening-integration` | `workbench-v1.8.9-hardening-integration` | `214dee95` | — | `archive/worktree/workbench-v1.8.9-hardening-integration` | `archive/leftovers/workbench-v1.8.9-hardening-integration`（3 项） | 未跟踪的构建产物；分支本身即 `archive/v1.8.9-codex-wip` | 已移除工作目录 |
+| `workbench-v1.8.10` | `workbench-v1.8.10` | `bea7e2a0` | `v1.8.10` | `archive/worktree/workbench-v1.8.10` | — |  | 常驻 |
+| `codex-v1810-evaluation` | `eval/v1810-codex` | `9ce17129` | — | `archive/local-only/eval-v1810-codex` | — | Codex 评估线，v1.8.10 工单 A；已并入 v1.8.10 | 保留（可移出） |
+| `codex-v1811-admission-oracles` | `eval/v1811-admission-oracles` | `3b43f003` | — | `archive/local-only/eval-v1811-admission-oracles` | — | Codex 评估线，工单 B；v1.8.11 的输入 | 保留 |
 
 `codex-c373`、`codex-c3f1` 是 Codex 自己的 worktree（`~/.codex/worktrees/`），提交 `90799cd7` 已包含在 `archive/v1.8.9-codex-wip` 中。
 

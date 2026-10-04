@@ -1261,7 +1261,8 @@
    ],
    "deleted_tracked": [],
    "leftovers_tag": "archive/leftovers/workbench-v1.8.5",
-   "kept": true
+   "kept": false,
+   "removed_on": "2026-10-04"
   },
   {
    "name": "workbench-v1.8.6",
@@ -1415,6 +1416,46 @@
    "deleted_tracked": [],
    "leftovers_tag": "archive/leftovers/workbench-v1.8.9-hardening-integration",
    "kept": false
+  },
+  {
+   "name": "workbench-v1.8.10",
+   "path": ".worktrees/workbench-v1.8.10",
+   "branch": "workbench-v1.8.10",
+   "head": "bea7e2a0948f9a3d78dde900286d670a55c61fc7",
+   "release_tags": [
+    "v1.8.10"
+   ],
+   "worktree_tag": "archive/worktree/workbench-v1.8.10",
+   "leftover_files": [],
+   "deleted_tracked": [],
+   "leftovers_tag": null,
+   "kept": true
+  },
+  {
+   "name": "codex-v1810-evaluation",
+   "path": ".worktrees/codex-v1810-evaluation",
+   "branch": "eval/v1810-codex",
+   "head": "9ce171299aac11d06a3bdc259343efa2d7c8d762",
+   "release_tags": [],
+   "worktree_tag": "archive/local-only/eval-v1810-codex",
+   "leftover_files": [],
+   "deleted_tracked": [],
+   "leftovers_tag": null,
+   "kept": true,
+   "note": "Codex evaluation lane, v1.8.10 work order A; merged into v1.8.10"
+  },
+  {
+   "name": "codex-v1811-admission-oracles",
+   "path": ".worktrees/codex-v1811-admission-oracles",
+   "branch": "eval/v1811-admission-oracles",
+   "head": "3b43f003201a298a6b8263609b0945e8e20c8bb5",
+   "release_tags": [],
+   "worktree_tag": "archive/local-only/eval-v1811-admission-oracles",
+   "leftover_files": [],
+   "deleted_tracked": [],
+   "leftovers_tag": null,
+   "kept": true,
+   "note": "Codex evaluation lane, work order B; input to v1.8.11"
   }
  ],
  "orphans": [

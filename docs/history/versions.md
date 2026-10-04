@@ -49,6 +49,7 @@
 | `v1.8.7` | 2026-08-07 | 复杂抽样设计、测量层级与统一结果契约 | [说明](../releases/v1.8.7-release-notes.md) | [Release](https://github.com/damndone/Arboris/releases/tag/v1.8.7) | [代码](https://github.com/damndone/Arboris/tree/v1.8.7) |
 | `v1.8.8` | 2026-08-13 | 声明驱动、可组合、可审计的 Agent 能力（P4–P7 并行开发） | [说明](../releases/v1.8.8-release-notes.md) | [Release](https://github.com/damndone/Arboris/releases/tag/v1.8.8) | [代码](https://github.com/damndone/Arboris/tree/v1.8.8) |
 | `v1.8.9` | 2026-09-28 | SPSS/Stata 互通、自然语言驱动与可核对的 AI 分析 | [说明](../releases/v1.8.9-release-notes.md) | [Release](https://github.com/damndone/Arboris/releases/tag/v1.8.9) | [代码](https://github.com/damndone/Arboris/tree/v1.8.9) |
+| `v1.8.10` | 2026-10-04 | 扩展地基：推断核心与后估计、检查库与准入、多重插补合并、Newey–West、按组执行、Agent 焦点 | [说明](../releases/v1.8.10-release-notes.md) | — | [代码](https://github.com/damndone/Arboris/tree/v1.8.10) |
 
 ## 没有发布 tag 的早期版本（v1.0–v1.4.0）
 
