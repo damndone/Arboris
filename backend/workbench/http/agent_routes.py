@@ -224,6 +224,15 @@ def _chain_agent_protocol(registry: OperationRegistry) -> str:
     )
 
 
+class AgentFocus(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["project", "dataset", "node", "plan", "report"]
+    id: str = Field(max_length=512)
+    run_id: str | None = Field(default=None, max_length=200)
+    label: str = Field(max_length=300)
+
+
 class AgentSessionCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -231,6 +240,10 @@ class AgentSessionCreateRequest(BaseModel):
     chain_id: str | None = None
     run_id: str | None = None
     context_packet: dict[str, Any] = Field(default_factory=dict)
+    # What the Agent is about (frontend agent/focus.ts): recorded with the
+    # session and told to the model, so its answers name the same object the
+    # panel's focus label shows.
+    focus: AgentFocus | None = None
 
 
 class AgentTurnRequest(BaseModel):
@@ -1036,6 +1049,22 @@ def create_agent_session(
             "metadata": {"protocol_version": "agent/v1"},
         },
     )
+    if body.focus is not None:
+        repository.append(
+            session_id,
+            "custom_message",
+            {
+                "message_type": "agent_focus",
+                "audience": "model",
+                "name": "workbench_agent_focus",
+                "content": (
+                    f"Focus: this conversation is about the {body.focus.kind} '{body.focus.label}'"
+                    + (f" in run {body.focus.run_id}" if body.focus.run_id else "")
+                    + ". Act on it unless the user names another object."
+                ),
+                "metadata": {"focus": body.focus.model_dump()},
+            },
+        )
     if body.role == "chain":
         registry = OperationRegistry()
         repository.append(
@@ -1058,6 +1087,7 @@ def create_agent_session(
             "role": body.role,
             "chain_id": chain_id,
             "run_id": body.run_id,
+            "focus": body.focus.model_dump() if body.focus is not None else None,
             "context_fingerprint": fingerprint,
         },
     )

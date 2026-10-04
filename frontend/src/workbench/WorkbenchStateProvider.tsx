@@ -24,6 +24,7 @@
 // node tab while the Report review system tab is active. It is never stored
 // as its own URL field. Plan §18.
 
+import type { FocusRef } from "./agent/focus";
 import {
   createContext,
   useCallback,
@@ -93,6 +94,9 @@ export interface WorkbenchState {
   contextMenu: ContextMenuState | null;
   /** Monotonic refresh signal for per-run graph view cleanup state. */
   graphCleanupVersion: number;
+  /** What a page declares the Agent is about (the Data page's dataset); null
+   * lets the graph selection or the project decide (agent/focus.ts). */
+  agentFocus: FocusRef | null;
 }
 
 export interface WorkbenchDispatch {
@@ -121,6 +125,8 @@ export interface WorkbenchDispatch {
   openContextMenu(menu: ContextMenuState): void;
   closeContextMenu(): void;
   refreshGraphCleanup(): void;
+  /** A page declares (or clears) the Agent's focus. */
+  setAgentFocus(focus: FocusRef | null): void;
 }
 
 export interface WorkbenchContextValue {
@@ -519,6 +525,16 @@ export function WorkbenchStateProvider({
     setGraphCleanupVersion((version) => version + 1);
   }, []);
 
+  const [agentFocus, setAgentFocusState] = useState<FocusRef | null>(null);
+  const setAgentFocus = useCallback((focus: FocusRef | null) => {
+    setAgentFocusState((current) =>
+      current === focus || (current && focus && current.kind === focus.kind && current.id === focus.id
+        && current.runId === focus.runId)
+        ? current
+        : focus,
+    );
+  }, []);
+
   const value = useMemo<WorkbenchContextValue>(
     () => ({
       state: {
@@ -537,6 +553,7 @@ export function WorkbenchStateProvider({
         searchCursorKey,
         contextMenu,
         graphCleanupVersion,
+        agentFocus,
       },
       dispatch: {
         selectByCanvasClick,
@@ -555,6 +572,7 @@ export function WorkbenchStateProvider({
         openContextMenu,
         closeContextMenu,
         refreshGraphCleanup,
+        setAgentFocus,
       },
     }),
     [
@@ -568,6 +586,8 @@ export function WorkbenchStateProvider({
       searchCursorKey,
       contextMenu,
       graphCleanupVersion,
+      agentFocus,
+      setAgentFocus,
       selectByCanvasClick,
       selectByTabSwitch,
       selectBySearchCommit,

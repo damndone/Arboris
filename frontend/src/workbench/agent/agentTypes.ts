@@ -186,4 +186,6 @@ export type AgentSessionCreateRequest = {
   chain_id?: string;
   run_id?: string;
   context_packet: AgentContextPacket;
+  /** What the Agent is about (agent/focus.ts), and its display label. */
+  focus?: { kind: string; id: string; run_id?: string; label: string };
 };
