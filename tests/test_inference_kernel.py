@@ -194,7 +194,9 @@ def test_survey_design_kernel_carries_the_design_variance_not_the_naive_one(tmp_
     _assert_diagonal_matches_packet(kernel, packet)
     assert kernel["covariance_estimator"].startswith("survey_design_")
     assert kernel["reference_distribution"] == "t"
-    assert kernel["df_resid"] == packet["survey_design"]["residual_degf"]
+    # The default convention is the design df itself (Stata svy).
+    assert kernel["df_resid"] == packet["survey_design"]["degf"] == packet["survey_design"]["inference_degf"]
+    assert kernel["df_method"] == "design"
     assert "loglik" not in kernel["interfaces"]
     assert "design-based" in kernel["unavailable"]["loglik"]
     assert kernel["weights"] == "sampling"

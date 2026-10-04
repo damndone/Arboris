@@ -884,6 +884,7 @@ def _submit_run(
         form.get("survey_weight_frame", ""),
         form.get("survey_subpop", ""),
         by_group_request,
+        form.get("survey_df", ""),
     )
     return {"run_id": run.run_id, "status": "running"}
 
@@ -945,6 +946,7 @@ def _bg_run(
     survey_weight_frame: str = "",
     survey_subpop: str = "",
     by_group: dict | None = None,
+    survey_df: str = "",
 ) -> None:
     events = get_event_manager()
     config = load_config(_resolve_project_root(run_root) / "config.yml")
@@ -1024,6 +1026,7 @@ def _bg_run(
             survey_lonely_psu=survey_lonely_psu,
             survey_weight_frame=survey_weight_frame,
             survey_subpop=survey_subpop,
+            survey_df=survey_df,
             labels=labels,
             statistical_tests=statistical_tests_request,
             by_group=by_group,

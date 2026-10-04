@@ -232,6 +232,7 @@ def run_workflow(
     survey_lonely_psu: str = "",
     survey_weight_frame: str = "",
     survey_subpop: str = "",
+    survey_df: str = "",
     labels: dict[str, object] | None = None,
     stop_reason: Callable[[], str | None] | None = None,
 ) -> dict[str, str]:
@@ -315,6 +316,8 @@ def run_workflow(
         "survey_lonely_psu": survey_lonely_psu,
         "survey_weight_frame": survey_weight_frame,
         "survey_subpop": survey_subpop,
+        # Only when set: an absent key keeps every earlier run's inputs.
+        **({"survey_df": survey_df} if survey_df else {}),
         "did_mode": did_mode,
         "did_cohort_col": did_cohort_col,
         "did_treat_col": did_treat_col,
@@ -449,6 +452,7 @@ def run_workflow(
             survey_lonely_psu=survey_lonely_psu,
             survey_weight_frame=survey_weight_frame,
             survey_subpop=survey_subpop,
+            survey_df=survey_df,
             labels=normalized_labels,
             stop_reason=stop_reason,
         )
@@ -576,6 +580,7 @@ def run_batch_y_workflow(
     survey_lonely_psu: str = "",
     survey_weight_frame: str = "",
     survey_subpop: str = "",
+    survey_df: str = "",
 ) -> dict[str, Any]:
     """Run one workflow per outcome column.
 
@@ -598,6 +603,7 @@ def run_batch_y_workflow(
             survey_lonely_psu=survey_lonely_psu,
             survey_weight_frame=survey_weight_frame,
             survey_subpop=survey_subpop,
+            survey_df=survey_df,
         )
         run_id = result["run_id"]
         run_root = Path(project_root) / "runs" / run_id
@@ -670,6 +676,7 @@ def _run_workflow(
     survey_lonely_psu: str = "",
     survey_weight_frame: str = "",
     survey_subpop: str = "",
+    survey_df: str = "",
     labels: dict[str, object] | None = None,
     lmm_execution_admission: object | None = None,
     stop_reason: Callable[[], str | None] | None = None,
@@ -753,6 +760,7 @@ def _run_workflow(
     ctx.artifacts["_survey_lonely_psu"] = survey_lonely_psu
     ctx.artifacts["_survey_weight_frame"] = survey_weight_frame
     ctx.artifacts["_survey_subpop"] = survey_subpop
+    ctx.artifacts["_survey_df"] = survey_df
     ctx.artifacts["_labels"] = normalized_labels
     ctx.artifacts["_iv_endog"] = [normalize_column_name(c) for c in (iv_endog or [])]
     ctx.artifacts["_iv_instruments"] = [normalize_column_name(c) for c in (iv_instruments or [])]

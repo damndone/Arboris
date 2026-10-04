@@ -12,6 +12,18 @@ describe("describeInference", () => {
     })).toBe("Standard errors: Cluster-robust (CR1) · Clusters: 18 · Inference: t(17)");
   });
 
+  it("describes a sampling design by its own df, not the pre-design fit's", () => {
+    // The fitted object's evidence still says HC1, t(77); the design replaced both.
+    const evidence = { covariance: "robust", effective_df: 77, inference_distribution: "t", inference_version: "v2" };
+    expect(describeInference({
+      covariance_evidence: evidence,
+      survey_design: { variance_method: "linearization", degf: 8, residual_degf: 6, df_convention: "design", inference_degf: 8 },
+    })).toBe("Standard errors: Design-based (linearization) · Inference: t(8), design df, PSUs minus strata");
+    // A result from before v1.8.10 recorded no convention and used R survey's.
+    expect(describeInference({ covariance_evidence: evidence, survey_design: { degf: 8, residual_degf: 6 } }))
+      .toBe("Standard errors: Design-based (linearization) · Inference: t(6), design df minus parameters plus one, R survey");
+  });
+
   it("names HC1 and t(N - K) for robust OLS", () => {
     expect(describeInference({
       inference_config: { covariance: "robust", effective_df: 296, inference_distribution: "t", inference_version: "v2" },

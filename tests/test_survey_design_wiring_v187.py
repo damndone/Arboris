@@ -35,6 +35,7 @@ SURVEY_FIELDS = {
     "survey_lonely_psu": "adjust",
     "survey_weight_frame": "cross_sectional",
     "survey_subpop": "region == 'north'",
+    "survey_df": "design_minus_p",
 }
 
 
@@ -115,6 +116,7 @@ def test_run_endpoint_forwards_survey_design_params(tmp_path):
     assert kw["survey_lonely_psu"] == "adjust"
     assert kw["survey_weight_frame"] == "cross_sectional"
     assert kw["survey_subpop"] == "region == 'north'"
+    assert kw["survey_df"] == "design_minus_p"
 
 
 def test_runs_batch_does_not_silently_ignore_survey_design(tmp_path):
@@ -168,6 +170,7 @@ def test_runs_batch_does_not_silently_ignore_survey_design(tmp_path):
         assert artifacts["_survey_replicate_weights"] == ["rw1", "rw2"]
         assert artifacts["_survey_lonely_psu"] == "adjust"
         assert artifacts["_survey_subpop"] == "region == 'north'"
+        assert artifacts["_survey_df"] == "design_minus_p"
 
 
 # --------------------------------------------------------------------------
@@ -198,6 +201,7 @@ def test_survey_design_params_reach_ctx_artifacts(tmp_path):
             survey_lonely_psu="adjust",
             survey_weight_frame="cross_sectional",
             survey_subpop="region == 'north'",
+            survey_df="design_minus_p",
         )
 
     assert seen["_survey_strata_col"] == "region"
@@ -208,6 +212,7 @@ def test_survey_design_params_reach_ctx_artifacts(tmp_path):
     assert seen["_survey_lonely_psu"] == "adjust"
     assert seen["_survey_weight_frame"] == "cross_sectional"
     assert seen["_survey_subpop"] == "region == 'north'"
+    assert seen["_survey_df"] == "design_minus_p"
 
 
 # --------------------------------------------------------------------------

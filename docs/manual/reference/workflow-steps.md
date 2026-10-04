@@ -414,6 +414,7 @@ Estimate one or more models from the source table.
 | `survey_lonely_psu` |  | Single-PSU stratum policy. One of: fail, remove, adjust, average, certainty. |
 | `survey_weight_frame` |  | Panel weight frame. One of: cross_sectional, longitudinal. |
 | `survey_subpop` |  | Subpopulation condition. |
+| `survey_df` |  | Coefficient test degrees of freedom. One of: design, design_minus_p. |
 | `sampling_weight` |  | Column holding the sampling weight. A survey design requires one, and a sampling weight without a declared design is refused -- give both or neither. |
 | `labels` |  | Column metadata. `measurement_level` maps column names to nominal / ordinal / scale / count and decides how each column is modelled -- an integer rating left undeclared is analysed as a count. Declare every column in one step rather than one at a time. |
 | `branches` | yes | List of {branch_id, outcome, predictors[, categorical][, polynomials][, covariance]}; one estimated model per entry. Entries in `predictors` enter LINEARLY, exactly as the column stands — listing a categorical code column there estimates a linear effect on the code, which is a different model. Use `categorical` for dummy expansion and `polynomials` for powers. Interaction terms cannot be expressed; say so rather than approximating one. |

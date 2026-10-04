@@ -268,6 +268,7 @@ async def run_endpoint(
     survey_lonely_psu: str = Form(""),          # fail | remove | adjust | average | certainty
     survey_weight_frame: str = Form(""),        # cross_sectional | longitudinal
     survey_subpop: str = Form(""),
+    survey_df: str = Form(""),           # design (default) | design_minus_p
     iv_endog: str = Form(""),          # JSON array of column names, e.g. ["educ"]
     iv_instruments: str = Form(""),    # JSON array of column names
     did_mode: str = Form(""),
@@ -341,6 +342,7 @@ async def run_endpoint(
             "survey_lonely_psu": survey_lonely_psu,
             "survey_weight_frame": survey_weight_frame,
             "survey_subpop": survey_subpop,
+            **({"survey_df": survey_df} if survey_df.strip() else {}),
             "iv_endog": iv_endog, "iv_instruments": iv_instruments,
             "did_mode": did_mode, "did_cohort_col": did_cohort_col,
             "did_treat_col": did_treat_col, "did_post_col": did_post_col,
@@ -406,6 +408,7 @@ async def batch_run_endpoint(
     survey_lonely_psu: str = Form(""),
     survey_weight_frame: str = Form(""),
     survey_subpop: str = Form(""),
+    survey_df: str = Form(""),           # design (default) | design_minus_p
 ) -> dict:
     _resolve_project_runs_dir(project_root)  # 404 PROJECT_NOT_FOUND for bogus roots
     if sheet_name or transpose == "true":
@@ -463,6 +466,7 @@ async def batch_run_endpoint(
             survey_lonely_psu=survey_lonely_psu,
             survey_weight_frame=survey_weight_frame,
             survey_subpop=survey_subpop,
+            survey_df=survey_df,
         )
         record_ui_action(
             root, source="POST /runs/batch", steps=["run.submit"],

@@ -400,8 +400,7 @@ def _survey_design_facts(run_root: Path) -> list[str]:
             f"kind: {design.get('variance_method', 'linearization')} over "
             f"{design.get('n_strata', 0)} strata and {design.get('n_psu', 0)} PSUs "
             f"(strata = {design.get('strata_column')}, PSU = {design.get('psu_column')})",
-            f"Design degrees of freedom: {design.get('degf')} "
-            f"(confidence intervals use this, not the sample size)",
+            _design_df_fact(design),
         ]
         deff = design.get("design_effect")
         n_eff = design.get("effective_sample_size")
@@ -419,6 +418,21 @@ def _survey_design_facts(run_root: Path) -> list[str]:
     return []
 
 
+def _design_df_fact(design: Mapping[str, Any]) -> str:
+    from .survey.design import recorded_df_convention
+
+    convention, df = recorded_df_convention(design)
+    if convention == "design":
+        return (
+            f"Coefficient tests and intervals use t({df}), the design degrees of freedom "
+            "(PSUs minus strata, as in Stata svy), not the sample size"
+        )
+    return (
+        f"Coefficient tests and intervals use t({df}): the design degrees of freedom "
+        f"({design.get('degf')}) less the parameters plus one, as in R survey"
+    )
+
+
 def _design_summary(design: Any) -> str:
     """One cell's worth of design, or nothing.
 
@@ -428,11 +442,14 @@ def _design_summary(design: Any) -> str:
     """
     if not isinstance(design, Mapping):
         return ""
+    from .survey.design import recorded_df_convention
+
     parts = [
         f"{design.get('variance_method', 'linearization')} design-based SE",
         f"strata={design.get('strata_column')}",
         f"PSU={design.get('psu_column')}",
         f"degf={design.get('degf')}",
+        "t df={1} ({0})".format(*recorded_df_convention(design)),
     ]
     deff = design.get("design_effect")
     if deff is not None:

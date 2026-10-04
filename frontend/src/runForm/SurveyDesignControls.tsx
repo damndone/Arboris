@@ -19,6 +19,8 @@ export type SurveyDesignValue = {
   survey_lonely_psu: string;
   survey_weight_frame: string;
   survey_subpop: string;
+  /** "" = the server default (design df). */
+  survey_df: string;
 };
 
 export function emptySurveyDesign(): SurveyDesignValue {
@@ -34,6 +36,7 @@ export function emptySurveyDesign(): SurveyDesignValue {
     survey_lonely_psu: "",
     survey_weight_frame: "",
     survey_subpop: "",
+    survey_df: "",
   };
 }
 
@@ -54,6 +57,11 @@ export function surveyDesignApplies(
 ): boolean {
   return Boolean(capability?.sampling_weight_families.includes(modelType));
 }
+
+const DF_CONVENTION_LABELS: Record<string, string> = {
+  design: "Design df: PSUs minus strata (Stata, SAS, SUDAAN)",
+  design_minus_p: "Design df minus parameters plus one (R survey)",
+};
 
 const WEIGHT_FRAMES = [
   { value: "cross_sectional", label: "Cross-sectional weight" },
@@ -149,6 +157,26 @@ export function SurveyDesignControls(props: {
           onChange={(event) => set({ survey_subpop: event.target.value })}
         />
       </label>
+      <label className="ios-field">
+        <span>Coefficient test degrees of freedom</span>
+        <select
+          aria-label="Survey degrees of freedom"
+          value={props.value.survey_df}
+          onChange={(event) => set({ survey_df: event.target.value })}
+        >
+          <option value="">Default: design df (PSUs minus strata)</option>
+          {(props.capability.df_conventions ?? []).map((convention) => (
+            <option key={convention} value={convention}>
+              {DF_CONVENTION_LABELS[convention] ?? convention}
+            </option>
+          ))}
+        </select>
+      </label>
+      <p className="ios-hint">
+        Choose before looking at results; the convention is recorded with them. The two differ
+        only when the design has few PSUs.
+      </p>
+
       <p className="ios-hint">
         A subpopulation is taken on the full design. Filtering the data first understates
         the standard errors while leaving the coefficients unchanged, so the result gives

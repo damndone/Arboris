@@ -236,6 +236,10 @@ def run(
         "", "--survey-subpop",
         help="Subpopulation expression evaluated on the full design.",
     ),
+    survey_df: str = typer.Option(
+        "", "--survey-df",
+        help="Coefficient test df under a survey design: design (default, #PSU - #strata) | design_minus_p (R survey).",
+    ),
 ) -> None:
     from .orchestrator import parse_imputation_request, run_workflow
 
@@ -279,6 +283,7 @@ def run(
         survey_lonely_psu=survey_lonely_psu,
         survey_weight_frame=survey_weight_frame,
         survey_subpop=survey_subpop,
+        survey_df=survey_df,
     )
     run_id = result["run_id"]
     # stdout: machine-readable run_id only — preserves the long-standing

@@ -474,6 +474,7 @@ export interface RunExtraParams {
   surveyLonelyPsu?: string;
   surveyWeightFrame?: string;
   surveySubpop?: string;
+  surveyDf?: string;
   ivEndog?: string[];
   ivInstruments?: string[];
   didMode?: string;
@@ -614,6 +615,7 @@ export async function runWorkflow(
   if (extra?.surveyLonelyPsu) form.append("survey_lonely_psu", extra.surveyLonelyPsu);
   if (extra?.surveyWeightFrame) form.append("survey_weight_frame", extra.surveyWeightFrame);
   if (extra?.surveySubpop) form.append("survey_subpop", extra.surveySubpop);
+  if (extra?.surveyDf) form.append("survey_df", extra.surveyDf);
   if (extra?.modelOptions !== undefined) {
     form.append("model_options", serializeModelOptions(extra.modelOptions));
   }

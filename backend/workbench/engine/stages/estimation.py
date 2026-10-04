@@ -648,9 +648,10 @@ def _apply_survey_design_variance(ctx, model_type: str, primary: dict) -> None:
     result = estimate_with_design(
         design, estimator, method=method,
         replicate_type=declared_replicate or None,
+        df_convention=str(ctx.artifacts.get("_survey_df") or "").strip() or "design",
     )
 
-    critical = float(stats.t.ppf(0.975, result.residual_degf))
+    critical = float(stats.t.ppf(0.975, result.inference_degf))
     coefficients = primary.get("coefficients") or {}
     unmatched = [
         term for term in coefficients if _design_term(term) not in result.standard_errors
@@ -678,7 +679,7 @@ def _apply_survey_design_variance(ctx, model_type: str, primary: dict) -> None:
         entry["ci_lower"] = estimate - critical * se
         entry["ci_upper"] = estimate + critical * se
         entry["p_value"] = float(
-            2 * stats.t.sf(abs(estimate / se), result.residual_degf)
+            2 * stats.t.sf(abs(estimate / se), result.inference_degf)
         ) if se > 0 else float("nan")
         entry["variance_source"] = "survey_design"
 
@@ -698,8 +699,10 @@ def _apply_survey_design_variance(ctx, model_type: str, primary: dict) -> None:
             params=[result.estimates[_design_term(term)] for term in payload_terms],
             vcov=np.asarray(result.covariance, dtype=float)[np.ix_(positions, positions)],
             reference_distribution="t",
-            df_resid=float(result.residual_degf),
-            df_method="design",
+            df_resid=float(result.inference_degf),
+            # "design" (degf) or "design_minus_p" (degf - p + 1): joint tests
+            # read it to pick the Korn-Graubard F or R's regTermTest F.
+            df_method=result.df_convention,
             loglik=None,
             nobs=nobs,
             covariance_estimator=f"survey_design_{result.method}",
@@ -742,6 +745,8 @@ def _apply_survey_design_variance(ctx, model_type: str, primary: dict) -> None:
         "n_psu": design.n_psu,
         "degf": result.degf,
         "residual_degf": result.residual_degf,
+        "df_convention": result.df_convention,
+        "inference_degf": result.inference_degf,
         "variance_method": result.method,
         "replicate_type": declared_replicate or None,
         "lonely_psu_policy": design.lonely_psu,

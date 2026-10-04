@@ -34,8 +34,23 @@ function hacDetail(evidence: Evidence): string | null {
   return `Bartlett kernel, lag ${lags} (${rule})${order}`;
 }
 
+/** A sampling design replaces the fitted variance and df; its own block says how. */
+function describeDesignInference(design: Evidence): string {
+  const method = typeof design.variance_method === "string" ? design.variance_method : "linearization";
+  // Before v1.8.10 no convention was recorded and R survey's degf - p + 1 was used.
+  const convention = design.df_convention === "design" ? "design" : "design_minus_p";
+  const df = count(design.inference_degf) ?? count(convention === "design" ? design.degf : design.residual_degf);
+  const basis = convention === "design" ? "design df, PSUs minus strata" : "design df minus parameters plus one, R survey";
+  return [
+    `Standard errors: Design-based (${method})`,
+    df !== null ? `Inference: t(${Math.round(df)}), ${basis}` : `Inference: t, ${basis}`,
+  ].join(" · ");
+}
+
 export function describeInference(result: unknown): string | null {
   const model = record(result);
+  const design = record(model?.survey_design);
+  if (design) return describeDesignInference(design);
   const evidence = record(model?.covariance_evidence) ?? record(model?.inference_config);
   if (!evidence) return null;
   const covariance = typeof evidence.covariance === "string" ? evidence.covariance : "";

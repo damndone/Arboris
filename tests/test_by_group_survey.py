@@ -3,8 +3,10 @@
 Filtering a group's rows before a design-based fit destroys the variance
 estimate, so each group is a subpopulation of the full design (Stata
 `svy, subpop()`). Compared live with Stata 18: each group's coefficients,
-standard errors and design degrees of freedom, and the group-difference test
-(`test` after `svy: regress y i.region##c.x`, Korn-Graubard adjusted F).
+standard errors, design degrees of freedom, t-test p-values and intervals, and
+the group-difference test (`test` after `svy: regress y i.region##c.x`,
+Korn-Graubard adjusted F). The default df convention is Stata's design df, so
+everything matches directly.
 
 Also pins the single-run subpopulation fix found here: the point estimate is
 the subpopulation's, not every row's.
@@ -72,7 +74,9 @@ def test_each_group_and_the_difference_test_match_stata_svy_subpop(grouped, surv
     for index, name in enumerate(REGIONS, start=1):
         lines += [f'svy, subpop(if region=="{name}"): regress y x',
                   emit(f"b{index}", "_b[x]"), emit(f"se{index}", "_se[x]"),
-                  emit(f"c{index}", "_b[_cons]"), emit(f"sec{index}", "_se[_cons]"), emit(f"df{index}", "e(df_r)")]
+                  emit(f"c{index}", "_b[_cons]"), emit(f"sec{index}", "_se[_cons]"), emit(f"df{index}", "e(df_r)"),
+                  emit(f"p{index}", "2*ttail(e(df_r), abs(_b[x]/_se[x]))"),
+                  emit(f"lo{index}", "_b[x] - invttail(e(df_r), 0.025)*_se[x]")]
     lines += ["svy: regress y i.reg##c.x",
               "test 2.reg 3.reg 2.reg#c.x 3.reg#c.x", emit("all_F", "r(F)"), emit("all_df", "r(df)"),
               emit("all_dfr", "r(df_r)"), emit("all_p", "r(p)"),
@@ -86,24 +90,19 @@ def test_each_group_and_the_difference_test_match_stata_svy_subpop(grouped, surv
         assert coefficients["x"]["std_error"] == pytest.approx(stata[f"se{index}"], rel=1e-8)
         assert coefficients["Intercept"]["estimate"] == pytest.approx(stata[f"c{index}"], rel=1e-9)
         assert coefficients["Intercept"]["std_error"] == pytest.approx(stata[f"sec{index}"], rel=1e-8)
-        # Stata's e(df_r) is the design df (PSUs - strata). Coefficient t tests
-        # here follow R survey, which subtracts the parameters: degf - p + 1.
-        # The two conventions differ by p - 1; the design df itself agrees.
-        assert packet["survey_design"]["degf"] == stata[f"df{index}"]
-        assert packet["survey_design"]["residual_degf"] == stata[f"df{index}"] - (len(coefficients) - 1)
+        # Stata's e(df_r) is the design df (PSUs - strata), the default here.
+        design = packet["survey_design"]
+        assert design["degf"] == design["inference_degf"] == stata[f"df{index}"]
+        assert design["df_convention"] == "design"
+        assert coefficients["x"]["p_value"] == pytest.approx(stata[f"p{index}"], rel=1e-7)
+        assert coefficients["x"]["ci_lower"] == pytest.approx(stata[f"lo{index}"], rel=1e-8)
     differences = read_json(grouped / collection["pooled"]["result_ref"])
     tests = {test["name"]: test for test in differences["tests"]}
-    # Compare the Wald statistic W both report through their adjusted F:
-    # F = (d - q + 1) / (d q) W, with Stata's d the design df and ours the
-    # residual df of the convention above.
-    for name, (stata_f, stata_dfr, q) in {"all": (stata["all_F"], stata["all_dfr"], 4),
-                                           "x": (stata["x_F"], stata["x_dfr"], 2)}.items():
-        stata_d = stata_dfr + q - 1
-        stata_w = stata_f * stata_d * q / (stata_d - q + 1)
+    for name, q in {"all": 4, "x": 2}.items():
         ours = tests[name]
-        our_d = ours["df_den"] + q - 1
-        our_w = ours["statistic"] * our_d * q / (our_d - q + 1)
-        assert our_w == pytest.approx(stata_w, rel=1e-7), name
+        assert ours["statistic"] == pytest.approx(stata[f"{name}_F"], rel=1e-7), name
+        assert ours["df_den"] == stata[f"{name}_dfr"], name
+        assert ours["p_value"] == pytest.approx(stata[f"{name}_p"], rel=1e-6), name
         assert ours["df_num"] == q and ours["adjustment"] == "korn_graubard_adjusted_f"
 
 

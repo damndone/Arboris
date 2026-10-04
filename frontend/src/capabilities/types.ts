@@ -53,6 +53,9 @@ export interface SurveyDesignCapability {
   variance_method_requirements: Record<string, string[]>;
   replicate_types: string[];
   lonely_psu_policies: string[];
+  /** Coefficient-test df conventions; the first is the default. Optional so
+   *  an older server without the field still renders the form. */
+  df_conventions?: string[];
   design_fields: string[];
   /** Families whose engine accepts a sampling weight; the design controls
    *  belong to those and nowhere else. Server-derived, never restated here. */

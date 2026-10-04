@@ -43,7 +43,7 @@ VCOV_SCOPES = ("full", "focal", "unavailable")
 WEIGHT_KINDS = ("none", "frequency", "analysis", "sampling")
 #: Where df_resid comes from: residual N - K, clusters G - 1, a survey design's
 #: degrees of freedom, or none (asymptotic, normal / chi-square).
-DF_METHODS = ("residual", "clusters_minus_one", "design", "asymptotic")
+DF_METHODS = ("residual", "clusters_minus_one", "design", "design_minus_p", "asymptotic")
 
 _FIELDS = frozenset(
     {

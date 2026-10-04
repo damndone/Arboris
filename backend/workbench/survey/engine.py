@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from .design import SurveyDesign
+from .design import DF_CONVENTIONS, SurveyDesign
 from .errors import SurveyCompositionError, SurveyEngineError
 from .estimator import EstimatorSpec, missing_capabilities
 
@@ -50,19 +50,25 @@ class DesignEstimate:
     covariance: np.ndarray
     terms: list[str]
     replicate_summary: ReplicateSummary | None = None
+    df_convention: str = "design"
 
     @property
     def residual_degf(self) -> int:
-        """Design df less the parameters spent: `degf - p + 1`.
-
-        This, not `degf` itself, is what intervals and the Wald denominator use
-        -- R reports it as `df.residual` for svyglm.  Here degf is 8 but the
-        multiplier is qt(.975, 6) = 2.447, so confusing the two is not subtle.
-        """
+        """Design df less the parameters spent: `degf - p + 1` (R's `df.residual`
+        for svyglm). Reported alongside degf whichever convention is chosen."""
         return self.degf - len(self.terms) + 1
 
+    @property
+    def inference_degf(self) -> int:
+        """The df coefficient t tests and intervals use, by the chosen convention.
+
+        Here degf is 8 and p is 3: qt(.975, 8) = 2.306 under "design",
+        qt(.975, 6) = 2.447 under "design_minus_p" -- not a subtle difference.
+        """
+        return self.degf if self.df_convention == "design" else self.residual_degf
+
     def _critical(self) -> float:
-        return float(stats.t.ppf(0.975, self.residual_degf))
+        return float(stats.t.ppf(0.975, self.inference_degf))
 
     @property
     def ci_lower(self) -> dict[str, float]:
@@ -75,20 +81,32 @@ class DesignEstimate:
         return {k: self.estimates[k] + c * self.standard_errors[k] for k in self.terms}
 
     def joint_test(self, terms: list[str]) -> JointTest:
-        """Adjusted Wald test on the design degrees of freedom.
+        """Design-based Wald test of the terms jointly equal to zero.
 
-        Using residual degrees of freedom here would quietly overstate
-        significance; the denominator must come from the design.
+        "design": the Korn-Graubard adjusted F, (d - q + 1) / (d q) W on
+        (q, d - q + 1) with d the design df (Stata's default after svy).
+        "design_minus_p": W / q on (q, degf - p + 1), R's regTermTest.
         """
         idx = [self.terms.index(t) for t in terms]
         beta = np.array([self.estimates[t] for t in terms])
         vcov = self.covariance[np.ix_(idx, idx)]
-        df = len(terms)
-        ddf = self.residual_degf
-        stat = float(beta @ np.linalg.solve(vcov, beta)) / df
+        q = len(terms)
+        wald = float(beta @ np.linalg.solve(vcov, beta))
+        if self.df_convention == "design":
+            d = self.degf
+            ddf = d - q + 1
+            if ddf <= 0:
+                raise SurveyEngineError(
+                    "SURVEY_TOO_FEW_DESIGN_DF",
+                    f"{q} constraints need more than {d} design degrees of freedom",
+                )
+            stat = wald * ddf / (d * q)
+        else:
+            ddf = self.residual_degf
+            stat = wald / q
         return JointTest(
-            statistic=stat, df=df, ddf=ddf,
-            p_value=float(stats.f.sf(stat, df, ddf)),
+            statistic=stat, df=q, ddf=ddf,
+            p_value=float(stats.f.sf(stat, q, ddf)),
         )
 
 
@@ -102,7 +120,13 @@ def estimate_with_design(
     *,
     method: str,
     replicate_type: str | None = None,
+    df_convention: str = "design",
 ) -> DesignEstimate:
+    if df_convention not in DF_CONVENTIONS:
+        raise SurveyEngineError(
+            "SURVEY_DF_CONVENTION_INVALID",
+            f"unknown degrees-of-freedom convention {df_convention!r}; use one of {list(DF_CONVENTIONS)}",
+        )
     missing = missing_capabilities(estimator, method)
     if missing:
         raise SurveyCompositionError(
@@ -139,6 +163,7 @@ def estimate_with_design(
         covariance=cov,
         terms=terms,
         replicate_summary=summary,
+        df_convention=df_convention,
     )
 
 

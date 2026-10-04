@@ -4237,6 +4237,19 @@ def _bounded_inference(result: Mapping[str, Any]) -> dict[str, Any] | None:
     robust or clustered covariance its p-values used the normal distribution,
     and the Agent has to be able to say so.
     """
+    design = result.get("survey_design")
+    if isinstance(design, Mapping):
+        # The design replaced the fitted object's variance and df; the covariance
+        # evidence still describes the pre-design fit (e.g. HC1, t(N - K)).
+        from ..survey.design import recorded_df_convention
+
+        convention, df = recorded_df_convention(design)
+        return {
+            "covariance": "survey_design",
+            "covariance_estimator": f"survey_design_{design.get('variance_method') or 'linearization'}",
+            "inference_distribution": "t", "effective_df": df, "df_method": convention,
+            "legacy_asymptotic": False,
+        }
     evidence = result.get("covariance_evidence") or result.get("inference_config")
     if not isinstance(evidence, Mapping):
         return None
@@ -5227,11 +5240,11 @@ def _bounded_survey_design(model_results: list[dict[str, Any]]) -> dict[str, Any
         return _bounded_numeric_fields(
             design,
             fields=(
-                "n_obs", "n_strata", "n_psu", "degf", "residual_degf",
+                "n_obs", "n_strata", "n_psu", "degf", "residual_degf", "inference_degf",
                 "design_effect", "effective_sample_size",
             ),
             string_fields=(
-                "variance_method", "strata_column", "psu_column",
+                "df_convention", "variance_method", "strata_column", "psu_column",
                 "weight_column", "replicate_type", "lonely_psu_policy",
                 "subpopulation",
             ),

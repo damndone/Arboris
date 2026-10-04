@@ -14,7 +14,9 @@ about the result looks wrong.  Stata warns about exactly this (`subpop()` versus
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -24,6 +26,24 @@ from .estimator import VARIANCE_METHOD_REQUIREMENTS, EstimatorSpec, missing_capa
 
 LONELY_PSU_POLICIES = ("fail", "remove", "adjust", "average", "certainty")
 REPLICATE_TYPES = ("brr", "jackknife", "bootstrap", "provided")
+#: Degrees of freedom for coefficient t tests and intervals. "design" is the
+#: design df itself (#PSU - #strata): Korn-Graubard, and what Stata svy, SAS
+#: SURVEYREG and SUDAAN use. "design_minus_p" also subtracts the parameters
+#: (degf - p + 1), R survey's svyglm convention. The first is the default.
+DF_CONVENTIONS = ("design", "design_minus_p")
+
+
+def recorded_df_convention(packet: Mapping[str, Any]) -> tuple[str, Any]:
+    """The convention a result's `survey_design` block used, and its t df.
+
+    Results from before v1.8.10 carry no convention: they used R survey's
+    degf - p + 1, recorded as residual_degf.
+    """
+    convention = packet.get("df_convention") or "design_minus_p"
+    df = packet.get("inference_degf")
+    if df is None:
+        df = packet.get("degf") if convention == "design" else packet.get("residual_degf")
+    return convention, df
 
 
 @dataclass(frozen=True)

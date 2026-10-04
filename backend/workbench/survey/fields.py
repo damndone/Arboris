@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .design import LONELY_PSU_POLICIES, REPLICATE_TYPES
+from .design import DF_CONVENTIONS, LONELY_PSU_POLICIES, REPLICATE_TYPES
 
 #: Ordered so the published params read the way the form asks for them.
 DESIGN_FIELD_SPECS: tuple[dict[str, Any], ...] = (
@@ -78,6 +78,16 @@ DESIGN_FIELD_SPECS: tuple[dict[str, Any], ...] = (
         "label": "Subpopulation condition",
         "required": False,
         "role": "survey_subpop",
+    },
+    {
+        # Chosen before results are seen and recorded with them; the default
+        # (empty) is the design df.
+        "key": "survey_df",
+        "kind": "select",
+        "label": "Coefficient test degrees of freedom",
+        "required": False,
+        "options": list(DF_CONVENTIONS),
+        "role": "survey_df",
     },
 )
 
