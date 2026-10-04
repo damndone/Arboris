@@ -110,8 +110,15 @@ cases$ols_cluster <- pooled_table(
   length(unique(g)) - 1
 )
 
+# glm reports the variance from the weights of the IRLS iterate *before* the
+# last update, about 1e-9 off the variance at the estimate (v1.8.10 A01:
+# enough to move a p-value near 5e-5 by 1.4e-7 relative). Refitting from the
+# optimum makes the two iterates coincide, so the reference is the variance at
+# the estimate, which is what Workbench reports.
 logit_fits <- lapply(completed, function(d) {
-  glm(yb ~ x1 + x2 + x3, data = d, family = binomial(), control = glm.control(epsilon = 1e-14, maxit = 100))
+  first <- glm(yb ~ x1 + x2 + x3, data = d, family = binomial(), control = glm.control(epsilon = 1e-14, maxit = 100))
+  glm(yb ~ x1 + x2 + x3, data = d, family = binomial(), start = coef(first),
+      control = glm.control(epsilon = 1e-14, maxit = 100))
 })
 direct_logit <- summary(pool(as.mira(logit_fits), dfcom = Inf))
 logit <- pooled_table(lapply(logit_fits, coef), lapply(logit_fits, function(f) sqrt(diag(vcov(f)))), Inf)
