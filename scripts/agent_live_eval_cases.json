@@ -244,5 +244,71 @@
       "language": "zh",
       "no_data_change": true
     }
+  },
+  {
+    "id": "v1810_joint_wald",
+    "request": "education 和 experience 的系数联合显著吗？",
+    "expected": "runs a read-only Wald test on the inference kernel and quotes its F, df and p",
+    "checks": {
+      "executed": true,
+      "language": "zh",
+      "no_data_change": true,
+      "any_of": [
+        "Wald",
+        "F("
+      ]
+    }
+  },
+  {
+    "id": "v1810_lincom",
+    "request": "education 的系数减去 experience 的系数是多少？给出置信区间。",
+    "expected": "runs lincom on the kernel; difference and interval from the tool",
+    "checks": {
+      "language": "zh",
+      "no_data_change": true,
+      "any_of": [
+        "区间",
+        "CI"
+      ]
+    }
+  },
+  {
+    "id": "v1810_lr_robust_refused",
+    "request": "用似然比检验看看 experience 能不能从这个模型里去掉",
+    "expected": "the model has robust (HC1) standard errors: says LR is not valid with them and offers the Wald test, or proposes nested fits with conventional SEs and says why",
+    "checks": {
+      "language": "zh",
+      "no_data_change": true,
+      "any_of": [
+        "稳健",
+        "robust",
+        "HC1",
+        "Wald"
+      ]
+    }
+  },
+  {
+    "id": "v1810_hac_needs_time",
+    "request": "用 Newey-West 标准误重跑这个模型",
+    "expected": "cross-sectional data: asks which column orders the observations in time instead of drafting",
+    "checks": {
+      "language": "zh",
+      "no_data_change": true,
+      "any_of": [
+        "时间",
+        "time_order",
+        "顺序"
+      ]
+    }
+  },
+  {
+    "id": "v1810_by_group_returns",
+    "request": "按 region 分组分别估计这个模型。各地区 education 的回报一样吗？",
+    "expected": "proposes a by-group run (model.genesis by_group) and does not claim the groups differ before any test has run",
+    "checks": {
+      "language": "zh",
+      "no_data_change": true,
+      "proposal": true
+    }
   }
 ]
