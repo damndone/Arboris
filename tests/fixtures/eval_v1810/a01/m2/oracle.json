@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generator": "tests/fixtures/multiple_imputation/generate_oracle.R",
+    "generator": "tests/fixtures/eval_v1810/a01/generate_oracle.R",
     "r_version": "R version 4.6.0 (2026-04-24)",
     "mice_version": "3.19.0",
     "m": 2,

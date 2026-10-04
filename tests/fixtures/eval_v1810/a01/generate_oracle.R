@@ -3,11 +3,11 @@
 #
 # Writes, next to this file:
 #   data.csv          frame with missing values (MAR on x1, x2 and y)
-#   imputed_<i>.csv   the m = 5 completed datasets mice produced from it
-#   oracle.json       mice::pool on each model fitted to those five datasets
+#   imputed_<i>.csv   the m = 2 or 20 completed datasets mice produced
+#   oracle.json       mice::pool on each model fitted to those datasets
 #
 # Run from the worktree root:
-#   Rscript tests/fixtures/multiple_imputation/generate_oracle.R
+#   Rscript tests/fixtures/eval_v1810/a01/generate_oracle.R tests/fixtures/eval_v1810/a01/m2 2
 #
 # VERIFICATION LEVEL:
 #   * The completed datasets are R's, so the comparison isolates what Workbench
@@ -120,7 +120,7 @@ cases$logit <- logit
 
 oracle <- list(
   meta = list(
-    generator = "tests/fixtures/multiple_imputation/generate_oracle.R",
+    generator = "tests/fixtures/eval_v1810/a01/generate_oracle.R",
     r_version = R.version.string,
     mice_version = as.character(packageVersion("mice")),
     m = m,
