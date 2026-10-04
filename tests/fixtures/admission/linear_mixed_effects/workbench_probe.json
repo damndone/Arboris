@@ -1,0 +1,19 @@
+{
+  "request": {
+    "model_type": "linear_mixed_effects",
+    "y": "y",
+    "x": [
+      "x"
+    ],
+    "model_options": {
+      "subject_id": "g",
+      "time": "time",
+      "group": "arm",
+      "fit_method": "reml",
+      "random_slope": false
+    }
+  },
+  "status": "probe_exception",
+  "exception": "Linear mixed-effects execution is unavailable until explicit local containment is admitted.",
+  "kernel": null
+}
