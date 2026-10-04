@@ -83,6 +83,7 @@ def test_pooled_results_match_mice_pool(kernels, case: str, m: int) -> None:
             # magnifies the optimiser's last digits; measure it on the scale of
             # its standard error instead.
             absolute = tolerance * reference["std_error"] if ref_key.startswith("ci_") else 1e-12
-            assert ours[ours_key] == pytest.approx(reference[ref_key], rel=tolerance, abs=absolute), (
+            relative = 0.0 if ref_key.startswith("ci_") else tolerance
+            assert ours[ours_key] == pytest.approx(reference[ref_key], rel=relative, abs=absolute), (
                 f"{case} {term} {ours_key}"
             )

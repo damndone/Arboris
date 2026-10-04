@@ -1,0 +1,39 @@
+
+ RUN  v2.1.9 /Users/jiayuanren/项目规划/.worktrees/codex-v1810-evaluation/frontend
+
+ ❯ src/workbench/agent/__eval__/focus.eval.test.ts (3 tests | 1 failed) 5ms
+   × A14 focus boundaries > uses the unresolved-node fallback for a nonexistent run rail selection 4ms
+     → expected { focus: { kind: 'node', …(2) }, …(5) } to match object { runId: 'run_active', …(2) }
+(6 matching properties omitted from actual)
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/workbench/agent/__eval__/focus.eval.test.ts > A14 focus boundaries > uses the unresolved-node fallback for a nonexistent run rail selection
+AssertionError: expected { focus: { kind: 'node', …(2) }, …(5) } to match object { runId: 'run_active', …(2) }
+(6 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  Object {
+    "nodeKey": null,
+    "role": "chain",
+-   "runId": "run_active",
++   "runId": "run_absent",
+  }
+
+ ❯ src/workbench/agent/__eval__/focus.eval.test.ts:34:22
+     32|     // The step-8 record says a selection absent from the forest stays…
+     33|     // the active chain without a node, as for an unresolved draft nod…
+     34|     expect(resolved).toMatchObject({ runId: "run_active", role: "chain…
+       |                      ^
+     35|   });
+     36| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 2 passed (3)
+   Start at  06:28:56
+   Duration  464ms (transform 25ms, setup 57ms, collect 9ms, tests 5ms, environment 268ms, prepare 37ms)
+

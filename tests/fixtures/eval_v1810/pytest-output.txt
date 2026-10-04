@@ -1,0 +1,139 @@
+.F......FF.......................                                        [100%]
+=================================== FAILURES ===================================
+________________ test_pooled_results_match_mice_pool[logit-20] _________________
+
+kernels = <function kernels.<locals>.fitted at 0x11b02b3d0>, case = 'logit'
+m = 20
+
+    @pytest.mark.parametrize("m", [2, 20])
+    @pytest.mark.parametrize("case", sorted(CASES))
+    def test_pooled_results_match_mice_pool(kernels, case: str, m: int) -> None:
+        fitted = kernels(case, m)
+        require_poolable(fitted[0]["model_type"], fitted[0])
+        pooled = pool_kernels(fitted)
+        expected = json.loads((FIXTURES / f"m{m}" / "oracle.json").read_text())["cases"][case]
+        print("case/data/formula", case, m, str(FIXTURES / f"m{m}"), CASES[case], ["x1", "x2", "x3"])
+        print("kernel settings", {key: fitted[0].get(key) for key in (
+            "covariance_estimator", "df_method", "reference_distribution", "df_resid", "nobs")})
+        print("first three pooled coefficients and standard errors", [
+            (term, pooled["terms"][term]["estimate"], reference["estimate"],
+             pooled["terms"][term]["std_error"], reference["std_error"])
+            for term, reference in list(expected["terms"].items())[:3]])
+        tolerance = 1e-7
+        dfcom = expected["dfcom"]
+        assert pooled["dfcom"] == (None if dfcom == "Inf" else pytest.approx(dfcom))
+        assert set(pooled["terms"]) == set(expected["terms"])
+        for term, reference in expected["terms"].items():
+            ours = pooled["terms"][term]
+            for ours_key, ref_key in (
+                ("estimate", "estimate"), ("within_variance", "ubar"), ("between_variance", "b"),
+                ("total_variance", "t"), ("std_error", "std_error"), ("df", "df"), ("riv", "riv"),
+                ("lambda", "lambda"), ("fmi", "fmi"), ("statistic", "statistic"), ("p_value", "p_value"),
+                ("ci_lower", "ci_lower"), ("ci_upper", "ci_upper"),
+            ):
+                # An interval endpoint can sit near zero, where a relative tolerance
+                # magnifies the optimiser's last digits; measure it on the scale of
+                # its standard error instead.
+                absolute = tolerance * reference["std_error"] if ref_key.startswith("ci_") else 1e-12
+                relative = 0.0 if ref_key.startswith("ci_") else tolerance
+>               assert ours[ours_key] == pytest.approx(reference[ref_key], rel=relative, abs=absolute), (
+                    f"{case} {term} {ours_key}"
+                )
+E               AssertionError: logit x2 p_value
+E               assert 5.1028874281546085e-05 == 5.10288669984066e-05 ± 5.1e-12
+E                 
+E                 comparison failed
+E                 Obtained: 5.1028874281546085e-05
+E                 Expected: 5.10288669984066e-05 ± 5.1e-12
+
+tests/eval_v1810/test_a01_pool_extremes.py:87: AssertionError
+----------------------------- Captured stdout call -----------------------------
+case/data/formula logit 20 /Users/jiayuanren/项目规划/.worktrees/codex-v1810-evaluation/tests/fixtures/eval_v1810/a01/m20 ('logit', 'yb', {}) ['x1', 'x2', 'x3']
+kernel settings {'covariance_estimator': 'nonrobust', 'df_method': 'asymptotic', 'reference_distribution': 'z', 'df_resid': 296.0, 'nobs': 300}
+first three pooled coefficients and standard errors [('Intercept', -0.2986814668339129, -0.298681466833912, 0.13024156117656824, 0.130241560289853), ('x1', 1.0589359689045963, 1.05893596890459, 0.1796403172055777, 0.179640314934678), ('x2', -0.5902789349025088, -0.590278934902508, 0.1451093513698985, 0.145109350143744)]
+_____________ test_direct_request_discloses_or_refuses_combination _____________
+
+tmp_path = PosixPath('/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-468/test_direct_request_discloses_0')
+
+    def test_direct_request_discloses_or_refuses_combination(tmp_path):
+        frame = pd.read_csv(Path(__file__).parents[1] / "fixtures/multiple_imputation/data.csv")
+        frame["region"] = ["east" if i % 2 else "west" for i in range(len(frame))]
+        path = tmp_path / "combined.csv"
+        frame.to_csv(path, index=False)
+        project = create_project(tmp_path, "combined")
+        result = run_workflow(project.root, [path], mode="auto", model_type="ols", y="y", x=["x1", "x3"],
+                              imputation={"method": "mice", "m": 2}, by_group={"column": "region"})
+        root = project.root / "runs" / result["run_id"]
+        if result["status"] in {"failed", "blocked"}:
+            issues = read_json(root / "errors.json")["issues"]
+            assert any("imput" in i["message"].lower() and "group" in i["message"].lower() for i in issues), issues
+        else:
+            assert result["status"] == "completed"
+            evidence = json.dumps(read_json(root / "errors.json"), ensure_ascii=False)
+>           assert "imput" in evidence.lower() and "group" in evidence.lower(), (
+                "Both requested; completed without disclosing which combinator was omitted", result, evidence)
+E           AssertionError: ('Both requested; completed without disclosing which combinator was omitted', {'run_id': '20261004_102936_465655_0146f...s": {}, "recommended_action_key": "", "is_user_action_required": false}], "superseded_by": "diagnostic_summary.json"}')
+E           assert ('imput' in '{"schema_version": "legacy", "run_id": "20261004_102936_465655_0146f158", "issues": [{"severity": "info", "code": "ca...ms": {}, "recommended_action_key": "", "is_user_action_required": false}], "superseded_by": "diagnostic_summary.json"}')
+E            +  where '{"schema_version": "legacy", "run_id": "20261004_102936_465655_0146f158", "issues": [{"severity": "info", "code": "ca...ms": {}, "recommended_action_key": "", "is_user_action_required": false}], "superseded_by": "diagnostic_summary.json"}' = <built-in method lower of str object at 0x11e037bb0>()
+E            +    where <built-in method lower of str object at 0x11e037bb0> = '{"schema_version": "legacy", "run_id": "20261004_102936_465655_0146f158", "issues": [{"severity": "INFO", "code": "CA...ms": {}, "recommended_action_key": "", "is_user_action_required": false}], "superseded_by": "diagnostic_summary.json"}'.lower
+
+tests/eval_v1810/test_a03_imputation_by_group.py:27: AssertionError
+----------------------------- Captured stderr call -----------------------------
+/Users/runner/work/crossbow/crossbow/arrow/cpp/src/arrow/util/cpu_info.cc:242: IOError: sysctlbyname failed for 'hw.l1dcachesize'. Detail: [errno 1] Operation not permitted
+/Users/runner/work/crossbow/crossbow/arrow/cpp/src/arrow/util/cpu_info.cc:242: IOError: sysctlbyname failed for 'hw.l2cachesize'. Detail: [errno 1] Operation not permitted
+/Users/runner/work/crossbow/crossbow/arrow/cpp/src/arrow/util/cpu_info.cc:242: IOError: sysctlbyname failed for 'hw.l3cachesize'. Detail: [errno 1] Operation not permitted
+/Users/runner/work/crossbow/crossbow/arrow/cpp/src/arrow/util/cpu_info.cc:242: IOError: sysctlbyname failed for 'hw.optional.neon'. Detail: [errno 1] Operation not permitted
+_________ test_pooled_projections_have_no_r_squared_or_residual_values _________
+
+tmp_path = PosixPath('/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-468/test_pooled_projections_have_n0')
+
+    def test_pooled_projections_have_no_r_squared_or_residual_values(tmp_path):
+        project = create_project(tmp_path, "projection")
+        source = Path(__file__).parents[1] / "fixtures/multiple_imputation/data.csv"
+        result = run_workflow(project.root, [source], mode="auto", model_type="ols", y="y", x=["x1", "x2", "x3"],
+                              imputation={"method": "mice", "m": 2})
+        root = project.root / "runs" / result["run_id"]
+        assert result["status"] == "completed"
+        packet = read_json(root / "model_results/ols_1.json")
+        views = [_bounded_persisted_model_facts([packet], run_root=root)[0],
+                 _public_requested_model_coefficients(run_id=result["run_id"], result=packet, requested_terms=("x1",))]
+        def inspect(value):
+            if isinstance(value, dict):
+                for key, child in value.items():
+                    assert key not in {"r_squared", "r_squared_adj", "residuals", "fitted_values"}, (key, child)
+                    inspect(child)
+            elif isinstance(value, list):
+                for child in value:
+                    inspect(child)
+        for view in views:
+            assert view["multiple_imputation"]["m"] == 2
+>           inspect(view)
+
+tests/eval_v1810/test_a04_pooled_projections.py:30: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+value = {'model_id': 'ols_1', 'nobs': 300, 'nobs_basis': 'rows', 'r_squared': None, ...}
+
+    def inspect(value):
+        if isinstance(value, dict):
+            for key, child in value.items():
+>               assert key not in {"r_squared", "r_squared_adj", "residuals", "fitted_values"}, (key, child)
+E               AssertionError: ('r_squared', None)
+E               assert 'r_squared' not in {'fitted_values', 'r_squared', 'r_squared_adj', 'residuals'}
+
+tests/eval_v1810/test_a04_pooled_projections.py:23: AssertionError
+=============================== warnings summary ===============================
+tests/eval_v1810/test_a10_logit_separation.py::test_separated_group_is_not_estimable_and_excluded_from_differences
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/discrete/discrete_model.py:227: PerfectSeparationWarning: Perfect separation or prediction detected, parameter may not be identified
+    warnings.warn(msg, category=PerfectSeparationWarning)
+
+tests/eval_v1810/test_a10_logit_separation.py::test_separated_group_is_not_estimable_and_excluded_from_differences
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/base/model.py:607: ConvergenceWarning: Maximum Likelihood optimization failed to converge. Check mle_retvals
+    warnings.warn("Maximum Likelihood optimization failed to "
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/eval_v1810/test_a01_pool_extremes.py::test_pooled_results_match_mice_pool[logit-20]
+FAILED tests/eval_v1810/test_a03_imputation_by_group.py::test_direct_request_discloses_or_refuses_combination
+FAILED tests/eval_v1810/test_a04_pooled_projections.py::test_pooled_projections_have_no_r_squared_or_residual_values
+3 failed, 30 passed, 2 warnings in 54.88s
