@@ -3502,8 +3502,7 @@ def _public_requested_model_coefficients(
         "model_id": model_id,
         "model_type": result.get("model_type") if isinstance(result.get("model_type"), str) else None,
         "nobs": _public_positive_int(result.get("nobs")),
-        "r_squared": _public_stat_number(result.get("r_squared")),
-        "r_squared_adj": _public_stat_number(result.get("r_squared_adj")),
+        **_fit_statistics(result),
         "df_model": _public_stat_number(result.get("df_model")),
         "df_resid": _public_stat_number(result.get("df_resid")),
         "outcome": result.get("y_column") if isinstance(result.get("y_column"), str) else None,
@@ -4100,8 +4099,7 @@ def _bounded_persisted_model_facts(
                 # over units (v1.8.10: CS reported 12 units beside 120 rows).
                 "nobs": result.get("nobs") if isinstance(result.get("nobs"), int) else None,
                 "nobs_basis": result.get("nobs_basis") or "rows",
-                "r_squared": _public_stat_number(result.get("r_squared")),
-                "r_squared_adj": _public_stat_number(result.get("r_squared_adj")),
+                **_fit_statistics(result),
                 "inference": _bounded_inference(result),
                 # The estimator that ran, from the kernel; a requested default
                 # the family does not use is never shown as if it had run.
@@ -4228,6 +4226,21 @@ _INFERENCE_FIELDS = (
     "covariance", "covariance_estimator", "inference_distribution", "effective_df", "df_method",
     "cluster_count", "inference_version", "hac",
 )
+
+
+def _fit_statistics(result: Mapping[str, Any]) -> dict[str, Any]:
+    """R-squared, unless the result is pooled over imputations.
+
+    A pooled result has no R-squared of its own; any one dataset's would be
+    shown as if it were the pooled model's, so the fields are left out rather
+    than sent as null (v1.8.10 evaluation A04).
+    """
+    if result.get("multiple_imputation"):
+        return {}
+    return {
+        "r_squared": _public_stat_number(result.get("r_squared")),
+        "r_squared_adj": _public_stat_number(result.get("r_squared_adj")),
+    }
 
 
 def _bounded_inference(result: Mapping[str, Any]) -> dict[str, Any] | None:

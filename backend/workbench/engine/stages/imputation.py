@@ -65,6 +65,18 @@ class ImputationStage:
                 "variances needs the design's degrees of freedom. Nothing was imputed or fitted.",
                 {"m": m, "sampling_weight": ctx.artifacts.get("_sampling_weight")},
             )
+        by_group = ctx.artifacts.get("_by_group_request")
+        if method == "mice" and multiple and by_group:
+            # Found by the v1.8.10 evaluation (A03): the run pooled the imputations
+            # and silently dropped the grouping. The Agent's planner already
+            # refuses this pair; a direct request must not do less.
+            return _block(
+                ctx, env, "MI_WITH_BY_GROUP",
+                "Multiple imputation combined with by-group execution is not supported yet: "
+                "pooling would have to be done within each group. Run them separately. "
+                "Nothing was imputed or fitted.",
+                {"m": m, "by_group": by_group},
+            )
         if method == "mice":
             imputation_summary = run_mice_imputation(
                 cleaned,

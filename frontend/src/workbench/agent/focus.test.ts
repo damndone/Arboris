@@ -52,6 +52,11 @@ describe("Agent focus", () => {
     const resolved = resolveFocus(focusFromWorkbench({ projectRoot: "/p", declared: null, selectedKey: "draft:x:model_1" }), env);
     expect(resolved).toMatchObject({ role: "chain", runId: "run_ols", nodeKey: null });
   });
+
+  it("does not act on a run the forest does not hold (evaluation A14)", () => {
+    const resolved = resolveFocus(focusFromWorkbench({ projectRoot: "/p", declared: null, selectedKey: "run:run_absent" }), env);
+    expect(resolved).toMatchObject({ role: "chain", runId: "run_ols", nodeKey: null, ownerIsNotActive: false });
+  });
 });
 
 describe("a leftover detail tab", () => {

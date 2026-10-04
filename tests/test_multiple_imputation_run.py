@@ -133,6 +133,16 @@ def test_a_sampling_design_is_refused_before_anything_is_imputed(tmp_path) -> No
     assert not list((run_root / "processed").glob("imputed_dataset*"))
 
 
+def test_by_group_with_multiple_imputation_is_refused_not_silently_dropped(tmp_path) -> None:
+    """v1.8.10 evaluation A03: the run pooled and dropped the grouping without a word."""
+    result, run_root = _run(tmp_path, "mi-by", by_group={"column": "g"})
+    assert result["status"] == "blocked"
+    issue = read_json(run_root / "errors.json")["issues"][0]
+    assert issue["code"] == "MI_WITH_BY_GROUP" and "separately" in issue["message"]
+    assert not list((run_root / "processed").glob("imputed_dataset*"))
+    assert not (run_root / "model_results" / "collections" / "by_group.json").exists()
+
+
 def test_a_model_column_that_cannot_be_imputed_blocks_the_run(tmp_path) -> None:
     frame = pd.read_csv(DATA)
     frame.loc[frame.index % 2 == 0, "x3"] = np.nan  # 50% missing: above the threshold
@@ -225,5 +235,7 @@ def test_every_agent_reading_of_the_result_says_it_is_pooled(pooled_run) -> None
         block = view["multiple_imputation"]
         assert block["m"] == 5 and "D1" in block["post_estimation"]
         assert {"df", "fmi"} <= set(view["coefficients"][0])
+        # A pooled result has no R-squared; not even a null field (evaluation A04).
+        assert "r_squared" not in view and "r_squared_adj" not in view
     label = _model_summary("ols_robust", packet, robust_se_dp=None, exposure_col=None, fallback_n=0)
     assert label.endswith("pooled from m = 5 imputations)")

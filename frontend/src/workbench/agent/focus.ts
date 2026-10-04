@@ -164,9 +164,15 @@ export function resolveFocus(focus: FocusRef, env: FocusEnv): ResolvedFocus {
   if (resolved) return resolved;
   if (focus.kind === "node") {
     // A selection the forest does not hold (a draft node): the active run's
-    // chain, without a node, as before focus existed.
-    return { focus, role: "chain", runId: focus.runId ?? env.activeRunId, nodeKey: null,
-             ownerIsNotActive: false, label: `Run · ${shortRun(focus.runId ?? env.activeRunId)}` };
+    // chain, without a node, as before focus existed. A named run is kept only
+    // when the forest knows it; otherwise the Agent would act on a run that
+    // does not exist (v1.8.10 evaluation A14).
+    const known = Boolean(focus.runId && env.forest && (
+      env.forest.heads.some((head) => head.runId === focus.runId)
+      || env.forest.nodes.some((node) => (node.runs ?? []).includes(focus.runId!))));
+    const runId = known ? focus.runId! : env.activeRunId;
+    return { focus, role: "chain", runId, nodeKey: null,
+             ownerIsNotActive: runId !== env.activeRunId, label: `Run · ${shortRun(runId)}` };
   }
   return projectProvider({ kind: "project", id: env.projectRoot }, env)!;
 }
