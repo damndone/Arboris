@@ -1,0 +1,69 @@
+{
+  "request": {
+    "model_type": "glm:poisson",
+    "y": "y",
+    "x": [
+      "x1",
+      "x2"
+    ]
+  },
+  "status": "completed",
+  "errors": {
+    "schema_version": "legacy",
+    "run_id": "20261004_115339_118428_3ec53b97",
+    "issues": [],
+    "superseded_by": "diagnostic_summary.json"
+  },
+  "kernel": {
+    "contract": "workbench.inference_kernel.v1",
+    "model_id": "glm_1",
+    "model_type": "glm",
+    "param_names": [
+      "Intercept",
+      "x1",
+      "x2"
+    ],
+    "params": [
+      0.2969880789466367,
+      0.4025376328782477,
+      -0.129016598588151
+    ],
+    "vcov": [
+      [
+        0.0017767733528383813,
+        -0.0005966108948599265,
+        0.000209983684291659
+      ],
+      [
+        -0.0005966108948599265,
+        0.001435470367749899,
+        1.9113191241784437e-05
+      ],
+      [
+        0.000209983684291659,
+        1.9113191241784437e-05,
+        0.0014935547178435904
+      ]
+    ],
+    "vcov_param_names": [
+      "Intercept",
+      "x1",
+      "x2"
+    ],
+    "vcov_scope": "full",
+    "reference_distribution": "z",
+    "df_resid": 447.0,
+    "df_method": "asymptotic",
+    "n_clusters": null,
+    "loglik": -667.6418001609244,
+    "nobs": 450,
+    "covariance_estimator": "nonrobust",
+    "estimation_sample_fingerprint": "rows-sha256:2f05a2f2815f5d1dfffdd6ef337aefcb8501babe034221887c046efaeafcede9",
+    "weights": "none",
+    "interfaces": [
+      "coef_vcov",
+      "loglik"
+    ],
+    "unavailable": {}
+  }
+}

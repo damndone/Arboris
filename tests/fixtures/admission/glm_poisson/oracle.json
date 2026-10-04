@@ -1,0 +1,25 @@
+{
+  "meta": {
+    "generator": "tests/fixtures/admission/glm_poisson/generate_oracle.R",
+    "r_version": "R version 4.6.0 (2026-04-24)",
+    "seed": 20261003,
+    "n": 450,
+    "verification_level": "Poisson log GLM, default nonrobust covariance, dispersion=1, z inference"
+  },
+  "inference": {
+    "covariance_estimator": "nonrobust",
+    "df_method": "asymptotic",
+    "reference_distribution": "z",
+    "df_resid": 447
+  },
+  "coefficients": {
+    "Intercept": 0.296988078946637,
+    "x1": 0.402537632878248,
+    "x2": -0.129016598588151
+  },
+  "std_error": {
+    "Intercept": 0.0421517894402436,
+    "x1": 0.0378876017691937,
+    "x2": 0.0386465356526668
+  }
+}
