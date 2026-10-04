@@ -43,4 +43,3 @@ def test_coefficients_and_standard_errors_match_r(fitted):
         if abs(se-reference_se) > 0.0001:
             errors.append((term, "std_error", se, reference_se, se-reference_se))
     assert not errors, errors
-

@@ -35,4 +35,3 @@ oracle <- list(meta=list(generator="tests/fixtures/admission/did/generate_oracle
                coefficients=as.list(b), std_error=as.list(se))
 writeLines(jsonlite::toJSON(oracle, auto_unbox=TRUE, digits=NA, pretty=TRUE), file.path(here,"oracle.json"))
 cat("wrote oracle.json\n")
-
