@@ -62,6 +62,7 @@
    - 根目录会话草稿 → `archive/session-scratch/`;
    - **删掉已合并的分支**(本地+远端),见下条 §5 的 tag 规矩;
    - 检查 `docs/superpowers/` 顶层没有裸放文件(除本 README)。
+   - **建 GitHub Release**(2026-10-04 用户定:每个版本都要):`gh release create vX.Y.Z --title "Workbench vX.Y.Z — <一句话>" --notes-file docs/releases/vX.Y.Z-release-notes.md --verify-tag`,并在 `docs/history/versions.md` 填 Release 链接。
 
 5. **分支合并后即删,但先用 tag 保住名字**(2026-07-22 定)。
 
