@@ -1,0 +1,25 @@
+{
+  "meta": {
+    "generator": "tests/fixtures/admission/iv_2sls/generate_oracle.R",
+    "r_version": "R version 4.6.0 (2026-04-24)",
+    "seed": 20261003,
+    "n": 450,
+    "verification_level": "HC0, no debiasing; 2SLS with x1 exogenous, xe instrumented by z; z inference"
+  },
+  "inference": {
+    "covariance_estimator": "robust",
+    "df_method": "asymptotic",
+    "reference_distribution": "z",
+    "df_resid": 447
+  },
+  "coefficients": {
+    "Intercept": 1.06934126486748,
+    "xe": 0.804154915192396,
+    "x1": 0.555220125320833
+  },
+  "std_error": {
+    "Intercept": 0.0492178704314452,
+    "xe": 0.051552279485063,
+    "x1": 0.0520790517565449
+  }
+}
