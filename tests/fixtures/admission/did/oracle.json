@@ -1,0 +1,23 @@
+{
+  "meta": {
+    "generator": "tests/fixtures/admission/did/generate_oracle.R",
+    "r_version": "R version 4.6.0 (2026-04-24)",
+    "seed": 20261003,
+    "n": 400,
+    "verification_level": "two-period 2x2 TWFE; sum-to-zero unit/time effects preserve intercept; HC1 includes absorbed degrees of freedom; kernel covariance is missing"
+  },
+  "inference": {
+    "covariance_estimator": "runtime robust; kernel null",
+    "df_method": "asymptotic",
+    "reference_distribution": "z",
+    "df_resid": 198
+  },
+  "coefficients": {
+    "Intercept": 1.24871379020845,
+    "_did_D": 0.667849681493604
+  },
+  "std_error": {
+    "Intercept": 0.0703546145108659,
+    "_did_D": 0.198992900033596
+  }
+}
