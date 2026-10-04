@@ -4,6 +4,9 @@
       "data_profile"
     ],
     "boxplots": [],
+    "checks_ols_1": [
+      "cleaned_dataset"
+    ],
     "cleaned_dataset": [
       "raw_data.csv"
     ],
@@ -21,6 +24,9 @@
     ],
     "fitted_vs_x": [],
     "histograms": [],
+    "inference_kernel_ols_1": [
+      "ols_1"
+    ],
     "kde_plots": [],
     "ols_1": [
       "cleaned_dataset"

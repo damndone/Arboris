@@ -548,6 +548,7 @@ def _genesis_model_editor_schema(
         ("prediction_group_column", "column", "Prediction group column", list(columns)),
         ("prediction_time_column", "column", "Prediction time column", list(columns)),
         ("imputation", "json", "Imputation request", None),
+        ("by_group", "json", "By-group request", None),
     ):
         control = {"key": key, "kind": kind, "label": label, "required": False}
         if options is not None:
@@ -696,7 +697,7 @@ def normalize_ols_genesis_model_params(model_params: Mapping[str, Any]) -> dict[
     options = dict(options)
     if options:
         try:
-            validate_ols_model_options(options)
+            validate_ols_model_options(options, family=str(normalized["model_type"]))
         except ValueError as exc:
             raise ValueError(getattr(exc, "error_code", str(exc))) from exc
     normalized["model_options"] = options

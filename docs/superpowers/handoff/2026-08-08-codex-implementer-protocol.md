@@ -32,9 +32,9 @@ Codex 的文字汇报**只当线索**。每一轮核验，Claude 都从 commit�
 
 | 文件 | 读什么 |
 |---|---|
-| `docs/superpowers/specs/2026-08-07-v1.8.8-data-management-in-natural-language-design.md` | **§0 三条北极星约束**（一切取舍由它裁决）、§2 四个决策、§5 分期表与 P0 完成记录 |
-| `docs/superpowers/plans/2026-08-07-v1.8.8-p0-composition-seam.md` | 顶部那条「**断言必须验活**」的硬规矩，以及它为什么存在 |
-| `docs/superpowers/plans/2026-08-07-v1.8.8-p1-capability-contract.md` | **§0 能力 ≠ 操作**（这是全局最容易搞错的概念） |
+| `docs/superpowers/archive/specs/2026-08-07-v1.8.8-data-management-in-natural-language-design.md` | **§0 三条北极星约束**（一切取舍由它裁决）、§2 四个决策、§5 分期表与 P0 完成记录 |
+| `docs/superpowers/archive/plans/2026-08-07-v1.8.8-p0-composition-seam.md` | 顶部那条「**断言必须验活**」的硬规矩，以及它为什么存在 |
+| `docs/superpowers/archive/plans/2026-08-07-v1.8.8-p1-capability-contract.md` | **§0 能力 ≠ 操作**（这是全局最容易搞错的概念） |
 
 ### 第二层：现在的地基长什么样
 
@@ -52,7 +52,7 @@ Codex 的文字汇报**只当线索**。每一轮核验，Claude 都从 commit�
 
 | 文件 | 读什么 |
 |---|---|
-| `docs/superpowers/specs/2026-08-08-p7-capability-adoption.md` | P7 的 29 个能力怎么接入，含四个已定位的坑 |
+| `docs/superpowers/archive/specs/2026-08-08-p7-capability-adoption.md` | P7 的 29 个能力怎么接入，含四个已定位的坑 |
 | `docs/superpowers/followups/BACKLOG.md` 的 §6 | v1.8.8 途中发现、不在范围内的 |
 | 本文 §5 | 未决问题清单 |
 

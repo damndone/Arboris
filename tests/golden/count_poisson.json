@@ -5,6 +5,9 @@
     ],
     "boxplots": [],
     "category_counts": [],
+    "checks_poisson_1": [
+      "cleaned_dataset"
+    ],
     "cleaned_dataset": [
       "raw_data.csv"
     ],
@@ -21,6 +24,9 @@
     ],
     "fitted_vs_x": [],
     "histograms": [],
+    "inference_kernel_poisson_1": [
+      "poisson_1"
+    ],
     "kde_plots": [],
     "outcome_counts": [],
     "poisson_1": [

@@ -61,7 +61,7 @@ LMM 已作为一个声明式 Pack 能力出现在受控模型入口中；Agent �
 ## 依据
 
 - `docs/superpowers/specs/2026-07-18-adr-pd-001-parallel-development-protocol.md`
-- `docs/superpowers/plans/2026-07-18-v1.7.3-repeated-measures-implementation-plan.md`
-- `docs/superpowers/plans/2026-07-18-v1.7.3-report-ops-closeout.md`
+- `docs/superpowers/archive/plans/2026-07-18-v1.7.3-repeated-measures-implementation-plan.md`
+- `docs/superpowers/archive/plans/2026-07-18-v1.7.3-report-ops-closeout.md`
 - `docs/superpowers/handoffs/v1.7.3/verified-path-manifest.md`
 - `docs/superpowers/handoffs/v1.7.3/verified-command-manifest.md`

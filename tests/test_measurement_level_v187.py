@@ -205,7 +205,7 @@ def test_an_undeclared_run_routes_and_estimates_exactly_as_before(tmp_path):
     def _model(run_root: Path) -> dict:
         path = next(
             p for p in sorted((run_root / "model_results").glob("*.json"))
-            if not p.name.startswith("diagnostics")
+            if not p.name.startswith(("diagnostics", "checks_"))
         )
         return read_json(path)
 

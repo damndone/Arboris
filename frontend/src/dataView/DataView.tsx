@@ -13,6 +13,7 @@ import { DatasetExportPanel } from "../workbench/views/DatasetExportPanel";
 import { SharingPanel } from "./SharingPanel";
 import { TransformPanel } from "./TransformPanel";
 import { VariableView } from "./VariableView";
+import { useWorkbenchOptional } from "../workbench/WorkbenchStateProvider";
 
 type Tab = "data" | "variables";
 
@@ -37,6 +38,16 @@ export function DataView({ projectRoot, runId: runIdProp }: { projectRoot: strin
   // newly selected, still-running run as ready for one render.
   const [runState, setRunState] = useState<{ runId: string; status: string } | null>(null);
   const runStatus = runState?.runId === runId ? runState.status : null;
+
+  // The Agent is about the dataset this page shows (agent/focus.ts): a
+  // question asked here runs on this dataset, not on the project overview.
+  const workbench = useWorkbenchOptional();
+  const setAgentFocus = workbench?.dispatch.setAgentFocus;
+  useEffect(() => {
+    if (!setAgentFocus || !runId) return undefined;
+    setAgentFocus({ kind: "dataset", id: nodeId, runId });
+    return () => setAgentFocus(null);
+  }, [nodeId, runId, setAgentFocus]);
 
   // A run saved from the Variable view is still re-estimating when the view
   // switches to it; its datasets exist only once it finishes.

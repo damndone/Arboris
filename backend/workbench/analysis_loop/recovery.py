@@ -153,7 +153,7 @@ OLS_CLUSTERED_RECOVERY_ACTION = RecoveryAction(
     required_fields=("cluster_variable",),
     covariance_only=True,
     field_mapping={"cluster_variable": "entity_col"},
-    policy_version="ols_cluster_policy_v1",
+    policy_version="ols_cluster_policy_v2",
 )
 
 RECOVERY_ACTION_REGISTRY = RecoveryActionRegistry((OLS_CLUSTERED_RECOVERY_ACTION,))

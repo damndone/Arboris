@@ -1,0 +1,85 @@
+{
+  "meta": {
+    "generator": "tests/fixtures/by_group/generate_oracle.R",
+    "r_version": "R version 4.6.0 (2026-04-24)",
+    "car_version": "3.1.5",
+    "n": 1200,
+    "reference_group": "east"
+  },
+  "tolerances": {
+    "default": 1e-07
+  },
+  "cases": {
+    "ols": {
+      "all": {
+        "statistic": 20.5462685716009,
+        "df_num": 9,
+        "df_den": 1188,
+        "p_value": 1.98576201656644e-32
+      },
+      "x1": {
+        "statistic": 56.8796538848751,
+        "df_num": 3,
+        "df_den": 1188,
+        "p_value": 2.33765068335326e-34
+      },
+      "x2": {
+        "statistic": 0.856059283118356,
+        "df_num": 3,
+        "df_den": 1188,
+        "p_value": 0.463395461237497
+      }
+    },
+    "logit": {
+      "all": {
+        "statistic": 54.2160545945405,
+        "df_num": 9,
+        "p_value": 1.71743538342093e-08
+      },
+      "x1": {
+        "statistic": 37.2940307956808,
+        "df_num": 3,
+        "p_value": 3.98724646972321e-08
+      },
+      "x2": {
+        "statistic": 1.90897820207607,
+        "df_num": 3,
+        "p_value": 0.591511812457622
+      }
+    },
+    "probit": {
+      "all": {
+        "statistic": 55.7113256041881,
+        "df_num": 9,
+        "p_value": 8.9116866234867e-09
+      },
+      "x1": {
+        "statistic": 38.3891864147906,
+        "df_num": 3,
+        "p_value": 2.33797234857443e-08
+      },
+      "x2": {
+        "statistic": 2.30854269261292,
+        "df_num": 3,
+        "p_value": 0.510886329647293
+      }
+    },
+    "poisson": {
+      "all": {
+        "statistic": 76.9766952555221,
+        "df_num": 9,
+        "p_value": 6.42640531098225e-13
+      },
+      "x1": {
+        "statistic": 62.7012109153368,
+        "df_num": 3,
+        "p_value": 1.55578977821453e-13
+      },
+      "x2": {
+        "statistic": 1.11619659645553,
+        "df_num": 3,
+        "p_value": 0.773165669602527
+      }
+    }
+  }
+}

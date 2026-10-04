@@ -72,11 +72,12 @@ def test_ols_agent_vocabulary_is_bounded_to_covariance() -> None:
     vocabulary = build_option_vocabulary("ols")
 
     assert vocabulary is not None
-    assert vocabulary["version"] == "ols-model-options/v1"
+    assert vocabulary["version"] == "ols-model-options/v2"
     assert vocabulary["fields"]["covariance"]["allowed_values"] == [
         "robust",
         "clustered",
         "unadjusted",
+        "hac",
     ]
 
 

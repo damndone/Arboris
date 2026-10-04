@@ -488,6 +488,48 @@ describe("AgentSurfaceProvider", () => {
     ));
   });
 
+  it("acts on a node selected in another run, in that run (v1.8.10 focus)", async () => {
+    const olsModel = {
+      id: "node-ols", nodeKey: "node-ols", opNodeId: "model:ols_1", nodeHash: "node-ols", raw: null,
+      stage: "model", kind: "model", title: "ols_robust", parentStageId: null, trust: "ok", decisions: [],
+      runs: ["run-ols"],
+    };
+    const ivModel = { ...olsModel, id: "node-iv", nodeKey: "node-iv", opNodeId: "model:iv_2sls_1",
+                      nodeHash: "node-iv", title: "iv_2sls", runs: ["run-iv"] };
+    const head = (runId: string, hash: string) => ({ runId, headNodeHash: hash, fromNode: null, rerunOf: null,
+                                                     rerunReason: null, status: "completed", createdAt: null });
+    mocks.workbenchState.selectedKey = null;
+    mocks.lineageModel.current = { nodes: [olsModel, ivModel] };
+    mocks.forest.current = {
+      forest: { schemaVersion: 4, legacy: false, nodes: [olsModel, ivModel], edges: [],
+                heads: [head("run-ols", "node-ols"), head("run-iv", "node-iv")], familyCount: 2, familyRunCount: 2 },
+      activeRunId: "run-ols",
+      setActiveRunId: vi.fn(),
+    };
+    const view = mount();
+    mocks.workbenchState.selectedKey = ivModel.nodeKey;  // a canvas click on the IV node
+    view.rerender(
+      <MemoryRouter>
+        <AgentSurfaceProvider projectRoot="/proj" runId="run-a">
+          <AgentPanel projectRoot="/proj" runId="run-a" />
+        </AgentSurfaceProvider>
+      </MemoryRouter>,
+    );
+    expect(await screen.findByText("Run run-iv · iv_2sls")).toBeInTheDocument();
+    fireEvent.change(await screen.findByRole("textbox", { name: "Ask Agent" }), { target: { value: "这个节点是什么" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send to Agent" }));
+    await waitFor(() => expect(mocks.createAgentSession).toHaveBeenCalledWith(
+      "/proj",
+      expect.objectContaining({
+        chain_id: "chain:run-iv",
+        run_id: "run-iv",
+        context_packet: expect.objectContaining({
+          selection: expect.objectContaining({ forest_node_key: "node-iv" }),
+        }),
+      }),
+    ));
+  });
+
   it("hydrates a durable session after reload", async () => {
     sessionStorage.setItem(
       "workbench:agent-session:/proj:run-a:project%3Arun-a%3Anone",

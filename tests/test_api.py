@@ -44,7 +44,9 @@ def completed_run(tmp_path: Path):
     project_root = response.json()["project_root"]
     data = tmp_path / "data.csv"
     pd.DataFrame(
-        {"y": [1 + 2 * i for i in range(35)], "x": list(range(35))}
+        # v1.8.10: a small deterministic disturbance; y = 1 + 2x exactly is a
+        # perfect fit, which the check library reports as an issue.
+        {"y": [1 + 2 * i + 0.5 * ((i * 7) % 5 - 2) for i in range(35)], "x": list(range(35))}
     ).to_csv(data, index=False)
     with data.open("rb") as handle:
         run_response = client.post(

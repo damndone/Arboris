@@ -18,6 +18,7 @@ const capability: SurveyDesignCapability = {
   },
   replicate_types: ["brr", "jackknife", "bootstrap", "provided"],
   lonely_psu_policies: ["fail", "remove", "adjust", "average", "certainty"],
+  df_conventions: ["design", "design_minus_p"],
   design_fields: [],
   sampling_weight_families: ["ols", "logit", "probit", "poisson"],
 };
@@ -42,6 +43,7 @@ describe("SurveyDesignControls", () => {
       "Survey lonely PSU policy",
       "Survey weight frame",
       "Survey subpopulation",
+      "Survey degrees of freedom",
     ]) {
       expect(screen.getByLabelText(label)).toBeInTheDocument();
     }
@@ -52,6 +54,7 @@ describe("SurveyDesignControls", () => {
       ...capability,
       replicate_types: ["jackknife"],
       lonely_psu_policies: ["fail", "adjust"],
+      df_conventions: ["design"],
     };
     render(
       <SurveyDesignControls
@@ -67,6 +70,9 @@ describe("SurveyDesignControls", () => {
 
     const lonely = screen.getByLabelText("Survey lonely PSU policy") as HTMLSelectElement;
     expect([...lonely.options].map((o) => o.value).filter(Boolean)).toEqual(["fail", "adjust"]);
+
+    const df = screen.getByLabelText("Survey degrees of freedom") as HTMLSelectElement;
+    expect([...df.options].map((o) => o.value).filter(Boolean)).toEqual(["design"]);
   });
 
   it("reports each edit to its owner", () => {
@@ -116,6 +122,7 @@ describe("SurveyDesignControls", () => {
       survey_lonely_psu: "",
       survey_weight_frame: "",
       survey_subpop: "",
+      survey_df: "",
     });
   });
 });

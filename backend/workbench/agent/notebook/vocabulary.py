@@ -20,6 +20,7 @@ better and be false.
 from __future__ import annotations
 
 from types import MappingProxyType
+from typing import Any
 
 from ..recipe_contracts import RECIPE_CONTRACTS
 
@@ -130,6 +131,19 @@ def capability_artifact_types(capability_id: str) -> MappingProxyType:
     return CAPABILITY_ARTIFACT_TYPES.get(capability_id, MappingProxyType({}))
 
 
+#: What a model run estimated by group publishes instead of its single primary
+#: result: the collection listing one result per group.
+BY_GROUP_ARTIFACT_TYPES = MappingProxyType({"by_group_collection": "metadata"})
+
+
+def by_group_artifact_types(operation_id: str, changes: Any) -> MappingProxyType | None:
+    """The published artifacts of a by-group model option, or None for any other option."""
+    if operation_id != "model.genesis" or not isinstance(changes, dict):
+        return None
+    params = changes.get("model_params")
+    return BY_GROUP_ARTIFACT_TYPES if isinstance(params, dict) and params.get("by_group") else None
+
+
 def is_declared(artifact_id: str) -> bool:
     return artifact_id in DECLARED_ARTIFACT_TYPES
 
@@ -140,6 +154,8 @@ def declared_type(artifact_id: str) -> str | None:
 
 __all__ = [
     "ARTIFACT_VOCABULARY_VERSION",
+    "BY_GROUP_ARTIFACT_TYPES",
+    "by_group_artifact_types",
     "CAPABILITY_ARTIFACT_TYPES",
     "CAPABILITY_ARTIFACT_VOCABULARY_VERSION",
     "DECLARED_ARTIFACT_TYPES",

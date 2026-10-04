@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 from ..context import ModelingContext, RunEnv
+from ...services.family_evidence import report_family_evidence
 
 
 def _xlsx_export_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -83,7 +84,7 @@ class ReportStage:
             _safe_flush_recorder,
             _write_manifest,
         )
-        from ...artifacts import read_json, register_artifact, write_json
+        from ...artifacts import register_artifact, write_json
         from ...domain import GuardrailIssue, Severity
 
         build_diagnostic_summary = _orch.build_diagnostic_summary
@@ -154,6 +155,7 @@ class ReportStage:
         model_family_display = {
             "ols": "OLS",
             "ols_robust": "OLS (robust SE)",
+            "ols_hac": "OLS (Newey-West SE)",
             "logit": "Logit",
             "ordinal_logit": "Ordinal logit",
             "multinomial_logit": "Multinomial logit",
@@ -164,22 +166,11 @@ class ReportStage:
             "panel_ols": "Panel OLS",
         }
         primary_type = model_results[0][1].get("model_type", "ols") if model_results else "ols"
-        family_evidence: dict[str, Any] | None = None
-        family_evidence_path = {
-            "ordinal_logit": run_root / "model_results" / "diagnostics_ordinal_logit_1.json",
-            "multinomial_logit": run_root / "model_results" / "diagnostics_multinomial_logit_1.json",
-            "survival_cox": run_root / "survival" / "evidence.json",
-        }.get(primary_type)
-        if family_evidence_path is not None and family_evidence_path.is_file():
-            family_evidence = read_json(family_evidence_path)
-        elif primary_type == "quantile_regression" and model_results:
-            family_evidence = {
-                "contract": "workbench.quantile_regression.result.v1",
-                "quantiles": model_results[0][1].get("quantiles", []),
-                "fits": model_results[0][1].get("fits", {}),
-                "bootstrap": model_results[0][1].get("bootstrap", {}),
-                "cross_quantile_comparisons": model_results[0][1].get("cross_quantile_comparisons", []),
-            }
+        # Which document is a family's evidence is declared once, beside the
+        # family (contracts.model.result_envelope_registry), not kept here.
+        family_evidence: dict[str, Any] | None = report_family_evidence(
+            run_root, model_results[0][1] if model_results else None
+        )
         if effective_exposure_col:
             facts = [
                 f"Model: Poisson rate model with log({effective_exposure_col}) as offset",

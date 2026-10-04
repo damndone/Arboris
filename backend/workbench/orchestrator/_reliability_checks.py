@@ -27,7 +27,7 @@ def _diagnostic_family(model_result: dict[str, Any]) -> str:
         return str(family) if family else "glm"
     if model_type == "poisson_rate":
         return "poisson"
-    if model_type in ("ols", "ols_robust", "fixed_effects", "panel_ols"):
+    if model_type in ("ols", "ols_robust", "ols_hac", "fixed_effects", "panel_ols"):
         return "ols"
     return str(model_type)
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { makeOwnerResolutionSeedFixture } from "../lineage/api/nodeOperationContext";
 import {
   buildFactTable,
+  buildFamilyEvidenceFacts,
   buildFigureFacts,
   buildPostEstimationFacts,
   buildTimeSeriesFacts,
@@ -393,5 +394,59 @@ describe("buildPostEstimationFacts", () => {
 
   it("returns nothing when no post-estimation step was declared", () => {
     expect(buildPostEstimationFacts([])).toEqual([]);
+  });
+});
+
+describe("buildFamilyEvidenceFacts", () => {
+  const provenance = { nodeKey: "hash::model:cs_did_1", nodeLabel: "cs_did (primary)" };
+  const evidence = {
+    contract: null,
+    model_type: "cs_did",
+    overall: { estimate: 2.0189, std_error: 0.125, ci: [1.7738, 2.2639] },
+    event_study: {
+      label_kind: "event_time",
+      rows: [
+        { label: -1, estimate: -0.0164, std_error: 0.1245, ci: [-0.2604, 0.2276] },
+        { label: 0, estimate: 2.0012, std_error: 0.175, ci: [1.658, 2.344] },
+      ],
+    },
+    honest_did: null,
+  };
+
+  it("makes every declared number citable, rows named by their label", () => {
+    const facts = buildFamilyEvidenceFacts(evidence, 10, provenance);
+    const byField = Object.fromEntries(facts.map((fact) => [fact.field, fact]));
+    expect(byField["family:overall:estimate"].value).toBe(2.0189);
+    expect(byField["family:overall:ci:lower"].value).toBe(1.7738);
+    expect(byField["family:overall:ci:upper"].value).toBe(2.2639);
+    expect(byField["family:event_study:rows:0:estimate"].value).toBe(2.0012);
+    expect(byField["family:event_study:rows:-1:ci:upper"].value).toBe(0.2276);
+    expect(byField["family:event_study:label_kind"].value).toBe("event_time");
+    expect(facts[0].id).toBe("c11");
+    expect(facts.every((fact) => fact.node_key === provenance.nodeKey)).toBe(true);
+  });
+
+  it("drops the envelope tags and absent sections rather than citing them", () => {
+    const fields = buildFamilyEvidenceFacts(evidence, 0, provenance).map((fact) => fact.field);
+    expect(fields.some((field) => field.includes("model_type") || field.includes("contract"))).toBe(false);
+    expect(fields.some((field) => field.includes("honest_did"))).toBe(false);
+  });
+
+  it("says so when it stops early", () => {
+    const rows = Array.from({ length: 300 }, (_, index) => ({ label: index, estimate: index }));
+    const facts = buildFamilyEvidenceFacts({ event_study: { rows } }, 0, provenance);
+    const last = facts[facts.length - 1];
+    expect(last.field).toBe("family:facts_truncated");
+    expect(last.value).toBe(true);
+    expect(facts.length).toBeLessThanOrEqual(240);
+  });
+
+  it("is empty when the run declares no family evidence", () => {
+    expect(buildFamilyEvidenceFacts(null, 0, provenance)).toEqual([]);
+  });
+
+  it("belongs to model and estimation evidence", () => {
+    const manifest = reportCapabilityManifestForFacts(buildFamilyEvidenceFacts(evidence, 0, provenance));
+    expect(manifest.map((entry) => entry.capability_id)).toEqual(["model.estimation"]);
   });
 });

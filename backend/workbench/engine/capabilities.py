@@ -264,6 +264,8 @@ COVARIANCE_UI = [
     {"key": "robust", "label": "Robust (default)", "default": True},
     {"key": "clustered", "label": "Clustered"},
     {"key": "unadjusted", "label": "Unadjusted"},
+    # Needs model_options.time_order; OLS only (validate_ols_model_options).
+    {"key": "hac", "label": "Newey-West (HAC)"},
 ]
 
 # U3 (v1.6.11): the default covariance is declared explicitly on the option, so
@@ -547,7 +549,7 @@ def _survey_design_capability() -> dict:
     hard-coded list that silently rots as families are added.
     """
     from ..agent.workflow_contracts import MODEL_FAMILY_CONTRACTS
-    from ..survey.design import LONELY_PSU_POLICIES, REPLICATE_TYPES
+    from ..survey.design import DF_CONVENTIONS, LONELY_PSU_POLICIES, REPLICATE_TYPES
     from ..survey.estimator import VARIANCE_METHOD_REQUIREMENTS
     from ..survey.fields import DESIGN_FIELDS
 
@@ -566,5 +568,6 @@ def _survey_design_capability() -> dict:
         },
         "replicate_types": list(REPLICATE_TYPES),
         "lonely_psu_policies": list(LONELY_PSU_POLICIES),
+        "df_conventions": list(DF_CONVENTIONS),
         "design_fields": list(DESIGN_FIELDS),
     }

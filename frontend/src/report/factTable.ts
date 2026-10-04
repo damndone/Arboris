@@ -272,6 +272,103 @@ export function buildPostEstimationFacts(
   return facts;
 }
 
+const MAX_FAMILY_EVIDENCE_FACTS = 240;
+// Tags that identify the projection, not the result.
+const FAMILY_EVIDENCE_ENVELOPE_FIELDS = new Set(["contract", "model_type"]);
+
+function isInterval(key: string, value: unknown): value is [number, number] {
+  return (
+    /(^|_)(ci|band|interval)$/.test(key)
+    && Array.isArray(value)
+    && value.length === 2
+    && value.every((bound) => typeof bound === "number" && Number.isFinite(bound))
+  );
+}
+
+/** A row that carries its own label is named by it, and the label is not
+ * repeated as a fact of the row. */
+function namedRow(item: unknown, index: number): [string, unknown] {
+  if (item && typeof item === "object" && !Array.isArray(item)) {
+    const { label, ...rest } = item as Record<string, unknown>;
+    if (isAtomicFact(label)) return [String(label), rest];
+  }
+  return [`[${index}]`, item];
+}
+
+function collectFamilyEvidenceValues(
+  value: unknown,
+  path: string[],
+  emit: (path: string[], value: string | number | boolean) => boolean,
+): boolean {
+  if (isAtomicFact(value)) return path.length > 0 ? emit(path, value) : true;
+  const key = path[path.length - 1] ?? "";
+  if (isInterval(key, value)) {
+    return emit([...path, "lower"], value[0]) && emit([...path, "upper"], value[1]);
+  }
+  if (Array.isArray(value)) {
+    for (const [index, item] of value.entries()) {
+      const [name, row] = namedRow(item, index);
+      if (!collectFamilyEvidenceValues(row, [...path, name], emit)) return false;
+    }
+    return true;
+  }
+  if (!value || typeof value !== "object") return true;
+  for (const [childKey, item] of Object.entries(value)) {
+    if (path.length === 0 && FAMILY_EVIDENCE_ENVELOPE_FIELDS.has(childKey)) continue;
+    if (!collectFamilyEvidenceValues(item, [...path, childKey], emit)) return false;
+  }
+  return true;
+}
+
+/** Make the declared model-family evidence citable in a generated report.
+ *
+ * The input is the projection the run-detail route serves under
+ * `family_evidence`: the same bounded object the Agent reads, so a written
+ * report and the Agent quote the same numbers. Before v1.8.10 the writer saw
+ * only the coefficient row; for an event-study estimator that meant the
+ * overall effect and nothing else. Nothing here names a family: rows are named
+ * by their own label and two-number intervals become lower and upper bounds.
+ */
+export function buildFamilyEvidenceFacts(
+  evidence: Record<string, unknown> | null | undefined,
+  startAt = 0,
+  provenance: { nodeKey: string; nodeLabel: string },
+): CitableFact[] {
+  const facts: CitableFact[] = [];
+  if (!evidence) return facts;
+  let counter = startAt;
+  let truncated = false;
+  collectFamilyEvidenceValues(evidence, [], (path, value) => {
+    // Reserve one slot for the truncation marker, so a long result cannot
+    // look complete after later evidence was discarded.
+    if (facts.length >= MAX_FAMILY_EVIDENCE_FACTS - 1) {
+      truncated = true;
+      return false;
+    }
+    const key = path.join(":");
+    facts.push({
+      id: `c${++counter}`,
+      node_key: provenance.nodeKey,
+      node_label: provenance.nodeLabel,
+      field: `family:${key}`,
+      label: `${provenance.nodeLabel} — ${path.join(" · ").replace(/_/g, " ")}`,
+      value,
+    });
+    return true;
+  });
+  if (truncated) {
+    facts.push({
+      id: `c${++counter}`,
+      node_key: provenance.nodeKey,
+      node_label: provenance.nodeLabel,
+      field: "family:facts_truncated",
+      label: `${provenance.nodeLabel} — family evidence truncated at ${MAX_FAMILY_EVIDENCE_FACTS - 1} facts`,
+      value: true,
+    });
+  }
+  return facts;
+}
+
 /** Bounded whitelist of truthful scalar evidence from ARMA-GARCH artifacts. */
 export function buildTimeSeriesFacts(
   artifacts: TimeSeriesArtifactMap,

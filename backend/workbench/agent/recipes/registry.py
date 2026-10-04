@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from functools import partial
 from types import MappingProxyType
 from typing import Any
 
@@ -119,20 +120,35 @@ BuildVocabulary = Callable[[], dict[str, Any]]
 
 
 def _build_ols_option_vocabulary() -> dict[str, Any]:
-    from ...contracts.model.ols import OLS_COVARIANCE_VALUES
+    from ...contracts.model.ols import HAC_DEFAULT_LAG_RULE, MAX_HAC_LAGS, OLS_COVARIANCE_VALUES
 
     return {
-        "version": "ols-model-options/v1",
+        "version": "ols-model-options/v2",
         "fields": {
             "covariance": {
                 "path": "covariance",
                 "type": "enum",
                 "allowed_values": list(OLS_COVARIANCE_VALUES),
-                "description": "OLS standard-error covariance estimator.",
-            }
+                "description": "OLS standard-error covariance estimator; hac is Newey-West (Bartlett kernel).",
+            },
+            "time_order": {
+                "path": "time_order",
+                "type": "string",
+                "description": "With covariance hac only: the column that orders the observations in time.",
+            },
+            "hac_lags": {
+                "path": "hac_lags",
+                "type": "integer",
+                "minimum": 0,
+                "maximum": MAX_HAC_LAGS,
+                "description": f"With covariance hac only, optional: the lag truncation; omitted, {HAC_DEFAULT_LAG_RULE}.",
+            },
         },
         "cross_field_rules": [
             "clustered covariance requires the source model's entity_col cluster field.",
+            "hac requires time_order; the time order must have no gaps or repeated periods in the rows used.",
+            "hac cannot be combined with an entity_col cluster field (Driscoll-Kraay is not implemented).",
+            "hac is offered for ols only; panel_ols refuses it.",
         ],
         "patch_shape_example": {"covariance": "unadjusted"},
         "prohibited_claims": [
@@ -169,13 +185,16 @@ PatchValidator = Callable[..., dict[str, Any]]
 
 
 def _validate_ols_model_options_patch(
-    *, current_contract: Mapping[str, object], patch: Mapping[str, object]
+    *, current_contract: Mapping[str, object], patch: Mapping[str, object], family: str = "ols"
 ) -> dict[str, object]:
-    from ...contracts.model.ols import validate_ols_model_options
+    from ...contracts.model.ols import OLS_HAC_FIELDS, validate_ols_model_options
     from ...model_options import merge_model_options
 
     merged = merge_model_options(current_contract, patch)
-    validate_ols_model_options(merged)
+    # A patch away from HAC leaves no HAC field behind to fail the merge.
+    if merged.get("covariance") != "hac" and "covariance" in patch:
+        merged = {key: value for key, value in merged.items() if key not in OLS_HAC_FIELDS}
+    validate_ols_model_options(merged, family=family)
     return merged
 
 
@@ -186,7 +205,7 @@ def _patch_validators() -> dict[str, PatchValidator]:
     return {
         ARMA_GARCH_PACK_ID: validate_arma_garch_model_options_patch,
         "ols": _validate_ols_model_options_patch,
-        "panel_ols": _validate_ols_model_options_patch,
+        "panel_ols": partial(_validate_ols_model_options_patch, family="panel_ols"),
     }
 
 

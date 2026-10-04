@@ -249,7 +249,11 @@ def test_tool_registry_returns_bounded_partial_output_instead_of_budget_error() 
     assert result.error is None
     assert len(json.dumps(result.output, ensure_ascii=False, sort_keys=True)) <= 240
     assert result.output["status"] == "partial"
-    assert "large_section" in result.output["omitted_sections"]
+    # v1.8.10: a section that no longer fits whole is shortened when part of it
+    # fits, and named either way.
+    assert "large_section" in result.output["omitted_sections"] or (
+        result.output["truncated_sections"]["large_section"] == "shortened"
+    )
 
 
 def test_agent_core_round_trips_tool_call_and_persists_tool_result(tmp_path: Path) -> None:

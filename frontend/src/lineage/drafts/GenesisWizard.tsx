@@ -783,6 +783,7 @@ export function GenesisWizard({
       params.survey_lonely_psu = surveyDesign.survey_lonely_psu;
       params.survey_weight_frame = surveyDesign.survey_weight_frame;
       params.survey_subpop = surveyDesign.survey_subpop;
+      if (surveyDesign.survey_df) params.survey_df = surveyDesign.survey_df;
       if (surveyDesign.survey_replicate_weights.length > 0) {
         params.survey_replicate_weights = JSON.stringify(
           surveyDesign.survey_replicate_weights,

@@ -28,6 +28,7 @@ from ..api_errors import (
     ERROR_REPORT_NOT_FOUND,
     WorkbenchAPIError,
 )
+from ..agent.family_evidence import bounded_model_family_evidence
 from ..agent.workflow_runtime import collect_post_estimation_results, count_post_estimation_results
 from ..artifacts import read_json
 from ..config import load_config
@@ -243,6 +244,7 @@ async def run_endpoint(
     sheet_name: str = Form(""),
     transpose: str = Form("false"),
     imputation: str = Form(""),
+    by_group: str = Form(""),
     entity_col: str = Form(""),
     time_col: str = Form(""),
     covariance: str = Form(""),
@@ -266,6 +268,7 @@ async def run_endpoint(
     survey_lonely_psu: str = Form(""),          # fail | remove | adjust | average | certainty
     survey_weight_frame: str = Form(""),        # cross_sectional | longitudinal
     survey_subpop: str = Form(""),
+    survey_df: str = Form(""),           # design (default) | design_minus_p
     iv_endog: str = Form(""),          # JSON array of column names, e.g. ["educ"]
     iv_instruments: str = Form(""),    # JSON array of column names
     did_mode: str = Form(""),
@@ -317,6 +320,7 @@ async def run_endpoint(
         form: dict[str, Any] = {
             "mode": mode, "model_type": model_type, "y": y, "x": x,
             "sheet_name": sheet_name, "transpose": transpose, "imputation": imputation,
+            **({"by_group": by_group} if by_group.strip() else {}),
             "entity_col": entity_col, "time_col": time_col, "covariance": covariance,
             "prediction_model_type": prediction_model_type,
             "prediction_cv_folds": prediction_cv_folds,
@@ -338,6 +342,7 @@ async def run_endpoint(
             "survey_lonely_psu": survey_lonely_psu,
             "survey_weight_frame": survey_weight_frame,
             "survey_subpop": survey_subpop,
+            **({"survey_df": survey_df} if survey_df.strip() else {}),
             "iv_endog": iv_endog, "iv_instruments": iv_instruments,
             "did_mode": did_mode, "did_cohort_col": did_cohort_col,
             "did_treat_col": did_treat_col, "did_post_col": did_post_col,
@@ -403,6 +408,7 @@ async def batch_run_endpoint(
     survey_lonely_psu: str = Form(""),
     survey_weight_frame: str = Form(""),
     survey_subpop: str = Form(""),
+    survey_df: str = Form(""),           # design (default) | design_minus_p
 ) -> dict:
     _resolve_project_runs_dir(project_root)  # 404 PROJECT_NOT_FOUND for bogus roots
     if sheet_name or transpose == "true":
@@ -460,6 +466,7 @@ async def batch_run_endpoint(
             survey_lonely_psu=survey_lonely_psu,
             survey_weight_frame=survey_weight_frame,
             survey_subpop=survey_subpop,
+            survey_df=survey_df,
         )
         record_ui_action(
             root, source="POST /runs/batch", steps=["run.submit"],
@@ -571,6 +578,9 @@ def get_run_endpoint(run_id: str, project_root: str) -> dict:
             diagnostic_summary.get("labels", {"variable_labels": {}, "value_labels": {}}),
         ),
         "model_family_evidence": model_family_evidence,
+        # v1.8.10: the declared, bounded projection the Agent reads, so the
+        # report writer's citable facts and the Agent quote the same numbers.
+        "family_evidence": bounded_model_family_evidence(run_root, model_results),
         "prediction_evidence": prediction_evidence,
         # Serve-time projection of already-durable evidence: a declared
         # post-estimation step answers a question, and this is what lets the

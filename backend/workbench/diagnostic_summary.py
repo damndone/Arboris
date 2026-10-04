@@ -244,6 +244,7 @@ def _model_label(primary_type: str) -> str:
     labels = {
         "ols": "OLS",
         "ols_robust": "OLS with robust standard errors",
+        "ols_hac": "OLS with Newey-West (HAC) standard errors",
         "logit": "Logistic regression",
         "ordinal_logit": "Ordinal logistic regression",
         "multinomial_logit": "Multinomial logistic regression",

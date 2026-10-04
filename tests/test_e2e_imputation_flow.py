@@ -52,6 +52,10 @@ def test_imputation_run_via_api_produces_fetchable_summary_artifact(tmp_path: Pa
     project_root = client.post(
         "/projects", json={"parent": str(tmp_path), "name": "demo"}
     ).json()["project_root"]
+    Path(project_root, "config.yml").write_text(
+        "imputation_method: mice\nimputation_m: 1\nimputation_max_iter: 2\n",
+        encoding="utf-8",
+    )
 
     res = client.post(
         "/runs",
@@ -87,6 +91,9 @@ def test_imputation_run_via_api_produces_fetchable_summary_artifact(tmp_path: Pa
     assert body["schema_version"] == 1
     assert body["method"] == "mice"
     assert body["status"] == "completed"
+    assert body["m"] == 1
+    assert body["persisted_datasets"] == 1
+    assert body["pooled_estimates"] is False
     assert body["output_artifact"] == "imputed_dataset"
     assert body["input_artifact"] == "cleaned_dataset"
 

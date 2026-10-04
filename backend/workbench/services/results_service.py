@@ -35,6 +35,7 @@ def validate_result_contract(result: Mapping[str, object]) -> dict[str, object]:
         "ols",
         "ols_robust",
         "ols_clustered",
+        "ols_hac",
     }:
         raise ValueError("SOURCE_CONTRACT_UNSUPPORTED: result is not an OLS result")
     stable_ids = result.get("stable_result_ids")

@@ -46,10 +46,9 @@ def build_regression_table(
         model_views.append(
             {
                 "id": model_key,
-                "label": (
-                    model_result.get("model_label")
-                    or model_result.get("model_type")
-                    or model_key
+                "label": _group_label(
+                    model_result.get("model_label") or model_result.get("model_type") or model_key,
+                    model_result.get("by_group"),
                 ),
                 "model_type": model_result.get("model_type"),
                 "nobs": model_result.get("nobs"),
@@ -59,6 +58,8 @@ def build_regression_table(
                 # on. A table pasted into a paper without them reports a
                 # precision the analysis did not have.
                 "survey_design": _design_summary(model_result.get("survey_design")),
+                "multiple_imputation": model_result.get("multiple_imputation"),
+                "by_group": model_result.get("by_group"),
             }
         )
         coefficients = model_result.get("coefficients", {})
@@ -324,15 +325,32 @@ def _build_facts_list(summary: dict[str, Any]) -> list[str]:
     return facts
 
 
+def _group_label(label: str, by_group: Any) -> str:
+    """A by-group result's column header says which group it is."""
+    if isinstance(by_group, Mapping) and by_group.get("column"):
+        return f"{label} [{by_group['column']} = {by_group.get('key')}]"
+    return label
+
+
 def _mice_imputation_fact(imputation: dict[str, Any]) -> str:
     columns = imputation.get("imputed_columns", [])
     columns_text = ", ".join(str(column) for column in columns) if columns else "none"
     persisted = imputation.get("persisted_datasets", 0)
-    persisted_text = "one" if persisted == 1 else str(persisted)
-    pooled = "were produced" if imputation.get("pooled_estimates") else "were not produced"
+    if persisted == 1:
+        return (
+            f"MICE imputation: one imputed dataset, fitted as if it were observed; imputed "
+            f"columns: {columns_text}. Standard errors do not reflect the uncertainty of the "
+            "imputation."
+        )
+    if imputation.get("pooled_estimates"):
+        return (
+            f"Multiple imputation (MICE): m = {persisted} imputed datasets; imputed columns: "
+            f"{columns_text}. Each dataset was fitted separately and the estimates pooled by "
+            "Rubin's rules with Barnard–Rubin degrees of freedom."
+        )
     return (
-        f"MICE imputation: {persisted_text} persisted imputed dataset; "
-        f"imputed columns: {columns_text}; pooled estimates {pooled}."
+        f"Multiple imputation (MICE): {persisted} imputed datasets; imputed columns: "
+        f"{columns_text}; pooled estimates were not produced."
     )
 
 
@@ -382,8 +400,7 @@ def _survey_design_facts(run_root: Path) -> list[str]:
             f"kind: {design.get('variance_method', 'linearization')} over "
             f"{design.get('n_strata', 0)} strata and {design.get('n_psu', 0)} PSUs "
             f"(strata = {design.get('strata_column')}, PSU = {design.get('psu_column')})",
-            f"Design degrees of freedom: {design.get('degf')} "
-            f"(confidence intervals use this, not the sample size)",
+            _design_df_fact(design),
         ]
         deff = design.get("design_effect")
         n_eff = design.get("effective_sample_size")
@@ -401,6 +418,21 @@ def _survey_design_facts(run_root: Path) -> list[str]:
     return []
 
 
+def _design_df_fact(design: Mapping[str, Any]) -> str:
+    from .survey.design import recorded_df_convention
+
+    convention, df = recorded_df_convention(design)
+    if convention == "design":
+        return (
+            f"Coefficient tests and intervals use t({df}), the design degrees of freedom "
+            "(PSUs minus strata, as in Stata svy), not the sample size"
+        )
+    return (
+        f"Coefficient tests and intervals use t({df}): the design degrees of freedom "
+        f"({design.get('degf')}) less the parameters plus one, as in R survey"
+    )
+
+
 def _design_summary(design: Any) -> str:
     """One cell's worth of design, or nothing.
 
@@ -410,11 +442,14 @@ def _design_summary(design: Any) -> str:
     """
     if not isinstance(design, Mapping):
         return ""
+    from .survey.design import recorded_df_convention
+
     parts = [
         f"{design.get('variance_method', 'linearization')} design-based SE",
         f"strata={design.get('strata_column')}",
         f"PSU={design.get('psu_column')}",
         f"degf={design.get('degf')}",
+        "t df={1} ({0})".format(*recorded_df_convention(design)),
     ]
     deff = design.get("design_effect")
     if deff is not None:

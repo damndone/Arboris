@@ -1,4 +1,9 @@
-"""Immutable policy contract for the OLS clustered covariance golden flow."""
+"""Immutable policy contract for the OLS clustered covariance golden flow.
+
+Values v2 (v1.8.10, inference engine v2): clustered inference uses t(G - 1),
+Stata's finite-sample rule, instead of the normal distribution. Records written
+under v1 keep naming v1; this module states what new runs do.
+"""
 
 from __future__ import annotations
 
@@ -24,12 +29,12 @@ _EXPECTED_POLICY_VALUES: dict[str, Any] = {
     "all_singleton_clusters": "warning",
     "small_sample_correction": True,
     "degrees_of_freedom_correction": True,
-    "use_t": False,
+    "use_t": True,
     "confidence_level": 0.95,
     "alpha": 0.05,
-    "inference_distribution": "normal",
-    "p_value_method": "normal_z",
-    "confidence_interval_method": "normal_z",
+    "inference_distribution": "t",
+    "p_value_method": "t",
+    "confidence_interval_method": "t",
     "effective_degrees_of_freedom": "record_per_target",
     "engine": "statsmodels",
     "minimum_engine_version": 0.14,

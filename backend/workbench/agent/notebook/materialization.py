@@ -32,9 +32,12 @@ from ...services.draft_materialization import (
 from ..context_compiler import NotebookPlanningContextV1
 from ..trace import TraceWriter
 from ..workflow_contracts import (
+    GENESIS_RUN_LEVEL_FIELDS,
     MODEL_FAMILY_SPEC_FIELDS,
+    NOTEBOOK_GENESIS_MODEL_PARAMS,
     OperationValidationError,
     family_context_columns,
+    genesis_run_params,
     model_family_contract,
     validate_model_genesis_spec,
 )
@@ -656,18 +659,7 @@ class NotebookOptionMaterializer:
         allowed_table = {"sheet_name", "transpose"}
         if set(table_params) - allowed_table:
             raise _fail("genesis materialization received unknown table params")
-        base_allowed_model = {
-            "model_type",
-            "y",
-            "x",
-            "focal_x",
-            "covariance",
-            "model_options",
-            "entity_col",
-            "time_col",
-            "cohort_col",
-            "treatment_path_col",
-        }
+        base_allowed_model = set(NOTEBOOK_GENESIS_MODEL_PARAMS)
         model_type = model_params.get("model_type")
         if not isinstance(model_type, str) or not model_type:
             raise _fail("genesis model_params requires model_type")
@@ -823,11 +815,22 @@ class NotebookOptionMaterializer:
                     {"branch_id": "notebook", "outcome": y, "predictors": list(x)}
                 ],
             }
-            for field_name in MODEL_FAMILY_SPEC_FIELDS:
+            for field_name in (*MODEL_FAMILY_SPEC_FIELDS, *GENESIS_RUN_LEVEL_FIELDS):
                 if field_name in model_params:
                     family_spec[field_name] = model_params[field_name]
             if "covariance" in model_params:
                 family_spec["covariance"] = model_params["covariance"]
+            # Options that belong to the covariance (HAC's time order) are checked
+            # with it here, as the workflow step checks them, so planning and
+            # materialization cannot disagree about them.
+            covariance_options = model_params.get("model_options") or {}
+            if family_contract.allows_covariance and isinstance(covariance_options, Mapping):
+                declared_options = {
+                    key: value for key, value in covariance_options.items()
+                    if key in family_contract.model_options_fields
+                }
+                if declared_options:
+                    family_spec["model_options"] = declared_options
             try:
                 validated_contract = validate_model_genesis_spec(family_spec)
                 missing_family_columns = sorted(
@@ -840,6 +843,12 @@ class NotebookOptionMaterializer:
                     "genesis family fields contain columns absent from the verified dataset",
                     columns=missing_family_columns,
                 )
+        # Run-level declarations travel as the run's own parameters (for
+        # multiple imputation: the `imputation` request), never as model fields;
+        # they were validated with the family spec above.
+        run_level = {key: model_params[key] for key in GENESIS_RUN_LEVEL_FIELDS if key in model_params}
+        if run_level and family_contract is None:
+            raise _fail("genesis run-level declarations need a model family contract")
         if family_builds_native_params:
             model_params = family_contract.build_model_params(
                 family_spec,
@@ -847,6 +856,8 @@ class NotebookOptionMaterializer:
                 list(x),
                 str(model_params.get("covariance", "unadjusted")),
             )
+        model_params = {key: value for key, value in model_params.items() if key not in run_level}
+        model_params.update(genesis_run_params(run_level))
         draft = create_genesis_draft(
             self.service.project_root,
             upload_sha256=source.upload_sha256 or "",

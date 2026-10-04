@@ -1124,12 +1124,33 @@ def _summarize_groups(
     group_values: Any,
 ) -> list[dict[str, Any]]:
     if group_values is None:
-        # "Group by year" means every year the column has. Demanding an
-        # enumeration makes the ordinary case fail for any caller that has not
-        # separately inspected the distinct values.
+        # "Group by year" means every year the column has, and a missing year is
+        # a group of its own: the by-group combinator plans them (sorted, the
+        # missing group last, at most 50), so every capability groups alike.
+        from .combinators.by_group import ByGroupRefusal, plan_groups
+
         column = _require_column(frame, group_by)
-        observed = frame[column].dropna().unique().tolist()
-        group_values = sorted(observed, key=lambda value: (str(type(value)), value))
+        try:
+            planned = plan_groups(frame, column)
+        except ByGroupRefusal as refusal:
+            raise StatisticalExplorationValidationError(refusal.message) from refusal
+        base_spec = ExplorationSpec(
+            operation=spec.operation,
+            selected_columns=spec.selected_columns,
+            filters=spec.filters,
+            options={key: item for key, item in spec.options.items() if key not in {"group_by", "group_values"}},
+        )
+        groups = []
+        for group in planned:
+            result = execute_exploration(frame.loc[group.mask], base_spec)
+            carried = {
+                key: item
+                for key, item in result.items()
+                if key not in {"schema_version", "operation", "source_row_count"}
+            }
+            groups.append({"value": group.value if group.value is not None else group.key,
+                           **({"missing_group": True} if group.value is None else {}), **carried})
+        return groups
     if not isinstance(group_values, (list, tuple)) or not group_values:
         raise StatisticalExplorationValidationError(
             "group_values must be a non-empty list when group_by is set"

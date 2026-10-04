@@ -70,7 +70,7 @@
       <h3>{{ diag_id }}</h3>
       {% set vif_data = diag.get("vif") %}
       {% if vif_data %}
-      <h4>Multicollinearity (VIF)</h4>
+      <h4>Multicollinearity (VIF; GVIF^(1/df) for factors)</h4>
       <table>
         <thead><tr><th>Variable</th><th>VIF</th></tr></thead>
         <tbody>
@@ -80,13 +80,16 @@
             <td>{{ var }}</td>
             <td>
               {% if vif is none %}—{% else %}{{ "%.1f"|format(vif) }}{% endif %}
-              {% if vif is not none and vif > 10 %}⚠️ high{% elif vif is not none and vif > 5 %}⚡ moderate{% endif %}
+              {% if vif is not none and vif > 10 %}⚠️ above 10 (Fox &amp; Monette, 1992){% endif %}
             </td>
           </tr>
           {% endif %}
           {% endfor %}
         </tbody>
       </table>
+      {% endif %}
+      {% if diag.get("residual_diagnostics_withheld") %}
+      <p>Residual diagnostics are not shown: {{ diag.residual_diagnostics_withheld }}</p>
       {% endif %}
       {% set bp = diag.get("breusch_pagan", {}) %}
       {% if bp and bp.get("lm") is not none %}
@@ -145,6 +148,7 @@
             <td>
               {{ cell.estimate if cell.estimate is defined else "—" }}{% if cell.significance %} {{ cell.significance }}{% endif %}
               {% if cell.source_id is defined %}<br><small>source: {{ cell.source_id }}</small>{% endif %}
+              {% if cell.fmi is defined %}<br><small>df {{ "%.1f"|format(cell.df) if cell.df is not none else "∞" }} · FMI {{ "%.3f"|format(cell.fmi) }}</small>{% endif %}
             </td>
             <td>{{ cell.std_error if cell.std_error is defined else "—" }}</td>
             <td>{{ cell.p_value if cell.p_value is defined else "—" }}</td>
@@ -157,6 +161,13 @@
           {% endfor %}
         </tbody>
       </table>
+      {% set grouped = view_model.regression_table.models | selectattr("by_group") | list %}
+      {% if grouped %}
+      <p>Estimated separately for each group of {{ grouped[0].by_group.column }} ({{ grouped | length }} of {{ grouped[0].by_group.n_groups }} groups). Coefficients side by side are not a test of a difference between groups.{% for item in grouped[0].by_group.not_estimable or [] %} Group {{ item.key }} ({{ item.nobs }} rows) was not estimated: {{ item.reason }}{% endfor %}</p>
+      {% endif %}
+      {% for model in view_model.regression_table.models if model.multiple_imputation %}
+      <p>{{ model.label }} ({{ model.id }}): estimates pooled from m = {{ model.multiple_imputation.m }} imputed datasets by Rubin's rules, with Barnard–Rubin degrees of freedom (df) per coefficient; FMI is the fraction of missing information. Fit statistics such as R² describe a single imputed dataset and are not reported.</p>
+      {% endfor %}
     </section>
     {% endif %}
 

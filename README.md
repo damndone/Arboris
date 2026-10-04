@@ -9,7 +9,7 @@ Arboris is meant to cover the everyday work people do in Stata or SPSS, across
 disciplines, while being easier to start with: you can drive it from the menus,
 from a lineage graph, or by talking to the Agent.
 
-**Current release: v1.8.9** (2026-09-28) — [release notes](docs/releases/v1.8.9-release-notes.md) ·
+**Current release: v1.8.10** (2026-10-04) — [release notes](docs/releases/v1.8.10-release-notes.md) ·
 [all releases](docs/releases/) · [manual](docs/manual/README.md)
 
 ---
@@ -58,9 +58,20 @@ permutation inference, multiple-comparison adjustment.
 ordinal and multinomial logit, quantile regression, zero-inflated and hurdle
 models, beta regression, panel fixed/random effects, linear mixed effects,
 IV/2SLS and GMM with weak-instrument diagnostics, Cox proportional hazards,
-ANOVA/ANCOVA, MANOVA and repeated-measures ANOVA — with robust, clustered and
-survey-design standard errors, weights, and multiple imputation (MICE with
-Rubin pooling).
+ANOVA/ANCOVA, MANOVA and repeated-measures ANOVA — with robust, clustered,
+Newey–West and survey-design standard errors (design degrees of freedom as in
+Stata `svy`, or R `survey`'s convention), weights, and multiple imputation
+(MICE with Rubin pooling and Barnard–Rubin degrees of freedom). Any model or
+test can be run separately by group, with a test of whether the groups differ
+and the comparisons counted for multiple testing; under a survey design each
+group is a subpopulation of the full design.
+
+**Post-estimation.** Wald tests, likelihood-ratio tests, linear and nonlinear
+combinations (`lincom`, `nlcom`) and average or at-means marginal effects,
+read from each result's stored coefficients and covariance rather than
+refitted. Assumption checks — collinearity (GVIF), perfect fit, separation,
+weak instruments with Anderson–Rubin intervals — apply by the properties a
+model declares, and a model family is admitted only with reference checks.
 
 **Causal inference.** Difference-in-differences from TWFE with event studies
 and Goodman-Bacon decomposition to Callaway–Sant'Anna, Sun–Abraham and
@@ -88,7 +99,7 @@ Estimators are checked against reference implementations, not only against
 themselves: Stata 18 for descriptive statistics and Stata file interchange,
 R (`foreign`, `haven`, `fixest`, `did`, `HonestDiD`, `DIDmultiplegtDYN`,
 `survey`, …) for SPSS files and estimators, typically to 1e-10 or better.
-Each release passes a full gate — about 5,800 backend tests, golden and
+Each release passes a full gate — about 6,500 backend tests, golden and
 invariant snapshots, 1,700 frontend tests and a type check — plus live
 evaluations of the Agent against a real provider, including injected network
 faults and adversarial requests. Evidence for each release is in
@@ -138,9 +149,10 @@ pip install -e ".[imbalanced]"  # imbalanced-learn, for SMOTE and resampling
 
 ## Where it is going
 
-Next (v1.8.10): a unified result envelope, per-family post-estimation,
-heteroskedasticity-and-autocorrelation-consistent (Newey–West) errors and
-analyses run separately by group. After that: classification and time-aware
+Next (v1.8.11): post-estimation for IV, panel, difference-in-differences,
+mixed-effects and GLM families, and reproducible script export (Stata do-file,
+R, Python) from the lineage graph. Then a redesigned workspace with a single
+Agent that follows what you are looking at. After that: classification and time-aware
 machine learning, then a research pack for quantitative finance — factor
 research and strategy validation that shows why a backtest can be trusted and
 where it cannot. See [the roadmap notes](docs/superpowers/roadmap/).

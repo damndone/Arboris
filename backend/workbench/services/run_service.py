@@ -48,6 +48,7 @@ from ..orchestrator import (
     _lineage,
     _run_workflow,
     _write_manifest,
+    parse_by_group_request,
     parse_imputation_request,
 )
 from ..projects import create_run
@@ -720,6 +721,7 @@ def _submit_run(
 
     x_columns = parse_column_selector(form.get("x", ""), "x")
     imputation_request = parse_imputation_request(form.get("imputation", ""))
+    by_group_request = parse_by_group_request(form.get("by_group", ""))
     iv_endog_list = _parse_json_str_array(form.get("iv_endog", ""), "iv_endog")
     iv_instruments_list = _parse_json_str_array(form.get("iv_instruments", ""), "iv_instruments")
 
@@ -774,11 +776,15 @@ def _submit_run(
     if model_options_binding is not None:
         executable_payload["model_options_binding"] = model_options_binding
         confirmed_payload["model_options_binding"] = model_options_binding
+    from ..orchestrator import _family_takes_covariance
+
     contract_summary = {
         "contract_version": "ols_result_contract_v1" if model_type == "ols" else None,
         "model": "ols" if model_type == "ols" else model_type,
         "model_type": model_type,
-        "covariance": wire_covariance,
+        # v1.8.10: recorded only for families that take the option.
+        "covariance": wire_covariance if _family_takes_covariance(model_type) else None,
+        "covariance_applies": _family_takes_covariance(model_type),
         "covariance_explicit": bool(requested_covariance),
         "entity_col": form_for_persist.get("entity_col", ""),
         "y": form_for_persist.get("y", ""),
@@ -877,6 +883,8 @@ def _submit_run(
         form.get("survey_lonely_psu", ""),
         form.get("survey_weight_frame", ""),
         form.get("survey_subpop", ""),
+        by_group_request,
+        form.get("survey_df", ""),
     )
     return {"run_id": run.run_id, "status": "running"}
 
@@ -937,6 +945,8 @@ def _bg_run(
     survey_lonely_psu: str = "",
     survey_weight_frame: str = "",
     survey_subpop: str = "",
+    by_group: dict | None = None,
+    survey_df: str = "",
 ) -> None:
     events = get_event_manager()
     config = load_config(_resolve_project_root(run_root) / "config.yml")
@@ -1016,8 +1026,10 @@ def _bg_run(
             survey_lonely_psu=survey_lonely_psu,
             survey_weight_frame=survey_weight_frame,
             survey_subpop=survey_subpop,
+            survey_df=survey_df,
             labels=labels,
             statistical_tests=statistical_tests_request,
+            by_group=by_group,
             lmm_execution_admission=lmm_execution_admission,
             stop_reason=_stop_reason,
         )

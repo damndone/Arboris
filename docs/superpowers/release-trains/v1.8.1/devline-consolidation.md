@@ -59,7 +59,7 @@ prior work, so it already builds on 100% of it.
 ### Phase 3 — `v181-agent-surface-polish` (UI layer, Codex — ACTIVE)
 - **Purpose:** restyle the Workbench Agent surface to match a Codex composer
   reference while preserving the typed-proposal / fail-closed boundaries
-  (see `docs/superpowers/specs/2026-07-24-v1.8.1-agent-surface-polish-design.md`).
+  (see `docs/superpowers/archive/specs/2026-07-24-v1.8.1-agent-surface-polish-design.md`).
 - **State:** uncommitted working-tree edits (~30 files: `AgentComposer`,
   `AgentPanel`, `AgentCapabilityPopover`, `agent.css`, `GraphView`,
   `GraphCanvas`, `RunHistoryRail`, `BottomPanel`, `App.tsx`, `agent_routes.py`,

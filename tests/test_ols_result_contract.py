@@ -50,7 +50,7 @@ def _cluster_fitted(frame: pd.DataFrame):
         groups=frame["firm"].to_numpy(copy=True),
         use_correction=True,
         df_correction=True,
-        use_t=False,
+        use_t=True,  # inference engine v2: t(G - 1), as Stata
     )
 
 
@@ -211,10 +211,11 @@ def test_clustered_covariance_changes_only_inference_and_records_evidence():
     assert evidence["entity_col"] == "firm"
     assert evidence["small_sample_correction"] is True
     assert evidence["degrees_of_freedom_correction"] is True
-    assert evidence["use_t"] is False
-    assert evidence["inference_distribution"] == "normal"
-    assert evidence["p_value_method"] == "normal_z"
-    assert evidence["confidence_interval_method"] == "normal_z"
+    assert evidence["use_t"] is True
+    assert evidence["inference_distribution"] == "t"
+    assert evidence["p_value_method"] == "t"
+    assert evidence["confidence_interval_method"] == "t"
+    assert evidence["df_method"] == "clusters_minus_one"
     assert evidence["effective_df"] is not None
     fitted = _cluster_fitted(_frame())
     assert evidence["effective_df"] == pytest.approx(

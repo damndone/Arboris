@@ -6,7 +6,7 @@
 // directly; that boundary is what makes future backend changes (V2.0 Pipeline
 // split, V1.5.x added fields) localised refactors.
 //
-// Spec: docs/superpowers/specs/2026-05-22-v1.5.0-uiux-integration-design.md §4
+// Spec: docs/superpowers/archive/specs/2026-05-22-v1.5.0-uiux-integration-design.md §4
 
 import type { RerunFromProvenance } from "./nodeOperationContext";
 

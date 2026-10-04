@@ -328,6 +328,9 @@ def test_confirmed_workflow_runs_declared_model_terms_and_post_estimation(
                     + 1.4 * value
                     - 0.1 * value**2
                     + (1.0 if index % 2 else -1.0)
+                    # v1.8.10: without this the regressors reproduce the
+                    # outcome exactly, and a perfect fit has no inference.
+                    + 0.25 * ((index * 7) % 5 - 2)
                     for index, value in enumerate(exposure)
                 ],
                 "exposure": exposure,

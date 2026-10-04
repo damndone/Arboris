@@ -8,7 +8,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, Iterable
 from uuid import uuid4
 
@@ -3221,14 +3221,30 @@ class WorkbenchOrchestrator:
         return None
 
 
+def _tests_per_step(outputs: Mapping[str, Any]) -> dict[str, int]:
+    """How many tests each executed step reported (a by-group step: one per group)."""
+    state = outputs.get("workflow_state") if isinstance(outputs, Mapping) else None
+    steps = state.get("steps") if isinstance(state, Mapping) else None
+    items = steps.values() if isinstance(steps, Mapping) else steps if isinstance(steps, list) else ()
+    counts: dict[str, int] = {}
+    for item in items:
+        if isinstance(item, Mapping) and isinstance(item.get("row_counts"), Mapping):
+            tests = item["row_counts"].get("ledger_count")
+            if isinstance(tests, int) and tests > 0:
+                counts[str(item.get("step_id"))] = tests
+    return counts
+
+
 def _record_operation_in_ledger(project_root: Any, record: OperationRecord) -> None:
     """Every executed Agent operation enters the analysis ledger."""
 
     from ..analysis_ledger import LedgerEntry, LedgerStep, record as record_entry
 
     if record.operation_id == "operation.multi_step":
+        tests = _tests_per_step(record.outputs or {})
         steps = tuple(
-            LedgerStep.of(str(step.get("operation_id", "")), str(step.get("step_id", "")))
+            LedgerStep.of(str(step.get("operation_id", "")), str(step.get("step_id", "")),
+                          tests=tests.get(str(step.get("step_id", "")), 1))
             for step in (record.changes.get("steps") or ())
             if isinstance(step, dict)
         )

@@ -174,7 +174,8 @@ def test_auto_poisson_overdispersion_emits_warning_issue(tmp_path):
     diag = read_json(run_root / "model_results" / "diagnostics_poisson_1.json")
     assert diag["overdispersion"]["overdispersion_ratio"] > 2.0
     errors = read_json(run_root / "errors.json")
-    assert any(issue["code"] == "OVERDISPERSION_DETECTED" for issue in errors["issues"])
+    # v1.8.10: reported by the check library's Cameron-Trivedi test.
+    assert any(issue["code"] == "CHECK_FIT_OVERDISPERSION" for issue in errors["issues"])
 
 
 def test_poisson_offset_is_not_reported_as_dropped_variable(tmp_path):

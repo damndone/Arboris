@@ -110,15 +110,22 @@ def test_design_reports_structure_and_degrees_of_freedom(design):
 def test_confidence_intervals_use_the_design_t_not_the_normal(design, linearizable_estimator):
     """The multiplier must come from the design, not from the normal.
 
-    An earlier version of this test asserted qt(.975, degf) = 2.306. That was
-    wrong: intervals use the *residual* design df, `degf - p + 1` = 6, giving
-    2.447 -- which is what R reports as `df.residual` for svyglm. Both are far
-    from 1.96, so the test still catches a normal approximation, but asserting
-    the wrong one of the two would have hard-coded a real error.
+    Two conventions exist (v1.8.10): the design df itself, degf = 8, giving
+    qt(.975, 8) = 2.306 (Stata svy, the default), and R survey's `degf - p + 1`
+    = 6, giving 2.447. R is the oracle here, so the R convention is requested.
+    Both are far from 1.96, so either catches a normal approximation.
     """
     from workbench.survey import estimate_with_design
 
-    result = estimate_with_design(design, linearizable_estimator, method="linearization")
+    default = estimate_with_design(design, linearizable_estimator, method="linearization")
+    assert default.df_convention == "design" and default.inference_degf == 8
+    assert (default.ci_upper["x1"] - default.estimates["x1"]) / default.standard_errors["x1"] == pytest.approx(
+        2.306, abs=0.001
+    )
+
+    result = estimate_with_design(
+        design, linearizable_estimator, method="linearization", df_convention="design_minus_p"
+    )
     oracle = _oracle()["linearization"]
     for term in ("(Intercept)", "x1", "x2"):
         assert result.ci_lower[term] == pytest.approx(oracle["ci_lower"][term], rel=1e-8)
@@ -336,13 +343,31 @@ def test_design_effect_and_effective_sample_size_match_r(design):
 def test_adjusted_wald_uses_design_degrees_of_freedom(design, linearizable_estimator):
     from workbench.survey import estimate_with_design
 
-    result = estimate_with_design(design, linearizable_estimator, method="linearization")
+    # R's regTermTest: W / q on (q, degf - p + 1).
+    result = estimate_with_design(
+        design, linearizable_estimator, method="linearization", df_convention="design_minus_p"
+    )
     wald = result.joint_test(["x1", "x2"])
     oracle = _oracle()["adjusted_wald"]
     assert wald.statistic == pytest.approx(oracle["statistic"], rel=1e-8)
     assert wald.df == oracle["df"]
     assert wald.ddf == oracle["ddf"]
     assert wald.p_value == pytest.approx(oracle["p_value"], rel=1e-6)
+
+    # The default: Korn-Graubard, (d - q + 1) / (d q) W on (q, d - q + 1) with
+    # d = degf = 8. The same W, so it follows from R's statistic.
+    default = estimate_with_design(design, linearizable_estimator, method="linearization").joint_test(["x1", "x2"])
+    w = oracle["statistic"] * oracle["df"]
+    assert default.ddf == 7
+    assert default.statistic == pytest.approx(w * 7 / (8 * 2), rel=1e-8)
+
+
+def test_an_unknown_df_convention_is_refused(design, linearizable_estimator):
+    from workbench.survey import SurveyEngineError, estimate_with_design
+
+    with pytest.raises(SurveyEngineError) as caught:
+        estimate_with_design(design, linearizable_estimator, method="linearization", df_convention="stata")
+    assert caught.value.code == "SURVEY_DF_CONVENTION_INVALID"
 
 
 # --------------------------------------------------------------------------
@@ -378,6 +403,7 @@ def test_every_coefficient_in_a_real_run_carries_the_design_standard_error(tmp_p
         survey_strata_col="stratum",
         survey_psu_col="psu",
         survey_fpc_col="fpc",
+        survey_df="design_minus_p",  # R's convention: R is the oracle
     )
     assert outcome["status"] == "completed"
 

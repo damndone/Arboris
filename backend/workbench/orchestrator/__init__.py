@@ -171,6 +171,18 @@ _Y_TYPE_TO_ATTEMPTED_MODEL: dict[str, str] = {
 }
 
 
+def _family_takes_covariance(model_type: str) -> bool:
+    """Whether the requested covariance option applies to this family.
+
+    Unknown here (auto routing picks the family later) counts as applying, so
+    the request is recorded; the executed estimator is in the kernel.
+    """
+    from ..agent.workflow_contracts import MODEL_FAMILY_CONTRACTS
+
+    contract = MODEL_FAMILY_CONTRACTS.get(model_type)
+    return True if contract is None else bool(contract.allows_covariance)
+
+
 def run_workflow(
     project_root: Path,
     input_files: list[Path],
@@ -180,6 +192,7 @@ def run_workflow(
     x: list[str],
     model_type: str = "auto",
     imputation: dict | None = None,
+    by_group: dict | None = None,
     statistical_tests: dict | None = None,
     entity_col: str = "",
     time_col: str = "",
@@ -219,6 +232,7 @@ def run_workflow(
     survey_lonely_psu: str = "",
     survey_weight_frame: str = "",
     survey_subpop: str = "",
+    survey_df: str = "",
     labels: dict[str, object] | None = None,
     stop_reason: Callable[[], str | None] | None = None,
 ) -> dict[str, str]:
@@ -281,6 +295,7 @@ def run_workflow(
         "y": y,
         "x": ",".join(x),
         "imputation": json.dumps(imputation) if imputation is not None else "",
+        **({"by_group": json.dumps(by_group)} if by_group is not None else {}),
         "prediction_model_type": prediction_model_type,
         "prediction_cv_folds": str(prediction_cv_folds),
         "prediction_sampling_method": prediction_sampling_method,
@@ -301,6 +316,8 @@ def run_workflow(
         "survey_lonely_psu": survey_lonely_psu,
         "survey_weight_frame": survey_weight_frame,
         "survey_subpop": survey_subpop,
+        # Only when set: an absent key keeps every earlier run's inputs.
+        **({"survey_df": survey_df} if survey_df else {}),
         "did_mode": did_mode,
         "did_cohort_col": did_cohort_col,
         "did_treat_col": did_treat_col,
@@ -357,7 +374,10 @@ def run_workflow(
             "contract_version": "ols_result_contract_v1" if model_type == "ols" else None,
             "model": "ols" if model_type == "ols" else model_type,
             "model_type": model_type,
-            "covariance": wire_covariance,
+            # v1.8.10: a family that does not take a covariance option does not
+            # get the OLS default recorded as if it had used it.
+            "covariance": wire_covariance if _family_takes_covariance(model_type) else None,
+            "covariance_applies": _family_takes_covariance(model_type),
             "covariance_explicit": bool(requested_covariance),
             "entity_col": entity_col,
             "y": y,
@@ -391,6 +411,7 @@ def run_workflow(
             started_at,
             model_type=model_type,
             imputation=imputation,
+            by_group=by_group,
             statistical_tests=statistical_tests,
             entity_col=entity_col,
             time_col=time_col,
@@ -431,6 +452,7 @@ def run_workflow(
             survey_lonely_psu=survey_lonely_psu,
             survey_weight_frame=survey_weight_frame,
             survey_subpop=survey_subpop,
+            survey_df=survey_df,
             labels=normalized_labels,
             stop_reason=stop_reason,
         )
@@ -531,6 +553,17 @@ def parse_imputation_request(raw: str | dict | None) -> dict | None:
     return parsed
 
 
+def parse_by_group_request(raw: str | dict | None) -> dict | None:
+    """``{"column": <grouping column>}``; empty means no by-group execution."""
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return None
+    parsed = json.loads(raw) if isinstance(raw, str) else raw
+    if not isinstance(parsed, dict) or set(parsed) - {"column"} or not isinstance(parsed.get("column"), str) \
+            or not parsed["column"].strip():
+        raise ValueError('by_group must be a JSON object {"column": <grouping column>}')
+    return {"column": parsed["column"].strip()}
+
+
 def run_batch_y_workflow(
     project_root: Path,
     input_files: list[Path],
@@ -547,6 +580,7 @@ def run_batch_y_workflow(
     survey_lonely_psu: str = "",
     survey_weight_frame: str = "",
     survey_subpop: str = "",
+    survey_df: str = "",
 ) -> dict[str, Any]:
     """Run one workflow per outcome column.
 
@@ -569,6 +603,7 @@ def run_batch_y_workflow(
             survey_lonely_psu=survey_lonely_psu,
             survey_weight_frame=survey_weight_frame,
             survey_subpop=survey_subpop,
+            survey_df=survey_df,
         )
         run_id = result["run_id"]
         run_root = Path(project_root) / "runs" / run_id
@@ -600,6 +635,7 @@ def _run_workflow(
     sheet_name: str | None = None,
     transpose: bool = False,
     imputation: dict | None = None,
+    by_group: dict | None = None,
     statistical_tests: dict | None = None,
     entity_col: str = "",
     time_col: str = "",
@@ -640,6 +676,7 @@ def _run_workflow(
     survey_lonely_psu: str = "",
     survey_weight_frame: str = "",
     survey_subpop: str = "",
+    survey_df: str = "",
     labels: dict[str, object] | None = None,
     lmm_execution_admission: object | None = None,
     stop_reason: Callable[[], str | None] | None = None,
@@ -696,6 +733,7 @@ def _run_workflow(
     ctx.artifacts["_model_type"] = model_type
     ctx.artifacts["_started_at"] = started_at
     ctx.artifacts["_imputation_request"] = imputation
+    ctx.artifacts["_by_group_request"] = parse_by_group_request(by_group)
     ctx.artifacts["_statistical_tests_request"] = statistical_tests
     ctx.artifacts["_entity_col"] = entity_col
     ctx.artifacts["_time_col"] = time_col
@@ -722,6 +760,7 @@ def _run_workflow(
     ctx.artifacts["_survey_lonely_psu"] = survey_lonely_psu
     ctx.artifacts["_survey_weight_frame"] = survey_weight_frame
     ctx.artifacts["_survey_subpop"] = survey_subpop
+    ctx.artifacts["_survey_df"] = survey_df
     ctx.artifacts["_labels"] = normalized_labels
     ctx.artifacts["_iv_endog"] = [normalize_column_name(c) for c in (iv_endog or [])]
     ctx.artifacts["_iv_instruments"] = [normalize_column_name(c) for c in (iv_instruments or [])]
@@ -760,6 +799,8 @@ def _run_workflow(
         "y": y,
         "x": list(x),
         "imputation": imputation,
+        # Only when set: an absent key keeps every other run's node hash.
+        **({"by_group": by_group} if by_group is not None else {}),
         "prediction_model_type": prediction_model_type,
         "prediction_cv_folds": prediction_cv_folds,
         "prediction_sampling_method": prediction_sampling_method,
@@ -794,14 +835,15 @@ def _run_workflow(
     return {"run_id": run_id, "status": ctx.terminal_status}
 
 
+from ..report_view_model import _mice_imputation_fact
 from ._report_build import (
     _build_descriptive_stats,
     _build_variable_importance,
     _coefficient_rows,
     _coefficient_rows_for_models,
     _importance_sort_key,
-    _mice_imputation_fact,
     _model_summary,
     _variable_summary,
+    _write_inference_kernel,
     _write_model_result,
 )

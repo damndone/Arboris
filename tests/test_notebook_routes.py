@@ -345,6 +345,8 @@ def test_dataset_notebook_confirmation_executes_a_source_pinned_composed_workflo
         {
             "response": [
                 16.0 + 1.5 * value - 0.11 * value**2 + (1.0 if index % 2 else -1.0)
+                # v1.8.10: keeps the fit from being exact (no inference otherwise).
+                + 0.25 * ((index * 7) % 5 - 2)
                 for index, value in enumerate(values)
             ],
             "exposure": values,
@@ -1067,13 +1069,17 @@ def test_real_planner_catalog_matches_model_family_covariance_contract(
     }
     assert planner.capability_catalog["ols"]["notebook_model_options_policy"] == {
         "supported": True,
-        "allowed_fields": ["covariance"],
+        # v1.8.10: HAC's time order and lag; panel_ols shares the vocabulary
+        # and its validator refuses hac with the reason.
+        "allowed_fields": ["covariance", "hac_lags", "time_order"],
         "forbidden_fields": [],
         "submission_rule": "use_published_fields",
     }
     assert planner.capability_catalog["panel_ols"]["notebook_model_options_policy"] == {
         "supported": True,
-        "allowed_fields": ["covariance"],
+        # v1.8.10: HAC's time order and lag; panel_ols shares the vocabulary
+        # and its validator refuses hac with the reason.
+        "allowed_fields": ["covariance", "hac_lags", "time_order"],
         "forbidden_fields": [],
         "submission_rule": "use_published_fields",
     }
@@ -1163,7 +1169,7 @@ def test_real_planner_uses_builtin_artifact_vocabulary_for_native_family(
     }
     assert planner.capability_catalog["ols"]["model_options_vocabulary"][
         "fields"
-    ]["covariance"]["allowed_values"] == ["robust", "clustered", "unadjusted"]
+    ]["covariance"]["allowed_values"] == ["robust", "clustered", "unadjusted", "hac"]
 
 
 def test_real_planner_binds_recipe_source_before_owner_validation(

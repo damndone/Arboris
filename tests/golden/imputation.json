@@ -4,6 +4,9 @@
       "data_profile"
     ],
     "boxplots": [],
+    "checks_ols_1": [
+      "imputed_dataset"
+    ],
     "cleaned_dataset": [
       "raw_data.csv"
     ],
@@ -26,6 +29,9 @@
     ],
     "imputed_dataset": [
       "cleaned_dataset"
+    ],
+    "inference_kernel_ols_1": [
+      "ols_1"
     ],
     "kde_plots": [],
     "mice_decisions": [

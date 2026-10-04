@@ -130,7 +130,6 @@ class DiagnosticsStage:
         from ...orchestrator import (
             _PREDICTION_MODEL_TYPES,
             _check_model_validity,
-            _check_overdispersion_issue,
             _diagnostic_family,
             _model_failure_details,
         )
@@ -177,6 +176,30 @@ class DiagnosticsStage:
         diag_x = [v for v in normalized_x if v != exposure_col] if exposure_col else normalized_x
         exog = modeling_frame[diag_x] if diag_x else pd.DataFrame(index=modeling_frame.index)
         diagnostic_artifacts: dict[str, dict[str, Any]] = {}
+        mi_pooling = ctx.artifacts.get("_mi_pooling")
+        if mi_pooling:
+            # A pooled result has no single fit: residuals, influence and the
+            # check library's fit checks belong to one imputed dataset each, and
+            # showing imputation 1's would present them as the pooled model's.
+            for model_id, result in model_results:
+                diag = {
+                    "model_id": model_id,
+                    "model_type": result.get("model_type", "ols"),
+                    "status": "unavailable",
+                    "reason_code": "MI_DIAGNOSTIC_NOT_POOLED",
+                    "residual_diagnostics_withheld": (
+                        f"This result pools m = {mi_pooling['m']} imputed datasets; residual "
+                        "diagnostics, collinearity and fit checks describe a single dataset and "
+                        "are not reported for the pooled model."
+                    ),
+                }
+                diag_path = run_root / "model_results" / f"diagnostics_{model_id}.json"
+                write_json(diag_path, diag)
+                register_artifact(
+                    run_root, f"diagnostics_{model_id}", diag_path, "model_diagnostic", "econometrics",
+                    model_input_ids,
+                )
+                diagnostic_artifacts[model_id] = diag
         for model_id, fitted in fitted_models.items():
             result_dict = dict(model_results)
             result = result_dict.get(model_id, {})
@@ -200,22 +223,45 @@ class DiagnosticsStage:
                 model_input_ids,
             )
             diagnostic_artifacts[model_id] = diag
+            # v1.8.10 check library: checks apply by the family's declared
+            # traits, and what they find reaches the run's issues.
+            from ...checks.reporting import check_issues, run_model_checks
+
+            check_results = run_model_checks(
+                run_root,
+                model_id=model_id,
+                model_type=fitted_model_type,
+                fitted=fitted,
+                nobs=result.get("nobs") if isinstance(result.get("nobs"), int) else None,
+                inputs=model_input_ids,
+            )
+            # The report's VIF table shows the check library's design-level
+            # GVIF, so it cannot disagree with the issue raised from it.
+            gvif = next((item for item in check_results if item["check_id"] == "collinearity.gvif"), None)
+            terms = (gvif or {}).get("evidence", {}).get("terms") if gvif else None
+            if isinstance(terms, dict):
+                diag["vif"] = {term: values.get("gvif_adjusted", 0) ** 2 for term, values in terms.items()}
+                diag["vif_basis"] = "collinearity.gvif: VIF, or GVIF^(1/df) for multi-column terms"
+                write_json(diag_path, diag)
+            # A degenerate fit (perfect fit, separation) makes residual-based
+            # diagnostics noise; they are withdrawn with the reason rather
+            # than reported beside a check that calls them not applicable.
+            withheld = next((item for item in check_results if item.get("suppresses_inference")), None)
+            if withheld is not None:
+                for key in ("breusch_pagan", "durbin_watson", "jarque_bera", "cooks_distance", "separation", "overdispersion"):
+                    diag.pop(key, None)
+                diag["residual_diagnostics_withheld"] = withheld["summary"]
+                write_json(diag_path, diag)
+            issues_from_checks = check_issues(check_results, model_id)
+            if issues_from_checks:
+                issue_dicts.extend(issues_from_checks)
+                write_json(run_root / "errors.json", {"issues": issue_dicts})
             if not family_owned:
                 _check_model_validity(diag, model_id, issue_dicts, run_root)
-            if not family_owned and family == "poisson":
-                _check_overdispersion_issue(diag, model_id, issue_dicts, run_root)
-            sep = diag.get("separation", {}) if not family_owned else {}
-            if isinstance(sep, dict) and sep.get("warning"):
-                issue_dicts.append(GuardrailIssue(
-                    Severity.WARNING,
-                    "SEPARATION_WARNING",
-                    f"Model {model_id}: {sep['warning']} "
-                    f"(converged={sep.get('converged')}, max|coef|={sep.get('max_abs_coef')}, "
-                    f"max SE={sep.get('max_std_error')}). "
-                    f"Consider Firth penalized likelihood or removing problematic predictors.",
-                    {"model_id": model_id, **{k: v for k, v in sep.items() if v is not None}},
-                ).to_dict())
-                write_json(run_root / "errors.json", {"issues": issue_dicts})
+            # Separation and overdispersion are reported by the check library
+            # (fit.separation, fit.overdispersion), which applies them by
+            # trait and with sourced thresholds; the older logit-only and
+            # Poisson-only heuristics no longer raise issues of their own.
         env.step("diagnostics", "complete", f"Diagnostics computed for {len(fitted_models)} model(s)")
 
         if model_type == "iv_2sls":
@@ -224,7 +270,17 @@ class DiagnosticsStage:
             if iv_fitted is not None:
                 n_endog = len(ctx.artifacts.get("_iv_endog") or [])
                 n_instr = len(ctx.artifacts.get("_iv_instruments") or [])
-                iv_diag = build_iv_diagnostics(iv_fitted, n_endog, n_instr)
+                checks_path = run_root / "model_results" / "checks_iv_2sls_1.json"
+                strength = None
+                if checks_path.is_file():
+                    from ...artifacts import read_json as _read_json
+
+                    strength = next(
+                        (item for item in _read_json(checks_path).get("checks", [])
+                         if item.get("check_id") == "iv.first_stage_strength"),
+                        None,
+                    )
+                iv_diag = build_iv_diagnostics(iv_fitted, n_endog, n_instr, strength)
                 iv_diag_path = run_root / "iv_diagnostics.json"
                 write_json(iv_diag_path, iv_diag)
                 register_artifact(

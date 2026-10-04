@@ -844,6 +844,73 @@ def test_dataset_materialization_builds_a_native_iv_draft_from_evidence_backed_c
     }
 
 
+def test_dataset_materialization_carries_multiple_imputation_as_the_run_request(
+    tmp_path: Path,
+) -> None:
+    """v1.8.10 step 5: planning validated `multiple_imputations`; materialization
+    must admit the same field and turn it into the run's imputation request,
+    not refuse it as an unknown model parameter (found in browser acceptance)."""
+
+    import json
+
+    from workbench.agent.notebook.materialization import OptionMaterializationFailed
+
+    project = make_project(tmp_path)
+    service = NotebookService(project)
+    upload_sha = store_upload_bytes(
+        project, b"y,x1,x2\n1.0,0.2,\n2.0,,0.3\n3.0,0.5,0.1\n", filename="mi.csv",
+    )
+    notebook = service.ensure_default_projection(
+        dataset={"kind": "dataset", "upload_sha256": upload_sha, "filename": "mi.csv", "sheet_names": []},
+        created_by="ui",
+    )
+
+    def materialize(model_type: str):
+        return NotebookOptionMaterializer(service)._materialize_dataset(
+            notebook,
+            {
+                "operation_id": "model.genesis",
+                "target": {"dataset_source_id": upload_sha},
+                "changes": {"model_params": {
+                    "model_type": model_type, "y": "y", "x": ["x1", "x2"], "multiple_imputations": 5,
+                }},
+            },
+            {"option_id": f"opt_mi_{model_type}", "option_revision": "1"},
+        )
+
+    draft = materialize("ols")
+    model = next(node for node in draft.draft["graph"]["nodes"] if node["node_type"] == "model")
+    assert "multiple_imputations" not in model["params"]
+    assert json.loads(model["params"]["imputation"]) == {"method": "mice", "m": 5}
+    with pytest.raises(OptionMaterializationFailed, match="not offered for probit"):
+        materialize("probit")
+
+
+def test_dataset_materialization_carries_by_group_as_the_run_request(tmp_path: Path) -> None:
+    """v1.8.10 step 7, found in browser acceptance: the Genesis draft schema
+    refused the by_group request planning had accepted (NON_EDITABLE_PARAM)."""
+
+    import json
+
+    project = make_project(tmp_path)
+    service = NotebookService(project)
+    upload_sha = store_upload_bytes(
+        project, b"y,x1,region\n1.0,0.2,a\n2.0,0.4,b\n3.0,0.5,a\n", filename="bg.csv",
+    )
+    notebook = service.ensure_default_projection(
+        dataset={"kind": "dataset", "upload_sha256": upload_sha, "filename": "bg.csv", "sheet_names": []},
+        created_by="ui",
+    )
+    draft = NotebookOptionMaterializer(service)._materialize_dataset(
+        notebook,
+        {"operation_id": "model.genesis", "target": {"dataset_source_id": upload_sha},
+         "changes": {"model_params": {"model_type": "ols", "y": "y", "x": ["x1"], "by_group": "region"}}},
+        {"option_id": "opt_bg", "option_revision": "1"},
+    )
+    model = next(node for node in draft.draft["graph"]["nodes"] if node["node_type"] == "model")
+    assert json.loads(model["params"]["by_group"]) == {"column": "region"}
+
+
 def test_dataset_materialization_builds_a_native_did_draft_with_its_treatment_mode(
     tmp_path: Path,
 ) -> None:

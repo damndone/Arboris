@@ -1,10 +1,24 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from typing import Any
 
 from ..context import ModelingContext, RunEnv
+from ..inference_kernels import (
+    record_inference_kernel,
+    record_single_estimate_kernel,
+    recorded_inference_kernel,
+)
 from ..pack import AnalysisPack, RerunAction, register_pack
+from ...contracts.model.inference_kernel import (
+    InferenceKernelError,
+    build_inference_kernel,
+    kernel_from_fitted,
+    resolve_inference_kernel,
+    unavailable_inference_kernel,
+)
+from ...econometrics.normalize import _public_term
 from ..registry import (
     ModelHandler,
     ModelOptionsValidationError,
@@ -13,7 +27,47 @@ from ..registry import (
 from ...contracts.model.ols import (
     OLS_MODEL_OPTIONS_CONTRACT,
     validate_ols_model_options,
+    validate_panel_ols_model_options,
 )
+
+
+def _fit_pooled(handler, ctx, env, handles, validation_error):
+    """Multiple imputation: fit every dataset and pool (stages/mi_pooling.py)."""
+    from ...combinators.multiple_imputation import MultipleImputationRefusal
+    from .mi_pooling import fit_multiply_imputed, kernel_resolver
+
+    resolve = kernel_resolver(
+        ctx, handler.model_type, kernel_source=_kernel_source_packet,
+        recorded=recorded_inference_kernel, public_name=_public_term,
+    )
+    try:
+        return fit_multiply_imputed(handler, ctx, env, handles, kernel_for=resolve)
+    except MultipleImputationRefusal as refusal:
+        raise validation_error(
+            f"MI_{refusal.code}", refusal.message,
+            {"model_type": handler.model_type, "imputation_count": len(handles),
+             "source_artifacts": [handle.artifact_id for handle in handles]},
+        ) from refusal
+
+
+def _fit_groups(handler, ctx, env, request, validation_error):
+    """By-group execution: one fit per group (stages/by_group_fit.py)."""
+    from ...combinators.by_group import ByGroupRefusal
+    from .by_group_fit import fit_by_group
+    from .mi_pooling import kernel_resolver
+
+    design_declared = _survey_design_declared(ctx) or bool(str(ctx.artifacts.get("_sampling_weight") or "").strip())
+    resolve = kernel_resolver(
+        ctx, handler.model_type, kernel_source=_kernel_source_packet,
+        recorded=recorded_inference_kernel, public_name=_public_term,
+    )
+    try:
+        return fit_by_group(handler, ctx, env, dict(request), design_declared=design_declared, kernel_for=resolve)
+    except ByGroupRefusal as refusal:
+        raise validation_error(
+            f"BY_GROUP_{refusal.code}", refusal.message,
+            {"model_type": handler.model_type, "by_group": dict(request)},
+        ) from refusal
 
 
 def _validate_model_family_weights(
@@ -52,6 +106,29 @@ def _validate_model_family_weights(
             f"model family {model_type} does not declare support for "
             f"{', '.join(unsupported)} weight(s); allowed: {allowed_text}"
         )
+
+
+def _record_fitted_kernel(ctx, fitted, *, model_id: str, model_type: str) -> None:
+    """Record the kernel of the fit whose covariance the result reports."""
+    kernel = kernel_from_fitted(
+        fitted, model_id=model_id, model_type=model_type,
+        nobs=int(getattr(fitted, "nobs", 0) or 0), public_name=_public_term,
+    )
+    if kernel is not None:
+        record_inference_kernel(ctx, kernel)
+
+
+def _kernel_source_packet(result: dict[str, Any]) -> dict[str, Any]:
+    """The packet whose sample size and fingerprint the kernel repeats.
+
+    Envelope-style results (model packs, LMM) carry their figures one level
+    down; reading the outer object would record no sample size.
+    """
+    for key in ("result", "payload"):
+        nested = result.get(key)
+        if isinstance(nested, dict) and "nobs" in nested:
+            return nested
+    return result
 
 
 def _result_for_downstream(model_type: str, result: dict[str, Any]) -> dict[str, Any]:
@@ -96,6 +173,16 @@ def _orch():
     return _o
 
 
+def _model_id(ctx, default: str) -> str:
+    """The result id a fit writes: the family's own, or a combinator's per-member id.
+
+    By-group execution fits the same family once per group; each group's
+    result, kernel, stable ids and source ids must carry the group's id.
+    """
+    override = ctx.artifacts.get("_model_id_override")
+    return str(override) if override else default
+
+
 def _fit_panel_ols(ctx, env):
     id_cands = ctx.artifacts.get("_id_candidates") or []
     t_cands = ctx.artifacts.get("_time_candidates") or []
@@ -109,19 +196,27 @@ def _fit_panel_ols(ctx, env):
         model_id="panel_ols_1",
         covariance=covariance,
     )
-    # NB: today's code does NOT store panel_ols fitted; preserve that.
+    # NB: today's code does NOT store panel_ols fitted; preserve that, but hand
+    # the stage its kernel so post-estimation does not need the fitted object.
+    kernel = kernel_from_fitted(
+        fitted, model_id="panel_ols_1", model_type="panel_ols",
+        nobs=int(primary.get("nobs") or 0), public_name=_public_term,
+    )
+    if kernel is not None:
+        record_inference_kernel(ctx, kernel)
     return "panel_ols_1", primary, None
 
 
 def _fit_probit(ctx, env):
+    model_id = _model_id(ctx, "probit_1")
     primary, fitted = _orch().run_probit(
         ctx.data.frame,
         y=ctx.artifacts["_normalized_y"],
         x=ctx.artifacts["_normalized_x"],
-        model_id="probit_1",
+        model_id=model_id,
         categorical_x=ctx.artifacts.get("_categorical_vars"),
     )
-    return "probit_1", primary, fitted
+    return model_id, primary, fitted
 
 
 def _fit_negative_binomial(ctx, env):
@@ -148,17 +243,19 @@ def _fit_glm(ctx, env):
 
 
 def _fit_logit(ctx, env):
+    model_id = _model_id(ctx, "logit_1")
     primary, fitted = _orch().run_logit(
         ctx.data.frame,
         y=ctx.artifacts["_normalized_y"],
         x=ctx.artifacts["_normalized_x"],
-        model_id="logit_1",
+        model_id=model_id,
         categorical_x=ctx.artifacts.get("_categorical_vars"),
     )
-    return "logit_1", primary, fitted
+    return model_id, primary, fitted
 
 
 def _fit_poisson(ctx, env):
+    model_id = _model_id(ctx, "poisson_1")
     poisson_x = ctx.artifacts["_poisson_x"]
     cat_all = ctx.artifacts.get("_categorical_vars") or set()
     poisson_cat = {v for v in cat_all if v in poisson_x}
@@ -166,11 +263,11 @@ def _fit_poisson(ctx, env):
         ctx.data.frame,
         y=ctx.artifacts["_normalized_y"],
         x=poisson_x,
-        model_id="poisson_1",
+        model_id=model_id,
         exposure_col=ctx.exposure_col,
         categorical_x=poisson_cat,
     )
-    return "poisson_1", primary, fitted
+    return model_id, primary, fitted
 
 
 def _fit_iv_2sls(ctx, env):
@@ -250,16 +347,35 @@ def _fit_cs_did(ctx, env):
     ctx.artifacts["_cs_did_result"] = result          # Task 12 (diagnostics) reads this
     simple = result["aggregations"]["simple"]
     primary = {
-        "schema_version": 1, "model_id": "cs_did_1", "model_type": "cs_did",
+        "schema_version": 1, "model_id": "cs_did_1", "model_type": "cs_did", "nobs_basis": "units", "n_rows": int(len(norm.frame)),
         "engine": "workbench", "nobs": int(result["metadata"]["n_units"]),
         "r_squared": None,
         "coefficients": {"ATT": {
             "estimate": simple["overall"], "std_error": simple["overall_se"],
-            "p_value": None,
+            "p_value": None, **_aggregate_interval(simple),
             "source_id": "model_results.cs_did_1.coefficients.ATT"}},
         "warnings": result["warnings"],
     }
+    record_single_estimate_kernel(
+        ctx, model_id="cs_did_1", model_type="cs_did", name="ATT",
+        estimate=simple["overall"], std_error=simple["overall_se"], nobs=primary["nobs"],
+    )
     return "cs_did_1", primary, None     # no fitted object; diagnostics reads _cs_did_result
+
+
+def _aggregate_interval(simple):
+    """The overall ATT's pointwise interval as the coefficient row carries it.
+
+    The aggregation document already reports it; without this the row said
+    "not reported" for an interval the same run had computed.
+    """
+    interval = simple.get("overall_pointwise_ci")
+    if (
+        isinstance(interval, (list, tuple)) and len(interval) == 2
+        and all(isinstance(bound, (int, float)) and math.isfinite(bound) for bound in interval)
+    ):
+        return {"ci_lower": float(interval[0]), "ci_upper": float(interval[1])}
+    return {}
 
 
 def _fit_sa_did(ctx, env):
@@ -286,11 +402,16 @@ def _fit_sa_did(ctx, env):
     )
     ctx.artifacts["_sa_did_result"] = result
     simple = result["aggregations"]["simple"]
-    primary = {"schema_version": 1, "model_id": "sa_did_1", "model_type": "sa_did",
+    primary = {"schema_version": 1, "model_id": "sa_did_1", "model_type": "sa_did", "nobs_basis": "units", "n_rows": int(len(norm.frame)),
         "engine": "workbench", "nobs": int(result["metadata"]["n_units"]), "r_squared": None,
         "coefficients": {"ATT": {"estimate": simple["overall"], "std_error": simple["overall_se"],
-            "p_value": None, "source_id": "model_results.sa_did_1.coefficients.ATT"}},
+            "p_value": None, **_aggregate_interval(simple),
+            "source_id": "model_results.sa_did_1.coefficients.ATT"}},
         "warnings": result["warnings"]}
+    record_single_estimate_kernel(
+        ctx, model_id="sa_did_1", model_type="sa_did", name="ATT",
+        estimate=simple["overall"], std_error=simple["overall_se"], nobs=primary["nobs"],
+    )
     return "sa_did_1", primary, None
 
 
@@ -312,11 +433,15 @@ def _fit_dcdh(ctx, env):
     )
     ctx.artifacts["_dcdh_result"] = result
     oa = result["overall_att"]
-    primary = {"schema_version": 1, "model_id": "dcdh_1", "model_type": "dcdh",
+    primary = {"schema_version": 1, "model_id": "dcdh_1", "model_type": "dcdh", "nobs_basis": "units", "n_rows": int(len(norm.frame)),
         "engine": "workbench", "nobs": int(result["metadata"]["n_units"]), "r_squared": None,
         "coefficients": {"ATT": {"estimate": oa["estimate"], "std_error": oa["se"],
             "p_value": None, "source_id": "model_results.dcdh_1.coefficients.ATT"}},
         "warnings": result["warnings"]}
+    record_single_estimate_kernel(
+        ctx, model_id="dcdh_1", model_type="dcdh", name="ATT",
+        estimate=oa["estimate"], std_error=oa["se"], nobs=primary["nobs"],
+    )
     return "dcdh_1", primary, None
 
 
@@ -329,6 +454,8 @@ def _ols_robust_se_decision(ctx):
         return dpf.ols_default_robust_se(variant="nonrobust", explicit=True)
     if covariance == "clustered":
         return dpf.ols_default_robust_se(variant="clustered", explicit=True)
+    if covariance == "hac":
+        return dpf.ols_default_robust_se(variant="HAC", explicit=True)
     return dpf.ols_default_robust_se(variant="HC1")
 
 
@@ -341,6 +468,11 @@ def _ols_covariance_plan(ctx) -> tuple[bool, str | None]:
     change the fit or fail closed.
     """
     covariance = (ctx.artifacts.get("_covariance") or "").strip() or "robust"
+    if covariance == "hac" and (ctx.artifacts.get("_entity_col") or "").strip():
+        raise ValueError(
+            "OLS_HAC_WITH_CLUSTERS: HAC (Newey-West) standard errors cannot be combined with "
+            "clustering; that is the Driscoll-Kraay estimator, which is not implemented yet."
+        )
     if covariance == "clustered":
         from ...cleaning import normalize_column_name
 
@@ -352,7 +484,7 @@ def _ols_covariance_plan(ctx) -> tuple[bool, str | None]:
                 "an entity field naming the cluster column."
             )
         return True, entity
-    return covariance != "unadjusted", None
+    return covariance not in {"unadjusted", "hac"}, None
 
 
 
@@ -415,6 +547,7 @@ def _ols_weight_spec(ctx):
 
 
 def _fit_ols(ctx, env):
+    model_id = _model_id(ctx, "ols_1")
     robust, cluster_col = _ols_covariance_plan(ctx)
     from ...lineage.run_inputs import read_run_inputs
 
@@ -423,12 +556,18 @@ def _fit_ols(ctx, env):
     except (FileNotFoundError, OSError, ValueError):
         persisted_form = {}
     requested_covariance = (ctx.artifacts.get("_covariance") or "").strip() or "robust"
+    options = ctx.artifacts.get("_model_options") or {}
+    hac_time_order = None
+    if requested_covariance == "hac" and options.get("time_order"):
+        from ...cleaning import normalize_column_name
+
+        hac_time_order = normalize_column_name(str(options["time_order"]))
     primary, fitted = _orch().run_ols(
         ctx.data.frame,
         y=ctx.artifacts["_normalized_y"],
         x=ctx.artifacts["_normalized_x"],
         robust=robust,
-        model_id="ols_1",
+        model_id=model_id,
         categorical_x=ctx.artifacts.get("_categorical_vars"),
         cluster_col=cluster_col,
         covariance=requested_covariance,
@@ -441,9 +580,18 @@ def _fit_ols(ctx, env):
         focal_x=persisted_form.get("focal_x"),
         primary_estimand=persisted_form.get("primary_estimand"),
         weights=_ols_weight_spec(ctx),
+        fitted_sink=lambda covariance_fit: _record_fitted_kernel(
+            ctx, covariance_fit, model_id=model_id, model_type="ols"
+        ),
+        hac_time_order=hac_time_order,
+        hac_lags=options.get("hac_lags") if requested_covariance == "hac" else None,
     )
     _apply_survey_design_variance(ctx, "ols", primary)
-    return "ols_1", primary, fitted
+    if primary.get("nobs_subpopulation") is not None:
+        # The fitted object describes every row, not the subpopulation; residual
+        # diagnostics on it would describe the wrong sample.
+        return model_id, primary, None
+    return model_id, primary, fitted
 
 
 
@@ -500,9 +648,10 @@ def _apply_survey_design_variance(ctx, model_type: str, primary: dict) -> None:
     result = estimate_with_design(
         design, estimator, method=method,
         replicate_type=declared_replicate or None,
+        df_convention=str(ctx.artifacts.get("_survey_df") or "").strip() or "design",
     )
 
-    critical = float(stats.t.ppf(0.975, result.residual_degf))
+    critical = float(stats.t.ppf(0.975, result.inference_degf))
     coefficients = primary.get("coefficients") or {}
     unmatched = [
         term for term in coefficients if _design_term(term) not in result.standard_errors
@@ -519,15 +668,71 @@ def _apply_survey_design_variance(ctx, model_type: str, primary: dict) -> None:
         )
     for term, entry in coefficients.items():
         se = result.standard_errors[_design_term(term)]
-        estimate = float(entry.get("estimate", result.estimates[_design_term(term)]))
+        # The engine's estimate, refitted on the subpopulation when one is
+        # declared. The packet's own was fitted on every row: with a subpop it
+        # paired a full-sample coefficient with the domain's standard error
+        # (found in v1.8.10 against Stata svy, subpop()); without one the two
+        # are the same weighted least squares.
+        estimate = float(result.estimates[_design_term(term)])
+        entry["estimate"] = estimate
         entry["std_error"] = se
         entry["ci_lower"] = estimate - critical * se
         entry["ci_upper"] = estimate + critical * se
         entry["p_value"] = float(
-            2 * stats.t.sf(abs(estimate / se), result.residual_degf)
+            2 * stats.t.sf(abs(estimate / se), result.inference_degf)
         ) if se > 0 else float("nan")
         entry["variance_source"] = "survey_design"
 
+    # The kernel must carry the variance the user now sees. Without this a joint
+    # test would read the naive covariance still attached to the fitted object.
+    import numpy as np
+
+    payload_terms = list(coefficients)
+    positions = [result.terms.index(_design_term(term)) for term in payload_terms]
+    model_id = str(primary.get("model_id"))
+    nobs = int(primary.get("nobs") or 0)
+    try:
+        kernel = build_inference_kernel(
+            model_id=model_id,
+            model_type=model_type,
+            param_names=payload_terms,
+            params=[result.estimates[_design_term(term)] for term in payload_terms],
+            vcov=np.asarray(result.covariance, dtype=float)[np.ix_(positions, positions)],
+            reference_distribution="t",
+            df_resid=float(result.inference_degf),
+            # "design" (degf) or "design_minus_p" (degf - p + 1): joint tests
+            # read it to pick the Korn-Graubard F or R's regTermTest F.
+            df_method=result.df_convention,
+            loglik=None,
+            nobs=nobs,
+            covariance_estimator=f"survey_design_{result.method}",
+            unavailable={
+                "loglik": (
+                    "The variance is design-based, so a likelihood-ratio test is not valid; "
+                    "joint tests use the design-based Wald test."
+                ),
+            },
+        )
+    except InferenceKernelError as error:
+        # Never fall back to the naive covariance still on the fitted object.
+        kernel = unavailable_inference_kernel(
+            model_id=model_id, model_type=model_type, nobs=nobs,
+            reason=f"The design-based covariance matrix could not be used: {error}.",
+        )
+    record_inference_kernel(ctx, kernel)
+
+    if design.subpop:
+        # Fit statistics, residuals and fitted values were computed on every row,
+        # not on the subpopulation the estimates describe.
+        primary["nobs_subpopulation"] = int(design.subpop_mask().sum())
+        for field in ("r_squared", "r_squared_adj", "adjusted_r_squared", "f_statistic", "f_p_value",
+                      "fitted_values", "residuals", "fitted_values_preview", "residuals_preview",
+                      "llf", "aic", "bic", "df_model", "df_resid"):
+            primary.pop(field, None)
+        primary["warnings"] = list(primary.get("warnings") or []) + [
+            "Estimated for a subpopulation (domain); fit statistics and residuals describe all rows "
+            "and are not reported."
+        ]
     effects = design.design_effects(ctx.artifacts["_normalized_y"])
     summary = result.replicate_summary
     primary["survey_design"] = {
@@ -540,6 +745,8 @@ def _apply_survey_design_variance(ctx, model_type: str, primary: dict) -> None:
         "n_psu": design.n_psu,
         "degf": result.degf,
         "residual_degf": result.residual_degf,
+        "df_convention": result.df_convention,
+        "inference_degf": result.inference_degf,
         "variance_method": result.method,
         "replicate_type": declared_replicate or None,
         "lonely_psu_policy": design.lonely_psu,
@@ -711,7 +918,7 @@ CORE_PACK = AnalysisPack(
             "panel_ols_1",
             ("continuous",),
             _fit_panel_ols,
-            validate_model_options=validate_ols_model_options,
+            validate_model_options=validate_panel_ols_model_options,
             model_options_contract=OLS_MODEL_OPTIONS_CONTRACT,
         ),
         ModelHandler("probit", "probit_1", ("binary",), _fit_probit),
@@ -790,6 +997,7 @@ class EstimationStage:
         # Lazy imports to avoid circular deps with orchestrator helpers/state.
         from ...orchestrator import (
             _model_failure_details,
+            _write_inference_kernel,
             _write_model_result,
             _write_manifest,
             _safe_flush_recorder,
@@ -866,7 +1074,12 @@ class EstimationStage:
         run_root = env.run_root
         run_id = env.run_id
         recorder = env.recorder
-        model_input_ids = [ctx.data.artifact_id]
+        # With multiple imputation the model reads every imputed dataset.
+        model_input_ids = list(ctx.artifacts.get("_model_input_ids") or [ctx.data.artifact_id])
+        mi_handles = ctx.artifacts.get("_imputation_handles") or []
+        mi_pooling_attempted = False
+        by_group_request = ctx.artifacts.get("_by_group_request")
+        by_group_attempted = False
         model_options = ctx.artifacts.get("_model_options", {})
         model_options_binding = ctx.artifacts.get("_model_options_binding")
 
@@ -982,7 +1195,14 @@ class EstimationStage:
             if handler.model_type == "linear_mixed_effects":
                 if env.lmm_execution_admission is None:
                     raise ModelOptionsValidationError("LMM_EXECUTION_BINDING_REQUIRED", "LMM requires a live admission.")
-            model_id, primary, fitted = handler.fit(ctx, env)
+            if len(mi_handles) > 1:
+                mi_pooling_attempted = True
+                fits = [_fit_pooled(handler, ctx, env, mi_handles, WorkflowValidationError)]
+            elif by_group_request:
+                by_group_attempted = True
+                fits = _fit_groups(handler, ctx, env, by_group_request, WorkflowValidationError)
+            else:
+                fits = [handler.fit(ctx, env)]
             primary_inputs = ctx.artifacts.get("_primary_model_input_ids")
             if primary_inputs is not None:
                 if not isinstance(primary_inputs, list) or not all(
@@ -993,27 +1213,43 @@ class EstimationStage:
                     )
                 model_input_ids = list(primary_inputs)
                 ctx.artifacts["_model_input_ids"] = list(model_input_ids)
-            # LMM's registered PacketEnvelope is its sole model-result source;
-            # never create a competing legacy ``model_results/*.json`` copy.
-            if handler.model_type != "linear_mixed_effects":
-                _write_model_result(run_root, model_id, primary, inputs=model_input_ids)
-            if handler.model_type != "linear_mixed_effects":
-                _persist_model_options_execution_binding(
+            for model_id, primary, fitted in fits:
+                # LMM's registered PacketEnvelope is its sole model-result source;
+                # never create a competing legacy ``model_results/*.json`` copy.
+                if handler.model_type != "linear_mixed_effects":
+                    _write_model_result(run_root, model_id, primary, inputs=model_input_ids)
+                _write_inference_kernel(
                     run_root,
-                    model_type=handler.model_type,
-                    model_options=model_options,
-                    model_options_binding=model_options_binding,
+                    resolve_inference_kernel(
+                        model_id=model_id,
+                        # The packet may refine the handler's family (a Poisson fit
+                        # with an exposure is `poisson_rate`); the kernel names
+                        # what the packet names.
+                        model_type=str(primary.get("model_type") or handler.model_type),
+                        primary=_kernel_source_packet(primary),
+                        fitted=fitted,
+                        recorded=recorded_inference_kernel(ctx, model_id),
+                        public_name=_public_term,
+                    ),
+                    inputs=[model_id] if handler.model_type != "linear_mixed_effects" else list(model_input_ids),
                 )
-            if model_id == "ols_1":
-                _persist_ols_contract_metadata(run_root, primary)
-            model_results.append(
-                (model_id, _result_for_downstream(handler.model_type, primary))
-            )
-            if fitted is not None:
-                fitted_models[model_id] = fitted
-            # OLS path (auto-continuous OR explicit `ols`) records robust SE DP.
-            if model_id == "ols_1":
-                _robust_se_dp = _ols_robust_se_decision(ctx)
+                if handler.model_type != "linear_mixed_effects":
+                    _persist_model_options_execution_binding(
+                        run_root,
+                        model_type=handler.model_type,
+                        model_options=model_options,
+                        model_options_binding=model_options_binding,
+                    )
+                if model_id == "ols_1":
+                    _persist_ols_contract_metadata(run_root, primary)
+                model_results.append(
+                    (model_id, _result_for_downstream(handler.model_type, primary))
+                )
+                if fitted is not None:
+                    fitted_models[model_id] = fitted
+                # OLS path (auto-continuous OR explicit `ols`) records robust SE DP.
+                if model_id == "ols_1" or (by_group_attempted and handler.model_type == "ols"):
+                    _robust_se_dp = _ols_robust_se_decision(ctx)
         except LmmInputError:
             if (
                 handler.model_type == "linear_mixed_effects"
@@ -1094,7 +1330,8 @@ class EstimationStage:
                 issue_code = "MODEL_FIT_FAILED"
 
             issue_dicts.append(GuardrailIssue(
-                Severity.BLOCKER if (model_type != "auto" or is_model_options_error) else Severity.WARNING,
+                Severity.BLOCKER if (model_type != "auto" or is_model_options_error or mi_pooling_attempted or by_group_attempted)
+                else Severity.WARNING,
                 issue_code,
                 str(exc),
                 failure_evidence,
@@ -1102,9 +1339,10 @@ class EstimationStage:
             write_json(run_root / "errors.json", {"issues": issue_dicts})
             env.step("estimation", "blocked", f"Model fit failed: {exc}")
 
-            if model_type != "auto" or is_model_options_error:
+            if model_type != "auto" or is_model_options_error or mi_pooling_attempted or by_group_attempted:
                 # 1.5.3.2 CONTRACT: explicit failure => structured `failed`.
-                # NO silent OLS fallback.
+                # NO silent OLS fallback (nor a single-dataset fit for a
+                # multiple-imputation request).
                 _write_manifest(
                     run_root,
                     run_id,
@@ -1177,6 +1415,18 @@ class EstimationStage:
 
             _robust_se_dp = _ols_robust_se_decision(ctx)
             _write_model_result(run_root, "ols_1", ols_result, inputs=model_input_ids)
+            _write_inference_kernel(
+                run_root,
+                resolve_inference_kernel(
+                    model_id="ols_1",
+                    model_type="ols",
+                    primary=ols_result,
+                    fitted=ols_fitted,
+                    recorded=None,
+                    public_name=_public_term,
+                ),
+                inputs=["ols_1"],
+            )
             _persist_ols_contract_metadata(run_root, ols_result)
             model_results.append(("ols_1", ols_result))
             fitted_models["ols_1"] = ols_fitted

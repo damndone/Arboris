@@ -43,6 +43,7 @@ import { ArmaGarchDashboard } from "./runResult/ArmaGarchDashboard";
 import { useArmaGarchArtifacts } from "./runResult/useArmaGarchArtifacts";
 import { useArmaGarchCharts } from "./runResult/useArmaGarchCharts";
 import { PredictionResearchEvidenceCard } from "./runResult/PredictionResearchEvidenceCard";
+import { formatEstimate, formatPValue as formatPValueRule } from "./format/numbers";
 
 /** Stable identity so the loader effects do not re-run on every render. */
 const NO_GROUPS: ArtifactGroup[] = [];
@@ -71,18 +72,14 @@ function statusLabel(status: string): string {
   return status.charAt(0).toUpperCase() + status.slice(1);
 }
 
-function formatNumber(value: number | null | undefined): string {
-  return typeof value === "number" && Number.isFinite(value)
-    ? value.toFixed(4)
-    : "—";
-}
+const formatNumber = formatEstimate;
 
 function formatPValue(
   value: number | null | undefined,
   display: string | null | undefined,
 ): string {
   if (display) return display;
-  return formatNumber(value);
+  return formatPValueRule(value);
 }
 
 function coefficientRows(detail: RunDetail) {
@@ -658,7 +655,7 @@ export function RunResultView({ projectRoot, runId, onError, onFailureAction }: 
                         <td>{t.display_term}</td>
                         <td>{t.reference_level ?? "—"}</td>
                         <td>{formatNumber(t.estimate)}</td>
-                        <td>{formatNumber(t.p_value)}</td>
+                        <td>{formatPValueRule(t.p_value)}</td>
                       </tr>
                     ))}
                   </tbody>

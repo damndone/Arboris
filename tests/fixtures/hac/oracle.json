@@ -1,0 +1,62 @@
+{
+  "meta": {
+    "generator": "tests/fixtures/hac/generate_oracle.R",
+    "r_version": "R version 4.6.0 (2026-04-24)",
+    "sandwich_version": "3.1.1",
+    "n": 150,
+    "default_lag": 4,
+    "formula": "y ~ x1 + x2, time order: year"
+  },
+  "tolerances": {
+    "default": 1e-09
+  },
+  "coefficients": {
+    "Intercept": 2.0109613364313,
+    "x1": 0.463664450217765,
+    "x2": -0.221663801326945
+  },
+  "cases": {
+    "lag_0": {
+      "lag": 0,
+      "std_error": {
+        "Intercept": 0.124355983428941,
+        "x1": 0.0835139067050658,
+        "x2": 0.110035082561955
+      },
+      "wald_x1_x2": {
+        "F": 16.2718852845059,
+        "df_num": 2,
+        "df_den": 147,
+        "p_value": 4.13336734898988e-07
+      }
+    },
+    "lag_4": {
+      "lag": 4,
+      "std_error": {
+        "Intercept": 0.227809573523846,
+        "x1": 0.125188641876516,
+        "x2": 0.127742884305193
+      },
+      "wald_x1_x2": {
+        "F": 8.78317132724558,
+        "df_num": 2,
+        "df_den": 147,
+        "p_value": 0.000249321265874465
+      }
+    },
+    "lag_8": {
+      "lag": 8,
+      "std_error": {
+        "Intercept": 0.27091495044197,
+        "x1": 0.138462979807085,
+        "x2": 0.128714224529614
+      },
+      "wald_x1_x2": {
+        "F": 8.46824170596403,
+        "df_num": 2,
+        "df_den": 147,
+        "p_value": 0.00033049615678582
+      }
+    }
+  }
+}

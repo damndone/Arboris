@@ -426,6 +426,7 @@ def _attach_ols_result_contract(
     intercept: bool,
     missing_policy: str,
     solver_options: Any,
+    hac: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     row_positions, analysis_ids = _analysis_row_context(
         frame,
@@ -516,17 +517,27 @@ def _attach_ols_result_contract(
     inference_distribution = "t" if use_t else "normal"
     p_value_method = "t" if use_t else "normal_z"
     confidence_interval_method = "t" if use_t else "normal_z"
+    # Where the inference degrees of freedom come from. Results written before
+    # inference engine v2 carry no `inference_version`: their robust and
+    # clustered p-values used the normal distribution.
+    df_method = (
+        ("clusters_minus_one" if covariance == "clustered" else "residual") if use_t else "asymptotic"
+    )
     evidence = {
         "covariance": covariance,
-        "covariance_estimator": "cluster" if covariance == "clustered" else (
-            "HC1" if covariance == "robust" else "nonrobust"
+        "covariance_estimator": {"clustered": "cluster", "robust": "HC1", "hac": "HAC"}.get(
+            covariance, "nonrobust"
         ),
         "engine": "statsmodels",
         "library": "statsmodels",
         "library_version": statsmodels.__version__,
-        "small_sample_correction": covariance == "clustered",
+        # HC1 and CR1 both scale the sandwich for finite samples (N/(N-K);
+        # G/(G-1) * (N-1)/(N-K)).
+        "small_sample_correction": covariance in {"clustered", "robust", "hac"},
         "degrees_of_freedom_correction": covariance == "clustered",
         "use_t": use_t,
+        "inference_version": INFERENCE_ENGINE_VERSION,
+        "df_method": df_method,
         "inference_distribution": inference_distribution,
         "p_value_method": p_value_method,
         "confidence_interval_method": confidence_interval_method,
@@ -538,6 +549,9 @@ def _attach_ols_result_contract(
         "cluster_count": cluster_count,
         "group_vector_dtype": group_vector_dtype,
         "group_vector_fingerprint": group_vector_fp,
+        # Newey-West: the kernel, the lag and the rule that chose it, and the
+        # column that ordered the rows.
+        **({"hac": dict(hac)} if hac is not None else {}),
     }
     inference_kwargs: dict[str, Any] = {
         "covariance": covariance,
@@ -546,6 +560,7 @@ def _attach_ols_result_contract(
         "corrections": {
             "small_sample_correction": covariance == "clustered",
             "degrees_of_freedom_correction": covariance == "clustered",
+            **({"hac": {key: hac[key] for key in ("kernel", "lags", "time_order")}} if hac is not None else {}),
         },
         "df": effective_df,
         "use_t": use_t,
@@ -600,7 +615,107 @@ def _attach_ols_result_contract(
     return result
 
 
-def apply_ols_covariance(original: Any, covariance: str, *, groups: Any = None) -> Any:
+#: Inference engine v2 (v1.8.10): robust and clustered OLS use Stata's
+#: finite-sample reference distributions instead of the normal.
+INFERENCE_ENGINE_VERSION = "workbench.inference.v2"
+
+
+def _require_hac_time_order(
+    frame: pd.DataFrame, time_order: str | None, y: str, x: list[str], weight_kind: str | None
+) -> None:
+    if not time_order:
+        raise ValueError(
+            "OLS_HAC_TIME_ORDER_MISSING: HAC (Newey-West) standard errors need the data's time "
+            "order; set time_order to the column that orders the observations in time."
+        )
+    if time_order not in frame.columns:
+        raise ValueError(f"OLS_HAC_TIME_ORDER_MISSING: time_order column {time_order!r} is not in the data.")
+    if time_order == y or time_order in x:
+        raise ValueError("OLS_HAC_TIME_ORDER_CONFLICT: time_order cannot be the outcome or a predictor.")
+    if weight_kind is not None:
+        raise ValueError(
+            f"OLS_HAC_WEIGHTS_NOT_VALIDATED: HAC with {weight_kind} weights has not been checked "
+            "against a reference implementation yet, so it is not offered."
+        )
+
+
+def _hac_plan(original: Any, model_frame: pd.DataFrame, time_order: str, lags: int | None) -> dict[str, Any]:
+    """Check the estimation sample is one regular time series and fix the lag.
+
+    The check runs on the rows the model used: a row dropped for a missing value
+    leaves a gap exactly as a missing period does, and Newey-West would then
+    treat observations two periods apart as neighbours (Stata's `newey`
+    refuses gaps for the same reason).
+    """
+    from ..contracts.model.ols import HAC_DEFAULT_LAG_RULE, hac_default_lags
+
+    labels = getattr(original.model.data, "row_labels", None)
+    times = model_frame.loc[list(labels), time_order] if labels is not None else model_frame[time_order]
+    if times.isna().any():
+        raise ValueError(f"OLS_HAC_TIME_ORDER_MISSING_VALUES: {time_order} is missing on rows the model uses.")
+    _require_regular_periods(times, time_order)
+    nobs = int(original.nobs)
+    if lags is None:
+        lags, rule = hac_default_lags(nobs), HAC_DEFAULT_LAG_RULE
+    else:
+        rule = "specified"
+    if lags >= nobs:
+        raise ValueError(f"OLS_HAC_LAGS_INVALID: {lags} lags need more than {nobs} observations.")
+    return {
+        "kernel": "bartlett",
+        "lags": int(lags),
+        "lag_rule": rule,
+        "time_order": time_order,
+        "nobs": nobs,
+        "first_period": _python_scalar(times.iloc[0]),
+        "last_period": _python_scalar(times.iloc[-1]),
+    }
+
+
+def _require_regular_periods(times: pd.Series, column: str) -> None:
+    """One observation per period, with no period missing between the first and last."""
+    if pd.api.types.is_numeric_dtype(times):
+        values = times.to_numpy(dtype=float)
+        if not np.all(np.isclose(values, np.round(values))):
+            raise ValueError(
+                f"OLS_HAC_TIME_ORDER_INVALID: {column} must hold whole-number periods (such as years) "
+                "or dates."
+            )
+        steps = np.diff(np.round(values))
+        if (steps == 0).any():
+            raise ValueError(_repeated_period_message(column))
+        if (steps != 1).any():
+            first_gap = int(np.flatnonzero(steps != 1)[0])
+            raise ValueError(
+                f"OLS_HAC_TIME_GAPS: {column} has gaps in the rows the model uses (first after "
+                f"{_python_scalar(times.iloc[first_gap])}); missing periods, or rows dropped for missing "
+                "values, would make observations two periods apart look adjacent. Fill or drop the "
+                "gap explicitly first."
+            )
+        return
+    stamps = pd.to_datetime(times, format="mixed", errors="coerce")
+    if stamps.isna().any():
+        raise ValueError(f"OLS_HAC_TIME_ORDER_INVALID: {column} must hold whole-number periods or dates.")
+    if stamps.duplicated().any():
+        raise ValueError(_repeated_period_message(column))
+    index = pd.DatetimeIndex(stamps)
+    frequency = pd.infer_freq(index) if len(index) >= 3 else None
+    if frequency is None:
+        raise ValueError(
+            f"OLS_HAC_TIME_GAPS: the dates in {column} are not evenly spaced in the rows the model "
+            "uses (a gap, or an irregular frequency); Newey-West needs one observation per period."
+        )
+
+
+def _repeated_period_message(column: str) -> str:
+    return (
+        f"OLS_HAC_REPEATED_PERIODS: {column} repeats a period in the rows the model uses. "
+        "Newey-West here is for one time series; panel data need Driscoll-Kraay standard "
+        "errors, which are not implemented yet."
+    )
+
+
+def apply_ols_covariance(original: Any, covariance: str, *, groups: Any = None, hac_lags: int | None = None) -> Any:
     """Return the fit carrying `covariance`, from a plain OLS fit.
 
     Single source for how a covariance estimator is applied to OLS, so a
@@ -618,10 +733,22 @@ def apply_ols_covariance(original: Any, covariance: str, *, groups: Any = None) 
             groups=groups,
             use_correction=True,
             df_correction=True,
-            use_t=False,
+            # Inference engine v2 (v1.8.10): Stata's finite-sample rule,
+            # t(G - 1) for coefficients and F(q, G - 1) for joint tests.
+            use_t=True,
         )
     if covariance == "robust":
-        return original.get_robustcov_results(cov_type="HC1", use_t=False)
+        # HC1 with t(N - K), as Stata's `regress, vce(robust)`.
+        return original.get_robustcov_results(cov_type="HC1", use_t=True)
+    if covariance == "hac":
+        if hac_lags is None:
+            raise ValueError("HAC covariance requires its lag truncation")
+        # Newey-West: Bartlett kernel, N/(N-K) scaling, t(N - K) -- Stata's
+        # `newey` and R's sandwich::NeweyWest(prewhite = FALSE, adjust = TRUE).
+        # The fit's rows must already be in time order.
+        return original.get_robustcov_results(
+            cov_type="HAC", maxlags=hac_lags, kernel="bartlett", use_correction=True, use_t=True
+        )
     if covariance == "unadjusted":
         return original
     raise ValueError(f"unsupported OLS covariance estimator: {covariance}")
@@ -738,6 +865,9 @@ def run_ols(
     intercept: bool = True,
     missing_policy: str = "statsmodels_patsy_drop_rows",
     solver_options: Any = None,
+    fitted_sink: Any = None,
+    hac_time_order: str | None = None,
+    hac_lags: int | None = None,
 ) -> tuple[dict[str, Any], Any]:
     frame = _ensure_numeric_y(frame, y)
     frame = _ensure_numeric_x(frame, x)
@@ -771,7 +901,7 @@ def run_ols(
             covariance_explicit = cluster_col is not None
     else:
         covariance = covariance.strip().lower()
-        if covariance not in {"robust", "unadjusted", "clustered"}:
+        if covariance not in {"robust", "unadjusted", "clustered", "hac"}:
             raise ValueError(f"OLS_COVARIANCE_UNSUPPORTED: unsupported covariance {covariance!r}.")
         if covariance_explicit is None:
             covariance_explicit = True
@@ -781,10 +911,17 @@ def run_ols(
                 "an entity field naming the cluster column."
             )
         robust = covariance == "robust"
+    if cluster_col is not None and covariance == "hac":
+        raise ValueError(
+            "OLS_HAC_WITH_CLUSTERS: HAC (Newey-West) standard errors cannot be combined with "
+            "clustering; that is the Driscoll-Kraay estimator, which is not implemented yet."
+        )
     if cluster_col is not None and covariance != "clustered":
         raise ValueError(
             "OLS_CLUSTER_COVARIANCE_CONFLICT: entity_col requires covariance=clustered."
         )
+    if covariance == "hac":
+        _require_hac_time_order(frame, hac_time_order, y, x, weight_kind)
     if covariance == "clustered":
         robust = False
     formula = _ols_formula(y, [_formula_term(column, column in cat) for column in x])
@@ -796,6 +933,14 @@ def run_ols(
         # index makes duplicate input labels unambiguous without changing any
         # values, columns, formula, sample order, or point estimate.
         model_frame.index = pd.RangeIndex(len(model_frame), name="__ols_position__")
+    if covariance == "hac":
+        # Newey-West weights residual autocovariances by lag, so the rows must be
+        # in time order. Sorting keeps the row labels, so every mapping back to
+        # the input rows is unchanged; the point estimate does not depend on it.
+        order_key = model_frame[hac_time_order]
+        if not pd.api.types.is_numeric_dtype(order_key):
+            order_key = pd.to_datetime(order_key, format="mixed", errors="coerce")
+        model_frame = model_frame.iloc[np.argsort(order_key.to_numpy(), kind="mergesort")]
     normalized_weights: dict[str, Any] | None = None
     if weight_kind is not None:
         normalized_weights = {"kind": weight_kind, "column": weight_column, "executed": True}
@@ -830,6 +975,7 @@ def run_ols(
         # Unweighted, or a frequency weight already executed by expanding the
         # analysis rows above.
         original = smf.ols(formula=formula, data=model_frame).fit()
+    hac: dict[str, Any] | None = None
     if covariance == "clustered":
         row_labels = getattr(original.model.data, "row_labels", None)
         row_positions, _ = _analysis_row_context(
@@ -851,6 +997,10 @@ def run_ols(
             original, "clustered", groups=groups.to_numpy(copy=True)
         )
         model_type = "ols_clustered"
+    elif covariance == "hac":
+        hac = _hac_plan(original, model_frame, hac_time_order, hac_lags)
+        fitted = apply_ols_covariance(original, "hac", hac_lags=hac["lags"])
+        model_type = "ols_hac"
     elif robust:
         fitted = apply_ols_covariance(original, "robust")
         model_type = "ols_robust"
@@ -871,6 +1021,7 @@ def run_ols(
         covariance=covariance,
         covariance_explicit=bool(covariance_explicit),
         cluster_col=cluster_col if covariance == "clustered" else None,
+        hac=hac,
         model_index=model_frame.index,
         dataset_snapshot=dataset_snapshot,
         row_ids=row_ids,
@@ -882,6 +1033,12 @@ def run_ols(
         missing_policy=missing_policy,
         solver_options=solver_options or {"engine": "statsmodels", "method": "ols"},
     )
+    if fitted_sink is not None:
+        # The caller keeps receiving the plain fit (diagnostics need it); the
+        # fit that carries the reported covariance goes to whoever records the
+        # inference kernel, so post-estimation uses the same variance as the
+        # standard errors on screen.
+        fitted_sink(fitted)
     return _add_engine(result), original
 
 
@@ -932,11 +1089,13 @@ def run_logit(
     try:
         fitted = smf.logit(formula=formula, data=frame).fit(disp=False, maxiter=100)
     except Exception as exc:
+        _raise_if_separated("Logit", model_id, smf.logit(formula=formula, data=frame))
         raise ValueError(
-            f"Logit model {model_id} failed to fit (possible perfect separation). "
+            f"Logit model {model_id} failed to fit. "
             f"Try OLS (Linear Probability Model) instead."
         ) from exc
     if not getattr(fitted, "converged", True):
+        _raise_if_separated("Logit", model_id, fitted.model)
         raise ValueError(
             f"Logit model {model_id} did not converge. "
             f"Try OLS (Linear Probability Model) instead."
@@ -945,6 +1104,18 @@ def run_logit(
     result["model_type"] = "logit"
     _attach_average_marginal_effects(result, fitted)
     return _add_engine(result), fitted
+
+
+def _raise_if_separated(label: str, model_id: str, model: Any) -> None:
+    """Name separation as the reason a binary fit failed, when it is."""
+    from ..checks.fit_checks import separation_reason
+
+    try:
+        reason = separation_reason(model)
+    except Exception:  # noqa: BLE001 - the original failure message still stands
+        return
+    if reason:
+        raise ValueError(f"{label} model {model_id} cannot be estimated: {reason}.")
 
 
 def run_probit(
@@ -961,11 +1132,13 @@ def run_probit(
     try:
         fitted = smf.probit(formula=formula, data=frame).fit(disp=False, maxiter=100)
     except Exception as exc:
+        _raise_if_separated("Probit", model_id, smf.probit(formula=formula, data=frame))
         raise ValueError(
             f"Probit model {model_id} failed to fit. "
             f"Check binary outcome values and predictors.{_root_cause_suffix(exc)}"
         ) from exc
     if not getattr(fitted, "converged", True):
+        _raise_if_separated("Probit", model_id, fitted.model)
         raise ValueError(f"Probit model {model_id} did not converge.")
     result = normalize_statsmodels_result(fitted, model_id)
     result["model_type"] = "probit"

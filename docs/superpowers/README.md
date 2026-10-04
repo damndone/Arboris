@@ -20,7 +20,7 @@
 | `roadmap/` | 长期产品/技术方向 + `architecture-debt.md` 架构债台账 | **人** | 长活 | 就地更新,不归档 |
 | `followups/BACKLOG.md` | **唯一** live 滚动欠账清单(2026-07-15 定名,不再随版本改名) | **人** | 长活滚动 | 做完就删(git 留痕);版本收尾时复制快照进 `archive/followups/`,本体继续滚 |
 | `handoffs/` | 会话交接快照(现状+下一步+恢复协议) | **人+agent** | 最新即权威 | **只留最新一份**,旧的移 `archive/handoff/` |
-| `specs/` | 每个 feature 一份设计文档(做什么/为什么/契约) | agent(实现者) | 写完即历史 | 只留**当前未发版**版本的;发版收尾移 `archive/specs/` |
+| `specs/` | 每个 feature 一份设计文档(做什么/为什么/契约) | agent(实现者) | 写完即历史 | 只留**当前未发版**版本的;发版收尾移 `archive/specs/`。例外:accepted 的 ADR(如 `2026-07-18-adr-pd-001-parallel-development-protocol.md`)是长期工程约束,一直留在 `specs/`,不归档 |
 | `plans/` | 对应 spec 的任务清单(TDD 勾选框) | agent(实现者) | 写完即历史 | 同上,发版收尾移 `archive/plans/` |
 | 仓库根 `task_plan.md` / `findings.md` / `progress.md` | 当前开发线的会话草稿(计划/发现/流水账),跨会话恢复用 | agent | 随开发线 | 不是正式文档;开发线收尾**整份冻结进 `archive/session-scratch/`**(命名 `<日期>-<版本>-<原名>.md`),根目录不留过期草稿 |
 | `archive/` | 已冻结历史(handoff/followups/specs/plans/复盘) | 考古 | immutable | 只读留痕,不再维护 |

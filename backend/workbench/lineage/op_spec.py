@@ -48,6 +48,9 @@ STAGE_FORM_KEYS: dict[str, list[str]] = {
         "x",
         "model_options",
         "model_options_binding",
+        # Present only when a run is estimated by group, so existing runs keep
+        # their node hashes.
+        "by_group",
     ],
     "diagnostics": [
         "prediction_model_type",

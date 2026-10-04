@@ -6,12 +6,13 @@ workbench.orchestrator.* namespace.
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
-from ..artifacts import register_artifact, write_json
+from ..artifacts import register_artifact, write_json, write_text_durable
 
 
 def _variable_summary(cat_dp: Any, coer_dp: Any) -> str:
@@ -35,8 +36,26 @@ def _model_summary(
     exposure_col: str | None,
     fallback_n: int,
 ) -> str | None:
+    label = _family_summary(
+        model_type, result, robust_se_dp=robust_se_dp, exposure_col=exposure_col, fallback_n=fallback_n
+    )
+    pooled = result.get("multiple_imputation")
+    if label is not None and isinstance(pooled, dict) and pooled.get("m"):
+        # Every reader of the overview must see that these are pooled figures.
+        return f"{label[:-1]}, pooled from m = {pooled['m']} imputations)"
+    return label
+
+
+def _family_summary(
+    model_type: str,
+    result: dict[str, Any],
+    *,
+    robust_se_dp: Any,
+    exposure_col: str | None,
+    fallback_n: int,
+) -> str | None:
     n = int(result.get("nobs", fallback_n))
-    if model_type in ("ols", "ols_robust"):
+    if model_type in ("ols", "ols_robust", "ols_hac"):
         if robust_se_dp is not None and robust_se_dp.reason is not None:
             se_type = robust_se_dp.reason.chosen_params.get("variant", robust_se_dp.selected)
         elif robust_se_dp is not None:
@@ -73,15 +92,33 @@ def _write_model_result(
     )
 
 
-def _mice_imputation_fact(imputation: dict[str, Any]) -> str:
-    columns = imputation.get("imputed_columns", [])
-    columns_text = ", ".join(str(column) for column in columns) if columns else "none"
-    persisted = imputation.get("persisted_datasets", 0)
-    persisted_text = "one" if persisted == 1 else str(persisted)
-    pooled = "were produced" if imputation.get("pooled_estimates") else "were not produced"
-    return (
-        f"MICE imputation: {persisted_text} persisted imputed dataset; "
-        f"imputed columns: {columns_text}; pooled estimates {pooled}."
+def _write_inference_kernel(
+    run_root: Path,
+    kernel: dict[str, Any],
+    *,
+    inputs: list[str],
+) -> None:
+    """Persist the kernel post-estimation reads instead of refitting."""
+    from ..contracts.model.inference_kernel import (
+        kernel_artifact_id,
+        kernel_relative_path,
+        validate_inference_kernel,
+    )
+
+    validate_inference_kernel(kernel)
+    model_id = kernel["model_id"]
+    kernel_path = run_root / kernel_relative_path(model_id)
+    kernel_path.parent.mkdir(parents=True, exist_ok=True)
+    # Compact on purpose: a 300-parameter covariance is 1.7 MB this way and
+    # several times that indented. Nobody reads this file by eye.
+    write_text_durable(kernel_path, json.dumps(kernel, ensure_ascii=False, separators=(",", ":")))
+    register_artifact(
+        run_root,
+        kernel_artifact_id(model_id),
+        kernel_path,
+        "inference_kernel",
+        "econometrics",
+        inputs,
     )
 
 

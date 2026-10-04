@@ -79,6 +79,7 @@ function surveyDesign2Extra(value: SurveyDesignValue) {
     surveyLonelyPsu: value.survey_lonely_psu,
     surveyWeightFrame: value.survey_weight_frame,
     surveySubpop: value.survey_subpop,
+    surveyDf: value.survey_df,
   };
 }
 

@@ -44,16 +44,13 @@ def compute_diagnostics(
 
     diag: dict[str, Any] = {"model_id": model_id, "nobs": n}
 
-    _compute_vif(exog, diag)
-
+    # VIF is computed by the check library on the design matrix
+    # (collinearity.gvif); the raw-column version here missed factor terms.
     if model_family in ("ols", "fixed_effects"):
         _compute_breusch_pagan(fitted, resid, diag)
         _compute_durbin_watson(resid, diag)
         _compute_jarque_bera(resid, n, diag)
         _compute_cooks_distance(fitted, diag)
-
-    if model_family in ("logit",):
-        _check_separation(fitted, diag)
 
     if model_family in ("poisson",):
         _check_overdispersion(fitted, diag)

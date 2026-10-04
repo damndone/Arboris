@@ -67,6 +67,7 @@ Every executed step is recorded in `workbench/analysis_ledger.jsonl` under one c
 | `resampling.*` | `inferential` |
 | `repeated_measures_anova.*` | `inferential` |
 | `synthetic_control.*` | `inferential` |
+| `postestimation.*` | `inferential` |
 
 ## Numeric check
 

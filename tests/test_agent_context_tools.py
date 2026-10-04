@@ -1722,6 +1722,8 @@ def test_global_coefficient_inspector_returns_requested_persisted_intervals(
                     "cluster_count": None,
                     "cluster_entity": None,
                 },
+                "multiple_imputation": None,  # not a pooled result
+                "by_group": None,  # not a by-group result
                 "coefficients": [
                     {
                         "term": "share",
@@ -1889,8 +1891,15 @@ def test_selected_model_result_summary_keeps_public_fit_and_interval_facts(
     assert output["result_summary"]["persisted_models"] == [
         {
             "model_id": "ols_1",
+            "nobs": 100,
+            "nobs_basis": "rows",
             "r_squared": 0.42,
             "r_squared_adj": 0.41,
+            "inference": None,  # no inference evidence recorded in this packet
+            "covariance_executed": None,  # no kernel in this fixture
+            "inference_suppressed": None,
+            "multiple_imputation": None,  # not a pooled result
+            "by_group": None,  # not a by-group result
             "coefficients": [{"term": "share", "estimate": 1.2, "std_error": None, "p_value": None, "ci_lower": 0.61, "ci_upper": 1.79}],
         }
     ]
@@ -2730,12 +2739,15 @@ def test_ols_contract_publishes_its_bounded_option_vocabulary(tmp_path: Path) ->
 
     assert contract["op_type"] == "ols"
     vocabulary = contract["option_vocabulary"]
-    assert vocabulary["version"] == "ols-model-options/v1"
+    assert vocabulary["version"] == "ols-model-options/v2"
     assert vocabulary["fields"]["covariance"]["allowed_values"] == [
         "robust",
         "clustered",
         "unadjusted",
+        "hac",
     ]
+    # v1.8.10: HAC's own fields, valid only with covariance hac.
+    assert {"time_order", "hac_lags"} <= set(vocabulary["fields"])
 
 
 def test_the_arma_garch_contract_payload_fits_the_tool_output_budget(

@@ -56,6 +56,8 @@ import { DatasetExportPanel } from "./DatasetExportPanel";
 import { StatisticalExplorationTable } from "./StatisticalExplorationTable";
 import { resolveTableRunScope } from "./tableRunScope";
 import { PredictionResearchEvidenceCard } from "../../runResult/PredictionResearchEvidenceCard";
+import { formatEstimate, formatPValue } from "../../format/numbers";
+import { describeInference, describeSuppressedInference, nobsBasis } from "../../format/inference";
 
 /** Run ids look like 20260703_065622_030010_92222fe1 — the last hex segment is
  *  the unique tail, matching the run-rail's short label so the two line up. */
@@ -64,9 +66,32 @@ function shortRunId(id: string): string {
   return tail.slice(0, 8);
 }
 
-function fmt(n: number | null | undefined): string {
-  if (n === null || n === undefined || Number.isNaN(n)) return "—";
-  return String(Number(n.toPrecision(4)));
+const fmt = formatEstimate;
+
+type ByGroup = { column?: string; key?: string; n_groups?: number; not_estimable?: { key?: string; nobs?: number; reason?: string }[] };
+
+function byGroup(model: object): ByGroup | null {
+  const block = (model as { by_group?: unknown }).by_group;
+  return block !== null && typeof block === "object" ? (block as ByGroup) : null;
+}
+
+/** "region = east" for one group's result of a by-group run. */
+function groupLabel(model: object): string | null {
+  const block = byGroup(model);
+  return block?.column ? `${block.column} = ${block.key ?? ""}` : null;
+}
+
+/** Groups listed as not estimable, with their reasons; shown once, on the first group. */
+function notEstimableGroups(model: object): string | null {
+  const block = byGroup(model);
+  const skipped = block?.not_estimable ?? [];
+  if (!block || skipped.length === 0 || (model as { by_group?: { index?: number } }).by_group?.index !== 1) return null;
+  return skipped.map((item) => `Not estimated: ${block.column} = ${item.key} (${item.nobs} rows): ${item.reason}`).join(" ");
+}
+
+function pooledDf(coefficient: object): string {
+  const df = (coefficient as { df?: number | null }).df;
+  return typeof df === "number" ? df.toFixed(1) : "∞";
 }
 
 function confidenceIntervalText(coefficient: {
@@ -430,7 +455,7 @@ function StatisticalEvidenceTable({ packet }: { packet: StatisticalEvidencePacke
                 <td style={{ padding: "2px 8px" }}>{evidenceTestLabel(result.test_type)}</td>
                 <td style={{ padding: "2px 8px" }}>{result.nobs ?? "—"}</td>
                 <td style={{ padding: "2px 8px" }}>{result.statistic == null ? "—" : fmt(result.statistic)}</td>
-                <td style={{ padding: "2px 8px" }}>{result.p_value == null ? "—" : fmt(result.p_value)}</td>
+                <td style={{ padding: "2px 8px" }}>{result.p_value == null ? "—" : formatPValue(result.p_value)}</td>
                 <td style={{ padding: "2px 8px" }}>{evidenceEffectValue(result.effect_size)}</td>
                 <td style={{ padding: "2px 8px", whiteSpace: "nowrap" }}>{result.source_id ?? "—"}</td>
               </tr>
@@ -495,6 +520,8 @@ function CoefficientTable({
   const rows = repeatedMeasures.kind === "complete"
     ? [[repeatedMeasures.primaryCoefficient.result_id, repeatedMeasures.primaryCoefficient] as const]
     : Object.entries(model.coefficients ?? {});
+  // Pooled multiple-imputation results carry a df and FMI per coefficient.
+  const pooled = rows.some(([, c]) => typeof (c as { fmi?: unknown }).fmi === "number");
   const diagnostics = repeatedMeasures.kind === "complete"
     ? repeatedMeasures.diagnostics.map((diagnostic) => diagnostic.code)
     : [];
@@ -503,12 +530,28 @@ function CoefficientTable({
       <div style={{ fontSize: 13, fontWeight: 600, color: "var(--label)", marginBottom: 4 }}>
         {model.model_id}
         {model.model_type ? ` · ${model.model_type}` : ""}
+        {groupLabel(model) ? ` · ${groupLabel(model)}` : ""}
       </div>
+      {notEstimableGroups(model) ? (
+        <div data-testid="table-view-not-estimable-groups" role="note" style={{ fontSize: 11, color: "var(--label-tertiary)", marginBottom: 6 }}>
+          {notEstimableGroups(model)}
+        </div>
+      ) : null}
       <div style={{ fontSize: 11, color: "var(--label-tertiary)", marginBottom: 6 }}>
-        {model.nobs !== undefined ? `n=${model.nobs}` : null}
+        {model.nobs !== undefined ? `n=${model.nobs}${nobsBasis(model)}` : null}
         {model.r_squared != null ? ` · R²=${fmt(model.r_squared)}` : null}
         {model.r_squared_adj != null ? ` · adj. R²=${fmt(model.r_squared_adj)}` : null}
       </div>
+      {describeInference(model) ? (
+        <div data-testid="table-view-inference" style={{ fontSize: 11, color: "var(--label-tertiary)", marginBottom: 6 }}>
+          {describeInference(model)}
+        </div>
+      ) : null}
+      {describeSuppressedInference(model) ? (
+        <div data-testid="table-view-inference-suppressed" role="note" style={{ fontSize: 12, color: "var(--warning, #b45309)", marginBottom: 6 }}>
+          {describeSuppressedInference(model)}
+        </div>
+      ) : null}
       <div
         className="wb-result-table-scroll"
         data-testid="table-view-coefficient-scroll"
@@ -523,6 +566,8 @@ function CoefficientTable({
             <th style={{ padding: "2px 8px" }}>std. error</th>
             <th style={{ padding: "2px 8px" }}>p-value</th>
             <th style={{ padding: "2px 8px" }}>95% CI</th>
+            {pooled ? <th style={{ padding: "2px 8px" }} title="Barnard-Rubin degrees of freedom">df</th> : null}
+            {pooled ? <th style={{ padding: "2px 8px" }} title="Fraction of missing information">FMI</th> : null}
           </tr>
         </thead>
         <tbody>
@@ -536,9 +581,11 @@ function CoefficientTable({
               <td style={{ padding: "2px 8px" }}>{fmt(c.estimate)}</td>
               <td style={{ padding: "2px 8px" }}>{fmt(c.std_error)}</td>
               <td style={{ padding: "2px 8px" }}>
-                {("p_value_display" in c ? c.p_value_display : undefined) ?? fmt(c.p_value)}
+                {("p_value_display" in c ? c.p_value_display : undefined) ?? formatPValue(c.p_value)}
               </td>
               <td style={{ padding: "2px 8px", whiteSpace: "nowrap" }}>{confidenceIntervalText(c)}</td>
+              {pooled ? <td style={{ padding: "2px 8px" }}>{pooledDf(c)}</td> : null}
+              {pooled ? <td style={{ padding: "2px 8px" }}>{fmt((c as { fmi?: number | null }).fmi)}</td> : null}
             </tr>
           ))}
         </tbody>
@@ -1031,6 +1078,9 @@ function RunResultsPanel({
   )?.artifact_id;
   const otherArtifacts = artifacts.filter((a) =>
     a.artifact_type !== "figure"
+      // Read by post-estimation, not by people; listing it would show an
+      // internal file name next to the results.
+      && a.artifact_type !== "inference_kernel"
       && !loadedExplorationIds.has(a.artifact_id)
       && a.artifact_id !== statisticalEvidenceArtifactId,
   );

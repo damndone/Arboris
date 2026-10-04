@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
-_WEAK_F_THRESHOLD = 10.0  # Staiger-Stock rule of thumb (NOT a guarantee)
+from ..checks.iv_checks import FIRST_STAGE_STRENGTH
 
 
-def build_iv_diagnostics(fitted: Any, n_endog: int, n_instruments: int) -> dict:
+def build_iv_diagnostics(
+    fitted: Any, n_endog: int, n_instruments: int, strength_check: dict | None = None,
+) -> dict:
     """Build the standard IV diagnostic trio from a fitted linearmodels IV2SLS result.
 
     linearmodels 7.0 accessors used:
@@ -24,17 +26,23 @@ def build_iv_diagnostics(fitted: Any, n_endog: int, n_instruments: int) -> dict:
     )
 
     # --- weak instruments: min first-stage F across endog ---
+    # v1.8.10: thresholds and verdict come from the check library's
+    # iv.first_stage_strength, so the card and the run's issues agree.
     fs_diag = fitted.first_stage.diagnostics
     min_f = float(fs_diag["f.stat"].min())
+    fails_below = FIRST_STAGE_STRENGTH.threshold("fails_below")
+    caution_below = FIRST_STAGE_STRENGTH.threshold("caution_below")
+    verdict = "weak" if min_f < fails_below else "caution" if min_f < caution_below else "strong"
     weak = {
         "first_stage_f": min_f,
-        "threshold": _WEAK_F_THRESHOLD,
-        "verdict": "strong" if min_f > _WEAK_F_THRESHOLD else "weak",
-        "message": (
-            "Instruments are strong (first-stage F > 10, rule of thumb)."
-            if min_f > _WEAK_F_THRESHOLD else
-            "Instruments appear weak (first-stage F <= 10); interpret with caution."
+        "threshold": fails_below,
+        "caution_threshold": caution_below,
+        "verdict": verdict,
+        "message": (strength_check or {}).get("summary") or (
+            f"First-stage F = {min_f:.1f}." if verdict == "strong" else
+            f"First-stage F = {min_f:.1f}, below {caution_below:g}."
         ),
+        "anderson_rubin_95": ((strength_check or {}).get("evidence") or {}).get("anderson_rubin_95"),
     }
 
     # --- endogeneity: Wu-Hausman ---
@@ -44,11 +52,14 @@ def build_iv_diagnostics(fitted: Any, n_endog: int, n_instruments: int) -> dict:
         "test": "wu_hausman",
         "statistic": wh_stat,
         "pvalue": wh_p,
-        "verdict": "endogenous" if wh_p < 0.05 else "exogenous",
+        "verdict": "rejects_exogeneity" if wh_p < 0.05 else "does_not_reject",
+        # v1.8.10: a post-fit test may inform inference, not the choice of
+        # specification (design section 4.3), and not rejecting is not proof.
         "message": (
-            "Endogeneity confirmed (p < 0.05); IV is warranted."
+            "The Wu-Hausman test rejects exogeneity of the regressor (p < 0.05)."
             if wh_p < 0.05 else
-            "No endogeneity detected (p >= 0.05); OLS is consistent and more efficient."
+            "The Wu-Hausman test does not reject exogeneity (p >= 0.05); this does not show the "
+            "regressor is exogenous."
         ),
     }
 

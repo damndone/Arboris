@@ -13,6 +13,7 @@ import type { PostEstimationResult } from "../../api";
 import { useLineage } from "../../lineage/LineageContext";
 import { buildAskAIContextPacket } from "../../lineage/detail/sections/askAiContextPacket";
 import { resolveNodeOperationContext } from "../../lineage/api/nodeOperationContext";
+import { focusFromWorkbench, resolveFocus } from "./focus";
 import { fetchLlmConfig, fetchLlmProviders, updateLlmProvider } from "../../llm/llmApi";
 import type { LlmConfigInfo, LlmProvider } from "../../llm/llmTypes";
 import { useForest } from "../ForestContext";
@@ -114,42 +115,6 @@ function toOperationStatus(
       : {},
     diffFocused,
   };
-}
-
-function runFocusModelNodeKey(
-  forest: { forest: ForestViewModel; activeRunId: string },
-  selectedKey: string | null,
-): string | null {
-  const selectedNode = selectedKey
-    ? forest.forest.nodes.find((node) => node.nodeKey === selectedKey)
-    : undefined;
-  // Detail tabs can outlive a run-rail selection. Only let an actual selected
-  // node scope a Chain Agent when it belongs to the active run; otherwise the
-  // active head is the authoritative run focus.
-  if (selectedNode?.runs.includes(forest.activeRunId)) {
-    return selectedNode.nodeKey;
-  }
-  // The run rail uses a `run:<id>` pseudo-selection.  It is a navigation
-  // focus, not an executable node identity; bind the Agent to the active
-  // model node before sending the session packet.
-  if (selectedKey !== null && !selectedKey.startsWith("run:") && !selectedNode) return null;
-  const activeHead = forest.forest.heads.find(
-    (head) => head.runId === forest.activeRunId,
-  );
-  const headModel = activeHead
-    ? forest.forest.nodes.find(
-        (node) =>
-          node.nodeHash === activeHead.headNodeHash &&
-          (node.kind === "model" || node.stage === "model"),
-      )
-    : undefined;
-  if (headModel) return headModel.nodeKey;
-  const activeModel = forest.forest.nodes.find(
-    (node) =>
-      node.runs.includes(forest.activeRunId) &&
-      (node.kind === "model" || node.stage === "model"),
-  );
-  return activeModel?.nodeKey ?? null;
 }
 
 const MAX_GLOBAL_PROJECT_NODES = 120;
@@ -296,15 +261,44 @@ export function AgentSurfaceProvider({
   const selectedKey = workbench.state.selectedKey;
   const graphNodes = Array.isArray(graphModel?.nodes) ? graphModel.nodes : [];
   const selectedNode = graphNodes.find((node) => node.nodeKey === selectedKey) ?? null;
-  const scopedForestNodeKey = forest
-    ? runFocusModelNodeKey(forest, selectedKey)
+  // One Agent; its scope follows the focus (agent/focus.ts): a page's declared
+  // focus (the Data page's dataset), else the graph selection -- in the run
+  // that owns the node, not the active run's head -- else the project.
+  const declaredFocus = workbench.state.agentFocus;
+  // Whichever changed last wins: a node selected after a run switch is the
+  // focus even in another run; a run switched after a selection outranks the
+  // leftover detail tab. With no history (first render) the run wins.
+  const activeRunForFocus = forest?.activeRunId ?? runId;
+  const lastFocusChange = useRef<"selection" | "run">("run");
+  const previousSelection = useRef(selectedKey);
+  const previousActiveRun = useRef(activeRunForFocus);
+  if (previousSelection.current !== selectedKey) {
+    lastFocusChange.current = "selection";
+    previousSelection.current = selectedKey;
+  }
+  if (previousActiveRun.current !== activeRunForFocus) {
+    lastFocusChange.current = "run";
+    previousActiveRun.current = activeRunForFocus;
+  }
+  const staleSelectionRunId = lastFocusChange.current === "run"
+    && selectedNode !== null
+    && forest
+    && !forest.forest.nodes.find((node) => node.nodeKey === selectedKey)?.runs.includes(activeRunForFocus)
+    ? activeRunForFocus
     : null;
+  const resolvedFocus = useMemo(
+    () => resolveFocus(
+      focusFromWorkbench({ projectRoot, declared: declaredFocus, selectedKey, staleSelectionRunId }),
+      { projectRoot, activeRunId: activeRunForFocus, forest: forest?.forest ?? null },
+    ),
+    [activeRunForFocus, declaredFocus, forest, projectRoot, selectedKey, staleSelectionRunId],
+  );
+  const scopeRunId = resolvedFocus.runId || runId;
+  const scopedForestNodeKey = resolvedFocus.nodeKey;
   const scopedSelectedNode = scopedForestNodeKey && forest
     ? forest.forest.nodes.find((node) => node.nodeKey === scopedForestNodeKey) ?? selectedNode
     : selectedNode;
-  // A run-rail focus still belongs to its chain. Only an actual blank canvas
-  // selection in forest mode promotes the surface to the project Main Agent.
-  const isGlobalScope = Boolean(forest) && selectedNode === null && selectedKey === null;
+  const isGlobalScope = resolvedFocus.role === "main";
   const contextPacket = useMemo<AgentContextPacket>(() => {
     if (isGlobalScope && forest) {
       return boundedGlobalProjectContext(projectRoot, forest);
@@ -313,12 +307,13 @@ export function AgentSurfaceProvider({
       const resolved = resolveNodeOperationContext({
         forest: forest.forest,
         selected_forest_node_key: scopedForestNodeKey,
-        active_head_run_id: forest.activeRunId,
+        // The chain of the run that owns the focused node.
+        active_head_run_id: scopeRunId,
       });
       if (resolved.ok) return buildAskAIContextPacket(resolved.context);
     }
-    return fallbackProjectContext(runId, selectedKey);
-  }, [forest, isGlobalScope, projectRoot, runId, scopedForestNodeKey, selectedKey]);
+    return fallbackProjectContext(scopeRunId, selectedKey);
+  }, [forest, isGlobalScope, projectRoot, scopeRunId, scopedForestNodeKey, selectedKey]);
 
   const contextFingerprint = typeof contextPacket.context_fingerprint === "string"
     && contextPacket.context_fingerprint
@@ -326,7 +321,7 @@ export function AgentSurfaceProvider({
     : `${runId}:${selectedKey ?? "none"}`;
   const storageKey = isGlobalScope
     ? `workbench:agent-session:${projectRoot}:main:${encodeURIComponent(contextFingerprint)}`
-    : `workbench:agent-session:${projectRoot}:${runId}:${encodeURIComponent(contextFingerprint)}`;
+    : `workbench:agent-session:${projectRoot}:${scopeRunId}:${encodeURIComponent(contextFingerprint)}`;
   const linkedSessionId = searchParams.get("agent_session") || null;
   const linkedOperationId = searchParams.get("operation") || null;
   const linkedDiffFocused = searchParams.get("diff") === "1";
@@ -531,11 +526,7 @@ export function AgentSurfaceProvider({
     : null;
   const scopeLabel = isGlobalScope
     ? `Global Agent · ${forest?.forest.familyRunCount ?? 0} runs · ${forest?.forest.familyCount ?? 0} families`
-    : scopedSelectedNode
-    ? `${forest ? "Current chain" : "Run"} · ${scopedSelectedNode.title}`
-    : forest
-      ? `Current chain · ${forest.activeRunId}`
-      : `Run · ${runId}`;
+    : resolvedFocus.label;
 
   const setModel = useCallback(async (value: string) => {
     if (!activeProvider || value === llmConfig?.model) return;
@@ -583,10 +574,16 @@ export function AgentSurfaceProvider({
           chain_id: isGlobalScope
             ? `project:${projectRoot}`
             : forest
-              ? `chain:${forest.activeRunId}`
-              : `run:${runId}`,
-          run_id: isGlobalScope ? undefined : runId,
+              ? `chain:${scopeRunId}`
+              : `run:${scopeRunId}`,
+          run_id: isGlobalScope ? undefined : scopeRunId,
           context_packet: contextPacket,
+          focus: {
+            kind: resolvedFocus.focus.kind,
+            id: resolvedFocus.focus.id,
+            ...(resolvedFocus.runId ? { run_id: resolvedFocus.runId } : {}),
+            label: scopeLabel,
+          },
         });
         activeSessionId = created.session_id;
         if (activeScopeRef.current !== requestScope) return;
@@ -632,7 +629,7 @@ export function AgentSurfaceProvider({
         setActiveTurnStartedAt(null);
       }
     }
-  }, [contextPacket, eventCursor, forest, isGlobalScope, isSubmitting, linkedSessionId, projectRoot, prompt, refreshNavigation, replayEvents, runId, sessionId, sessionScope, storageKey]);
+  }, [contextPacket, eventCursor, forest, isGlobalScope, isSubmitting, linkedSessionId, projectRoot, prompt, refreshNavigation, replayEvents, resolvedFocus, runId, scopeLabel, scopeRunId, sessionId, sessionScope, storageKey]);
 
   const abortTurn = useCallback(async () => {
     const controller = activeTurnControllerRef.current;

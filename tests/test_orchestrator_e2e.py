@@ -576,7 +576,6 @@ def test_e2e_poisson_rate_model_facts(tmp_path: Path):
 
 def test_e2e_poisson_rate_vif_excludes_exposure(tmp_path: Path):
     """VIF diagnostics for poisson_rate should not include the exposure column."""
-    from workbench.econometrics.diagnostics import compute_diagnostics
     from workbench.econometrics.runner import run_poisson
 
     rng = np.random.default_rng(42)
@@ -590,21 +589,21 @@ def test_e2e_poisson_rate_vif_excludes_exposure(tmp_path: Path):
         "y": y, "x1": x1, "x2": x2, "exposure_months": exposure_months,
     })
 
+    # The estimation stage removes the exposure from the regressors before
+    # fitting (it enters as an offset); the direct call mirrors that.
     result, fitted = run_poisson(
-        frame, y="y", x=["x1", "x2", "exposure_months"],
+        frame, y="y", x=["x1", "x2"],
         model_id="poisson_vif", exposure_col="exposure_months",
     )
     assert result["model_type"] == "poisson_rate"
 
-    # Compute diagnostics with x that excludes exposure (leaving x1, x2 = 2 columns = VIF enabled)
-    from workbench.orchestrator import _detect_exposure_candidates
-    normalized_x = ["x1", "x2", "exposure_months"]
-    exposure_col = _detect_exposure_candidates(normalized_x)[0]
-    diag_x = [v for v in normalized_x if v != exposure_col]
-    exog = frame[diag_x]
-    diag = compute_diagnostics(fitted, exog, model_id="poisson_vif", model_family="poisson")
+    # v1.8.10: VIF is the check library's design-level GVIF. The exposure is
+    # an offset, so it is not a column of the design and cannot appear.
+    from workbench.checks import build_context, run_checks
 
-    vif = diag.get("vif", {})
+    context = build_context(model_id="poisson_vif", model_type="poisson_rate", fitted=fitted, kernel=None, nobs=n)
+    gvif = next(item for item in run_checks(context) if item["check_id"] == "collinearity.gvif")
+    vif = gvif["evidence"]["terms"]
     assert "exposure_months" not in vif, "VIF should exclude exposure column"
     assert "x1" in vif, "VIF should include non-exposure predictors"
     assert "x2" in vif, "VIF should include non-exposure predictors"

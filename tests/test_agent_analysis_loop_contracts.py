@@ -553,18 +553,19 @@ def test_ols_cluster_policy_is_immutable_and_has_exact_values():
     assert policy.all_singleton_clusters == "warning"
     assert policy.small_sample_correction is True
     assert policy.degrees_of_freedom_correction is True
-    assert policy.use_t is False
+    # Values v2 (inference engine v2): t(G - 1), as Stata's vce(cluster).
+    assert policy.use_t is True
     assert policy.confidence_level == 0.95
     assert policy.alpha == 0.05
-    assert policy.inference_distribution == "normal"
-    assert policy.p_value_method == "normal_z"
-    assert policy.confidence_interval_method == "normal_z"
+    assert policy.inference_distribution == "t"
+    assert policy.p_value_method == "t"
+    assert policy.confidence_interval_method == "t"
     assert policy.effective_degrees_of_freedom == "record_per_target"
     assert policy.engine == "statsmodels"
     assert policy.minimum_engine_version == 0.14
 
     with pytest.raises((AttributeError, TypeError)):
-        policy.use_t = True
+        policy.use_t = False
 
 
 def test_ols_cluster_policy_round_trips_and_rejects_non_exact_contract_values():
@@ -588,9 +589,9 @@ def test_ols_cluster_policy_round_trips_and_rejects_non_exact_contract_values():
         "use_t": "false",
         "confidence_level": "0.95",
         "alpha": True,
-        "inference_distribution": "t",
-        "p_value_method": "t",
-        "confidence_interval_method": "t",
+        "inference_distribution": "normal",
+        "p_value_method": "normal_z",
+        "confidence_interval_method": "normal_z",
         "effective_degrees_of_freedom": "residual",
         "engine": "numpy",
         "minimum_engine_version": "0.14",

@@ -245,6 +245,9 @@ export type RunDetail = RunSummary & {
     value_labels?: Record<string, Record<string, string>>;
   };
   model_family_evidence?: Record<string, unknown> | null;
+  /** v1.8.10: the declared, bounded family projection -- the same object the
+   * Agent's result summary carries -- for the report writer's citable facts. */
+  family_evidence?: Record<string, unknown> | null;
 };
 
 export type CoefficientRecord = {
@@ -255,6 +258,10 @@ export type CoefficientRecord = {
   ci_lower?: number | null;
   ci_upper?: number | null;
   source_id?: string;
+  /** Pooled multiple imputation: this coefficient's Barnard-Rubin df (null when
+   * infinite) and fraction of missing information. */
+  df?: number | null;
+  fmi?: number | null;
 };
 
 export type ModelResult = {
@@ -467,6 +474,7 @@ export interface RunExtraParams {
   surveyLonelyPsu?: string;
   surveyWeightFrame?: string;
   surveySubpop?: string;
+  surveyDf?: string;
   ivEndog?: string[];
   ivInstruments?: string[];
   didMode?: string;
@@ -607,6 +615,7 @@ export async function runWorkflow(
   if (extra?.surveyLonelyPsu) form.append("survey_lonely_psu", extra.surveyLonelyPsu);
   if (extra?.surveyWeightFrame) form.append("survey_weight_frame", extra.surveyWeightFrame);
   if (extra?.surveySubpop) form.append("survey_subpop", extra.surveySubpop);
+  if (extra?.surveyDf) form.append("survey_df", extra.surveyDf);
   if (extra?.modelOptions !== undefined) {
     form.append("model_options", serializeModelOptions(extra.modelOptions));
   }

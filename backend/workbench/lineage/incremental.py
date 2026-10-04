@@ -58,9 +58,15 @@ CACHEABLE_STAGES: frozenset[str] = frozenset({
 
 
 def _mice_requested(form: dict, config: dict) -> bool:
+    """A single MICE imputation, the only one the cache materializes.
+
+    Multiple imputation leaves m datasets rather than ``imputed_dataset``, so
+    its node is identity-only and must never be "restored" from the cache.
+    """
     request = form.get("imputation")
     method = request.get("method") if isinstance(request, dict) else config.get("imputation_method", "")
-    return method == "mice"
+    m = request.get("m", config.get("imputation_m", 5)) if isinstance(request, dict) else config.get("imputation_m", 5)
+    return method == "mice" and m == 1
 
 
 def run_pipeline_traced(pipeline, ctx, env, *, form: dict, config: dict, force_full: bool, upload_hash: str):

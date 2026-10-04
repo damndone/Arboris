@@ -130,7 +130,7 @@ Everything Workbench can run, as registered. The Agent reaches the same list: an
 | `resample.smote` | Resample prediction-training data with SMOTE. |
 | `resample.undersample` | Resample prediction-training data with Undersample. |
 
-## Operations (29)
+## Operations (34)
 
 | Id | What it does |
 |---|---|
@@ -158,6 +158,11 @@ Everything Workbench can run, as registered. The Agent reaches the same list: an
 | `model.rerun` | Change the current model parameters and rerun. |
 | `model.white_test` | Run White's test for heteroskedasticity on a completed OLS branch. |
 | `operation.multi_step` | Compile and execute a multi-step statistical workflow with one confirmation and auditable per-step artifacts. |
+| `postestimation.lincom` | Estimate a linear combination of a completed model's coefficients, with its standard error, test and confidence interval. |
+| `postestimation.lr` | Likelihood-ratio test of a restricted model nested in a fuller one. Both must be estimated on the same rows with model-based (not robust or clustered) variance. |
+| `postestimation.margins` | Marginal effects of regressors on the predicted outcome: averaged over the estimation sample (`at: average`) or at the regressors' means (`at: means`). |
+| `postestimation.nlcom` | Estimate a smooth function of a completed model's coefficients by the delta method. |
+| `postestimation.wald` | Jointly test linear restrictions on a completed model's coefficients (Wald). Reads the model's stored covariance; F or chi-square follows the model's own inference. |
 | `report.compose` | Assemble the completed steps into a report. |
 | `statistical.derive_boolean` | Create one server-defined boolean grouping node. |
 | `statistical.derive_numeric` | Create declared numeric columns without arbitrary code. |

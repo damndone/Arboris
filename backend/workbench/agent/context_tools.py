@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import json
 import math
 from pathlib import Path
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from typing import Any, Iterable, Protocol
 
 from ..artifacts import read_json, sha256_file
@@ -33,6 +33,14 @@ from .operations import OperationRecord, OperationRecordStore, OperationRegistry
 from .recipes.registry import build_option_vocabulary, validate_model_options_patch
 from .storage import read_jsonl
 from .tools import ToolContext, ToolDefinition, ToolVisibleError
+from .bounds import (
+    _bounded_label,
+    _bounded_labels,
+    _bounded_numeric_fields,
+    _public_positive_int,
+    _public_stat_number,
+)
+from .family_evidence import bounded_model_family_evidence as _bounded_model_family_evidence
 
 
 @dataclass(frozen=True)
@@ -3467,6 +3475,7 @@ def _public_requested_model_coefficients(
                     if isinstance(coefficient.get("source_id"), str)
                     else None
                 ),
+                **_pooled_coefficient_fields(coefficient),
             }
         )
 
@@ -3493,8 +3502,7 @@ def _public_requested_model_coefficients(
         "model_id": model_id,
         "model_type": result.get("model_type") if isinstance(result.get("model_type"), str) else None,
         "nobs": _public_positive_int(result.get("nobs")),
-        "r_squared": _public_stat_number(result.get("r_squared")),
-        "r_squared_adj": _public_stat_number(result.get("r_squared_adj")),
+        **_fit_statistics(result),
         "df_model": _public_stat_number(result.get("df_model")),
         "df_resid": _public_stat_number(result.get("df_resid")),
         "outcome": result.get("y_column") if isinstance(result.get("y_column"), str) else None,
@@ -3524,7 +3532,15 @@ def _public_requested_model_coefficients(
                 if isinstance(covariance_evidence.get("cluster_entity"), bool)
                 else None
             ),
+            # Newey-West: kernel, lag, the rule that chose it, and the time order.
+            **(
+                {"hac": {key: covariance_evidence["hac"].get(key)
+                         for key in ("kernel", "lags", "lag_rule", "time_order")}}
+                if isinstance(covariance_evidence.get("hac"), dict) else {}
+            ),
         },
+        "multiple_imputation": _bounded_multiple_imputation(result),
+        "by_group": _bounded_by_group(result),
         "coefficients": public_coefficients,
         "missing_terms": missing_terms,
         # When a requested term is absent, name the terms that do exist, so a
@@ -3605,10 +3621,6 @@ def _run_term_labeler(run_root: Path) -> Any:
     )
 
 
-def _public_stat_number(value: Any) -> int | float | None:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return None
-    return value if math.isfinite(float(value)) else None
 
 
 def _public_probability(value: Any) -> float | None:
@@ -3618,10 +3630,6 @@ def _public_probability(value: Any) -> float | None:
     return float(number)
 
 
-def _public_positive_int(value: Any) -> int | None:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        return None
-    return value
 
 
 def _read_manifest(run_root: Path) -> dict[str, Any]:
@@ -3750,16 +3758,23 @@ def _bounded_statistics_evidence(
             "warnings",
             "correction",
             "family",
+            # By-group runs: which group, and the p-value adjusted across groups.
+            "group",
+            "group_column",
+            "p_value_holm_across_groups",
+            "p_value_bh_across_groups",
+            "groups_in_adjustment",
         ):
             if key not in row:
                 continue
-            if key in {"test_id", "test_version", "test_type", "family", "correction"}:
+            if key in {"test_id", "test_version", "test_type", "family", "correction", "group", "group_column"}:
                 # The correction method is what makes a post-hoc p-value
                 # interpretable, so it is a short label, not budgeted detail.
                 label = _bounded_label(row[key])
                 if label is not None:
                     bounded[key] = label
-            elif key in {"nobs", "statistic", "p_value", "p_value_corrected", "effect_size"}:
+            elif key in {"nobs", "statistic", "p_value", "p_value_corrected", "effect_size",
+                         "p_value_holm_across_groups", "p_value_bh_across_groups", "groups_in_adjustment"}:
                 number = _public_stat_number(row[key])
                 if number is not None:
                     bounded[key] = number
@@ -3786,6 +3801,8 @@ def _bounded_statistics_evidence(
         "dataset_ref": packet.get("dataset_ref"),
         "lineage_parent": packet.get("lineage_parent"),
         "correction_scope": packet.get("correction_scope"),
+        **({"by_group": _bounded_test_by_group(packet.get("by_group"))}
+           if isinstance(packet.get("by_group"), Mapping) else {}),
         "results": bounded_results,
         "result_count": len(raw_results),
         "results_omitted": max(len(raw_results) - len(bounded_results), 0),
@@ -3972,222 +3989,40 @@ def _bounded_result_summary(
             else None
         ),
         "run_status": run_status if isinstance(run_status, dict) else None,
-        "persisted_models": _bounded_persisted_model_facts(model_results),
-        "statistical_evidence": statistical_evidence,
-        "regression_table": regression_table,
+        # Order is priority when the tool's output budget cuts (agent/tools.py):
+        # the selected model's own evidence first, then the coefficient tables,
+        # then run-level tests, which also have their own tool.
         "model_family_evidence": model_family_evidence,
+        # v1.8.10 check library: what the assumption checks found, with status.
+        "checks": _bounded_checks(run_root, model_results),
+        "persisted_models": _bounded_persisted_model_facts(model_results, run_root),
+        "regression_table": regression_table,
+        "statistical_evidence": statistical_evidence,
     }
 
 
-def _bounded_model_family_evidence(
-    run_root: Path,
-    model_results: list[dict[str, Any]],
-) -> dict[str, Any] | None:
-    """Project exact, bounded evidence for v1.8.6 non-linear model families.
-
-    The raw model result remains outside the Agent boundary. This projection
-    keeps the packet's numeric authority while exposing only family-owned
-    fields, with fixed list/depth budgets so probabilities and survival rows
-    cannot become an unbounded data-export channel.
-    """
-
-    primary = next((item for item in model_results if isinstance(item, dict)), None)
-    if not isinstance(primary, dict):
-        return None
-    spec = FAMILY_EVIDENCE_PROJECTIONS.get(primary.get("model_type"))
-    if spec is None:
-        return None
-    return _project_family_evidence(primary, spec, run_root)
 
 
-def _project_family_evidence(
-    primary: dict[str, Any], spec: "FamilyEvidenceSpec", run_root: Path
-) -> dict[str, Any] | None:
-    """Apply a family's declared projection.
-
-    Nothing here knows any family name.  Each family states which fields it
-    exposes and how each is bounded, so adding one is a table entry rather than
-    another branch -- the same move blocks 2 and 3 made in the design layer and
-    in `result_shape`. Leaving the branches here would just relocate the cost.
-    """
-    source: dict[str, Any] = primary
-    if spec.packet_path is not None:
-        packet_path = run_root / spec.packet_path
-        packet = read_json(packet_path) if packet_path.is_file() else None
-        if not isinstance(packet, dict):
-            return None
-        source = packet
-
-    sidecars: dict[str, dict[str, Any]] = {}
-    for name, relative in spec.sidecars.items():
-        sidecar_path = run_root / relative
-        loaded = read_json(sidecar_path) if sidecar_path.is_file() else {}
-        sidecars[name] = loaded if isinstance(loaded, dict) else {}
-
-    projected: dict[str, Any] = {
-        "contract": spec.contract if spec.contract is not None else source.get("contract"),
-        "model_type": primary.get("model_type"),
-    }
-    # How strongly this family's numbers were checked (v1.8.7 A3). Projected for
-    # every family rather than declared per family: it is a property of the
-    # result, and an Agent quoting a figure should be able to say what backs it
-    # instead of implying more than is known. Three of the four v1.8.6 families
-    # agree with R only within a solver tolerance.
-    validation = source.get("validation")
-    if isinstance(validation, dict):
-        projected["validation"] = _bounded_numeric_fields(
-            validation, fields=(), string_fields=("level", "external_oracle")
-        )
-    for field in spec.fields:
-        origin = sidecars[field.sidecar] if field.sidecar else source
-        value = origin.get(field.source_key)
-        if field.nested_key is not None:
-            value = value.get(field.nested_key) if isinstance(value, dict) else {}
-        projected[field.key] = field.bound(value)
-    return projected
 
 
-def _bounded_label(value: Any) -> str | None:
-    return value[:128] if isinstance(value, str) else None
 
 
-def _bounded_labels(value: Any, *, limit: int = 16) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    return [item[:128] for item in value[:limit] if isinstance(item, str)]
 
 
-def _bounded_numeric_list(value: Any, *, limit: int) -> list[int | float]:
-    if not isinstance(value, list):
-        return []
-    return [number for item in value[:limit] if (number := _public_stat_number(item)) is not None]
 
 
-def _bounded_numeric_fields(
-    value: Any,
-    *,
-    fields: tuple[str, ...],
-    string_fields: tuple[str, ...] = (),
-    list_fields: tuple[str, ...] = (),
-) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        return {}
-    result: dict[str, Any] = {}
-    for field in fields:
-        number = _public_stat_number(value.get(field))
-        if number is not None:
-            result[field] = number
-    for field in string_fields:
-        label = _bounded_label(value.get(field))
-        if label is not None:
-            result[field] = label
-    for field in list_fields:
-        result[field] = _bounded_labels(value.get(field))
-    return result
 
 
-def _bounded_numeric_map(value: Any, *, fields: tuple[str, ...]) -> dict[str, dict[str, int | float]]:
-    if not isinstance(value, dict):
-        return {}
-    result: dict[str, dict[str, int | float]] = {}
-    for key, cell in list(value.items())[:64]:
-        if not isinstance(key, str) or not isinstance(cell, dict):
-            continue
-        bounded = _bounded_numeric_fields(cell, fields=fields)
-        if bounded:
-            result[key[:128]] = bounded
-    return result
 
 
-def _bounded_ordinal_marginal_effects(value: Any) -> list[dict[str, Any]]:
-    if not isinstance(value, list):
-        return []
-    result: list[dict[str, Any]] = []
-    for row in value[:16]:
-        if not isinstance(row, dict):
-            continue
-        effects = row.get("average_effect_by_category")
-        result.append({
-            "variable": _bounded_label(row.get("variable")),
-            "average_effect_by_category": {},
-        })
-        if isinstance(effects, dict):
-            result[-1]["average_effect_by_category"] = {
-                str(key)[:128]: number
-                for key, item in list(effects.items())[:16]
-                if (number := _public_stat_number(item)) is not None
-            }
-    return result
 
 
-def _bounded_ordinal_probabilities(value: Any, *, limit: int = 8) -> list[dict[str, Any]]:
-    if not isinstance(value, list):
-        return []
-    result: list[dict[str, Any]] = []
-    for row in value[:limit]:
-        if not isinstance(row, dict):
-            continue
-        probabilities = row.get("probabilities")
-        result.append({
-            "row": _public_positive_int(row.get("row")),
-            "probabilities": {
-                str(key)[:128]: number
-                for key, item in list(probabilities.items())[:16]
-                if isinstance(key, str) and (number := _public_stat_number(item)) is not None
-            } if isinstance(probabilities, dict) else {},
-        })
-    return result
 
 
-def _bounded_parallel_lines(value: Any) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        return {}
-    result = _bounded_numeric_fields(value, fields=(), string_fields=("status", "method"))
-    result["slope_ranges"] = {}
-    if isinstance(value.get("slope_ranges"), dict):
-        result["slope_ranges"] = {
-            str(key)[:128]: number
-            for key, item in list(value["slope_ranges"].items())[:16]
-            if (number := _public_stat_number(item)) is not None
-        }
-    comparisons: list[dict[str, Any]] = []
-    for row in (value.get("comparisons") if isinstance(value.get("comparisons"), list) else [])[:8]:
-        if not isinstance(row, dict):
-            continue
-        coefficients = row.get("coefficients")
-        comparisons.append({
-            "threshold": _public_positive_int(row.get("threshold")),
-            "coefficients": {
-                str(key)[:128]: number
-                for key, item in list(coefficients.items())[:16]
-                if isinstance(key, str) and (number := _public_stat_number(item)) is not None
-            } if isinstance(coefficients, dict) else {},
-        })
-    result["comparisons"] = comparisons
-    return result
 
 
-def _bounded_multinomial_marginal_effects(value: Any) -> list[dict[str, Any]]:
-    if not isinstance(value, list):
-        return []
-    numeric_fields = ("dy/dx", "Std. Err.", "z", "Pr(>|z|)", "Conf. Int. Low", "Cont. Int. Hi.")
-    result: list[dict[str, Any]] = []
-    for row in value[:16]:
-        if not isinstance(row, dict):
-            continue
-        bounded = _bounded_numeric_fields(row, fields=numeric_fields, string_fields=("endog", "exog"))
-        result.append(bounded)
-    return result
 
 
-def _bounded_probability_map(value: Any, *, limit: int = 8) -> dict[str, list[int | float]]:
-    if not isinstance(value, dict):
-        return {}
-    return {
-        key[:128]: _bounded_numeric_list(item, limit=limit)
-        for key, item in list(value.items())[:16]
-        if isinstance(key, str) and isinstance(item, list)
-    }
 
 
 def _bounded_family_diagnostic(value: Any) -> dict[str, Any]:
@@ -4207,125 +4042,23 @@ def _bounded_family_diagnostic(value: Any) -> dict[str, Any]:
     }
 
 
-def _bounded_anova_rows(value: Any, *, limit: int = 24) -> list[dict[str, Any]]:
-    """An ANOVA table, bounded like every other agent-facing projection.
-
-    A factorial design with many levels can produce a long table; the limit
-    keeps this a summary rather than a data-export channel.
-    """
-    if not isinstance(value, list):
-        return []
-    rows: list[dict[str, Any]] = []
-    for row in value[:limit]:
-        if not isinstance(row, dict):
-            continue
-        rows.append(
-            _bounded_numeric_fields(
-                row,
-                fields=("sum_sq", "df", "f", "p_value", "partial_eta_squared"),
-                string_fields=("term",),
-            )
-        )
-    return rows
 
 
-def _bounded_survival_rows(value: Any, *, limit: int) -> list[dict[str, Any]]:
-    if not isinstance(value, list):
-        return []
-    result: list[dict[str, Any]] = []
-    for row in value[:limit]:
-        if not isinstance(row, dict):
-            continue
-        bounded = _bounded_numeric_fields(
-            row,
-            fields=("time", "survival", "n_at_risk", "at_risk", "events", "censored"),
-            string_fields=("group",),
-        )
-        result.append(bounded)
-    return result
 
 
-def _bounded_schoenfeld(value: Any, *, limit: int = 8) -> list[dict[str, Any]]:
-    if not isinstance(value, list):
-        return []
-    result: list[dict[str, Any]] = []
-    for row in value[:limit]:
-        if not isinstance(row, dict):
-            continue
-        result.append(_bounded_numeric_fields(
-            row,
-            fields=("time_correlation",),
-            string_fields=("variable", "status"),
-        ))
-    return result
 
 
-def _bounded_quantile_fits(value: Any) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        return {}
-    result: dict[str, Any] = {}
-    numeric_fields = ("estimate", "std_error", "p_value", "ci_lower", "ci_upper")
-    for quantile, fit in list(value.items())[:7]:
-        if not isinstance(quantile, str) or not isinstance(fit, dict):
-            continue
-        coefficients = fit.get("coefficients")
-        result[quantile[:32]] = {
-            "quantile": _public_stat_number(fit.get("quantile")),
-            "coefficients": {
-                str(term)[:128]: _bounded_numeric_fields(cell, fields=numeric_fields)
-                for term, cell in list(coefficients.items())[:32]
-                if isinstance(term, str) and isinstance(cell, dict)
-            } if isinstance(coefficients, dict) else {},
-        }
-    return result
 
 
-def _bounded_quantile_intervals(value: Any) -> dict[str, dict[str, list[int | float]]]:
-    if not isinstance(value, dict):
-        return {}
-    result: dict[str, dict[str, list[int | float]]] = {}
-    for quantile, terms in list(value.items())[:7]:
-        if not isinstance(quantile, str) or not isinstance(terms, dict):
-            continue
-        result[quantile[:32]] = {}
-        for term, interval in list(terms.items())[:32]:
-            if not isinstance(term, str) or not isinstance(interval, list) or len(interval) != 2:
-                continue
-            numbers = [_public_stat_number(item) for item in interval]
-            if all(item is not None for item in numbers):
-                result[quantile[:32]][term[:128]] = [numbers[0], numbers[1]]  # type: ignore[list-item]
-    return result
 
 
-def _bounded_bootstrap(value: Any) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        return {}
-    result = _bounded_numeric_fields(value, fields=("repetitions", "random_state"))
-    successful = value.get("successful_repetitions")
-    if isinstance(successful, dict):
-        result["successful_repetitions"] = {
-            str(key)[:32]: number
-            for key, item in list(successful.items())[:7]
-            if (number := _public_positive_int(item)) is not None
-        }
-    result["intervals"] = _bounded_quantile_intervals(value.get("intervals"))
-    return result
 
 
-def _bounded_cross_quantile_comparisons(value: Any, *, limit: int = 32) -> list[dict[str, Any]]:
-    if not isinstance(value, list):
-        return []
-    numeric_fields = ("lower_quantile", "upper_quantile", "difference", "std_error", "p_value")
-    result: list[dict[str, Any]] = []
-    for row in value[:limit]:
-        if not isinstance(row, dict):
-            continue
-        result.append(_bounded_numeric_fields(row, fields=numeric_fields, string_fields=("term",)))
-    return result
 
 
 def _bounded_persisted_model_facts(
     model_results: list[dict[str, Any]],
+    run_root: Path | None = None,
 ) -> list[dict[str, Any]]:
     """Project the public facts needed to answer a selected model question.
 
@@ -4336,7 +4069,10 @@ def _bounded_persisted_model_facts(
     """
 
     projected: list[dict[str, Any]] = []
-    for result in model_results[:2]:
+    # A by-group run is one result per group; two would hide the rest. Each
+    # projected group still states n_groups, and the coefficient tool returns all.
+    grouped = any(isinstance(result.get("by_group"), Mapping) for result in model_results if isinstance(result, dict))
+    for result in model_results[: _MAX_GROUPS_PROJECTED if grouped else 2]:
         model_id = result.get("model_id")
         coefficients = result.get("coefficients")
         if not isinstance(model_id, str) or not isinstance(coefficients, dict):
@@ -4353,17 +4089,190 @@ def _bounded_persisted_model_facts(
                     "p_value": _public_stat_number(coefficient.get("p_value")),
                     "ci_lower": _public_stat_number(coefficient.get("ci_lower")),
                     "ci_upper": _public_stat_number(coefficient.get("ci_upper")),
+                    **_pooled_coefficient_fields(coefficient),
                 }
             )
         projected.append(
             {
                 "model_id": model_id,
-                "r_squared": _public_stat_number(result.get("r_squared")),
-                "r_squared_adj": _public_stat_number(result.get("r_squared_adj")),
+                # What n counts: rows, or units for estimators that aggregate
+                # over units (v1.8.10: CS reported 12 units beside 120 rows).
+                "nobs": result.get("nobs") if isinstance(result.get("nobs"), int) else None,
+                "nobs_basis": result.get("nobs_basis") or "rows",
+                **_fit_statistics(result),
+                "inference": _bounded_inference(result),
+                # The estimator that ran, from the kernel; a requested default
+                # the family does not use is never shown as if it had run.
+                "covariance_executed": _executed_covariance(run_root, model_id),
+                "inference_suppressed": result.get("inference_suppressed"),
+                "multiple_imputation": _bounded_multiple_imputation(result),
+                "by_group": _bounded_by_group(result),
                 "coefficients": rows,
             }
         )
     return projected
+
+
+_MAX_GROUPS_PROJECTED = 12
+
+
+def _bounded_test_by_group(block: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "column": block.get("column"),
+        "estimated_groups": block.get("estimated_groups"),
+        "groups": [
+            {key: group.get(key) for key in ("key", "nobs", "status", "reason") if group.get(key) is not None}
+            for group in (block.get("groups") or [])[:_MAX_GROUPS_PROJECTED] if isinstance(group, Mapping)
+        ],
+        "adjustment_across_groups": block.get("adjustment_across_groups"),
+        "comparing_groups": block.get("comparing_groups"),
+    }
+
+
+def _bounded_by_group(result: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Which group this result is, the groups not estimated, and how to compare them."""
+    block = result.get("by_group")
+    if not isinstance(block, Mapping):
+        return None
+    return {
+        "column": block.get("column"),
+        "group": block.get("key"),
+        "group_index": block.get("index"),
+        "n_groups": block.get("n_groups"),
+        "semantics": block.get("semantics"),
+        "not_estimable": [
+            {"group": item.get("key"), "nobs": item.get("nobs"), "reason": str(item.get("reason") or "")[:300]}
+            for item in (block.get("not_estimable") or [])[:10] if isinstance(item, Mapping)
+        ],
+        "difference_tests": _bounded_difference_tests(block.get("difference_tests")),
+        "comparing_groups": (
+            "Coefficients of separate groups side by side are not a test of a difference; "
+            "cite the group-difference test before saying groups differ."
+        ),
+    }
+
+
+def _bounded_difference_tests(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, Mapping):
+        return None
+    if value.get("status") != "estimated":
+        return {"status": value.get("status"), "reason": str(value.get("reason") or "")[:300]}
+    return {
+        "status": "estimated",
+        "method": value.get("method"),
+        "reference_group": value.get("reference_group"),
+        "covariance_estimator": value.get("covariance_estimator"),
+        "tests": [
+            {key: test.get(key) for key in ("label", "statistic", "df_num", "df_den", "p_value", "distribution",
+                                             "status", "reason") if test.get(key) is not None}
+            for test in (value.get("tests") or [])[:12] if isinstance(test, Mapping)
+        ],
+    }
+
+
+def _pooled_coefficient_fields(coefficient: Mapping[str, Any]) -> dict[str, Any]:
+    """A pooled multiple-imputation coefficient's own Barnard-Rubin df and
+    fraction of missing information; nothing for an ordinary fit."""
+    if "fmi" not in coefficient:
+        return {}
+    return {"df": _public_stat_number(coefficient.get("df")), "fmi": _public_stat_number(coefficient.get("fmi"))}
+
+
+def _bounded_multiple_imputation(result: Mapping[str, Any]) -> dict[str, Any] | None:
+    """m and the pooling rule, so the Agent says how the figures were combined."""
+    block = result.get("multiple_imputation")
+    if not isinstance(block, Mapping):
+        return None
+    return {
+        "m": block.get("m"),
+        "method": "Rubin's rules, Barnard-Rubin df per coefficient",
+        "complete_data_df": block.get("dfcom"),
+        "not_reported": "R-squared, residuals and diagnostics (they describe one imputed dataset)",
+        "post_estimation": "joint tests on pooled estimates are not available yet (needs D1)",
+    }
+
+
+def _executed_covariance(run_root: Path | None, model_id: Any) -> str | None:
+    if run_root is None or not isinstance(model_id, str):
+        return None
+    from ..contracts.model.inference_kernel import kernel_relative_path
+
+    path = run_root / kernel_relative_path(model_id)
+    try:
+        return read_json(path).get("covariance_estimator") if path.is_file() else None
+    except (OSError, ValueError):
+        return None
+
+
+def _bounded_checks(run_root: Path, model_results: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
+    """The primary model's check results: id, status and the one-line finding."""
+    primary = next((item for item in model_results if isinstance(item, dict)), None)
+    model_id = primary.get("model_id") if primary else None
+    path = run_root / "model_results" / f"checks_{model_id}.json"
+    if not model_id or not path.is_file():
+        return None
+    try:
+        payload = read_json(path)
+    except (OSError, ValueError):
+        return None
+    return [
+        {"check_id": item.get("check_id"), "status": item.get("status"), "blinding": item.get("blinding"),
+         "summary": str(item.get("summary") or "")[:300]}
+        for item in payload.get("checks", []) if isinstance(item, dict)
+    ]
+
+
+_INFERENCE_FIELDS = (
+    "covariance", "covariance_estimator", "inference_distribution", "effective_df", "df_method",
+    "cluster_count", "inference_version", "hac",
+)
+
+
+def _fit_statistics(result: Mapping[str, Any]) -> dict[str, Any]:
+    """R-squared, unless the result is pooled over imputations.
+
+    A pooled result has no R-squared of its own; any one dataset's would be
+    shown as if it were the pooled model's, so the fields are left out rather
+    than sent as null (v1.8.10 evaluation A04).
+    """
+    if result.get("multiple_imputation"):
+        return {}
+    return {
+        "r_squared": _public_stat_number(result.get("r_squared")),
+        "r_squared_adj": _public_stat_number(result.get("r_squared_adj")),
+    }
+
+
+def _bounded_inference(result: Mapping[str, Any]) -> dict[str, Any] | None:
+    """How the model's standard errors and p-values were computed.
+
+    A result without `inference_version` predates inference engine v2; with a
+    robust or clustered covariance its p-values used the normal distribution,
+    and the Agent has to be able to say so.
+    """
+    design = result.get("survey_design")
+    if isinstance(design, Mapping):
+        # The design replaced the fitted object's variance and df; the covariance
+        # evidence still describes the pre-design fit (e.g. HC1, t(N - K)).
+        from ..survey.design import recorded_df_convention
+
+        convention, df = recorded_df_convention(design)
+        return {
+            "covariance": "survey_design",
+            "covariance_estimator": f"survey_design_{design.get('variance_method') or 'linearization'}",
+            "inference_distribution": "t", "effective_df": df, "df_method": convention,
+            "legacy_asymptotic": False,
+        }
+    evidence = result.get("covariance_evidence") or result.get("inference_config")
+    if not isinstance(evidence, Mapping):
+        return None
+    out = {key: evidence.get(key) for key in _INFERENCE_FIELDS if evidence.get(key) is not None}
+    out["legacy_asymptotic"] = (
+        "inference_version" not in evidence
+        and evidence.get("inference_distribution") == "normal"
+        and evidence.get("covariance") in {"robust", "clustered"}
+    )
+    return out
 
 
 def _bounded_coefficient_row(row: dict[str, Any]) -> dict[str, Any]:
@@ -4536,6 +4445,8 @@ def _public_operation_artifact_result(
         # A frequency table is an aggregate. Its entries are stored under
         # `rows` for the UI table, a key the projection withholds as raw data.
         result = {**{key: value for key, value in result.items() if key != "rows"}, "frequencies": result["rows"]}
+    if artifact_type == "statistical_test" and isinstance(result.get("by_group"), Mapping):
+        return _public_test_by_group(result), ["raw_artifact_payloads", "raw_rows", "test_effect_details"]
     if artifact_type == "statistical_exploration":
         # Grouped statistics sit at groups[i].variables[name].percentiles --
         # one level deeper than any other result. Lifting each group's
@@ -4549,6 +4460,31 @@ def _public_operation_artifact_result(
             ["raw_artifact_payloads", "raw_rows"],
         )
     return _bounded_public_result_value(result), ["raw_artifact_payloads", "raw_rows"]
+
+
+_BY_GROUP_TEST_FIELDS = (
+    "test_id", "test_type", "group", "nobs", "statistic", "degrees_of_freedom", "p_value",
+    "p_value_holm_across_groups", "p_value_bh_across_groups",
+)
+_MAX_BY_GROUP_TEST_ROWS = 60
+
+
+def _public_test_by_group(result: Mapping[str, Any]) -> dict[str, Any]:
+    """Every group's row of every test, compactly: a generic budget dropped whole groups."""
+    rows = [row for row in result.get("results") or () if isinstance(row, Mapping)]
+    kept = rows[:_MAX_BY_GROUP_TEST_ROWS]
+    return {
+        "test_type": result.get("test_type"),
+        "by_group": _bounded_test_by_group(result["by_group"]),
+        "results": [
+            {key: (_public_stat_number(row[key]) if isinstance(row[key], (int, float)) and not isinstance(row[key], bool)
+                   else _bounded_label(row[key]))
+             for key in _BY_GROUP_TEST_FIELDS if row.get(key) is not None}
+            for row in kept
+        ],
+        "result_count": len(rows),
+        "results_omitted": max(len(rows) - len(kept), 0),
+    }
 
 
 def _lift_group_variables(group: Any) -> Any:
@@ -5273,117 +5209,10 @@ def read_prediction_research_evidence(
     return read_prediction_evidence_from_run_root(run_root, consumer=consumer)
 
 
-@dataclass(frozen=True)
-class FamilyEvidenceField:
-    """One projected field: where it comes from and how it is bounded."""
-
-    key: str
-    source_key: str
-    bound: Callable[[Any], Any]
-    sidecar: str | None = None
-    nested_key: str | None = None
 
 
-@dataclass(frozen=True)
-class FamilyEvidenceSpec:
-    """A family's declaration of what its evidence exposes.
-
-    The bounds are part of the declaration, not an afterthought: this projection
-    is what an agent sees, and an unbounded probability or survival table would
-    turn it into a data-export channel.
-    """
-
-    contract: str | None
-    fields: tuple[FamilyEvidenceField, ...]
-    packet_path: str | None = None
-    sidecars: dict[str, str] = field(default_factory=dict)
 
 
-FAMILY_EVIDENCE_PROJECTIONS: dict[str, FamilyEvidenceSpec] = {
-    "anova": FamilyEvidenceSpec(
-        contract="workbench.anova.result.v1",
-        fields=(
-            # The type is not decoration: on an unbalanced design Type I and
-            # Type III disagree (166.74 against 104.05 on the committed
-            # fixture), so a table quoted without it is ambiguous.
-            FamilyEvidenceField("sums_of_squares_type", "sums_of_squares_type", _public_positive_int),
-            FamilyEvidenceField("anova_table", "anova_table", _bounded_anova_rows),
-            FamilyEvidenceField(
-                "partial_eta_squared", "partial_eta_squared",
-                lambda v: _bounded_numeric_map(v, fields=("partial_eta_squared",)),
-            ),
-            FamilyEvidenceField("posthoc", "posthoc", lambda v: _bounded_anova_rows(v, limit=32)),
-        ),
-    ),
-    "ordinal_logit": FamilyEvidenceSpec(
-        contract="workbench.ordinal_logit.result.v1",
-        sidecars={"diagnostic": "model_results/diagnostics_ordinal_logit_1.json"},
-        fields=(
-            FamilyEvidenceField("outcome_levels", "outcome_levels", _bounded_labels),
-            FamilyEvidenceField(
-                "odds_ratios", "odds_ratios",
-                lambda v: _bounded_numeric_map(v, fields=("odds_ratio", "ci_lower", "ci_upper")),
-            ),
-            FamilyEvidenceField("marginal_effects", "marginal_effects", _bounded_ordinal_marginal_effects),
-            FamilyEvidenceField("predicted_probabilities", "predicted_probabilities", _bounded_ordinal_probabilities),
-            FamilyEvidenceField(
-                "parallel_lines", "parallel_lines", _bounded_parallel_lines, sidecar="diagnostic"
-            ),
-        ),
-    ),
-    "multinomial_logit": FamilyEvidenceSpec(
-        contract="workbench.multinomial_logit.result.v1",
-        sidecars={"diagnostic": "model_results/diagnostics_multinomial_logit_1.json"},
-        fields=(
-            FamilyEvidenceField("outcome_levels", "outcome_levels", _bounded_labels),
-            FamilyEvidenceField("base_category", "base_category", _bounded_label),
-            FamilyEvidenceField(
-                "relative_risk_ratios", "relative_risk_ratios",
-                lambda v: _bounded_numeric_map(
-                    v, fields=("relative_risk_ratio", "ci_lower", "ci_upper")
-                ),
-            ),
-            FamilyEvidenceField("marginal_effects", "marginal_effects", _bounded_multinomial_marginal_effects),
-            FamilyEvidenceField("predicted_probabilities", "predicted_probabilities", _bounded_probability_map),
-        ),
-    ),
-    "survival_cox": FamilyEvidenceSpec(
-        contract=None,  # the packet carries its own
-        packet_path="survival/evidence.json",
-        fields=(
-            FamilyEvidenceField("duration_column", "duration_column", _bounded_label),
-            FamilyEvidenceField("event_column", "event_column", _bounded_label),
-            FamilyEvidenceField("nobs", "nobs", _public_positive_int),
-            FamilyEvidenceField(
-                "censoring", "censoring",
-                lambda v: _bounded_numeric_fields(v, fields=("events", "censored")),
-            ),
-            FamilyEvidenceField("kaplan_meier", "kaplan_meier", lambda v: _bounded_survival_rows(v, limit=16)),
-            FamilyEvidenceField(
-                "log_rank", "log_rank",
-                lambda v: _bounded_numeric_fields(
-                    v, fields=("statistic", "p_value"),
-                    string_fields=("status",), list_fields=("groups",),
-                ),
-            ),
-            FamilyEvidenceField("risk_set", "risk_set", lambda v: _bounded_survival_rows(v, limit=16)),
-            FamilyEvidenceField("schoenfeld", "schoenfeld", _bounded_schoenfeld),
-        ),
-    ),
-    "quantile_regression": FamilyEvidenceSpec(
-        contract="workbench.quantile_regression.result.v1",
-        fields=(
-            FamilyEvidenceField("quantiles", "quantiles", lambda v: _bounded_numeric_list(v, limit=7)),
-            FamilyEvidenceField("fits", "fits", _bounded_quantile_fits),
-            FamilyEvidenceField("confidence_intervals", "confidence_intervals", _bounded_quantile_intervals),
-            FamilyEvidenceField("bootstrap", "bootstrap", _bounded_bootstrap),
-            FamilyEvidenceField(
-                "cross_quantile_comparisons", "cross_quantile_comparisons",
-                _bounded_cross_quantile_comparisons,
-            ),
-        ),
-    ),
-}
 
 
 @dataclass(frozen=True)
@@ -5424,11 +5253,11 @@ def _bounded_survey_design(model_results: list[dict[str, Any]]) -> dict[str, Any
         return _bounded_numeric_fields(
             design,
             fields=(
-                "n_obs", "n_strata", "n_psu", "degf", "residual_degf",
+                "n_obs", "n_strata", "n_psu", "degf", "residual_degf", "inference_degf",
                 "design_effect", "effective_sample_size",
             ),
             string_fields=(
-                "variance_method", "strata_column", "psu_column",
+                "df_convention", "variance_method", "strata_column", "psu_column",
                 "weight_column", "replicate_type", "lonely_psu_policy",
                 "subpopulation",
             ),

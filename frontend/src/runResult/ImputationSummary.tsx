@@ -9,6 +9,7 @@ export interface ImputationSummaryData {
   // method-specific (mice)
   m?: number;
   max_iter?: number;
+  pooled_estimates?: boolean;
   [key: string]: unknown;
 }
 
@@ -47,6 +48,14 @@ export function ImputationSummary(props: { summary: ImputationSummaryData | unde
               </>
             )}
           </li>
+        )}
+        {s.method === "mice" && s.pooled_estimates === true && (
+          <li>
+            Estimates pooled across the {s.m} datasets by Rubin's rules (Barnard–Rubin df)
+          </li>
+        )}
+        {s.method === "mice" && s.m === 1 && (
+          <li>One imputed dataset: standard errors do not reflect imputation uncertainty</li>
         )}
         <li>
           Model lineage: <strong>{s.output_artifact}</strong>{" "}

@@ -4,6 +4,9 @@
       "data_profile"
     ],
     "boxplots": [],
+    "checks_did_1": [
+      "cleaned_dataset"
+    ],
     "cleaned_dataset": [
       "raw_data.csv"
     ],
@@ -26,6 +29,9 @@
     ],
     "event_study": [],
     "histograms": [],
+    "inference_kernel_did_1": [
+      "did_1"
+    ],
     "kde_plots": [],
     "raw_data.csv": [],
     "report_html": [],
@@ -52,9 +58,7 @@
     ],
     "time_trend": []
   },
-  "error_codes": [
-    "PANEL_POOLED_MODEL"
-  ],
+  "error_codes": [],
   "models": {
     "did_1": {
       "coef_keys": [

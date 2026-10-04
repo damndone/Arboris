@@ -414,12 +414,15 @@ Estimate one or more models from the source table.
 | `survey_lonely_psu` |  | Single-PSU stratum policy. One of: fail, remove, adjust, average, certainty. |
 | `survey_weight_frame` |  | Panel weight frame. One of: cross_sectional, longitudinal. |
 | `survey_subpop` |  | Subpopulation condition. |
+| `survey_df` |  | Coefficient test degrees of freedom. One of: design, design_minus_p. |
 | `sampling_weight` |  | Column holding the sampling weight. A survey design requires one, and a sampling weight without a declared design is refused -- give both or neither. |
 | `labels` |  | Column metadata. `measurement_level` maps column names to nominal / ordinal / scale / count and decides how each column is modelled -- an integer rating left undeclared is analysed as a count. Declare every column in one step rather than one at a time. |
 | `branches` | yes | List of {branch_id, outcome, predictors[, categorical][, polynomials][, covariance]}; one estimated model per entry. Entries in `predictors` enter LINEARLY, exactly as the column stands — listing a categorical code column there estimates a linear effect on the code, which is a different model. Use `categorical` for dummy expansion and `polynomials` for powers. Interaction terms cannot be expressed; say so rather than approximating one. |
 | `categorical` |  | Per branch: list of column names to expand into dummy indicators. One level is dropped as the reference category to avoid perfect collinearity with the intercept; the lowest sorted level is the reference. A column listed here must NOT also appear in `predictors`. |
 | `polynomials` |  | Per branch: list of {column, degree}. degree 2 adds the square, 3 adds square and cube, and so on; generated columns are named {column}_pow2, {column}_pow3. The linear term is not added implicitly — list the column in `predictors` as well when the model should contain it. |
 | `context_columns` |  | Extra columns to carry into the model context. |
+| `multiple_imputations` |  | Optional m (2-100) for multiple imputation: missing values in the outcome and predictors are imputed m times by chained equations (MICE), the model is fitted to each completed dataset, and the estimates are pooled by Rubin's rules with Barnard-Rubin degrees of freedom. Offered for: ols with covariance unadjusted, robust or clustered; logit (its model-based covariance). Refused with a sampling design. Pooled results report no R-squared or residual diagnostics, and joint tests on them are not available yet. |
+| `by_group` |  | Optional grouping column: the model is estimated separately within each group (a missing value is a group of its own; at most 50 groups; under a sampling design each group is a domain of the full design). Each group gets its own result; a group below the check library's sample minimum is listed as not estimable. The run also tests whether the groups' coefficients differ (Wald on the fully interacted pooled model): cite that test before saying groups differ. Offered for: logit, ols, poisson, probit. |
 
 ## `model.joint_f_test`
 
@@ -636,6 +639,62 @@ Run the frozen nonparametric statistical operation through its typed, bounded ad
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
 | `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
 | `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+
+## `postestimation.lincom`
+
+Estimate a linear combination of a completed model's coefficients, with its standard error, test and confidence interval. Offered for: logit, multinomial_logit, negative_binomial, ols, ordinal_logit, poisson, probit, the families where it has been checked against a reference implementation; for any other family say it is not offered yet because that check is missing, not because the model cannot. Plan the workflow on the dataset node the model was estimated from (its parent stage, such as stage:cleaned), not on the model node; name the model in model_ref.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `model_ref` | yes | Model node to read, as shown in the graph (`model:logit_1`, or its forest key); the model must belong to `model_run_id`, or to the workflow's target run when that is omitted. |
+| `model_run_id` |  | Run that owns `model_ref`; omit it for the workflow's target run. |
+| `terms` | yes | Object mapping coefficient names to weights. |
+| `constant` |  | Number added to the combination, default 0. |
+| `level` |  | Confidence level, default 0.95. |
+
+## `postestimation.lr`
+
+Likelihood-ratio test of a restricted model nested in a fuller one. Both must be estimated on the same rows with model-based (not robust or clustered) variance. Offered for: logit, ols, poisson, probit, the families where it has been checked against a reference implementation; for any other family say it is not offered yet because that check is missing, not because the model cannot. Plan the workflow on the dataset node the model was estimated from (its parent stage, such as stage:cleaned), not on the model node; name the model in model_ref.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `model_ref` | yes | The fuller model. Model node to read, as shown in the graph (`model:logit_1`, or its forest key); the model must belong to `model_run_id`, or to the workflow's target run when that is omitted. |
+| `model_run_id` |  | Run that owns `model_ref`; omit it for the workflow's target run. |
+| `restricted_model_ref` | yes | The restricted model nested in it. |
+| `restricted_model_run_id` |  | Run that owns the restricted model; omit for the target run. |
+
+## `postestimation.margins`
+
+Marginal effects of regressors on the predicted outcome: averaged over the estimation sample (`at: average`) or at the regressors' means (`at: means`). Offered for: logit, ols, poisson, probit, the families where it has been checked against a reference implementation; for any other family say it is not offered yet because that check is missing, not because the model cannot. Plan the workflow on the dataset node the model was estimated from (its parent stage, such as stage:cleaned), not on the model node; name the model in model_ref.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `model_ref` | yes | Model node to read, as shown in the graph (`model:logit_1`, or its forest key); the model must belong to `model_run_id`, or to the workflow's target run when that is omitted. |
+| `model_run_id` |  | Run that owns `model_ref`; omit it for the workflow's target run. |
+| `variables` | yes | Non-empty list of regressor names. |
+| `at` |  | `average` (default) or `means`. |
+| `level` |  | Confidence level, default 0.95. |
+
+## `postestimation.nlcom`
+
+Estimate a smooth function of a completed model's coefficients by the delta method. Offered for: logit, ols, poisson, probit, the families where it has been checked against a reference implementation; for any other family say it is not offered yet because that check is missing, not because the model cannot. Plan the workflow on the dataset node the model was estimated from (its parent stage, such as stage:cleaned), not on the model node; name the model in model_ref.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `model_ref` | yes | Model node to read, as shown in the graph (`model:logit_1`, or its forest key); the model must belong to `model_run_id`, or to the workflow's target run when that is omitted. |
+| `model_run_id` |  | Run that owns `model_ref`; omit it for the workflow's target run. |
+| `expression` | yes | Arithmetic over coefficient names: + - * / **, exp, log, sqrt; write a name that is not an identifier as b["name"]. Example: x1 / x2. |
+| `level` |  | Confidence level, default 0.95. |
+
+## `postestimation.wald`
+
+Jointly test linear restrictions on a completed model's coefficients (Wald). Reads the model's stored covariance; F or chi-square follows the model's own inference. Offered for: logit, multinomial_logit, negative_binomial, ols, ordinal_logit, poisson, probit, the families where it has been checked against a reference implementation; for any other family say it is not offered yet because that check is missing, not because the model cannot. Plan the workflow on the dataset node the model was estimated from (its parent stage, such as stage:cleaned), not on the model node; name the model in model_ref.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `model_ref` | yes | Model node to read, as shown in the graph (`model:logit_1`, or its forest key); the model must belong to `model_run_id`, or to the workflow's target run when that is omitted. |
+| `model_run_id` |  | Run that owns `model_ref`; omit it for the workflow's target run. |
+| `constraints` | yes | Non-empty list of {terms, value}: `terms` maps coefficient names to weights and the restriction is sum(weight * coefficient) = value. Joint significance of x1 and x2 is [{terms: {x1: 1}, value: 0}, {terms: {x2: 1}, value: 0}]. |
 
 ## `power_analysis.sensitivity_grid`
 
