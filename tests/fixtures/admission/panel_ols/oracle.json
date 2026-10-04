@@ -1,0 +1,25 @@
+{
+  "meta": {
+    "generator": "tests/fixtures/admission/panel_ols/generate_oracle.R",
+    "r_version": "R version 4.6.0 (2026-04-24)",
+    "seed": 20261003,
+    "n": 400,
+    "verification_level": "two-way FE with sum-to-zero effects; explicit dummy OLS HC1 includes all absorbed degrees of freedom; kernel covariance is missing"
+  },
+  "inference": {
+    "covariance_estimator": "runtime robust; kernel null",
+    "df_method": "asymptotic",
+    "reference_distribution": "z",
+    "df_resid": 341
+  },
+  "coefficients": {
+    "Intercept": 1.97979076581951,
+    "x1": 0.712766782355681,
+    "x2": -0.38919171631797
+  },
+  "std_error": {
+    "Intercept": 0.052346581295197,
+    "x1": 0.0633281766070462,
+    "x2": 0.0594316830597326
+  }
+}
