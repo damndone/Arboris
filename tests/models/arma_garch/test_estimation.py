@@ -131,7 +131,7 @@ def test_joint_q_zero_real_arch_fit_has_unified_likelihood_and_series() -> None:
     json.dumps(payload, allow_nan=False)
 
 
-def test_joint_q_greater_than_zero_runtime_error_never_downgrades() -> None:
+def test_joint_request_rejects_a_sequential_candidate_without_downgrading() -> None:
     from workbench.engine.packs.arma_garch.estimation import estimate_arma_garch
     from workbench.engine.packs.arma_garch.volatility import search_variance_candidates
 
@@ -156,7 +156,7 @@ def test_joint_q_greater_than_zero_runtime_error_never_downgrades() -> None:
         object.__setattr__(unsafe_joint_contract, field_name, getattr(contract, field_name))
     object.__setattr__(unsafe_joint_contract, "estimation_strategy", "joint")
 
-    with pytest.raises(ArmaGarchInputError) as caught:
+    with pytest.raises(ValueError, match="strategy"):
         estimate_arma_garch(
             values,
             unsafe_joint_contract,
@@ -165,9 +165,6 @@ def test_joint_q_greater_than_zero_runtime_error_never_downgrades() -> None:
             frozen_hold_back=search.common_hold_back,
         )
 
-    assert caught.value.code == "UNSUPPORTED_JOINT_ARMA_GARCH"
-    assert caught.value.evidence["arma_q"] == 1
-    assert len(caught.value.recommended_actions) == 2
 
 
 @pytest.mark.parametrize(

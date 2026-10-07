@@ -1,0 +1,5 @@
+Traceback (most recent call last):
+  File "/Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py", line 8, in <module>
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+KeyboardInterrupt

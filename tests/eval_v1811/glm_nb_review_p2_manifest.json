@@ -1,0 +1,25 @@
+{
+  "reviewed_producer_tip": "06e3c798b4758a2c32fae2c30708641d54b15642",
+  "pre_remediation_tip": "87f964311115117f08b790a6247645ad23e1ff80",
+  "statistical_reference_tip": "64ec3d73121c7d8e792942e62d30d0b92c9d8907",
+  "baseline": "01fb0752bce129c8d8848c021eca776dadccb515",
+  "worktree": "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-final-oracles",
+  "scope": "P2 public reference protection only; no numerical rerun",
+  "conclusion": "PASS",
+  "fresh_result": "6 passed in 1.34s",
+  "raw_copies_retained": "ignored local/v1811-glm-nb-raw-logs/20261004-p2/; raw hashes in proof, values withheld",
+  "commands": [
+    "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 .venv/bin/python tests/eval_v1811/glm_nb_review_p2_recheck.py > tests/eval_v1811/glm_nb_review_p2_capture_output.txt 2>&1",
+    "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py .venv/bin/python -m pytest -q tests/eval_v1811/glm_nb_review_p2_test.py tests/test_glm_nb_v1811_reference.py::test_native_log_redaction_preserves_all_non_header_bytes > tests/eval_v1811/glm_nb_review_p2_test_output.txt 2>&1"
+  ],
+  "owned_sha256": {
+    "tests/eval_v1811/glm_nb_review_p2_recheck.py": "d62ef4006953bcf0a0f008ca3e98bb276bd25d4b8ae953d0f24c70afcd87df13",
+    "tests/eval_v1811/glm_nb_review_p2_test.py": "3c45e37c8a265c65f5c6742d39afa7933e08bf9d03c5e0995f05557abdbf7fb3",
+    "tests/eval_v1811/glm_nb_review_p2_proof.json": "616eb4b5e9552206782bf3e6c188fe48a053b5559da3273f965f09eab7b0e70a",
+    "tests/eval_v1811/glm_nb_review_p2_capture_output.txt": "5d075fc3e136786b651e8c209f381f2dbdc6ee8037bbb8bc70bffbec38b1dc1a",
+    "tests/eval_v1811/glm_nb_review_p2_test_output.txt": "918b21996e101464c291c10c35bb68a495826dffc5140ab4fb7bfdffa64c6020",
+    "docs/superpowers/handoffs/2026-10-04-v1811-glm-nb-p2-independent-recheck.md": "b2ed0fd593f40dc4c52b4245df2065a3a81d9b457f6214c9ce05ccbfbecb36c9"
+  },
+  "new_owned_private_value_scan": "PASS; no original private field value in any new file",
+  "report_commit_role": "Review evidence only, not a new feature baseline"
+}

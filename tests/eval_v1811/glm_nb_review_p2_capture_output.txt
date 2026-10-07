@@ -1,0 +1,1 @@
+{"raw_logs": 4, "changed_lines": 8, "public_texts_scanned": 50, "private_value_hits": 0, "unredacted_header_hits": 0, "protected": 9}

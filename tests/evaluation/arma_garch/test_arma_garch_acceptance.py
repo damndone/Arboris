@@ -195,16 +195,11 @@ def test_sequential_strategy_reports_no_composite_information_criterion(
     assert not {"aic", "bic", "log_likelihood"}.intersection(validation_fit)
 
 
-def test_joint_request_with_ma_term_is_explicitly_rejected() -> None:
-    from workbench.engine.packs.arma_garch.errors import ArmaGarchInputError
+def test_joint_request_with_ma_term_is_not_silently_downgraded() -> None:
     from workbench.engine.packs.arma_garch.estimation import resolve_estimation_strategy
-
-    # Proof 5: q > 0 joint request is blocked, never silently downgraded.
     assert resolve_estimation_strategy("sequential", mean_q=1) == "sequential_arma_garch"
-    with pytest.raises(ArmaGarchInputError) as exc_info:
-        resolve_estimation_strategy("joint", mean_q=1)
-    assert exc_info.value.code == "UNSUPPORTED_JOINT_ARMA_GARCH"
-    assert exc_info.value.recommended_actions
+    assert resolve_estimation_strategy("auto", mean_q=1) == "sequential_arma_garch"
+    assert resolve_estimation_strategy("joint", mean_q=1) == "joint_arma_garch"
 
 
 def test_failure_recommended_actions_form_schema_valid_proposals() -> None:

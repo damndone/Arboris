@@ -23,7 +23,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Path, Request
 from fastapi.exceptions import RequestValidationError
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 
@@ -397,6 +397,54 @@ class ProviderUpsertRequest(BaseModel):
 
 
 ProviderID = Annotated[str, Path(pattern=PROVIDER_ID_PATTERN)]
+
+
+class ModelsDiscoveryRequest(BaseModel):
+    model_config = ConfigDict(hide_input_in_errors=True, extra="forbid")
+
+    base_url: str
+    api_key: SecretStr = Field(min_length=1)
+    timeout_s: float = Field(default=DEFAULT_TIMEOUT_S, gt=0, le=MAX_TIMEOUT_S)
+
+    @field_validator("base_url")
+    @classmethod
+    def validate_base_url(cls, value: str) -> str:
+        return _validate_provider_url(value, "base_url")
+
+    @field_validator("api_key")
+    @classmethod
+    def validate_api_key(cls, value: SecretStr) -> SecretStr:
+        if not value.get_secret_value().strip():
+            raise ValueError("API key must not be blank")
+        return value
+
+    @field_validator("timeout_s")
+    @classmethod
+    def validate_timeout(cls, value: float) -> float:
+        if not math.isfinite(value):
+            raise ValueError("timeout_s must be finite")
+        return value
+
+
+@router.post("/llm/providers/models/discover")
+def discover_llm_provider_models(request: ModelsDiscoveryRequest) -> dict[str, Any]:
+    """Discover draft models without persisting credentials or provider state."""
+    from ..llm.config import LLMConfig
+
+    config = LLMConfig(
+        base_url=request.base_url, api_key=request.api_key.get_secret_value(),
+        model="", timeout_s=request.timeout_s,
+    )
+    try:
+        summaries = fetch_models(config)
+    except LLMNotConfiguredError as exc:
+        raise WorkbenchAPIError(status_code=503, code="LLM_NOT_CONFIGURED", message=str(exc)) from exc
+    except LLMUpstreamError as exc:
+        raise _upstream_error(exc) from exc
+    return {
+        "models": [ModelRecord(item["id"], item["id"]).to_dict() for item in summaries],
+        "message": "Models discovered" if summaries else "No models returned; enter a model manually.",
+    }
 
 
 def _provider_or_error(provider_id: str) -> ProviderRecord:

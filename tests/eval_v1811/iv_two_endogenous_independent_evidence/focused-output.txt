@@ -1,0 +1,30 @@
+.........F......
+Fontconfig error: No writable cache directories
+	/opt/homebrew/var/cache/fontconfig
+	/Users/jiayuanren/.cache/fontconfig
+	/Users/jiayuanren/.fontconfig
+Retained public IV run: /private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-786/iv-two-endogenous-v18110/oracle/runs/20261004_202819_260118_4e4bf9dc
+r max coefficient/covariance error: 5.551115123125783e-16 8.239936510889834e-18
+.stata max coefficient/covariance error: 8.881784197001252e-16 8.673617379884035e-18
+.r joint endogenous Wald Workbench/native: {'operation': 'wald', 'model_id': 'iv_2sls_1', 'model_type': 'iv_2sls', 'covariance_estimator': 'robust', 'nobs': 650, 'df_method': 'asymptotic', 'n_clusters': None, 'constraints': [{'terms': {'xe1': 1.0}, 'value': 0.0}, {'terms': {'xe2': 1.0}, 'value': 0.0}], 'distribution': 'chi2', 'statistic': 52.966469476497096, 'df_num': 2, 'df_den': None, 'p_value': 3.1512095954357576e-12} {'distribution': 'chi2', 'statistic': 52.966469476497025, 'df_num': 2, 'df_den': None, 'p_value': 3.151209595435867e-12, 'constraints': ['xe1=0', 'xe2=0']}
+.stata joint endogenous Wald Workbench/native: {'operation': 'wald', 'model_id': 'iv_2sls_1', 'model_type': 'iv_2sls', 'covariance_estimator': 'robust', 'nobs': 650, 'df_method': 'asymptotic', 'n_clusters': None, 'constraints': [{'terms': {'xe1': 1.0}, 'value': 0.0}, {'terms': {'xe2': 1.0}, 'value': 0.0}], 'distribution': 'chi2', 'statistic': 52.966469476497096, 'df_num': 2, 'df_den': None, 'p_value': 3.1512095954357576e-12} {'distribution': 'chi2', 'statistic': 52.9664694764971, 'df_num': 2, 'df_den': None, 'p_value': 3.15120959543578e-12, 'constraints': ['xe1=0', 'xe2=0']}
+...
+=================================== FAILURES ===================================
+____________ test_actual_public_owner_metadata_and_complete_kernel _____________
+
+evidence = ({'method': "Exactly identified moment solve beta=(Z'X)^-1 Z'y; HC0 moment sandwich A S A'/N", 'environment': {'R': 'R...b46c7cf6c42c4dc1db66b3ae63a0ef02ffe10ff3b24983687355daa238c497', 'filename': 'data.csv'}, 'rerun_of': None, ...}, ...})
+
+    def test_actual_public_owner_metadata_and_complete_kernel(evidence):
+        r,_,o=evidence; k=o["kernel"]
+        assert k["param_names"]==r["terms"]
+        assert k["nobs"]==650 and k["df_resid"]==646
+        assert k["reference_distribution"]=="z" and k["df_method"]=="asymptotic"
+        assert k["covariance_estimator"]=="robust"
+>       assert o["run_inputs"]["iv_endog"]==["xe1","xe2"]
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'iv_endog'
+
+tests/eval_v1811/iv_two_endogenous_independent_checks.py:130: KeyError
+=========================== short test summary info ============================
+FAILED tests/eval_v1811/iv_two_endogenous_independent_checks.py::test_actual_public_owner_metadata_and_complete_kernel
+1 failed, 21 passed in 12.35s

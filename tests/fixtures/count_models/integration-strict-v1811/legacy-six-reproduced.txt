@@ -1,0 +1,249 @@
+FFFF
+Fontconfig error: No writable cache directories
+	/opt/homebrew/var/cache/fontconfig
+	/Users/jiayuanren/.cache/fontconfig
+	/Users/jiayuanren/.fontconfig
+EE
+==================================== ERRORS ====================================
+_______ ERROR at setup of test_coefficients_and_standard_errors_match_r ________
+
+tmp_path_factory = TempPathFactory(_given_basetemp=None, _trace=<pluggy._tracing.TagTracerSub object at 0x1027c55b0>, _basetemp=PosixPath.../0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-703'), _retention_count=1000000, _retention_policy='all')
+
+    @pytest.fixture(scope="module")
+    def fitted(tmp_path_factory):
+        project = create_project(tmp_path_factory.mktemp("oracle-glm_negative_binomial"), "oracle")
+        outcome = run_workflow(project.root, [FIXTURES / "data.csv"], mode="auto",
+                               model_type='glm:negative_binomial', y='y', x=['x1', 'x2'], **{})
+        root = project.root / "runs" / outcome["run_id"]
+>       assert outcome["status"] == "completed", read_json(root / "errors.json")
+E       AssertionError: {'issues': [{'severity': 'BLOCKER', 'code': 'MODEL_FIT_FAILED', 'message': 'GLM_NB_ALPHA_REQUIRED: supply a fixed posi...'model_type': 'glm:negative_binomial', 'model_id': 'glm_1', 'engine': 'statsmodels', 'step': 'estimation', ...}, ...}]}
+E       assert 'failed' == 'completed'
+E         
+E         - completed
+E         + failed
+
+../workbench-v1.8.11/tests/test_admission_oracle_glm_negative_binomial.py:21: AssertionError
+------------------------------ Captured log setup ------------------------------
+WARNING  matplotlib:__init__.py:577 /Users/jiayuanren/.matplotlib is not a writable directory
+WARNING  matplotlib:__init__.py:593 Matplotlib created a temporary cache directory at /var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/matplotlib-78y4pyup because there was an issue with the default path ({configdir}); it is highly recommended to set the MPLCONFIGDIR environment variable to a writable directory, in particular to speed up the import of Matplotlib and to better support multiprocessing.
+WARNING  matplotlib.font_manager:font_manager.py:1249 Matplotlib is building the font cache; this may take a moment.
+__________ ERROR at setup of test_inference_settings_match_reference ___________
+
+tmp_path_factory = TempPathFactory(_given_basetemp=None, _trace=<pluggy._tracing.TagTracerSub object at 0x1027c55b0>, _basetemp=PosixPath.../0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-703'), _retention_count=1000000, _retention_policy='all')
+
+    @pytest.fixture(scope="module")
+    def fitted(tmp_path_factory):
+        project = create_project(tmp_path_factory.mktemp("oracle-glm_negative_binomial"), "oracle")
+        outcome = run_workflow(project.root, [FIXTURES / "data.csv"], mode="auto",
+                               model_type='glm:negative_binomial', y='y', x=['x1', 'x2'], **{})
+        root = project.root / "runs" / outcome["run_id"]
+>       assert outcome["status"] == "completed", read_json(root / "errors.json")
+E       AssertionError: {'issues': [{'severity': 'BLOCKER', 'code': 'MODEL_FIT_FAILED', 'message': 'GLM_NB_ALPHA_REQUIRED: supply a fixed posi...'model_type': 'glm:negative_binomial', 'model_id': 'glm_1', 'engine': 'statsmodels', 'step': 'estimation', ...}, ...}]}
+E       assert 'failed' == 'completed'
+E         
+E         - completed
+E         + failed
+
+../workbench-v1.8.11/tests/test_admission_oracle_glm_negative_binomial.py:21: AssertionError
+=================================== FAILURES ===================================
+______ test_underdispersed_sample_reports_poisson_boundary_and_valid_test ______
+
+    def test_underdispersed_sample_reports_poisson_boundary_and_valid_test():
+        frame = pd.read_csv(FIXTURE / "poisson.csv", float_precision="round_trip")
+        reference = json.loads((FIXTURE / "stata.json").read_text())["poisson"]
+>       result, fitted = run_negative_binomial(frame, "y", ["x1", "x2"], "boundary")
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+../workbench-v1.8.11/tests/test_count_models_boundary.py:18: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+../workbench-v1.8.11/backend/workbench/econometrics/runner.py:1265: in run_negative_binomial
+    return fit_negative_binomial(frame, formula, model_id, dispersion=dispersion, alpha=alpha, y_column=y)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+frame =       y        x1        x2
+0     2  0.974582  0.180718
+1     0 -0.169747  0.500335
+2     4 -0.312766 -0.657020
+3     ...  0.303900
+1997  3  0.394361 -1.812106
+1998  2  0.660694 -1.173967
+1999  3  1.135337  0.878281
+
+[2000 rows x 3 columns]
+formula = "Q('y') ~ Q('x1') + Q('x2')", model_id = 'boundary'
+dispersion = 'mean', alpha = None, y_column = 'y'
+
+    def fit_negative_binomial(frame, formula: str, model_id: str, *, dispersion="mean", alpha=None, y_column=None):
+        if y_column is not None and alpha is None:
+            _validate_counts(np.asarray(frame[y_column].dropna()))
+        if dispersion not in {"mean", "constant"}:
+            raise ValueError("NB_DISPERSION_INVALID: dispersion must be 'mean' or 'constant'.")
+        if alpha is not None:
+            alpha = _validate_alpha(alpha)
+            if dispersion != "mean":
+                raise ValueError("NB_FIXED_DISPERSION_UNSUPPORTED: fixed alpha currently requires NB2 dispersion='mean'.")
+            fitted = _glm_fitted(frame, formula, families.NegativeBinomial(alpha=alpha),
+                                 response_error_code="NB_COUNTS_INVALID")
+            fitted._results.normalized_cov_params = _information_covariance(
+                -fitted.model.hessian(fitted.params, observed=True), "GLM_RESULT_NONFINITE")
+            fitted._results._cache.clear()
+            _validate_glm_result(fitted)
+            result = normalize_statsmodels_result(fitted, model_id)
+            result.update(_metadata(dispersion=dispersion, estimated=False, fixed=alpha, ancillary=[],
+                                    test=None, information="observed", convergence=_glm_convergence(fitted)))
+        else:
+            model = smf.negativebinomial(formula=formula, data=frame, loglike_method="nb2" if dispersion == "mean" else "nb1")
+            iterations = 0
+    
+            def record_iteration(params):
+                nonlocal iterations
+                iterations += 1
+    
+            fitted = model.fit(method="bfgs", gtol=ML_TOLERANCE, maxiter=1000, disp=False,
+                               callback=record_iteration)
+            if float(fitted.params.iloc[-1]) < .001:
+                _install_stable_likelihood(model, dispersion)
+                fitted = model.fit(start_params=np.asarray(fitted.params), method="bfgs",
+                                   gtol=ML_TOLERANCE, maxiter=1000, disp=False, callback=record_iteration)
+            endog = model.endog
+            _validate_counts(endog)
+            retvals = fitted.mle_retvals
+            if not retvals["converged"]:
+                raise ValueError("NB_NOT_CONVERGED: joint ML failed to converge.")
+            params = np.asarray(fitted.params)
+            _require_finite(params, "NB_INFERENCE_UNCERTIFIED", "Joint parameters")
+            _require_finite(fitted.llf, "NB_INFERENCE_UNCERTIFIED", "Log likelihood")
+            if params[-1] <= 0:
+                raise ValueError("NB_INFERENCE_UNCERTIFIED: a regular natural-parameter interior point is unavailable.")
+            natural_score = model.score(params)
+            _require_finite(natural_score, "NB_INFERENCE_UNCERTIFIED", "Natural-parameter score")
+            natural_mean_score = float(np.max(np.abs(natural_score)) / len(endog))
+            if natural_mean_score > ML_TOLERANCE:
+>               raise ValueError("NB_INFERENCE_UNCERTIFIED: regular interior inference is unavailable; "
+                                 f"maximum absolute natural-parameter score per observation={natural_mean_score:.17g} "
+                                 f"exceeds tolerance={ML_TOLERANCE:.17g}. Optimizer log-coordinate stopping does not certify this point.")
+E               ValueError: NB_INFERENCE_UNCERTIFIED: regular interior inference is unavailable; maximum absolute natural-parameter score per observation=0.010249274019403664 exceeds tolerance=1e-08. Optimizer log-coordinate stopping does not certify this point.
+
+../workbench-v1.8.11/backend/workbench/econometrics/count_models.py:335: ValueError
+________ test_invalid_response_is_rejected_for_joint_and_fixed[0.5-0.5] ________
+
+value = 0.5, alpha = 0.5
+
+    @pytest.mark.parametrize("value", [-1, .5, float("inf")])
+    @pytest.mark.parametrize("alpha", [None, .5])
+    def test_invalid_response_is_rejected_for_joint_and_fixed(value, alpha):
+        frame = pd.read_csv(FIXTURE / "nb2.csv")
+        frame["y"] = frame.y.astype(float)
+        frame.loc[0, "y"] = value
+>       with pytest.raises(ValueError, match="NB_COUNTS_INVALID"):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE ValueError
+
+../workbench-v1.8.11/tests/test_count_models_boundary.py:46: Failed
+_______ test_boundary_packet_can_be_serialized_without_nonfinite_numbers _______
+
+    def test_boundary_packet_can_be_serialized_without_nonfinite_numbers():
+        frame = pd.read_csv(FIXTURE / "poisson.csv", float_precision="round_trip")
+>       result, _ = run_negative_binomial(frame, "y", ["x1", "x2"], "boundary")
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+../workbench-v1.8.11/tests/test_count_models_boundary.py:52: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+../workbench-v1.8.11/backend/workbench/econometrics/runner.py:1265: in run_negative_binomial
+    return fit_negative_binomial(frame, formula, model_id, dispersion=dispersion, alpha=alpha, y_column=y)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+frame =       y        x1        x2
+0     2  0.974582  0.180718
+1     0 -0.169747  0.500335
+2     4 -0.312766 -0.657020
+3     ...  0.303900
+1997  3  0.394361 -1.812106
+1998  2  0.660694 -1.173967
+1999  3  1.135337  0.878281
+
+[2000 rows x 3 columns]
+formula = "Q('y') ~ Q('x1') + Q('x2')", model_id = 'boundary'
+dispersion = 'mean', alpha = None, y_column = 'y'
+
+    def fit_negative_binomial(frame, formula: str, model_id: str, *, dispersion="mean", alpha=None, y_column=None):
+        if y_column is not None and alpha is None:
+            _validate_counts(np.asarray(frame[y_column].dropna()))
+        if dispersion not in {"mean", "constant"}:
+            raise ValueError("NB_DISPERSION_INVALID: dispersion must be 'mean' or 'constant'.")
+        if alpha is not None:
+            alpha = _validate_alpha(alpha)
+            if dispersion != "mean":
+                raise ValueError("NB_FIXED_DISPERSION_UNSUPPORTED: fixed alpha currently requires NB2 dispersion='mean'.")
+            fitted = _glm_fitted(frame, formula, families.NegativeBinomial(alpha=alpha),
+                                 response_error_code="NB_COUNTS_INVALID")
+            fitted._results.normalized_cov_params = _information_covariance(
+                -fitted.model.hessian(fitted.params, observed=True), "GLM_RESULT_NONFINITE")
+            fitted._results._cache.clear()
+            _validate_glm_result(fitted)
+            result = normalize_statsmodels_result(fitted, model_id)
+            result.update(_metadata(dispersion=dispersion, estimated=False, fixed=alpha, ancillary=[],
+                                    test=None, information="observed", convergence=_glm_convergence(fitted)))
+        else:
+            model = smf.negativebinomial(formula=formula, data=frame, loglike_method="nb2" if dispersion == "mean" else "nb1")
+            iterations = 0
+    
+            def record_iteration(params):
+                nonlocal iterations
+                iterations += 1
+    
+            fitted = model.fit(method="bfgs", gtol=ML_TOLERANCE, maxiter=1000, disp=False,
+                               callback=record_iteration)
+            if float(fitted.params.iloc[-1]) < .001:
+                _install_stable_likelihood(model, dispersion)
+                fitted = model.fit(start_params=np.asarray(fitted.params), method="bfgs",
+                                   gtol=ML_TOLERANCE, maxiter=1000, disp=False, callback=record_iteration)
+            endog = model.endog
+            _validate_counts(endog)
+            retvals = fitted.mle_retvals
+            if not retvals["converged"]:
+                raise ValueError("NB_NOT_CONVERGED: joint ML failed to converge.")
+            params = np.asarray(fitted.params)
+            _require_finite(params, "NB_INFERENCE_UNCERTIFIED", "Joint parameters")
+            _require_finite(fitted.llf, "NB_INFERENCE_UNCERTIFIED", "Log likelihood")
+            if params[-1] <= 0:
+                raise ValueError("NB_INFERENCE_UNCERTIFIED: a regular natural-parameter interior point is unavailable.")
+            natural_score = model.score(params)
+            _require_finite(natural_score, "NB_INFERENCE_UNCERTIFIED", "Natural-parameter score")
+            natural_mean_score = float(np.max(np.abs(natural_score)) / len(endog))
+            if natural_mean_score > ML_TOLERANCE:
+>               raise ValueError("NB_INFERENCE_UNCERTIFIED: regular interior inference is unavailable; "
+                                 f"maximum absolute natural-parameter score per observation={natural_mean_score:.17g} "
+                                 f"exceeds tolerance={ML_TOLERANCE:.17g}. Optimizer log-coordinate stopping does not certify this point.")
+E               ValueError: NB_INFERENCE_UNCERTIFIED: regular interior inference is unavailable; maximum absolute natural-parameter score per observation=0.010249274019403664 exceeds tolerance=1e-08. Optimizer log-coordinate stopping does not certify this point.
+
+../workbench-v1.8.11/backend/workbench/econometrics/count_models.py:335: ValueError
+_______ test_explicit_alpha_one_matches_high_precision_admission_oracle ________
+
+    def test_explicit_alpha_one_matches_high_precision_admission_oracle():
+        path = Path(__file__).parent / "fixtures/admission/glm_negative_binomial"
+        oracle = json.loads((path / "oracle_high_precision.json").read_text())
+        result, fitted = run_glm(pd.read_csv(path / "data.csv", float_precision="round_trip"), "y", ["x1", "x2"], "glm", "negative_binomial", alpha=1.)
+        for term, value in oracle["coefficients"].items():
+>           assert abs(result["coefficients"][term]["estimate"]-value) < 1e-8
+E           assert 1.0561876151449212e-08 < 1e-08
+E            +  where 1.0561876151449212e-08 = abs((0.3789844117869672 - 0.378984401225091))
+
+../workbench-v1.8.11/tests/test_count_models_glm_precision.py:16: AssertionError
+=============================== warnings summary ===============================
+tests/test_count_models_boundary.py::test_invalid_response_is_rejected_for_joint_and_fixed[0.5-0.5]
+tests/test_count_models_glm_precision.py::test_explicit_alpha_one_matches_high_precision_admission_oracle
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/genmod/generalized_linear_model.py:1923: FutureWarning: The bic value is computed using the deviance formula. After 0.13 this will change to the log-likelihood based formula. This change has no impact on the relative rank of models compared using BIC. You can directly access the log-likelihood version using the `bic_llf` attribute. You can suppress this message by calling statsmodels.genmod.generalized_linear_model.SET_USE_BIC_LLF with True to get the LLF-based version now or False to retainthe deviance version.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED ../workbench-v1.8.11/tests/test_count_models_boundary.py::test_underdispersed_sample_reports_poisson_boundary_and_valid_test
+FAILED ../workbench-v1.8.11/tests/test_count_models_boundary.py::test_invalid_response_is_rejected_for_joint_and_fixed[0.5-0.5]
+FAILED ../workbench-v1.8.11/tests/test_count_models_boundary.py::test_boundary_packet_can_be_serialized_without_nonfinite_numbers
+FAILED ../workbench-v1.8.11/tests/test_count_models_glm_precision.py::test_explicit_alpha_one_matches_high_precision_admission_oracle
+ERROR ../workbench-v1.8.11/tests/test_admission_oracle_glm_negative_binomial.py::test_coefficients_and_standard_errors_match_r
+ERROR ../workbench-v1.8.11/tests/test_admission_oracle_glm_negative_binomial.py::test_inference_settings_match_reference
+4 failed, 2 warnings, 2 errors in 10.62s

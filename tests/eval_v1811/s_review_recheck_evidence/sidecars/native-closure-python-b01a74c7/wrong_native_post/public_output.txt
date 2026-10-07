@@ -1,0 +1,7 @@
+Traceback (most recent call last):
+  File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_recheck_evidence/sidecars/native-closure-python-b01a74c7/wrong_native_post/analysis.py", line 213, in <module>
+    wb_check(checks[31], 1.8142923393283725, 1e-08, 1e-05, 'native_post:statistics.value')
+    ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_recheck_evidence/sidecars/native-closure-python-b01a74c7/wrong_native_post/analysis.py", line 32, in wb_check
+    raise AssertionError(f'{label}: {actual!r} != {expected!r}')
+AssertionError: native_post:statistics.value: 0.8142923393283724 != 1.8142923393283725

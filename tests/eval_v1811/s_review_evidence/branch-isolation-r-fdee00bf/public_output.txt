@@ -1,0 +1,3 @@
+Error in results[["categorical"]][["beta"]][["C(Q('category'))[T.2.0]"]] : 
+  subscript out of bounds
+Execution halted

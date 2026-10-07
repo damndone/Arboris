@@ -161,11 +161,16 @@ def _build_ols_option_vocabulary() -> dict[str, Any]:
 def _option_vocabulary_builders() -> dict[str, BuildVocabulary]:
     from .arma_garch_vocabulary import build_arma_garch_option_vocabulary
     from ...contracts.model.arma_garch import ARMA_GARCH_PACK_ID
+    from .count_models_vocabulary import (
+        build_negative_binomial_option_vocabulary, build_glm_nb_option_vocabulary,
+    )
 
     return {
         ARMA_GARCH_PACK_ID: build_arma_garch_option_vocabulary,
         "ols": _build_ols_option_vocabulary,
         "panel_ols": _build_ols_option_vocabulary,
+        "negative_binomial": build_negative_binomial_option_vocabulary,
+        "glm:negative_binomial": build_glm_nb_option_vocabulary,
     }
 
 

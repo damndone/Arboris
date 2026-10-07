@@ -1,0 +1,105 @@
+
+Fontconfig error: No writable cache directories
+	/opt/homebrew/var/cache/fontconfig
+	/Users/jiayuanren/.cache/fontconfig
+	/Users/jiayuanren/.fontconfig
+{"http_run": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-755/test_http_reaches_actual_owner0/review/runs/20261004_200407_962074_60c0ab0d", "options": {"dispersion": "constant"}, "status": "completed"}
+.{"http_run": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-755/test_http_reaches_actual_owner1/review/runs/20261004_200409_468633_37237a9a", "options": {"alpha": 0.5}, "status": "completed"}
+.{"http_run": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-755/test_http_reaches_actual_owner2/review/runs/20261004_200410_685321_d18da9c7", "options": {"alpha": 0.5}, "status": "completed"}
+.{"agent_branch": {"branch_id": "a", "run_id": "20261004_200412_053018_9dfca124", "model_id": "negative_binomial_1", "inference_kernel_sha256": "d2e814075e2bade42e98c9ec7761ef9524fd6e18cac8996a83ba3668daaae6f1", "artifact_ids": ["raw_nb1.csv", "cleaning_actions", "cleaned_dataset", "data_profile", "analysis_router", "statistical_tests_correlations", "statistical_tests_rank_correlations", "statistical_tests_t_tests", "statistical_tests_anova", "statistical_tests_nonparametric", "statistical_tests_chi_square", "statistical_tests_fisher_exact", "statistical_tests_evidence", "negative_binomial_1", "inference_kernel_negative_binomial_1", "diagnostics_negative_binomial_1", "checks_negative_binomial_1", "histograms", "kde_plots", "boxplots", "correlation_heatmap", "scatter_plots", "residuals_fitted", "qq_residuals", "coef_plot", "residuals_vs_x1", "fitted_vs_x1", "residuals_vs_x2", "fitted_vs_x2", "pred_prob_by_class", "outcome_counts", "diagnostic_summary", "report_html"], "branch_spec": {"model_family": "negative_binomial", "covariance": "unadjusted", "outcome": "y", "predictors": ["x1", "x2"], "categorical": [], "polynomials": []}, "predictor_columns": ["x1", "x2"], "term_groups": {"linear": {"x1": ["x1"], "x2": ["x2"]}, "categorical": {}, "polynomial": {}}}, "options": {"dispersion": "constant"}}
+.{"agent_branch": {"branch_id": "a", "run_id": "20261004_200413_483956_2a291e5e", "model_id": "glm_1", "inference_kernel_sha256": "fd383a9158dfdf0f56ad473fc87b502154540275acf3cdeab4e02516eea5bf73", "artifact_ids": ["raw_data.csv", "cleaning_actions", "cleaned_dataset", "data_profile", "analysis_router", "statistical_tests_correlations", "statistical_tests_rank_correlations", "statistical_tests_t_tests", "statistical_tests_anova", "statistical_tests_nonparametric", "statistical_tests_chi_square", "statistical_tests_fisher_exact", "statistical_tests_evidence", "glm_1", "inference_kernel_glm_1", "diagnostics_glm_1", "checks_glm_1", "histograms", "kde_plots", "boxplots", "correlation_heatmap", "scatter_plots", "coef_plot", "outcome_counts", "diagnostic_summary", "report_html"], "branch_spec": {"model_family": "glm:negative_binomial", "covariance": "unadjusted", "outcome": "y", "predictors": ["x1", "x2"], "categorical": [], "polynomials": []}, "predictor_columns": ["x1", "x2"], "term_groups": {"linear": {"x1": ["x1"], "x2": ["x2"]}, "categorical": {}, "polynomial": {}}}, "options": {"alpha": 0.5}}
+.{"run_root": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-755/test_persisted_beta_kernel_kee0/projects/named/runs/20261004_200414_745989_151ea1b8", "family": "negative_binomial", "outcome": "ynb", "param_names": ["Intercept", "alpha", "x2", "x3"], "dispersion": "mean", "alpha_fixed_value": null}
+.{"run_root": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-755/test_persisted_beta_kernel_kee1/projects/named/runs/20261004_200416_390293_1d93a8c1", "family": "negative_binomial", "outcome": "ynb", "param_names": ["Intercept", "lnalpha", "x2", "x3"], "dispersion": "mean", "alpha_fixed_value": null}
+.{"run_root": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-755/test_persisted_beta_kernel_kee2/projects/named/runs/20261004_200418_111827_ca577023", "family": "negative_binomial", "outcome": "ynb", "param_names": ["Intercept", "delta", "x2", "x3"], "dispersion": "mean", "alpha_fixed_value": null}
+.{"run_root": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-755/test_persisted_beta_kernel_kee3/projects/named/runs/20261004_200419_756256_0ae3a71d", "family": "negative_binomial", "outcome": "ynb", "param_names": ["Intercept", "lndelta", "x2", "x3"], "dispersion": "mean", "alpha_fixed_value": null}
+.{"run_root": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-755/test_unbound_default_and_null_0/legacy/runs/20261004_200421_395243_10e9673d", "family": "negative_binomial", "outcome": "ynb", "param_names": ["Intercept", "x1", "x2", "x3"], "dispersion": "mean", "alpha_fixed_value": null}
+{"run_root": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-755/test_unbound_default_and_null_0/legacy/runs/20261004_200423_097501_9a56f849", "family": "negative_binomial", "outcome": "ynb", "param_names": ["Intercept", "x1", "x2", "x3"], "dispersion": "mean", "alpha_fixed_value": null}
+.....{"run_root": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-755/test_numeric_range_warning_rea0/warning/runs/20261004_200426_477044_24a06796", "family": "negative_binomial", "outcome": "ynb", "param_names": ["Intercept", "x1", "x2", "x3"], "dispersion": "mean", "alpha_fixed_value": null}
+{"raw_warnings": [{"code": "NB_ANCILLARY_CI_NUMERIC_RANGE", "message": "Natural-scale ancillary confidence limit is unavailable: exponent exceeds the finite numeric range. The log-scale interval is retained."}], "bounded": {"contract": null, "model_type": "negative_binomial", "dispersion": "mean", "alpha_estimated": true, "alpha_fixed_value": null, "information_matrix": "observed", "ancillary_parameters": [{"estimate": -0.8150466432543119, "std_error": 0.21558494962802033, "conf_low": -1.2375853801341135, "conf_high": -0.3925079063745103, "name": "lnalpha", "scale": "log"}, {"estimate": 0.4426186817041306, "std_error": 0.09542192619960575, "name": "alpha", "scale": "natural"}], "overdispersion_test": {"statistic": 57.6977469113408, "df": 1, "p_value": 1.528263618773564e-14, "log_likelihood_restricted": -532.7476627663339, "distribution": "chibar2(01)", "restricted_model": "poisson"}}, "issues": []}
+F/Users/runner/work/crossbow/crossbow/arrow/cpp/src/arrow/util/cpu_info.cc:242: IOError: sysctlbyname failed for 'hw.l1dcachesize'. Detail: [errno 1] Operation not permitted
+/Users/runner/work/crossbow/crossbow/arrow/cpp/src/arrow/util/cpu_info.cc:242: IOError: sysctlbyname failed for 'hw.l2cachesize'. Detail: [errno 1] Operation not permitted
+/Users/runner/work/crossbow/crossbow/arrow/cpp/src/arrow/util/cpu_info.cc:242: IOError: sysctlbyname failed for 'hw.l3cachesize'. Detail: [errno 1] Operation not permitted
+/Users/runner/work/crossbow/crossbow/arrow/cpp/src/arrow/util/cpu_info.cc:242: IOError: sysctlbyname failed for 'hw.optional.neon'. Detail: [errno 1] Operation not permitted
+{"run_root": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-755/count-glm-owners0/glm/runs/20261004_200428_192344_535b2781", "family": "glm:poisson", "outcome": "yc", "param_names": ["Intercept", "x1", "x2", "x3"], "dispersion": null, "alpha_fixed_value": null}
+{"run_root": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-755/count-glm-owners0/glm/runs/20261004_200429_101547_c4241e88", "family": "glm:poisson", "outcome": "yc", "param_names": ["Intercept", "x1"], "dispersion": null, "alpha_fixed_value": null}
+{"run_root": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-755/count-glm-owners0/glm/runs/20261004_200429_516123_ce02c079", "family": "glm:poisson", "outcome": "yb", "param_names": ["Intercept", "x1", "x2", "x3"], "dispersion": null, "alpha_fixed_value": null}
+{"run_root": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-755/count-glm-owners0/glm/runs/20261004_200429_892487_0bd8ab84", "family": "glm:binomial", "outcome": "yb", "param_names": ["Intercept", "x1", "x2", "x3"], "dispersion": null, "alpha_fixed_value": null}
+..{"invalid_different_outcome_LR": {"schema_version": "workbench.postestimation.result/v1", "model_run_id": "20261004_200429_516123_ce02c079", "operation": "lr", "full": {"model_id": "glm_1", "model_type": "glm:poisson", "covariance_estimator": "nonrobust", "nobs": 300, "df_method": "asymptotic", "n_clusters": null}, "restricted": {"model_id": "glm_1", "model_type": "glm:poisson", "covariance_estimator": "nonrobust", "nobs": 300, "df_method": "asymptotic", "n_clusters": null}, "dropped_parameters": ["x2", "x3"], "distribution": "chi2", "statistic": 377.9906969680824, "df": 2, "p_value": 8.324593738242256e-83, "loglik_full": -268.3577630618404, "loglik_restricted": -457.3531115458816, "restricted_model_run_id": "20261004_200429_101547_c4241e88"}, "full_y": "yb", "restricted_y": "yc"}
+F.F
+=================================== FAILURES ===================================
+_____ test_numeric_range_warning_reaches_public_evidence_and_shared_issues _____
+
+tmp_path = PosixPath('/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-755/test_numeric_range_warning_rea0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x16dd99810>
+
+    def test_numeric_range_warning_reaches_public_evidence_and_shared_issues(tmp_path, monkeypatch):
+        from workbench.econometrics import count_models
+        # Metadata transport probe: keep the certified fit/OIM, induce only the CI
+        # representation branch. This is not a new statistical reference case.
+        monkeypatch.setattr(count_models, "_exp_confidence_limit", lambda log_limit: None)
+        project = create_project(tmp_path, "warning").root
+        root, packet, _ = fit(project, POST, "negative_binomial", "ynb", ["x1", "x2", "x3"])
+        code = "NB_ANCILLARY_CI_NUMERIC_RANGE"
+        assert any(w["code"] == code for w in packet["warnings"])
+        bounded = bounded_model_family_evidence(root, [packet])
+        issues = read_json(root / "errors.json")["issues"]
+        print(json.dumps({"raw_warnings": packet["warnings"], "bounded": bounded, "issues": issues}))
+>       assert code in json.dumps(bounded), "Agent auxiliary null limits lost their explicit reason"
+E       AssertionError: Agent auxiliary null limits lost their explicit reason
+E       assert 'NB_ANCILLARY_CI_NUMERIC_RANGE' in '{"contract": null, "model_type": "negative_binomial", "dispersion": "mean", "alpha_estimated": true, "alpha_fixed_val...4e-14, "log_likelihood_restricted": -532.7476627663339, "distribution": "chibar2(01)", "restricted_model": "poisson"}}'
+E        +  where '{"contract": null, "model_type": "negative_binomial", "dispersion": "mean", "alpha_estimated": true, "alpha_fixed_val...4e-14, "log_likelihood_restricted": -532.7476627663339, "distribution": "chibar2(01)", "restricted_model": "poisson"}}' = <function dumps at 0x10341e400>({'contract': None, 'model_type': 'negative_binomial', 'dispersion': 'mean', 'alpha_estimated': True, ...})
+E        +    where <function dumps at 0x10341e400> = json.dumps
+
+tests/eval_v1811/count_public_review_adversarial.py:179: AssertionError
+_ test_glm_lr_refuses_different_outcomes_even_with_same_rows_and_nested_names __
+
+glm_runs = (PosixPath('/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-755/count-glm-owners0..._kernel.v1', 'model_id': 'glm_1', 'model_type': 'glm:binomial', 'param_names': ['Intercept', 'x1', 'x2', 'x3'], ...})})
+
+    def test_glm_lr_refuses_different_outcomes_even_with_same_rows_and_nested_names(glm_runs):
+        project, runs = glm_runs
+        full = runs["other_outcome"][0]
+        restricted = runs["restricted"][0]
+>       with pytest.raises(WorkflowExecutionError, match="outcome|response|nested|comparable"):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE WorkflowExecutionError
+
+tests/eval_v1811/count_public_review_adversarial.py:221: Failed
+_____________ test_new_kernel_loader_refuses_other_model_identity ______________
+
+tmp_path = PosixPath('/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-755/test_new_kernel_loader_refuses0')
+glm_runs = (PosixPath('/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-755/count-glm-owners0..._kernel.v1', 'model_id': 'glm_1', 'model_type': 'glm:binomial', 'param_names': ['Intercept', 'x1', 'x2', 'x3'], ...})})
+
+    def test_new_kernel_loader_refuses_other_model_identity(tmp_path, glm_runs):
+        from workbench.agent.postestimation_steps import _load_kernel
+        _, runs = glm_runs
+        kernel = deepcopy(runs["poisson"][2])
+        kernel["model_id"] = "logit_999"
+        path = tmp_path / kernel_relative_path("glm_1")
+        path.parent.mkdir(parents=True)
+        write_json(path, kernel)
+>       with pytest.raises(WorkflowExecutionError, match="identity|owner|match"):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE WorkflowExecutionError
+
+tests/eval_v1811/count_public_review_adversarial.py:242: Failed
+=============================== warnings summary ===============================
+../../.venv/lib/python3.14/site-packages/fastapi/testclient.py:1
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+tests/eval_v1811/count_public_review_adversarial.py::test_http_reaches_actual_owner_and_preserves_fractional_support[negative_binomial-source1-options1]
+tests/eval_v1811/count_public_review_adversarial.py::test_http_reaches_actual_owner_and_preserves_fractional_support[glm:negative_binomial-source2-options2]
+tests/eval_v1811/count_public_review_adversarial.py::test_agent_spec_and_execution_frame_share_options[glm:negative_binomial-options1]
+tests/eval_v1811/count_public_review_adversarial.py::test_glm_operations_resolve_exact_persisted_owner_and_no_nb_admission[poisson]
+tests/eval_v1811/count_public_review_adversarial.py::test_glm_operations_resolve_exact_persisted_owner_and_no_nb_admission[poisson]
+tests/eval_v1811/count_public_review_adversarial.py::test_glm_operations_resolve_exact_persisted_owner_and_no_nb_admission[poisson]
+tests/eval_v1811/count_public_review_adversarial.py::test_glm_operations_resolve_exact_persisted_owner_and_no_nb_admission[poisson]
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/genmod/generalized_linear_model.py:1923: FutureWarning: The bic value is computed using the deviance formula. After 0.13 this will change to the log-likelihood based formula. This change has no impact on the relative rank of models compared using BIC. You can directly access the log-likelihood version using the `bic_llf` attribute. You can suppress this message by calling statsmodels.genmod.generalized_linear_model.SET_USE_BIC_LLF with True to get the LLF-based version now or False to retainthe deviance version.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/eval_v1811/count_public_review_adversarial.py::test_numeric_range_warning_reaches_public_evidence_and_shared_issues
+FAILED tests/eval_v1811/count_public_review_adversarial.py::test_glm_lr_refuses_different_outcomes_even_with_same_rows_and_nested_names
+FAILED tests/eval_v1811/count_public_review_adversarial.py::test_new_kernel_loader_refuses_other_model_identity
+3 failed, 17 passed, 8 warnings in 33.21s

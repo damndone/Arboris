@@ -26,6 +26,7 @@
 
 | ID | 级别 | 内容 | 现状 / 建议 | 来源 |
 |---|---|---|---|---|
+| V1811-DARK-PANEL-CONTRAST | P | 深色主题的 ios-group 面板仍用固定白底，文字对比度不足；浅色/跟随系统浅色可读 | 原有问题，本轮未修改样式；发版前修复并浏览器验收，或保留本项且在发布说明列出限制 | 第 6 步①②审核；handoffs/2026-10-04-v1.8.11-step6-review-feedback.md；devline inherited_dark_result_panel_contrast |
 | V1810-FAMILY-ORACLES | F | 接入 Codex 工单 B 的 7 族对照：iv_2sls、glm:binomial、glm:poisson 一致，可登记准入并开放后估计 | 分支 `eval/v1811-admission-oracles`（tag `archive/local-only/eval-v1811-admission-oracles`），基线早于 v1.8.10；报告 `docs/superpowers/handoffs/2026-10-04-codex-v1811-admission-oracles-report.md`（在该分支） | Codex 工单 B |
 | V1810-PANEL-DID-KERNEL | F | panel_ols、did 的推断核心 `covariance_estimator=null` 且用 z；数值与 R 一致到 1e-15 | 补声明并定惯例（Stata `xtreg, fe vce(robust)`：按个体聚类 + t(G−1)） | Codex 工单 B |
 | V1810-NEGBIN | F | glm:negative_binomial 系数只准到约 1e-6（IRLS tol 1e-8 太松）；离散参数 α 固定为 1、未估计也未说明（静默降级） | 收紧收敛；改为像 `nbreg` 一样估计 α，固定 α 作高级选项并写明。需用户确认 | Codex 工单 B |

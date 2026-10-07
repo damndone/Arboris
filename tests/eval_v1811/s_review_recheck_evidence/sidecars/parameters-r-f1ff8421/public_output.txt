@@ -1,0 +1,12 @@
+Warning message:
+In system2("python3", c(shQuote(wb_result_bridge), shQuote(base),  :
+  running command ''python3' '/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T//RtmpvUdd5D/file77b963ec92b5.py' '/Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_recheck_evidence/sidecars/parameters-r-f1ff8421' eyJyZWZlcmVuY2UiOiB7ImZpbGVuYW1lIjogImNvbXBsZXRlZF9yZXN1bHQuanNvbiIsICJzaGEyNTYiOiAiZGI3ZGUwZDU1Y2RkMDQwODFlOTZmNjlkM2Y5ZjFjMzBiNDA2YTMxOWU4ZWFjOWJlYjI2NWFmNDliZmM4NGMxZiIsICJzY2hlbWFfdmVyc2lvbiI6IDF9LCAiYmluZGluZyI6IHsicHJvamVjdF9pZCI6ICJzaWRlY2FyIiwgInJ1bl9pZCI6ICJleGVjdXRlZCIsICJsaW5lYWdlX2hhc2giOiAiZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZiIsICJzdGVwX2lkIjogImNvbXBsZXRlZCIsICJraW5kIjogIm1vZGVsIiwgIm9wZXJhdGlvbiI6ICJtb2RlbC5vbHMiLCAicGFyYW1ldGVyc19zaGEyNTYiOiAiYWM1ZDZiMzc1YWRhOTIwYTBmM2MyZDI5NzFmM2I4ZTk5NTA0YWYwN2ExMjY0MTE1MjUwYzA1NDg0N2FiNmZiMiIsICJpbnB1dHMiOiBbInNvdXJjZSJdLCAibW9kZWxzIjogW119LCAicXVlcmllcyI6IFtbIm5vYnMiXSwgWyJjb2VmZmljaWVudHMiLCAiSW50ZXJjZXB0Il0sIFsiY29lZmZpY2llbnRzIiwgIngxIl0sIFsiY2 [... truncated]
+Error: Traceback (most recent call last):
+  File "/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T//RtmpvUdd5D/file77b963ec92b5.py", line 11, in <module>
+    values = read_result_snapshot(Path(sys.argv[1]), reference, expected_binding=configuration['binding'])
+  File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/backend/workbench/script_export/result_snapshot.py", line 187, in read_result_snapshot
+    return validate_result_snapshot(_strict_json(raw), expected_binding=expected_binding)
+  File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/backend/workbench/script_export/result_snapshot.py", line 117, in validate_result_snapshot
+    raise ContractError("result snapshot binding differs from the executed step")
+workbench.contracts.common.envelope.ContractError: result snapshot binding differs from the executed step
+Execution halted

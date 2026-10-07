@@ -1,0 +1,429 @@
+Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_recheck_evidence/original/branch-isolation-stata-bc1d8868
+.Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_recheck_evidence/original/branch-isolation-r-b48c4b17
+.Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_recheck_evidence/original/branch-isolation-python-868263b1
+.Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_recheck_evidence/original/internal-column-stata-eda147b2
+.Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_recheck_evidence/original/internal-column-r-16b65bf7
+.Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_recheck_evidence/original/internal-column-python-cf6bec33
+.Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_recheck_evidence/original/hac-numeric-unit-stata-bc429f50
+.Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_recheck_evidence/original/hac-numeric-unit-r-d5de276b
+.Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_recheck_evidence/original/hac-numeric-unit-python-481c89b6
+.Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_recheck_evidence/original/hac-iso-dates-stata-ca86a83f
+.Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_recheck_evidence/original/hac-iso-dates-r-1bd23ea1
+.Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_recheck_evidence/original/hac-iso-dates-python-a4bd9dde
+.Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_recheck_evidence/original/numeric-category-stata-c37ae8d7
+.Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_recheck_evidence/original/numeric-category-r-b1e45977
+.Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_recheck_evidence/original/numeric-category-python-a77dbb28
+.Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_recheck_evidence/original/aggregate-empty-group-stata-fa54175f
+.Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_recheck_evidence/original/aggregate-empty-group-r-9e4e58a0
+.Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_recheck_evidence/original/aggregate-empty-group-python-6b7f23ab
+.Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_recheck_evidence/original/string-mode-stata-d72600f4
+.Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_recheck_evidence/original/string-mode-r-93e334dc
+.Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_recheck_evidence/original/string-mode-python-430a7082
+.Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_recheck_evidence/original/string-only-header-stata-9342e028
+.Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_recheck_evidence/original/string-only-header-r-3c9ad6dd
+.Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_recheck_evidence/original/string-only-header-python-1e325c7b
+.Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_recheck_evidence/original/tsset-internal-column-stata-57d70670
+.Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_recheck_evidence/original/tsset-internal-column-r-c9871e0c
+.Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_recheck_evidence/original/tsset-internal-column-python-b6a5fd47
+.Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_recheck_evidence/original/reader-selected-sheet-stata-04e14669
+.Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_recheck_evidence/original/reader-selected-sheet-r-deb8f940
+.Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_recheck_evidence/original/reader-selected-sheet-python-b620d1ae
+.Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_recheck_evidence/original/sampling-design-stata-f48155bd
+FIndependent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_recheck_evidence/original/sampling-design-r-2bd10395
+FIndependent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_recheck_evidence/original/sampling-design-python-a58be7ee
+F...........................FFF......
+=================================== FAILURES ===================================
+______ test_workbench_supported_complete_sampling_design_is_native[stata] ______
+tests/eval_v1811/s_review_test_required_coverage.py:64: in test_workbench_supported_complete_sampling_design_is_native
+    record_attempt(target, plan, language)
+tests/eval_v1811/s_review_test_required_coverage.py:19: in record_attempt
+    exported = export_script(plan, language, require_native=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/render.py:49: in export_script
+    raise ScriptExportRefusal('NOT_FULLY_NATIVE','Native export unavailable for: '+reasons,steps=blocked)
+E   workbench.script_export.plan.ScriptExportRefusal: Native export unavailable for: model: FPC is supplied, but the frozen Workbench linearization engine does not apply FPC; native FPC would change the executed covariance.
+________ test_workbench_supported_complete_sampling_design_is_native[r] ________
+tests/eval_v1811/s_review_test_required_coverage.py:64: in test_workbench_supported_complete_sampling_design_is_native
+    record_attempt(target, plan, language)
+tests/eval_v1811/s_review_test_required_coverage.py:19: in record_attempt
+    exported = export_script(plan, language, require_native=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/render.py:49: in export_script
+    raise ScriptExportRefusal('NOT_FULLY_NATIVE','Native export unavailable for: '+reasons,steps=blocked)
+E   workbench.script_export.plan.ScriptExportRefusal: Native export unavailable for: model: FPC is supplied, but the frozen Workbench linearization engine does not apply FPC; native FPC would change the executed covariance.
+_____ test_workbench_supported_complete_sampling_design_is_native[python] ______
+tests/eval_v1811/s_review_test_required_coverage.py:64: in test_workbench_supported_complete_sampling_design_is_native
+    record_attempt(target, plan, language)
+tests/eval_v1811/s_review_test_required_coverage.py:19: in record_attempt
+    exported = export_script(plan, language, require_native=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/render.py:49: in export_script
+    raise ScriptExportRefusal('NOT_FULLY_NATIVE','Native export unavailable for: '+reasons,steps=blocked)
+E   workbench.script_export.plan.ScriptExportRefusal: Native export unavailable for: model: FPC is supplied, but the frozen Workbench linearization engine does not apply FPC; native FPC would change the executed covariance.
+___ test_raw_distribution_is_literal_and_nullable_actual_is_retained[stata] ____
+tests/eval_v1811/s_review_recheck_sidecars.py:137: in test_raw_distribution_is_literal_and_nullable_actual_is_retained
+    assert code == 0, output
+E   AssertionError: . do analysis.do 
+E     
+E     . * Workbench 1.8.11
+E     . * project: sidecar
+E     . * run: executed
+E     . * lineage_hash: fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+E     > fff
+E     . * Coverage
+E     . * completed | model.ols | snapshot | FPC is supplied, but the frozen Workbenc
+E     > h linearization engine does not apply FPC; native FPC would change the execut
+E     > ed covariance. Workbench completed this step; numeric values come from a veri
+E     > fied result sidecar, without native re-estimation.
+E     . * post | postestimation.wald | snapshot | Dependent post-estimation needs its
+E     >  own completed Workbench result sidecar; no fitted state is reconstructed. Wo
+E     > rkbench completed this step; numeric values come from a verified result sidec
+E     > ar, without native re-estimation.
+E     . * selected | data.subset | native | 
+E     . * independent | model.ols | native | 
+E     . version 18
+E     
+E     . set more off
+E     
+E     . set type double
+E     
+E     . capture program drop wb_repost
+E     
+E     . program define wb_repost, eclass
+E       1.     args beta covariance
+E       2.     ereturn repost b=`beta' V=`covariance', rename
+E       3. end
+E     
+E     . capture program drop wb_sha
+E     
+E     . program define wb_sha
+E       1.     args filename expected
+E       2.     tempfile digestfile
+E       3.     shell shasum -a 256 "`filename'" > "`digestfile'"
+E       4.     tempname fh
+E       5.     file open `fh' using "`digestfile'", read text
+E       6.     file read `fh' line
+E       7.     file close `fh'
+E       8.     if substr("`line'",1,64) != "`expected'" {
+E       9.         display as error "SHA256 mismatch"
+E      10.         exit 9
+E      11.     }
+E      12. end
+E     
+E     . 
+E     . wb_sha "data.csv" "5f8d0cc66fc9efdfd08e6a06640ea410d58671fe93ac5cac2ad90d6aa6
+E     > 8de937"
+E     
+E     
+E     . frame create wb_src0
+E     
+E     . frame change wb_src0
+E     
+E     . import delimited using "data.csv", varnames(1) delimiters(",") encoding("UTF-
+E     > 8") asdouble clear case(preserve)
+E     (8 vars, 80 obs)
+E     
+E     . * Workbench completed this step: Sampling OLS completed in Workbench
+E     . wb_sha "completed.csv" "5f8d0cc66fc9efdfd08e6a06640ea410d58671fe93ac5cac2ad90
+E     > d6aa68de937"
+E     
+E     
+E     . frame create wb1
+E     
+E     . frame change wb1
+E     
+E     . import delimited using "completed.csv", varnames(1) delimiters(",") encoding(
+E     > "UTF-8") asdouble clear case(preserve)
+E     (8 vars, 80 obs)
+E     
+E     . scalar wb_number_0 = _N
+E     
+E     . unab wb_columns: _all
+E     
+E     . scalar wb_check_1 = (`"`wb_columns'"' == "stratum psu y x1 x2 weight fpc subp
+E     > op")
+E     
+E     . tempfile wb_result_bridge
+E     
+E     . tempname wb_result_writer
+E     
+E     . file open `wb_result_writer' using "`wb_result_bridge'", write text
+E     
+E     . file write `wb_result_writer' `"import base64"' _n
+E     
+E     . file write `wb_result_writer' `"import json"' _n
+E     
+E     . file write `wb_result_writer' `"import os"' _n
+E     
+E     . file write `wb_result_writer' `"from pathlib import Path"' _n
+E     
+E     . file write `wb_result_writer' `"import sys"' _n
+E     
+E     . file write `wb_result_writer' `"from workbench.contracts.common.envelope impo
+E     > rt thaw_json"' _n
+E     
+E     . file write `wb_result_writer' `"from workbench.script_export.result_snapshot 
+E     > import ResultSnapshotRef, read_result_snapshot"' _n
+E     
+E     . file write `wb_result_writer' `""' _n
+E     
+E     . file write `wb_result_writer' `"configuration = json.loads(base64.b64decode(s
+E     > ys.argv[2]))"' _n
+E     
+E     . file write `wb_result_writer' `"reference = ResultSnapshotRef(**configuration
+E     > ['reference'])"' _n
+E     
+E     . file write `wb_result_writer' `"values = read_result_snapshot(Path(sys.argv[1
+E     > ]), reference, expected_binding=configuration['binding'])"' _n
+E     
+E     . file write `wb_result_writer' `"for name, distribution in configuration['dist
+E     > ributions'].items():"' _n
+E     
+E     . file write `wb_result_writer' `"    if values['statistics'][name]['distributi
+E     > on'] != distribution:"' _n
+E     
+E     . file write `wb_result_writer' `"        raise AssertionError('Result sidecar 
+E     > reference distribution differs')"' _n
+E     
+E     . file write `wb_result_writer' `"if sys.argv[3] == 'r':"' _n
+E     
+E     . file write `wb_result_writer' `"    print(json.dumps(thaw_json(values), ensur
+E     > e_ascii=False, allow_nan=False))"' _n
+E     
+E     . file write `wb_result_writer' `"elif sys.argv[3] == 'stata':"' _n
+E     
+E     . file write `wb_result_writer' `"    lines = []"' _n
+E     
+E     . file write `wb_result_writer' `"    for index, path in enumerate(configuratio
+E     > n['queries']):"' _n
+E     
+E     . file write `wb_result_writer' `"        value = values"' _n
+E     
+E     . file write `wb_result_writer' `"        for key in path:"' _n
+E     
+E     . file write `wb_result_writer' `"            value = value[key]"' _n
+E     
+E     . file write `wb_result_writer' `"        if value is not None and type(value) 
+E     > not in (int, float):"' _n
+E     
+E     . file write `wb_result_writer' `"            raise AssertionError('Result side
+E     > car query is not numeric')"' _n
+E     
+E     . file write `wb_result_writer' `"        token = '.' if value is None else rep
+E     > r(value)"' _n
+E     
+E     . file write `wb_result_writer' `"        lines.append('scalar wb_result_' + st
+E     > r(configuration['index']) + '_' + str(index) + ' = ' + token)"' _n
+E     
+E     . file write `wb_result_writer' `"    lines.append('scalar wb_result_valid_' + 
+E     > str(configuration['index']) + ' = 1')"' _n
+E     
+E     . file write `wb_result_writer' `"    fd = os.open(sys.argv[4], os.O_WRONLY | o
+E     > s.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)"' _n
+E     
+E     . file write `wb_result_writer' `"    with os.fdopen(fd, 'w', encoding='utf-8')
+E     >  as handle:"' _n
+E     
+E     . file write `wb_result_writer' `"        handle.write('\n'.join(lines) + '\n')
+E     > "' _n
+E     
+E     . file write `wb_result_writer' `"else:"' _n
+E     
+E     . file write `wb_result_writer' `"    raise AssertionError('Unsupported result 
+E     > bridge mode')"' _n
+E     
+E     . file close `wb_result_writer'
+E     
+E     . tempfile wb_result_commands
+E     
+E     . shell python3 "`wb_result_bridge'" . eyJyZWZlcmVuY2UiOiB7ImZpbGVuYW1lIjogImNv
+E     > bXBsZXRlZF9yZXN1bHQuanNvbiIsICJzaGEyNTYiOiAiMmViYjlhYjdmYWFkZGVmM2ExYTFjNGEzM
+E     > Dc0Zjg2MWUxZDUxYTBlYjgwMjBlNDU1ODQzMTJlMzZiMzEwMGQ1NCIsICJzY2hlbWFfdmVyc2lvbi
+E     > I6IDF9LCAiYmluZGluZyI6IHsicHJvamVjdF9pZCI6ICJzaWRlY2FyIiwgInJ1bl9pZCI6ICJleGV
+E     > jdXRlZCIsICJsaW5lYWdlX2hhc2giOiAiZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZm
+E     > ZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZiIsICJzdGVwX2lkIjogImNvbXBsZXRlZCIsI
+E     > CJraW5kIjogIm1vZGVsIiwgIm9wZXJhdGlvbiI6ICJtb2RlbC5vbHMiLCAicGFyYW1ldGVyc19zaG
+E     > EyNTYiOiAiYWM1ZDZiMzc1YWRhOTIwYTBmM2MyZDI5NzFmM2I4ZTk5NTA0YWYwN2ExMjY0MTE1MjU
+E     > wYzA1NDg0N2FiNmZiMiIsICJpbnB1dHMiOiBbInNvdXJjZSJdLCAibW9kZWxzIjogW119LCAicXVl
+E     > cmllcyI6IFtbIm5vYnMiXSwgWyJjb2VmZmljaWVudHMiLCAiSW50ZXJjZXB0Il0sIFsiY29lZmZpY
+E     > 2llbnRzIiwgIngxIl0sIFsiY29lZmZpY2llbnRzIiwgIngyIl0sIFsic3RkX2Vycm9ycyIsICJJbn
+E     > RlcmNlcHQiXSwgWyJzdGRfZXJyb3JzIiwgIngxIl0sIFsic3RkX2Vycm9ycyIsICJ4MiJdLCBbInN
+E     > 0YXRpc3RpY3MiLCAiSW50ZXJjZXB0IiwgInZhbHVlIl0sIFsic3RhdGlzdGljcyIsICJJbnRlcmNl
+E     > cHQiLCAiZGYiXSwgWyJzdGF0aXN0aWNzIiwgIkludGVyY2VwdCIsICJwX3ZhbHVlIl0sIFsic3Rhd
+E     > GlzdGljcyIsICJ4MSIsICJ2YWx1ZSJdLCBbInN0YXRpc3RpY3MiLCAieDEiLCAiZGYiXSwgWyJzdG
+E     > F0aXN0aWNzIiwgIngxIiwgInBfdmFsdWUiXSwgWyJzdGF0aXN0aWNzIiwgIngyIiwgInZhbHVlIl0
+E     > sIFsic3RhdGlzdGljcyIsICJ4MiIsICJkZiJdLCBbInN0YXRpc3RpY3MiLCAieDIiLCAicF92YWx1
+E     > ZSJdXSwgImRpc3RyaWJ1dGlvbnMiOiB7IkludGVyY2VwdCI6ICJ0IiwgIngxIjogInQiLCAieDIiO
+E     > iAidCJ9LCAiaW5kZXgiOiAxfQ== stata "`wb_result_commands'"
+E     
+E     
+E     . confirm file "`wb_result_commands'"
+E     
+E     . do "`wb_result_commands'"
+E     
+E     . scalar wb_result_1_0 = 80
+E     
+E     . scalar wb_result_1_1 = 4.652711573943123
+E     
+E     . scalar wb_result_1_2 = 1.475820771771979
+E     
+E     . scalar wb_result_1_3 = -0.40404481777033774
+E     
+E     . scalar wb_result_1_4 = 1.5955241455226616
+E     
+E     . scalar wb_result_1_5 = 0.17732404110690134
+E     
+E     . scalar wb_result_1_6 = 0.08888234469730581
+E     
+E     . scalar wb_result_1_7 = 2.9161022645752492
+E     
+E     . scalar wb_result_1_8 = 8
+E     
+E     . scalar wb_result_1_9 = 0.019406798019796175
+E     
+E     . scalar wb_result_1_10 = 8.322733694537604
+E     
+E     . scalar wb_result_1_11 = 8
+E     
+E     . scalar wb_result_1_12 = 3.2813378097179405e-05
+E     
+E     . scalar wb_result_1_13 = -4.545838874371921
+E     
+E     . scalar wb_result_1_14 = 8
+E     
+E     . scalar wb_result_1_15 = 0.0018846599328036571
+E     
+E     . scalar wb_result_valid_1 = 1
+E     
+E     . 
+E     end of do-file
+E     
+E     . assert scalar(wb_result_valid_1) == 1
+E     
+E     . scalar wb_number_2 = scalar(wb_result_1_0)
+E     
+E     . scalar wb_number_3 = scalar(wb_result_1_1)
+E     
+E     . scalar wb_number_4 = scalar(wb_result_1_2)
+E     
+E     . scalar wb_number_5 = scalar(wb_result_1_3)
+E     
+E     . scalar wb_number_6 = scalar(wb_result_1_4)
+E     
+E     . scalar wb_number_7 = scalar(wb_result_1_5)
+E     
+E     . scalar wb_number_8 = scalar(wb_result_1_6)
+E     
+E     . scalar wb_number_9 = scalar(wb_result_1_7)
+E     
+E     . scalar wb_number_10 = scalar(wb_result_1_8)
+E     
+E     . scalar wb_number_11 = scalar(wb_result_1_9)
+E     
+E     . scalar wb_number_12 = scalar(wb_result_1_10)
+E     
+E     . scalar wb_number_13 = scalar(wb_result_1_11)
+E     
+E     . scalar wb_number_14 = scalar(wb_result_1_12)
+E     
+E     . scalar wb_number_15 = scalar(wb_result_1_13)
+E     
+E     . scalar wb_number_16 = scalar(wb_result_1_14)
+E     
+E     . scalar wb_number_17 = scalar(wb_result_1_15)
+E     
+E     . * Workbench completed this step: Actual persisted design Wald
+E     . frame copy wb1 wb2
+E     
+E     . frame change wb2
+E     
+E     . tempfile wb_result_commands
+E     
+E     . shell python3 "`wb_result_bridge'" . eyJyZWZlcmVuY2UiOiB7ImZpbGVuYW1lIjogInBv
+E     > c3RfcmVzdWx0Lmpzb24iLCAic2hhMjU2IjogIjA2NTg4Nzg2MTUxMGY5Yjg5MGQ1MzY2Mjk4M2M5M
+E     > mQyNDlkMDA2YTJkOTg3NmNkMjgxZmRiODY2ZDlhOWE0Y2QiLCAic2NoZW1hX3ZlcnNpb24iOiAxfS
+E     > wgImJpbmRpbmciOiB7InByb2plY3RfaWQiOiAic2lkZWNhciIsICJydW5faWQiOiAiZXhlY3V0ZWQ
+E     > iLCAibGluZWFnZV9oYXNoIjogImZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZm
+E     > ZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmYiLCAic3RlcF9pZCI6ICJwb3N0IiwgImtpbmQiOiAic
+E     > G9zdGVzdGltYXRpb24iLCAib3BlcmF0aW9uIjogInBvc3Rlc3RpbWF0aW9uLndhbGQiLCAicGFyYW
+E     > 1ldGVyc19zaGEyNTYiOiAiZWFlMGMyYzIzNmQyNmRlMWQ2ZjQ4ZDk2MmNlZjU3N2UyMzYwOWJmZGF
+E     > mNmFiZTJjMjQ5NWUzMGUxYjcyZjhjZSIsICJpbnB1dHMiOiBbImNvbXBsZXRlZCJdLCAibW9kZWxz
+E     > IjogWyJjb21wbGV0ZWQiXX0sICJxdWVyaWVzIjogW1sic3RhdGlzdGljcyIsICJ0ZXN0IiwgInZhb
+E     > HVlIl0sIFsic3RhdGlzdGljcyIsICJ0ZXN0IiwgImRmIl0sIFsic3RhdGlzdGljcyIsICJ0ZXN0Ii
+E     > wgImRmX2Rlbm9taW5hdG9yIl0sIFsic3RhdGlzdGljcyIsICJ0ZXN0IiwgInBfdmFsdWUiXV0sICJ
+E     > kaXN0cmlidXRpb25zIjogeyJ0ZXN0IjogIkYiLCAicHJvYmUiOiAiUmVjb3JkZWQgXCJjdXN0b21c
+E     > IiAkSE9NRSBgdW5zYWZlYFxccGF0aFxucmVmZXJlbmNlIn0sICJpbmRleCI6IDJ9 stata "`wb_r
+E     > esult_commands'"
+E     
+E     Traceback (most recent call last):
+E       File "/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T//St30286.000001", line
+E     >  11, in <module>
+E         values = read_result_snapshot(Path(sys.argv[1]), reference, expected_bindin
+E     > g=configuration['binding'])
+E       File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/backend/workbench/s
+E     > cript_export/result_snapshot.py", line 187, in read_result_snapshot
+E         return validate_result_snapshot(_strict_json(raw), expected_binding=expecte
+E     > d_binding)
+E       File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/backend/workbench/s
+E     > cript_export/result_snapshot.py", line 144, in validate_result_snapshot
+E         _text(entry["distribution"], "statistic.distribution")
+E         ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/backend/workbench/s
+E     > cript_export/result_snapshot.py", line 35, in _text
+E         raise ContractError(f"{field} must be a nonempty text identity")
+E     workbench.contracts.common.envelope.ContractError: statistic.distribution must 
+E     > be a nonempty text identity
+E     
+E     . confirm file "`wb_result_commands'"
+E     file /var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T//St30286.000003 not
+E         found
+E     r(601);
+E     
+E     end of do-file
+E     r(601);
+E     
+E   assert 9 == 0
+_____ test_raw_distribution_is_literal_and_nullable_actual_is_retained[r] ______
+tests/eval_v1811/s_review_recheck_sidecars.py:137: in test_raw_distribution_is_literal_and_nullable_actual_is_retained
+    assert code == 0, output
+E   AssertionError: Warning message:
+E     In system2("python3", c(shQuote(wb_result_bridge), shQuote(base),  :
+E       running command ''python3' '/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T//RtmpbsgHQn/file76565601410f.py' '/Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_recheck_evidence/sidecars/literal-null-r-03dd0468' eyJyZWZlcmVuY2UiOiB7ImZpbGVuYW1lIjogInBvc3RfcmVzdWx0Lmpzb24iLCAic2hhMjU2IjogIjA2NTg4Nzg2MTUxMGY5Yjg5MGQ1MzY2Mjk4M2M5MmQyNDlkMDA2YTJkOTg3NmNkMjgxZmRiODY2ZDlhOWE0Y2QiLCAic2NoZW1hX3ZlcnNpb24iOiAxfSwgImJpbmRpbmciOiB7InByb2plY3RfaWQiOiAic2lkZWNhciIsICJydW5faWQiOiAiZXhlY3V0ZWQiLCAibGluZWFnZV9oYXNoIjogImZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmYiLCAic3RlcF9pZCI6ICJwb3N0IiwgImtpbmQiOiAicG9zdGVzdGltYXRpb24iLCAib3BlcmF0aW9uIjogInBvc3Rlc3RpbWF0aW9uLndhbGQiLCAicGFyYW1ldGVyc19zaGEyNTYiOiAiZWFlMGMyYzIzNmQyNmRlMWQ2ZjQ4ZDk2MmNlZjU3N2UyMzYwOWJmZGFmNmFiZTJjMjQ5NWUzMGUxYjcyZjhjZSIsICJpbnB1dHMiOiBbImNvbXBsZXRlZCJdLCAibW9kZWxzIjogWyJjb21wbGV0ZWQiXX0sICJxdWVyaWVzIjogW1sic3RhdGlzdGljcyIsICJ0ZXN0IiwgInZhbHVlIl0sIFsic3RhdGlzdGlj [... truncated]
+E     Error: Traceback (most recent call last):
+E       File "/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T//RtmpbsgHQn/file76565601410f.py", line 11, in <module>
+E         values = read_result_snapshot(Path(sys.argv[1]), reference, expected_binding=configuration['binding'])
+E       File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/backend/workbench/script_export/result_snapshot.py", line 187, in read_result_snapshot
+E         return validate_result_snapshot(_strict_json(raw), expected_binding=expected_binding)
+E       File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/backend/workbench/script_export/result_snapshot.py", line 144, in validate_result_snapshot
+E         _text(entry["distribution"], "statistic.distribution")
+E         ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/backend/workbench/script_export/result_snapshot.py", line 35, in _text
+E         raise ContractError(f"{field} must be a nonempty text identity")
+E     workbench.contracts.c
+E     Execution halted
+E     
+E   assert 1 == 0
+___ test_raw_distribution_is_literal_and_nullable_actual_is_retained[python] ___
+tests/eval_v1811/s_review_recheck_sidecars.py:137: in test_raw_distribution_is_literal_and_nullable_actual_is_retained
+    assert code == 0, output
+E   AssertionError: Traceback (most recent call last):
+E       File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_recheck_evidence/sidecars/literal-null-python-399f54a5/analysis.py", line 61, in <module>
+E         wb_result_values2 = read_result_snapshot(base,ResultSnapshotRef(**{'filename': 'post_result.json', 'sha256': '065887861510f9b890d53662983c92d249d006a2d9876cd281fdb866d9a9a4cd', 'schema_version': 1}),expected_binding={'project_id': 'sidecar', 'run_id': 'executed', 'lineage_hash': 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff', 'step_id': 'post', 'kind': 'postestimation', 'operation': 'postestimation.wald', 'parameters_sha256': 'eae0c2c236d26de1d6f48d962cef577e23609bfdaf6abe2c2495e30e1b72f8ce', 'inputs': ['completed'], 'models': ['completed']})
+E       File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/backend/workbench/script_export/result_snapshot.py", line 187, in read_result_snapshot
+E         return validate_result_snapshot(_strict_json(raw), expected_binding=expected_binding)
+E       File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/backend/workbench/script_export/result_snapshot.py", line 144, in validate_result_snapshot
+E         _text(entry["distribution"], "statistic.distribution")
+E         ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/backend/workbench/script_export/result_snapshot.py", line 35, in _text
+E         raise ContractError(f"{field} must be a nonempty text identity")
+E     workbench.contracts.common.envelope.ContractError: statistic.distribution must be a nonempty text identity
+E     
+E   assert 1 == 0
+=========================== short test summary info ============================
+FAILED tests/eval_v1811/s_review_recheck_original.py::test_workbench_supported_complete_sampling_design_is_native[stata]
+FAILED tests/eval_v1811/s_review_recheck_original.py::test_workbench_supported_complete_sampling_design_is_native[r]
+FAILED tests/eval_v1811/s_review_recheck_original.py::test_workbench_supported_complete_sampling_design_is_native[python]
+FAILED tests/eval_v1811/s_review_recheck_sidecars.py::test_raw_distribution_is_literal_and_nullable_actual_is_retained[stata]
+FAILED tests/eval_v1811/s_review_recheck_sidecars.py::test_raw_distribution_is_literal_and_nullable_actual_is_retained[r]
+FAILED tests/eval_v1811/s_review_recheck_sidecars.py::test_raw_distribution_is_literal_and_nullable_actual_is_retained[python]
+6 failed, 63 passed in 29.53s

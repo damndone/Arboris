@@ -1,0 +1,109 @@
+Initial fit:
+Deviance = 665.0704 Iterations - 1
+Deviance = 539.6902 Iterations - 2
+Deviance = 533.6841 Iterations - 3
+Deviance = 533.6581 Iterations - 4
+Deviance = 533.6581 Iterations - 5
+Deviance = 533.6581 Iterations - 6
+Initial value for 'theta': 2.268070
+Deviance = 330.0447 Iterations - 1
+Deviance = 330.0432 Iterations - 2
+Deviance = 330.0432 Iterations - 3
+Deviance = 330.0432 Iterations - 4
+Deviance = 330.0432 Iterations - 5
+Deviance = 330.0432 Iterations - 6
+Theta(1) = 2.268070, 2(Ls - Lm) = 330.043000
+Deviance = 330.0432 Iterations - 1
+Theta(2) = 2.259310, 2(Ls - Lm) = 329.637000
+Deviance = 329.6367 Iterations - 1
+Deviance = 329.6367 Iterations - 2
+Deviance = 329.6367 Iterations - 3
+Deviance = 329.6367 Iterations - 4
+Theta(3) = 2.259310, 2(Ls - Lm) = 329.637000
+Deviance = 329.6367 Iterations - 1
+Theta(4) = 2.259280, 2(Ls - Lm) = 329.635000
+Deviance = 329.6353 Iterations - 1
+Deviance = 329.6353 Iterations - 2
+Theta(5) = 2.259280, 2(Ls - Lm) = 329.635000
+Deviance = 329.6353 Iterations - 1
+Theta(6) = 2.259280, 2(Ls - Lm) = 329.635000
+Deviance = 329.6353 Iterations - 1
+Theta(7) = 2.259280, 2(Ls - Lm) = 329.635000
+Deviance = 329.6353 Iterations - 1
+Theta(8) = 2.259280, 2(Ls - Lm) = 329.635000
+Deviance = 329.6353 Iterations - 1
+Theta(9) = 2.259280, 2(Ls - Lm) = 329.635000
+Deviance = 329.6353 Iterations - 1
+Theta(10) = 2.259280, 2(Ls - Lm) = 329.635000
+Deviance = 329.6353 Iterations - 1
+Theta(11) = 2.259280, 2(Ls - Lm) = 329.635000
+Deviance = 329.6353 Iterations - 1
+Theta(12) = 2.259280, 2(Ls - Lm) = 329.635000
+Deviance = 329.6353 Iterations - 1
+Theta(13) = 2.259280, 2(Ls - Lm) = 329.635000
+Deviance = 329.6353 Iterations - 1
+Theta(14) = 2.259280, 2(Ls - Lm) = 329.635000
+Warning messages:
+1: glm.fit: algorithm did not converge 
+2: glm.fit: algorithm did not converge 
+3: glm.fit: algorithm did not converge 
+$`epsilon1e-14`
+$`epsilon1e-14`$converged
+[1] TRUE
+
+$`epsilon1e-14`$final_glm_iterations
+[1] 1
+
+$`epsilon1e-14`$theta
+[1] "2.2592810418490474"
+
+$`epsilon1e-14`$beta
+[1] "0.53037035337916805"  "0.38132412408842614"  "-0.29966972550014481"
+[4] "-0.10962102198173496"
+
+$`epsilon1e-14`$natural_score
+[1] "-3.1807889655510735e-14" "-4.1197341594436268e-14"
+[3] "-4.0640285215973225e-14" "-4.0662377781995696e-14"
+[5] "1.97918850863947e-13"   
+
+$`epsilon1e-14`$natural_mean_score_max
+[1] "6.5972950287982338e-16"
+
+$`epsilon1e-14`$warnings
+list()
+
+
+$`epsilon1e-16`
+$`epsilon1e-16`$converged
+[1] TRUE
+
+$`epsilon1e-16`$final_glm_iterations
+[1] 1
+
+$`epsilon1e-16`$theta
+[1] "2.2592810418490479"
+
+$`epsilon1e-16`$beta
+[1] "0.53037035337916771"  "0.38132412408842603"  "-0.29966972550014476"
+[4] "-0.10962102198173482"
+
+$`epsilon1e-16`$natural_score
+[1] "3.3417713041217212e-14"  "5.6394462051952759e-15" 
+[3] "-7.0760237652794246e-14" "1.6832038190144153e-14" 
+[5] "1.1050587235066482e-14" 
+
+$`epsilon1e-16`$natural_mean_score_max
+[1] "2.3586745884264746e-16"
+
+$`epsilon1e-16`$warnings
+$`epsilon1e-16`$warnings[[1]]
+[1] "glm.fit: algorithm did not converge"
+
+$`epsilon1e-16`$warnings[[2]]
+[1] "glm.fit: algorithm did not converge"
+
+$`epsilon1e-16`$warnings[[3]]
+[1] "glm.fit: algorithm did not converge"
+
+
+

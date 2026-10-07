@@ -1,0 +1,276 @@
+{
+  "run_root": "/Users/jiayuanren/\u9879\u76ee\u89c4\u5212/.worktrees/codex-v1811-iv-oracles/tests/eval_v1811/iv_two_endogenous_independent_evidence/private_projects/independent_iv/runs/20261004_202725_000714_c9e617ba",
+  "kernel": {
+    "contract": "workbench.inference_kernel.v1",
+    "model_id": "iv_2sls_1",
+    "model_type": "iv_2sls",
+    "param_names": [
+      "Intercept",
+      "x1",
+      "xe1",
+      "xe2"
+    ],
+    "params": [
+      0.7251293659544988,
+      0.3405203891325043,
+      0.3280277230792002,
+      -0.24035447189290546
+    ],
+    "vcov": [
+      [
+        0.002197443129042005,
+        0.0004827426800875154,
+        9.548476459357137e-06,
+        0.00033042713154410937
+      ],
+      [
+        0.0004827426800875154,
+        0.0035359022736481923,
+        -0.001209520451366531,
+        0.00038691570863857874
+      ],
+      [
+        9.548476459357137e-06,
+        -0.001209520451366531,
+        0.0035618422580889902,
+        -0.00010024846648797861
+      ],
+      [
+        0.00033042713154410937,
+        0.00038691570863857874,
+        -0.00010024846648797861,
+        0.0023501416178851814
+      ]
+    ],
+    "vcov_param_names": [
+      "Intercept",
+      "x1",
+      "xe1",
+      "xe2"
+    ],
+    "vcov_scope": "full",
+    "reference_distribution": "z",
+    "df_resid": 646.0,
+    "df_method": "asymptotic",
+    "n_clusters": null,
+    "loglik": null,
+    "nobs": 650,
+    "covariance_estimator": "robust",
+    "estimation_sample_fingerprint": null,
+    "weights": "none",
+    "interfaces": [
+      "coef_vcov"
+    ],
+    "unavailable": {
+      "loglik": "The model did not provide a log-likelihood."
+    }
+  },
+  "primary": {
+    "schema_version": 1,
+    "model_id": "iv_2sls_1",
+    "model_type": "iv_2sls",
+    "engine": "linearmodels",
+    "y_column": null,
+    "nobs": 650,
+    "r_squared": 0.48401678168071727,
+    "r_squared_adj": 0.4816205747844977,
+    "df_model": 4.0,
+    "df_resid": 646.0,
+    "coefficients": {
+      "Intercept": {
+        "estimate": 0.7251293659544988,
+        "std_error": 0.046876893338210934,
+        "p_value": 0.0,
+        "ci_lower": 0.6332523433044799,
+        "ci_upper": 0.8170063886045178,
+        "source_id": "model_results.iv_2sls_1.coefficients.Intercept"
+      },
+      "x1": {
+        "estimate": 0.3405203891325043,
+        "std_error": 0.05946345326036987,
+        "p_value": 0.0,
+        "ci_lower": 0.22397416234579853,
+        "ci_upper": 0.4570666159192101,
+        "source_id": "model_results.iv_2sls_1.coefficients.x1"
+      },
+      "xe1": {
+        "estimate": 0.3280277230792002,
+        "std_error": 0.05968117172181684,
+        "p_value": 0.0,
+        "ci_lower": 0.21105477594928884,
+        "ci_upper": 0.44500067020911155,
+        "source_id": "model_results.iv_2sls_1.coefficients.xe1"
+      },
+      "xe2": {
+        "estimate": -0.24035447189290546,
+        "std_error": 0.04847825922911405,
+        "p_value": 1e-06,
+        "ci_lower": -0.3353701140151655,
+        "ci_upper": -0.14533882977064544,
+        "source_id": "model_results.iv_2sls_1.coefficients.xe2"
+      }
+    },
+    "warnings": []
+  },
+  "run_inputs": {
+    "run_input_schema_version": 1,
+    "form": {
+      "mode": "auto",
+      "model_type": "iv_2sls",
+      "covariance": "",
+      "entity_col": "",
+      "time_col": "",
+      "iv_endog": "[\"xe1\", \"xe2\"]",
+      "iv_instruments": "[\"z1\", \"z2\"]",
+      "y": "y",
+      "x": "x1",
+      "imputation": "",
+      "prediction_model_type": "",
+      "prediction_cv_folds": "0",
+      "prediction_sampling_method": "",
+      "prediction_data_structure": null,
+      "prediction_entity_column": "",
+      "prediction_group_column": "",
+      "prediction_time_column": "",
+      "prediction_final_holdout_fraction": null,
+      "prediction_shuffle": null,
+      "frequency_weight": "",
+      "analysis_weight": "",
+      "sampling_weight": "",
+      "survey_strata_col": "",
+      "survey_psu_col": "",
+      "survey_fpc_col": "",
+      "survey_replicate_weights": "[]",
+      "survey_replicate_type": "",
+      "survey_lonely_psu": "",
+      "survey_weight_frame": "",
+      "survey_subpop": "",
+      "did_mode": "",
+      "did_cohort_col": "",
+      "did_treat_col": "",
+      "did_post_col": "",
+      "did_status_col": "",
+      "did_treatment_path": "",
+      "cs_control_group": "",
+      "cs_est_method": "",
+      "cs_base_period": "",
+      "cs_anticipation": "0",
+      "cs_cluster_var": "",
+      "honest_did": "false",
+      "model_options": {}
+    },
+    "upload": {
+      "sha256": "d3b46c7cf6c42c4dc1db66b3ae63a0ef02ffe10ff3b24983687355daa238c497",
+      "filename": "data.csv"
+    },
+    "rerun_of": null,
+    "from_node": null,
+    "rerun_reason": "initial",
+    "override_hash": null,
+    "dag_hash": "5a6b4107853042218aa8ee55aa99c45a5523065bd42a9db13650d66ef5eaab3d",
+    "contract_summary": {
+      "contract_version": null,
+      "model": "iv_2sls",
+      "model_type": "iv_2sls",
+      "covariance": "robust",
+      "covariance_applies": true,
+      "covariance_explicit": false,
+      "entity_col": "",
+      "y": "y",
+      "x": [
+        "x1"
+      ],
+      "source_eligible": false
+    },
+    "executable_payload": {
+      "model_type": "iv_2sls",
+      "covariance": "robust",
+      "entity_col": "",
+      "y": "y",
+      "x": [
+        "x1"
+      ],
+      "model_options": {},
+      "form": {
+        "mode": "auto",
+        "model_type": "iv_2sls",
+        "covariance": "",
+        "entity_col": "",
+        "time_col": "",
+        "iv_endog": "[\"xe1\", \"xe2\"]",
+        "iv_instruments": "[\"z1\", \"z2\"]",
+        "y": "y",
+        "x": "x1",
+        "imputation": "",
+        "prediction_model_type": "",
+        "prediction_cv_folds": "0",
+        "prediction_sampling_method": "",
+        "prediction_data_structure": null,
+        "prediction_entity_column": "",
+        "prediction_group_column": "",
+        "prediction_time_column": "",
+        "prediction_final_holdout_fraction": null,
+        "prediction_shuffle": null,
+        "frequency_weight": "",
+        "analysis_weight": "",
+        "sampling_weight": "",
+        "survey_strata_col": "",
+        "survey_psu_col": "",
+        "survey_fpc_col": "",
+        "survey_replicate_weights": "[]",
+        "survey_replicate_type": "",
+        "survey_lonely_psu": "",
+        "survey_weight_frame": "",
+        "survey_subpop": "",
+        "did_mode": "",
+        "did_cohort_col": "",
+        "did_treat_col": "",
+        "did_post_col": "",
+        "did_status_col": "",
+        "did_treatment_path": "",
+        "cs_control_group": "",
+        "cs_est_method": "",
+        "cs_base_period": "",
+        "cs_anticipation": "0",
+        "cs_cluster_var": "",
+        "honest_did": "false",
+        "model_options": {}
+      },
+      "rerun_of": null,
+      "from_node": null
+    },
+    "rerun_inputs": {
+      "rerun_of": null,
+      "from_node": null,
+      "rerun_reason": "initial"
+    }
+  },
+  "wald": {
+    "operation": "wald",
+    "model_id": "iv_2sls_1",
+    "model_type": "iv_2sls",
+    "covariance_estimator": "robust",
+    "nobs": 650,
+    "df_method": "asymptotic",
+    "n_clusters": null,
+    "constraints": [
+      {
+        "terms": {
+          "xe1": 1.0
+        },
+        "value": 0.0
+      },
+      {
+        "terms": {
+          "xe2": 1.0
+        },
+        "value": 0.0
+      }
+    ],
+    "distribution": "chi2",
+    "statistic": 52.966469476497096,
+    "df_num": 2,
+    "df_den": null,
+    "p_value": 3.1512095954357576e-12
+  }
+}

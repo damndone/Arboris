@@ -1,0 +1,164 @@
+EEEEEEEE.
+==================================== ERRORS ====================================
+_ ERROR at setup of test_projected_kernel_has_only_beta_and_full_joint_inverse_block _
+
+    @pytest.fixture(scope="module")
+    def measured():
+>       return collect_numeric_results()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_count_models_v1811_numeric_reference.py:56: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def collect_numeric_results():
+        frame = pd.read_csv(FIXTURES / "postestimation/data.csv", float_precision="round_trip")
+        packet, fitted = run_negative_binomial(frame, "ynb", ["x1", "x2", "x3"], "strict_nb")
+        k = fitted.model.exog.shape[1]
+>       kernel = kernel_from_fitted(fitted, model_id="strict_nb", model_type="negative_binomial",
+                                    nobs=len(frame), param_positions=list(range(k)), public_name=_public_term)
+E       TypeError: kernel_from_fitted() got an unexpected keyword argument 'param_positions'
+
+tests/test_count_models_v1811_numeric_reference.py:32: TypeError
+_ ERROR at setup of test_nb2_postestimation_matches_native_r_at_existing_tolerance[wald_joint] _
+
+    @pytest.fixture(scope="module")
+    def measured():
+>       return collect_numeric_results()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_count_models_v1811_numeric_reference.py:56: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def collect_numeric_results():
+        frame = pd.read_csv(FIXTURES / "postestimation/data.csv", float_precision="round_trip")
+        packet, fitted = run_negative_binomial(frame, "ynb", ["x1", "x2", "x3"], "strict_nb")
+        k = fitted.model.exog.shape[1]
+>       kernel = kernel_from_fitted(fitted, model_id="strict_nb", model_type="negative_binomial",
+                                    nobs=len(frame), param_positions=list(range(k)), public_name=_public_term)
+E       TypeError: kernel_from_fitted() got an unexpected keyword argument 'param_positions'
+
+tests/test_count_models_v1811_numeric_reference.py:32: TypeError
+_ ERROR at setup of test_nb2_postestimation_matches_native_r_at_existing_tolerance[wald_shifted] _
+
+    @pytest.fixture(scope="module")
+    def measured():
+>       return collect_numeric_results()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_count_models_v1811_numeric_reference.py:56: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def collect_numeric_results():
+        frame = pd.read_csv(FIXTURES / "postestimation/data.csv", float_precision="round_trip")
+        packet, fitted = run_negative_binomial(frame, "ynb", ["x1", "x2", "x3"], "strict_nb")
+        k = fitted.model.exog.shape[1]
+>       kernel = kernel_from_fitted(fitted, model_id="strict_nb", model_type="negative_binomial",
+                                    nobs=len(frame), param_positions=list(range(k)), public_name=_public_term)
+E       TypeError: kernel_from_fitted() got an unexpected keyword argument 'param_positions'
+
+tests/test_count_models_v1811_numeric_reference.py:32: TypeError
+_ ERROR at setup of test_nb2_postestimation_matches_native_r_at_existing_tolerance[lincom] _
+
+    @pytest.fixture(scope="module")
+    def measured():
+>       return collect_numeric_results()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_count_models_v1811_numeric_reference.py:56: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def collect_numeric_results():
+        frame = pd.read_csv(FIXTURES / "postestimation/data.csv", float_precision="round_trip")
+        packet, fitted = run_negative_binomial(frame, "ynb", ["x1", "x2", "x3"], "strict_nb")
+        k = fitted.model.exog.shape[1]
+>       kernel = kernel_from_fitted(fitted, model_id="strict_nb", model_type="negative_binomial",
+                                    nobs=len(frame), param_positions=list(range(k)), public_name=_public_term)
+E       TypeError: kernel_from_fitted() got an unexpected keyword argument 'param_positions'
+
+tests/test_count_models_v1811_numeric_reference.py:32: TypeError
+_ ERROR at setup of test_nb2_postestimation_matches_native_r_at_existing_tolerance[nlcom] _
+
+    @pytest.fixture(scope="module")
+    def measured():
+>       return collect_numeric_results()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_count_models_v1811_numeric_reference.py:56: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def collect_numeric_results():
+        frame = pd.read_csv(FIXTURES / "postestimation/data.csv", float_precision="round_trip")
+        packet, fitted = run_negative_binomial(frame, "ynb", ["x1", "x2", "x3"], "strict_nb")
+        k = fitted.model.exog.shape[1]
+>       kernel = kernel_from_fitted(fitted, model_id="strict_nb", model_type="negative_binomial",
+                                    nobs=len(frame), param_positions=list(range(k)), public_name=_public_term)
+E       TypeError: kernel_from_fitted() got an unexpected keyword argument 'param_positions'
+
+tests/test_count_models_v1811_numeric_reference.py:32: TypeError
+_ ERROR at setup of test_nb2_margins_matches_native_r_with_projected_beta_covariance[average] _
+
+    @pytest.fixture(scope="module")
+    def measured():
+>       return collect_numeric_results()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_count_models_v1811_numeric_reference.py:56: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def collect_numeric_results():
+        frame = pd.read_csv(FIXTURES / "postestimation/data.csv", float_precision="round_trip")
+        packet, fitted = run_negative_binomial(frame, "ynb", ["x1", "x2", "x3"], "strict_nb")
+        k = fitted.model.exog.shape[1]
+>       kernel = kernel_from_fitted(fitted, model_id="strict_nb", model_type="negative_binomial",
+                                    nobs=len(frame), param_positions=list(range(k)), public_name=_public_term)
+E       TypeError: kernel_from_fitted() got an unexpected keyword argument 'param_positions'
+
+tests/test_count_models_v1811_numeric_reference.py:32: TypeError
+_ ERROR at setup of test_nb2_margins_matches_native_r_with_projected_beta_covariance[at_means] _
+
+    @pytest.fixture(scope="module")
+    def measured():
+>       return collect_numeric_results()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_count_models_v1811_numeric_reference.py:56: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def collect_numeric_results():
+        frame = pd.read_csv(FIXTURES / "postestimation/data.csv", float_precision="round_trip")
+        packet, fitted = run_negative_binomial(frame, "ynb", ["x1", "x2", "x3"], "strict_nb")
+        k = fitted.model.exog.shape[1]
+>       kernel = kernel_from_fitted(fitted, model_id="strict_nb", model_type="negative_binomial",
+                                    nobs=len(frame), param_positions=list(range(k)), public_name=_public_term)
+E       TypeError: kernel_from_fitted() got an unexpected keyword argument 'param_positions'
+
+tests/test_count_models_v1811_numeric_reference.py:32: TypeError
+_ ERROR at setup of test_fixed_alpha_glm_matches_epsilon16_final_expected_information _
+
+    @pytest.fixture(scope="module")
+    def measured():
+>       return collect_numeric_results()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_count_models_v1811_numeric_reference.py:56: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def collect_numeric_results():
+        frame = pd.read_csv(FIXTURES / "postestimation/data.csv", float_precision="round_trip")
+        packet, fitted = run_negative_binomial(frame, "ynb", ["x1", "x2", "x3"], "strict_nb")
+        k = fitted.model.exog.shape[1]
+>       kernel = kernel_from_fitted(fitted, model_id="strict_nb", model_type="negative_binomial",
+                                    nobs=len(frame), param_positions=list(range(k)), public_name=_public_term)
+E       TypeError: kernel_from_fitted() got an unexpected keyword argument 'param_positions'
+
+tests/test_count_models_v1811_numeric_reference.py:32: TypeError
+=========================== short test summary info ============================
+ERROR tests/test_count_models_v1811_numeric_reference.py::test_projected_kernel_has_only_beta_and_full_joint_inverse_block
+ERROR tests/test_count_models_v1811_numeric_reference.py::test_nb2_postestimation_matches_native_r_at_existing_tolerance[wald_joint]
+ERROR tests/test_count_models_v1811_numeric_reference.py::test_nb2_postestimation_matches_native_r_at_existing_tolerance[wald_shifted]
+ERROR tests/test_count_models_v1811_numeric_reference.py::test_nb2_postestimation_matches_native_r_at_existing_tolerance[lincom]
+ERROR tests/test_count_models_v1811_numeric_reference.py::test_nb2_postestimation_matches_native_r_at_existing_tolerance[nlcom]
+ERROR tests/test_count_models_v1811_numeric_reference.py::test_nb2_margins_matches_native_r_with_projected_beta_covariance[average]
+ERROR tests/test_count_models_v1811_numeric_reference.py::test_nb2_margins_matches_native_r_with_projected_beta_covariance[at_means]
+ERROR tests/test_count_models_v1811_numeric_reference.py::test_fixed_alpha_glm_matches_epsilon16_final_expected_information
+1 passed, 8 errors in 1.11s

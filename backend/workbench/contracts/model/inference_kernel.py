@@ -369,6 +369,7 @@ def kernel_from_fitted(
     model_type: str,
     nobs: int,
     param_names: Sequence[str] | None = None,
+    param_positions: Sequence[int] | None = None,
     public_name: Callable[[str], str] | None = None,
     estimation_sample_fingerprint: str | None = None,
     unavailable: Mapping[str, str] | None = None,
@@ -378,6 +379,10 @@ def kernel_from_fitted(
     ``public_name`` maps an estimator's term label to the name the result
     packet reports (formula quoting removed), so a post-estimation request
     naming a coefficient finds it in both.
+
+    ``param_positions`` is an owner-declared regression subspace; ancillary
+    parameters are excluded by position, retaining the exact covariance block.
+    It never guesses that a particular parameter name is ancillary.
 
     Returns ``None`` when the object does not expose those interfaces, so the
     caller can record why rather than guess.
@@ -402,6 +407,17 @@ def kernel_from_fitted(
     flat = _flatten(params)
     if names is None or len(names) != len(flat):
         return None
+    if param_positions is not None:
+        positions = tuple(param_positions)
+        full_covariance = np.asarray(covariance, dtype=float)
+        if (not positions or any(type(i) is not int or i < 0 or i >= len(flat) for i in positions)
+            or len(set(positions)) != len(positions)
+            or full_covariance.shape != (len(flat), len(flat))):
+            return unavailable_inference_kernel(model_id=model_id, model_type=model_type,
+                nobs=nobs, reason="The runtime declared an invalid regression parameter projection.")
+        names = [names[i] for i in positions]
+        flat = flat[list(positions)]
+        covariance = full_covariance[np.ix_(positions, positions)]
     if not nobs:
         fitted_nobs = _finite_or_none(getattr(fitted, "nobs", None))
         nobs = int(fitted_nobs) if fitted_nobs is not None else 0
@@ -492,6 +508,8 @@ def resolve_inference_kernel(
     nobs = nobs if isinstance(nobs, int) and not isinstance(nobs, bool) else None
     if recorded is not None:
         validate_inference_kernel(recorded)
+        if recorded["model_id"] != model_id:
+            raise InferenceKernelError("recorded kernel identity does not match its model owner")
         return _with_declared_weights(recorded, primary)
     extracted = kernel_from_fitted(
         fitted,

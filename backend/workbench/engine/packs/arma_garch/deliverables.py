@@ -49,6 +49,7 @@ def build_arma_garch_deliverables(run_root: Path) -> dict[str, Any]:
         {"field": "Transform", "value": contract.get("transform", "—")},
         {"field": "Analysis observations", "value": _first(data_audit, "analysis_row_count", "row_count", default=_first(data_quality, "finite_value_count", default="—"))},
         {"field": "Selected model", "value": model_label},
+        {"field": "Evaluation mode", "value": _as_mapping(contract.get("validation")).get("evaluation_mode", "train_validation")},
         {"field": "Estimation", "value": contract.get("estimation_strategy", "—")},
         {"field": "Innovation distribution", "value": contract.get("innovation_distribution", "—")},
         {"field": "Validation role", "value": arma_selection.get("validation_data_role", variance_selection.get("validation_data_role", "—"))},
@@ -77,9 +78,13 @@ def build_arma_garch_deliverables(run_root: Path) -> dict[str, Any]:
         "Forecast metrics are rolling, one-step evaluation results; they are not in-sample fit claims.",
         "When an MA term is present, the current sequential ARMA then ARCH/GARCH strategy is a workflow regression against the Stata joint likelihood, not a numerical reproduction of joint ARMA–GARCH maximum likelihood.",
     ]
-    warnings = diagnostics.get("warnings") if isinstance(diagnostics.get("warnings"), list) else []
-    if warnings:
-        limitations.extend(str(item) for item in warnings)
+    report = _as_mapping(artifacts.get("ts.report"))
+    warnings = [
+        str(item)
+        for source in (report, diagnostics)
+        for item in (source.get("warnings") if isinstance(source.get("warnings"), list) else [])
+    ]
+    limitations.extend(dict.fromkeys(warnings))
     return {
         "report": {
             "report_kind": "arma_garch",
@@ -186,14 +191,14 @@ def _diagnostic_rows(diagnostics: Mapping[str, Any]) -> list[dict[str, Any]]:
         entry = _as_mapping(entry)
         if not entry:
             continue
-        # A Ljung--Box entry carries no status of its own, and the producer
-        # emits None for a non-finite statistic; derive it rather than assume.
+        # Legacy rows have no status; require both statistic and p-value.
         computed = entry.get("statistic") is not None and entry.get("p_value") is not None
         rows.append(
             _diagnostic_row(
                 f"Ljung–Box residuals (lag {_value(entry, 'lag', '—')})",
                 entry,
                 status="ok" if computed else "unavailable",
+                detail=str(entry.get("reason") or ""),
             )
         )
 

@@ -1,0 +1,7 @@
+{
+  "raw_sha256": "withheld-raw-sha256-c67cf66dbc8b0d05af2fb1cb",
+  "redacted_sha256": "47ec24901a5bea44626c62e0230d18b80494817e63b694f4121813604234b128",
+  "ignored_raw": "local/v1811-script-statistical-adapters/fpc_fraction_stata_71e2b6567c/analysis.log",
+  "outside_header_values_byte_identical": true,
+  "raw_mode": "0600"
+}

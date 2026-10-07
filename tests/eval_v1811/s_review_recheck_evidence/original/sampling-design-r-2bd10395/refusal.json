@@ -1,0 +1,7 @@
+{
+  "code": "NOT_FULLY_NATIVE",
+  "message": "Native export unavailable for: model: FPC is supplied, but the frozen Workbench linearization engine does not apply FPC; native FPC would change the executed covariance.",
+  "steps": [
+    "model"
+  ]
+}

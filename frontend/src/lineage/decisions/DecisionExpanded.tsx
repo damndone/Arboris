@@ -8,7 +8,7 @@ export interface DecisionExpandedProps {
 }
 
 export function DecisionExpanded({ dp }: DecisionExpandedProps) {
-  const d = getDPDisplay(dp.decision_id);
+  const d = getDPDisplay(dp.decision_id, dp);
   const params = dp.reason?.chosen_params ?? {};
   const alts = d.displayAlternatives(params);
   const checks = dp.contestability.assumption_checks_needed;

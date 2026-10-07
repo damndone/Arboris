@@ -1,0 +1,41 @@
+{
+  "R_version": "R version 4.6.0 (2026-04-24)",
+  "definition": "zero mean Gaussian: variance MLE = mean(y^2), no optimization",
+  "n": 144,
+  "closed": {
+    "variance": 1.0841774164273452,
+    "ll": -210.14630095143715,
+    "score": 1.4210854715202004e-14,
+    "score_per_observation": 9.8686491077791687e-17
+  },
+  "workbench": {
+    "variance": 1.0841774164273454,
+    "ll": -210.14630095143715,
+    "score": 0,
+    "score_per_observation": 0
+  },
+  "stata": {
+    "variance": 1.0841775206953714,
+    "ll": -210.1463009514375,
+    "score": -6.3867931459071769e-06,
+    "score_per_observation": -4.435273017991095e-08
+  },
+  "prefix_closed": {
+    "variance": 1.0877128823007141,
+    "ll": -204.53679995507503,
+    "score": 1.4210854715202004e-14,
+    "score_per_observation": 1.0150610510858574e-16
+  },
+  "prefix_workbench": {
+    "variance": 1.0877128823007143,
+    "ll": -204.53679995507503,
+    "score": 0,
+    "score_per_observation": 0
+  },
+  "prefix_stata": {
+    "variance": 1.0877129146043252,
+    "ll": -204.53679995507514,
+    "score": -1.9112633964368797e-06,
+    "score_per_observation": -1.3651881403120569e-08
+  }
+}

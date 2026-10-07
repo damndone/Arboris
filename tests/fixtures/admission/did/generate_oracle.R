@@ -1,0 +1,37 @@
+# VERIFICATION LEVEL (v1.8.11): standard errors clustered by g as Stata xtreg, fe vce(cluster g) -- CR1 with G/(G-1)*(N-1)/(N-K), K excluding the unit effects nested in the clusters, t(G-1) -- via fixest ssc(K.fixef="nested", G.df="min", t.df="min"). The intercept's estimate is the sum-to-zero one from lm; its standard error is not compared (Stata's _cons is a different parameter).
+# Deterministic data, seed 20261003; no downloaded inputs.
+args <- commandArgs(trailingOnly = TRUE)
+stopifnot(length(args) == 2)
+here <- args[1]; phase <- args[2]
+stopifnot(here == "tests/fixtures/admission/did")
+cat("output directory:", here, "phase:", phase, "\n")
+dir.create(here, recursive=TRUE, showWarnings=FALSE)
+set.seed(20261003)
+n <- 400
+g <- rep(seq_len(200), each=2); time <- rep(0:1, 200)
+treat <- as.integer(g > 100); post <- time; D <- treat*post
+first_treat <- ifelse(treat==1, 1, 0)
+y <- 1 + rnorm(200)[g] + .4*post + .8*D + rnorm(n)
+data <- data.frame(y, g, time, treat, post, D, first_treat)
+write.csv(data, file.path(here, "data.csv"), row.names=FALSE)
+if (phase == "data") quit(status=0)
+data <- read.csv(file.path(here, "data.csv"))
+suppressPackageStartupMessages({library(jsonlite); library(fixest)})
+fit <- feols(y ~ D | g + time, data=data, cluster=~g,
+             ssc=ssc(K.adj=TRUE, K.fixef="nested", G.adj=TRUE, G.df="min", t.df="min"))
+b <- coef(fit); se <- se(fit)
+names(b)[names(b)=="D"] <- "_did_D"
+names(se)[names(se)=="D"] <- "_did_D"
+G <- length(unique(data$g))
+sum_to_zero <- lm(y ~ D + factor(g) + factor(time), data=data,
+          contrasts=list("factor(g)"="contr.sum", "factor(time)"="contr.sum"))
+intercept <- unname(coef(sum_to_zero)["(Intercept)"])
+oracle <- list(meta=list(generator="tests/fixtures/admission/did/generate_oracle.R",
+                           r_version=R.version.string, fixest=as.character(packageVersion("fixest")),
+                           seed=20261003, n=nrow(data),
+                           verification_level="clustered by g as Stata xtreg, fe vce(cluster g); intercept estimate only"),
+               inference=list(covariance_estimator="cluster", df_method="clusters_minus_one",
+                              reference_distribution="t", df_resid=G - 1, n_clusters=G),
+               coefficients=c(list(Intercept=intercept), as.list(b)), std_error=as.list(se))
+writeLines(jsonlite::toJSON(oracle, auto_unbox=TRUE, digits=NA, pretty=TRUE), file.path(here,"oracle.json"))
+cat("wrote oracle.json\n")

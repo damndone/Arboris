@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -40,10 +40,11 @@ _SECRET_KEY_MARKERS = (
 
 @dataclass(frozen=True)
 class ModelOptionsContract:
-    """Server-owned version facts for one handler's model-options payload."""
+    """Server-owned version facts and optional new-submission normalization."""
 
     producer_version: str
     input_contract_version: str
+    normalize_payload: Callable[[Mapping[str, object]], Mapping[str, object]] | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.producer_version, str) or not self.producer_version:
@@ -280,6 +281,11 @@ def bind_new_model_options(model_type: object, value: object) -> BoundModelOptio
     handler = _resolve_model_options_handler(model_type)
     owner_model_type, owner_model_id, contract = _owner_facts(handler)
     _validate_payload_for_handler(handler, payload)
+    if contract.normalize_payload is not None:
+        # Only new submissions use owner-declared semantic normalization.
+        # Persisted bindings continue to verify the exact stored payload.
+        payload = canonicalize_model_options(contract.normalize_payload(payload))
+        _validate_payload_for_handler(handler, payload)
     payload = canonicalize_model_options(payload)
     return BoundModelOptions(
         payload=payload,

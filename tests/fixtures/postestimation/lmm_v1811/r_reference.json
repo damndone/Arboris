@@ -1,0 +1,103 @@
+{
+  "meta": {
+    "generator": "tests/fixtures/postestimation/lmm_v1811/generate_reference.R",
+    "source": "/Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-lmm-host/runs/20261005_024643_550779_dbe309ee/raw_snapshot/data.csv",
+    "data_sha256": "f971e489477c8c912580aa09b2f0327334f0e12a2f9d5313a5e95f9ccf333828",
+    "formula": "y ~ arm * time + x + (1|g)",
+    "fit_method": "reml",
+    "environment": {
+      "R": "R version 4.6.0 (2026-04-24)",
+      "lme4": "2.0.1",
+      "car": "3.1.5",
+      "jsonlite": "2.0.0"
+    },
+    "native_diagnostics": {
+      "optimizer": "bobyqa",
+      "opt_convergence": 0,
+      "convergence_messages": [],
+      "warnings": [],
+      "singular": false,
+      "REML": true,
+      "loglik": -401.77958252689962,
+      "sigma": 0.60204760747578401
+    }
+  },
+  "nobs": 360,
+  "nominal_fixed_effect_df": 355,
+  "owner_terms": ["Intercept", "C(Q('arm'), Treatment(reference='a'))[T.b]", "time", "C(Q('arm'), Treatment(reference='a'))[T.b]:Q('time')", "x"],
+  "coefficient_mapping": {
+    "Intercept": "(Intercept)",
+    "C(Q('arm'), Treatment(reference='a'))[T.b]": "armb",
+    "time": "time",
+    "C(Q('arm'), Treatment(reference='a'))[T.b]:Q('time')": "armb:time",
+    "x": "x"
+  },
+  "params": {
+    "(Intercept)": 1.0157906001418116,
+    "armb": 0.33395537711022438,
+    "time": 0.28296112826305542,
+    "x": 0.54943398269927601,
+    "armb:time": 0.21719901887088391
+  },
+  "std_error": {
+    "(Intercept)": 0.15023331951117955,
+    "armb": 0.21248694164835355,
+    "time": 0.026286774629536675,
+    "x": 0.036190116484979246,
+    "armb:time": 0.03718491097469933
+  },
+  "covariance_owner_order": [
+    [0.022570050291348162, -0.022555185609266983, -0.0017277071669659872, 0.0017229491305191863, -8.0001845918595068e-05],
+    [-0.022555185609266983, 0.045150700371070808, 0.0017225333919611235, -0.0034582548082595695, -0.00016335052359976989],
+    [-0.0017277071669659872, 0.0017225333919611235, 0.00069099452042405303, -0.00068933844665764181, 2.784530126483664e-05],
+    [0.0017229491305191863, -0.0034582548082595695, -0.00068933844665764181, 0.0013827176041963146, 5.0049364578766741e-05],
+    [-8.0001845918595068e-05, -0.00016335052359976989, 2.784530126483664e-05, 5.0049364578766741e-05, 0.0013097245311963664]
+  ],
+  "reference_distribution": "z",
+  "df_method": "asymptotic",
+  "wald_joint": {
+    "distribution": "chi2",
+    "statistic": 337.0835092905391,
+    "df_num": 2,
+    "df_den": null,
+    "p_value": 6.3569088942620045e-74
+  },
+  "wald_shifted": {
+    "distribution": "chi2",
+    "statistic": 824.64268930032279,
+    "df_num": 1,
+    "df_den": null,
+    "p_value": 2.3680853107131484e-181
+  },
+  "lincom": {
+    "estimate": 0.88182909366160755,
+    "std_error": 0.077725631874362169,
+    "statistic": 11.34540913204823,
+    "distribution": "z",
+    "df": null,
+    "p_value": 7.8159817064077806e-30
+  },
+  "nlcom": {
+    "estimate": 0.51500478159890173,
+    "std_error": 0.057833421041155138,
+    "statistic": 8.9049683094558176,
+    "distribution": "z",
+    "df": null,
+    "p_value": 5.3401300770330986e-19
+  },
+  "fixed_effect_average_prediction": {
+    "estimate": 2.1740461366861261,
+    "std_error": 0.09552525270309134,
+    "mean_design_owner_order": [1, 0.5, 2.5, 1.25, 0.022525460988336268],
+    "nobs": 360,
+    "definition": "Empirical mean of native predict(fit,re.form=NA) on the unchanged estimation rows",
+    "random_effects": "zero (population fixed-effect prediction)",
+    "uncertainty": "sampling SE of empirical fixed-effect mean; excludes residual/new-subject prediction variance",
+    "current_operation": "lincom with mean fixed-effect design weights; not a margins derivative target"
+  },
+  "lr": {
+    "available": false,
+    "reason": "REML_FIXED_EFFECT_LIKELIHOODS_NOT_COMPARABLE",
+    "explanation": "Do not compare restricted likelihoods across different fixed-effect designs; no LR reference generated"
+  }
+}

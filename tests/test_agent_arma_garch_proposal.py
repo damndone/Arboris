@@ -145,10 +145,11 @@ def test_a_partial_section_patch_is_merged_not_replaced(tmp_path: Path) -> None:
             {
                 "selection_mode": "manual",
                 "estimation_strategy": "joint",
+                "innovation_distribution": "student_t",
                 "arma": {"p": 1, "q": 1},
                 "variance": {"model": "garch", "garch_p": 1, "garch_q": 1},
             },
-            "UNSUPPORTED_JOINT_ARMA_GARCH",
+            "UNSUPPORTED_JOINT_DISTRIBUTION",
         ),
         ({"arma": {"auto_max_p": 9}}, "CANDIDATE_LIMIT_EXCEEDED"),
         ({"transform": "not_a_transform"}, "INVALID_ORDER"),
@@ -156,7 +157,7 @@ def test_a_partial_section_patch_is_merged_not_replaced(tmp_path: Path) -> None:
     ],
     ids=[
         "fixed_orders_in_auto_mode",
-        "joint_estimation_with_an_ma_term",
+        "joint_ma_student_t",
         "auto_search_cap_exceeded",
         "value_outside_the_closed_set",
         "field_the_contract_does_not_have",
@@ -236,3 +237,10 @@ def test_the_refusal_reaches_the_model_not_just_the_exception_class(
     assert result.ok is False
     assert result.error_details == [{"message": "SPECIFIC_CODE: do this"}]
     assert "SPECIFIC_CODE" in json.dumps(result.to_payload())
+
+
+def test_normal_joint_ma_patch_survives_agent_canonicalization(tmp_path: Path) -> None:
+    patch = {"selection_mode": "manual", "estimation_strategy": "joint",
+             "arma": {"p": 1, "q": 1},
+             "variance": {"model": "garch", "garch_p": 1, "garch_q": 1}}
+    assert _canonicalize(_project(tmp_path), patch)["changes"]["model_options"] == patch

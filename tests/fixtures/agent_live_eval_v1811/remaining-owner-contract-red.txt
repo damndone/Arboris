@@ -1,0 +1,315 @@
+FFFFFFFFFFFFFF                                                           [100%]
+=================================== FAILURES ===================================
+__________ test_remaining_owner_field_binding_mutants[metadata_only] ___________
+
+attack = 'metadata_only'
+
+    @pytest.mark.parametrize("attack", ["metadata_only", "wrong_term", "wrong_field", "wrong_sign", "foreign_nested", "conflicting_ref", "duplicate_terms", "short_round"])
+    def test_remaining_owner_field_binding_mutants(attack):
+        current = {"run_id": "r", "model_id": "m", "coefficients": {"x1": {"estimate": .40536541665861775}}}
+        foreign = {"run_id": "r_other", "model_id": "m0", "coefficients": current["coefficients"]}
+        objects = [current]
+        if attack == "metadata_only": objects = [{"run_id": "r", "model_id": "m"}, foreign]
+        if attack == "wrong_term": current["coefficients"] = {"x10": {"estimate": .40536541665861775}}
+        if attack == "wrong_field": current["coefficients"] = {"x1": {"std_error": .40536541665861775}}
+        if attack == "wrong_sign": current["coefficients"]["x1"]["estimate"] *= -1
+        if attack == "foreign_nested": current["coefficients"]["x1"].update(run_id="r_other", model_id="m0")
+        if attack == "conflicting_ref": current["evidence_ref"] = {"run_id": "r_other", "model_id": "m0"}
+        if attack == "duplicate_terms": current["coefficients"] = [{"term": "x1", "estimate": .40536541665861775}]*2
+        if attack == "short_round": current["coefficients"]["x1"]["estimate"] = .40536542
+        field = {"path": ["coefficients", "x1", "estimate"], "artifact": None}
+        row = {"actual": .40536541665861775, "tolerance": 1e-6}
+>       verdict = harness._answer_field_evidence(owner_field_entries(objects), "r", "m", [field], [row], {})
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'live_eval_v1811' has no attribute '_answer_field_evidence'. Did you mean: '_answer_owner_evidence'?
+
+tests/test_agent_live_eval_v1811_harness.py:479: AttributeError
+____________ test_remaining_owner_field_binding_mutants[wrong_term] ____________
+
+attack = 'wrong_term'
+
+    @pytest.mark.parametrize("attack", ["metadata_only", "wrong_term", "wrong_field", "wrong_sign", "foreign_nested", "conflicting_ref", "duplicate_terms", "short_round"])
+    def test_remaining_owner_field_binding_mutants(attack):
+        current = {"run_id": "r", "model_id": "m", "coefficients": {"x1": {"estimate": .40536541665861775}}}
+        foreign = {"run_id": "r_other", "model_id": "m0", "coefficients": current["coefficients"]}
+        objects = [current]
+        if attack == "metadata_only": objects = [{"run_id": "r", "model_id": "m"}, foreign]
+        if attack == "wrong_term": current["coefficients"] = {"x10": {"estimate": .40536541665861775}}
+        if attack == "wrong_field": current["coefficients"] = {"x1": {"std_error": .40536541665861775}}
+        if attack == "wrong_sign": current["coefficients"]["x1"]["estimate"] *= -1
+        if attack == "foreign_nested": current["coefficients"]["x1"].update(run_id="r_other", model_id="m0")
+        if attack == "conflicting_ref": current["evidence_ref"] = {"run_id": "r_other", "model_id": "m0"}
+        if attack == "duplicate_terms": current["coefficients"] = [{"term": "x1", "estimate": .40536541665861775}]*2
+        if attack == "short_round": current["coefficients"]["x1"]["estimate"] = .40536542
+        field = {"path": ["coefficients", "x1", "estimate"], "artifact": None}
+        row = {"actual": .40536541665861775, "tolerance": 1e-6}
+>       verdict = harness._answer_field_evidence(owner_field_entries(objects), "r", "m", [field], [row], {})
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'live_eval_v1811' has no attribute '_answer_field_evidence'. Did you mean: '_answer_owner_evidence'?
+
+tests/test_agent_live_eval_v1811_harness.py:479: AttributeError
+___________ test_remaining_owner_field_binding_mutants[wrong_field] ____________
+
+attack = 'wrong_field'
+
+    @pytest.mark.parametrize("attack", ["metadata_only", "wrong_term", "wrong_field", "wrong_sign", "foreign_nested", "conflicting_ref", "duplicate_terms", "short_round"])
+    def test_remaining_owner_field_binding_mutants(attack):
+        current = {"run_id": "r", "model_id": "m", "coefficients": {"x1": {"estimate": .40536541665861775}}}
+        foreign = {"run_id": "r_other", "model_id": "m0", "coefficients": current["coefficients"]}
+        objects = [current]
+        if attack == "metadata_only": objects = [{"run_id": "r", "model_id": "m"}, foreign]
+        if attack == "wrong_term": current["coefficients"] = {"x10": {"estimate": .40536541665861775}}
+        if attack == "wrong_field": current["coefficients"] = {"x1": {"std_error": .40536541665861775}}
+        if attack == "wrong_sign": current["coefficients"]["x1"]["estimate"] *= -1
+        if attack == "foreign_nested": current["coefficients"]["x1"].update(run_id="r_other", model_id="m0")
+        if attack == "conflicting_ref": current["evidence_ref"] = {"run_id": "r_other", "model_id": "m0"}
+        if attack == "duplicate_terms": current["coefficients"] = [{"term": "x1", "estimate": .40536541665861775}]*2
+        if attack == "short_round": current["coefficients"]["x1"]["estimate"] = .40536542
+        field = {"path": ["coefficients", "x1", "estimate"], "artifact": None}
+        row = {"actual": .40536541665861775, "tolerance": 1e-6}
+>       verdict = harness._answer_field_evidence(owner_field_entries(objects), "r", "m", [field], [row], {})
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'live_eval_v1811' has no attribute '_answer_field_evidence'. Did you mean: '_answer_owner_evidence'?
+
+tests/test_agent_live_eval_v1811_harness.py:479: AttributeError
+____________ test_remaining_owner_field_binding_mutants[wrong_sign] ____________
+
+attack = 'wrong_sign'
+
+    @pytest.mark.parametrize("attack", ["metadata_only", "wrong_term", "wrong_field", "wrong_sign", "foreign_nested", "conflicting_ref", "duplicate_terms", "short_round"])
+    def test_remaining_owner_field_binding_mutants(attack):
+        current = {"run_id": "r", "model_id": "m", "coefficients": {"x1": {"estimate": .40536541665861775}}}
+        foreign = {"run_id": "r_other", "model_id": "m0", "coefficients": current["coefficients"]}
+        objects = [current]
+        if attack == "metadata_only": objects = [{"run_id": "r", "model_id": "m"}, foreign]
+        if attack == "wrong_term": current["coefficients"] = {"x10": {"estimate": .40536541665861775}}
+        if attack == "wrong_field": current["coefficients"] = {"x1": {"std_error": .40536541665861775}}
+        if attack == "wrong_sign": current["coefficients"]["x1"]["estimate"] *= -1
+        if attack == "foreign_nested": current["coefficients"]["x1"].update(run_id="r_other", model_id="m0")
+        if attack == "conflicting_ref": current["evidence_ref"] = {"run_id": "r_other", "model_id": "m0"}
+        if attack == "duplicate_terms": current["coefficients"] = [{"term": "x1", "estimate": .40536541665861775}]*2
+        if attack == "short_round": current["coefficients"]["x1"]["estimate"] = .40536542
+        field = {"path": ["coefficients", "x1", "estimate"], "artifact": None}
+        row = {"actual": .40536541665861775, "tolerance": 1e-6}
+>       verdict = harness._answer_field_evidence(owner_field_entries(objects), "r", "m", [field], [row], {})
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'live_eval_v1811' has no attribute '_answer_field_evidence'. Did you mean: '_answer_owner_evidence'?
+
+tests/test_agent_live_eval_v1811_harness.py:479: AttributeError
+__________ test_remaining_owner_field_binding_mutants[foreign_nested] __________
+
+attack = 'foreign_nested'
+
+    @pytest.mark.parametrize("attack", ["metadata_only", "wrong_term", "wrong_field", "wrong_sign", "foreign_nested", "conflicting_ref", "duplicate_terms", "short_round"])
+    def test_remaining_owner_field_binding_mutants(attack):
+        current = {"run_id": "r", "model_id": "m", "coefficients": {"x1": {"estimate": .40536541665861775}}}
+        foreign = {"run_id": "r_other", "model_id": "m0", "coefficients": current["coefficients"]}
+        objects = [current]
+        if attack == "metadata_only": objects = [{"run_id": "r", "model_id": "m"}, foreign]
+        if attack == "wrong_term": current["coefficients"] = {"x10": {"estimate": .40536541665861775}}
+        if attack == "wrong_field": current["coefficients"] = {"x1": {"std_error": .40536541665861775}}
+        if attack == "wrong_sign": current["coefficients"]["x1"]["estimate"] *= -1
+        if attack == "foreign_nested": current["coefficients"]["x1"].update(run_id="r_other", model_id="m0")
+        if attack == "conflicting_ref": current["evidence_ref"] = {"run_id": "r_other", "model_id": "m0"}
+        if attack == "duplicate_terms": current["coefficients"] = [{"term": "x1", "estimate": .40536541665861775}]*2
+        if attack == "short_round": current["coefficients"]["x1"]["estimate"] = .40536542
+        field = {"path": ["coefficients", "x1", "estimate"], "artifact": None}
+        row = {"actual": .40536541665861775, "tolerance": 1e-6}
+>       verdict = harness._answer_field_evidence(owner_field_entries(objects), "r", "m", [field], [row], {})
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'live_eval_v1811' has no attribute '_answer_field_evidence'. Did you mean: '_answer_owner_evidence'?
+
+tests/test_agent_live_eval_v1811_harness.py:479: AttributeError
+_________ test_remaining_owner_field_binding_mutants[conflicting_ref] __________
+
+attack = 'conflicting_ref'
+
+    @pytest.mark.parametrize("attack", ["metadata_only", "wrong_term", "wrong_field", "wrong_sign", "foreign_nested", "conflicting_ref", "duplicate_terms", "short_round"])
+    def test_remaining_owner_field_binding_mutants(attack):
+        current = {"run_id": "r", "model_id": "m", "coefficients": {"x1": {"estimate": .40536541665861775}}}
+        foreign = {"run_id": "r_other", "model_id": "m0", "coefficients": current["coefficients"]}
+        objects = [current]
+        if attack == "metadata_only": objects = [{"run_id": "r", "model_id": "m"}, foreign]
+        if attack == "wrong_term": current["coefficients"] = {"x10": {"estimate": .40536541665861775}}
+        if attack == "wrong_field": current["coefficients"] = {"x1": {"std_error": .40536541665861775}}
+        if attack == "wrong_sign": current["coefficients"]["x1"]["estimate"] *= -1
+        if attack == "foreign_nested": current["coefficients"]["x1"].update(run_id="r_other", model_id="m0")
+        if attack == "conflicting_ref": current["evidence_ref"] = {"run_id": "r_other", "model_id": "m0"}
+        if attack == "duplicate_terms": current["coefficients"] = [{"term": "x1", "estimate": .40536541665861775}]*2
+        if attack == "short_round": current["coefficients"]["x1"]["estimate"] = .40536542
+        field = {"path": ["coefficients", "x1", "estimate"], "artifact": None}
+        row = {"actual": .40536541665861775, "tolerance": 1e-6}
+>       verdict = harness._answer_field_evidence(owner_field_entries(objects), "r", "m", [field], [row], {})
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'live_eval_v1811' has no attribute '_answer_field_evidence'. Did you mean: '_answer_owner_evidence'?
+
+tests/test_agent_live_eval_v1811_harness.py:479: AttributeError
+_________ test_remaining_owner_field_binding_mutants[duplicate_terms] __________
+
+attack = 'duplicate_terms'
+
+    @pytest.mark.parametrize("attack", ["metadata_only", "wrong_term", "wrong_field", "wrong_sign", "foreign_nested", "conflicting_ref", "duplicate_terms", "short_round"])
+    def test_remaining_owner_field_binding_mutants(attack):
+        current = {"run_id": "r", "model_id": "m", "coefficients": {"x1": {"estimate": .40536541665861775}}}
+        foreign = {"run_id": "r_other", "model_id": "m0", "coefficients": current["coefficients"]}
+        objects = [current]
+        if attack == "metadata_only": objects = [{"run_id": "r", "model_id": "m"}, foreign]
+        if attack == "wrong_term": current["coefficients"] = {"x10": {"estimate": .40536541665861775}}
+        if attack == "wrong_field": current["coefficients"] = {"x1": {"std_error": .40536541665861775}}
+        if attack == "wrong_sign": current["coefficients"]["x1"]["estimate"] *= -1
+        if attack == "foreign_nested": current["coefficients"]["x1"].update(run_id="r_other", model_id="m0")
+        if attack == "conflicting_ref": current["evidence_ref"] = {"run_id": "r_other", "model_id": "m0"}
+        if attack == "duplicate_terms": current["coefficients"] = [{"term": "x1", "estimate": .40536541665861775}]*2
+        if attack == "short_round": current["coefficients"]["x1"]["estimate"] = .40536542
+        field = {"path": ["coefficients", "x1", "estimate"], "artifact": None}
+        row = {"actual": .40536541665861775, "tolerance": 1e-6}
+>       verdict = harness._answer_field_evidence(owner_field_entries(objects), "r", "m", [field], [row], {})
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'live_eval_v1811' has no attribute '_answer_field_evidence'. Did you mean: '_answer_owner_evidence'?
+
+tests/test_agent_live_eval_v1811_harness.py:479: AttributeError
+___________ test_remaining_owner_field_binding_mutants[short_round] ____________
+
+attack = 'short_round'
+
+    @pytest.mark.parametrize("attack", ["metadata_only", "wrong_term", "wrong_field", "wrong_sign", "foreign_nested", "conflicting_ref", "duplicate_terms", "short_round"])
+    def test_remaining_owner_field_binding_mutants(attack):
+        current = {"run_id": "r", "model_id": "m", "coefficients": {"x1": {"estimate": .40536541665861775}}}
+        foreign = {"run_id": "r_other", "model_id": "m0", "coefficients": current["coefficients"]}
+        objects = [current]
+        if attack == "metadata_only": objects = [{"run_id": "r", "model_id": "m"}, foreign]
+        if attack == "wrong_term": current["coefficients"] = {"x10": {"estimate": .40536541665861775}}
+        if attack == "wrong_field": current["coefficients"] = {"x1": {"std_error": .40536541665861775}}
+        if attack == "wrong_sign": current["coefficients"]["x1"]["estimate"] *= -1
+        if attack == "foreign_nested": current["coefficients"]["x1"].update(run_id="r_other", model_id="m0")
+        if attack == "conflicting_ref": current["evidence_ref"] = {"run_id": "r_other", "model_id": "m0"}
+        if attack == "duplicate_terms": current["coefficients"] = [{"term": "x1", "estimate": .40536541665861775}]*2
+        if attack == "short_round": current["coefficients"]["x1"]["estimate"] = .40536542
+        field = {"path": ["coefficients", "x1", "estimate"], "artifact": None}
+        row = {"actual": .40536541665861775, "tolerance": 1e-6}
+>       verdict = harness._answer_field_evidence(owner_field_entries(objects), "r", "m", [field], [row], {})
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'live_eval_v1811' has no attribute '_answer_field_evidence'. Did you mean: '_answer_owner_evidence'?
+
+tests/test_agent_live_eval_v1811_harness.py:479: AttributeError
+__________ test_remaining_owner_field_binding_valid_projections[raw] ___________
+
+shape = 'raw'
+
+    @pytest.mark.parametrize("shape", ["raw", "bounded", "projection"])
+    def test_remaining_owner_field_binding_valid_projections(shape):
+        coeffs = {"x1": {"estimate": -.6}, "x2": {"estimate": .7}}
+        if shape == "bounded": coeffs = [{"term": term, **values} for term,values in coeffs.items()]
+        current = {"run_id": "r", "model_id": "m", "coefficients": coeffs, "evidence_ref": {"run_id": "r", "model_id": "m"}}
+        if shape == "projection": current = {"run_id": "r", "model_id": "m", "result": {"coefficients": coeffs}}
+        fields = [{"path": ["coefficients", term, "estimate"], "artifact": None} for term in ["x1", "x2"]]
+        rows = [{"actual": value, "tolerance": 1e-6} for value in [-.6,.7]]
+>       verdict = harness._answer_field_evidence(owner_field_entries([current]), "r", "m", fields, rows, {})
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'live_eval_v1811' has no attribute '_answer_field_evidence'. Did you mean: '_answer_owner_evidence'?
+
+tests/test_agent_live_eval_v1811_harness.py:490: AttributeError
+________ test_remaining_owner_field_binding_valid_projections[bounded] _________
+
+shape = 'bounded'
+
+    @pytest.mark.parametrize("shape", ["raw", "bounded", "projection"])
+    def test_remaining_owner_field_binding_valid_projections(shape):
+        coeffs = {"x1": {"estimate": -.6}, "x2": {"estimate": .7}}
+        if shape == "bounded": coeffs = [{"term": term, **values} for term,values in coeffs.items()]
+        current = {"run_id": "r", "model_id": "m", "coefficients": coeffs, "evidence_ref": {"run_id": "r", "model_id": "m"}}
+        if shape == "projection": current = {"run_id": "r", "model_id": "m", "result": {"coefficients": coeffs}}
+        fields = [{"path": ["coefficients", term, "estimate"], "artifact": None} for term in ["x1", "x2"]]
+        rows = [{"actual": value, "tolerance": 1e-6} for value in [-.6,.7]]
+>       verdict = harness._answer_field_evidence(owner_field_entries([current]), "r", "m", fields, rows, {})
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'live_eval_v1811' has no attribute '_answer_field_evidence'. Did you mean: '_answer_owner_evidence'?
+
+tests/test_agent_live_eval_v1811_harness.py:490: AttributeError
+_______ test_remaining_owner_field_binding_valid_projections[projection] _______
+
+shape = 'projection'
+
+    @pytest.mark.parametrize("shape", ["raw", "bounded", "projection"])
+    def test_remaining_owner_field_binding_valid_projections(shape):
+        coeffs = {"x1": {"estimate": -.6}, "x2": {"estimate": .7}}
+        if shape == "bounded": coeffs = [{"term": term, **values} for term,values in coeffs.items()]
+        current = {"run_id": "r", "model_id": "m", "coefficients": coeffs, "evidence_ref": {"run_id": "r", "model_id": "m"}}
+        if shape == "projection": current = {"run_id": "r", "model_id": "m", "result": {"coefficients": coeffs}}
+        fields = [{"path": ["coefficients", term, "estimate"], "artifact": None} for term in ["x1", "x2"]]
+        rows = [{"actual": value, "tolerance": 1e-6} for value in [-.6,.7]]
+>       verdict = harness._answer_field_evidence(owner_field_entries([current]), "r", "m", fields, rows, {})
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'live_eval_v1811' has no attribute '_answer_field_evidence'. Did you mean: '_answer_owner_evidence'?
+
+tests/test_agent_live_eval_v1811_harness.py:490: AttributeError
+_ test_remaining_owner_artifact_fields_require_exact_registered_owner[registered] _
+
+artifact = 'registered'
+
+    @pytest.mark.parametrize("artifact", ["registered", "foreign", "missing"])
+    def test_remaining_owner_artifact_fields_require_exact_registered_owner(artifact):
+        current = {"run_id": "r", "artifact_id": "dcdh_1", "result": {"event_study": {"estimate": [.1,.2,.6]}}}
+        if artifact == "foreign": current["artifact_id"] = "dcdh_10"
+        if artifact == "missing": del current["artifact_id"]
+        entry = {"payload": {"role": "tool", "name": "inspect_operation_artifact", "content": json.dumps(current)}}
+        field = {"path": ["event_study", "estimate", 2], "artifact": "dcdh.json"}
+>       verdict = harness._answer_field_evidence([entry], "r", "dcdh_1", [field], [{"actual": .6, "tolerance": 1e-6}], {"dcdh.json": "dcdh_1"})
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'live_eval_v1811' has no attribute '_answer_field_evidence'. Did you mean: '_answer_owner_evidence'?
+
+tests/test_agent_live_eval_v1811_harness.py:500: AttributeError
+_ test_remaining_owner_artifact_fields_require_exact_registered_owner[foreign] _
+
+artifact = 'foreign'
+
+    @pytest.mark.parametrize("artifact", ["registered", "foreign", "missing"])
+    def test_remaining_owner_artifact_fields_require_exact_registered_owner(artifact):
+        current = {"run_id": "r", "artifact_id": "dcdh_1", "result": {"event_study": {"estimate": [.1,.2,.6]}}}
+        if artifact == "foreign": current["artifact_id"] = "dcdh_10"
+        if artifact == "missing": del current["artifact_id"]
+        entry = {"payload": {"role": "tool", "name": "inspect_operation_artifact", "content": json.dumps(current)}}
+        field = {"path": ["event_study", "estimate", 2], "artifact": "dcdh.json"}
+>       verdict = harness._answer_field_evidence([entry], "r", "dcdh_1", [field], [{"actual": .6, "tolerance": 1e-6}], {"dcdh.json": "dcdh_1"})
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'live_eval_v1811' has no attribute '_answer_field_evidence'. Did you mean: '_answer_owner_evidence'?
+
+tests/test_agent_live_eval_v1811_harness.py:500: AttributeError
+_ test_remaining_owner_artifact_fields_require_exact_registered_owner[missing] _
+
+artifact = 'missing'
+
+    @pytest.mark.parametrize("artifact", ["registered", "foreign", "missing"])
+    def test_remaining_owner_artifact_fields_require_exact_registered_owner(artifact):
+        current = {"run_id": "r", "artifact_id": "dcdh_1", "result": {"event_study": {"estimate": [.1,.2,.6]}}}
+        if artifact == "foreign": current["artifact_id"] = "dcdh_10"
+        if artifact == "missing": del current["artifact_id"]
+        entry = {"payload": {"role": "tool", "name": "inspect_operation_artifact", "content": json.dumps(current)}}
+        field = {"path": ["event_study", "estimate", 2], "artifact": "dcdh.json"}
+>       verdict = harness._answer_field_evidence([entry], "r", "dcdh_1", [field], [{"actual": .6, "tolerance": 1e-6}], {"dcdh.json": "dcdh_1"})
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'live_eval_v1811' has no attribute '_answer_field_evidence'. Did you mean: '_answer_owner_evidence'?
+
+tests/test_agent_live_eval_v1811_harness.py:500: AttributeError
+=============================== warnings summary ===============================
+../../.venv/lib/python3.14/site-packages/fastapi/testclient.py:1
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_remaining_owner_field_binding_mutants[metadata_only]
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_remaining_owner_field_binding_mutants[wrong_term]
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_remaining_owner_field_binding_mutants[wrong_field]
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_remaining_owner_field_binding_mutants[wrong_sign]
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_remaining_owner_field_binding_mutants[foreign_nested]
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_remaining_owner_field_binding_mutants[conflicting_ref]
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_remaining_owner_field_binding_mutants[duplicate_terms]
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_remaining_owner_field_binding_mutants[short_round]
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_remaining_owner_field_binding_valid_projections[raw]
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_remaining_owner_field_binding_valid_projections[bounded]
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_remaining_owner_field_binding_valid_projections[projection]
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_remaining_owner_artifact_fields_require_exact_registered_owner[registered]
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_remaining_owner_artifact_fields_require_exact_registered_owner[foreign]
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_remaining_owner_artifact_fields_require_exact_registered_owner[missing]
+14 failed, 84 deselected, 1 warning in 1.75s

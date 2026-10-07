@@ -1,0 +1,378 @@
+{
+  "production_sha": "5f8451b929ac51ba7ae9821e4a8a7f1adea642a8",
+  "sessions": [
+    {
+      "out": "tests/fixtures/eval_v1811/lane_e_20261005/r01",
+      "passed": 44,
+      "failed": 4,
+      "seconds": 33.41
+    },
+    {
+      "out": "tests/fixtures/eval_v1811/lane_e_20261005/r02",
+      "passed": 3,
+      "failed": 1,
+      "seconds": 14.53
+    }
+  ],
+  "final_nodes": [
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e01_joint.py::test_new_orders_report_final_parameters_se_ll_ic[arma22-ar0-ma0-0.55-18112051]",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 1.2607016660040244
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e01_joint.py::test_new_orders_report_final_parameters_se_ll_ic[near_unit-ar1-ma1-0.55-18112052]",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 1.0309314579935744
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e01_joint.py::test_new_orders_report_final_parameters_se_ll_ic[small_beta-ar2-ma2-0.025-18112053]",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 1.1425508329411969
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e01_joint.py::test_failure_has_no_partial_numbers_or_strategy_fallback",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 0.008092875010333955
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e02_count.py::test_new_count_data_final_outputs_match_native_stata[nb2-mean-lnalpha]",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 0.9782687500119209
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e02_count.py::test_new_count_data_final_outputs_match_native_stata[nb1-constant-lndelta]",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 0.9632570829708129
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e02_count.py::test_new_count_data_final_outputs_match_native_stata[fixed-mean-None]",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 0.9653250830015168
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e02_count.py::test_fixed_glm_expected_information_matches_fresh_r",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 0.19579941709525883
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e02_count.py::test_alpha_zero_boundary_is_explicit_not_uncertified_numbers",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 0.007648166036233306
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e02_count.py::test_missing_glm_alpha_and_fixed_nb1_refuse_without_defaults",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 0.0007869999390095472
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e03_panel_did.py::test_actual_default_cluster_kernel_and_final_lincom_match_stata[panel_ols]",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 1.3840996669605374
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e03_panel_did.py::test_actual_default_cluster_kernel_and_final_lincom_match_stata[did]",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 1.1562128749210387
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e03_panel_did.py::test_event_study_final_leads_f_df_p_match_fresh_stata",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 1.164298916934058
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e03_panel_did.py::test_one_threshold_and_old_result_label_preserve_legacy",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 0.00030333397444337606
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e04_post.py::test_final_registered_public_post_values_match_real_r[wald-binomial]",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 0.0008297080639749765
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e04_post.py::test_final_registered_public_post_values_match_real_r[wald-poisson]",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 0.00044166704174131155
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e04_post.py::test_final_registered_public_post_values_match_real_r[wald-negative_binomial]",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 0.000434375018812716
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e04_post.py::test_final_registered_public_post_values_match_real_r[lincom-binomial]",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 0.0004734169924631715
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e04_post.py::test_final_registered_public_post_values_match_real_r[lincom-poisson]",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 0.0004117080243304372
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e04_post.py::test_final_registered_public_post_values_match_real_r[lincom-negative_binomial]",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 0.00039662502240389585
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e04_post.py::test_final_registered_public_post_values_match_real_r[nlcom-binomial]",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 0.0004484170349314809
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e04_post.py::test_final_registered_public_post_values_match_real_r[nlcom-poisson]",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 0.00040341599378734827
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e04_post.py::test_final_registered_public_post_values_match_real_r[nlcom-negative_binomial]",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 0.0005469170864671469
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e04_post.py::test_final_registered_public_post_values_match_real_r[lr-binomial]",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 0.032772709033451974
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e04_post.py::test_final_registered_public_post_values_match_real_r[lr-poisson]",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 0.005255499971099198
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e04_post.py::test_final_registered_public_post_values_match_real_r[lr-negative_binomial]",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 0.00560575001873076
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e04_post.py::test_final_registered_public_post_values_match_real_r[margins_average-binomial]",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 0.001721833017654717
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e04_post.py::test_final_registered_public_post_values_match_real_r[margins_average-poisson]",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 0.001949208090081811
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e04_post.py::test_final_registered_public_post_values_match_real_r[margins_average-negative_binomial]",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 0.0026084580458700657
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e04_post.py::test_final_registered_public_post_values_match_real_r[margins_means-binomial]",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 0.0024907079059630632
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e04_post.py::test_final_registered_public_post_values_match_real_r[margins_means-poisson]",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 0.0020449160365387797
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e04_post.py::test_final_registered_public_post_values_match_real_r[margins_means-negative_binomial]",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 0.002251541940495372
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e04_post.py::test_lmm_post_does_not_gain_validation_from_successful_fit[wald]",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 9.166705422103405e-05
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e04_post.py::test_lmm_post_does_not_gain_validation_from_successful_fit[lincom]",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 3.3624935895204544e-05
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e04_post.py::test_lmm_post_does_not_gain_validation_from_successful_fit[nlcom]",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 3.533298149704933e-05
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e04_post.py::test_lmm_post_does_not_gain_validation_from_successful_fit[lr]",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 3.2041920349001884e-05
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e04_post.py::test_lmm_post_does_not_gain_validation_from_successful_fit[margins]",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 2.5000073947012424e-05
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e04_post.py::test_iv_lr_refuses_no_likelihood_and_panel_margins_remain_unvalidated",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 7.625005673617125e-05
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e04_post.py::test_public_two_endogenous_iv_wald_lincom_nlcom_match_fresh_stata",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 1.0797755839303136
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e05_scripts.py::test_real_public_zip_path_runs_natively_and_changed_source_refuses[stata]",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 0.23845637496560812
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e05_scripts.py::test_real_public_zip_path_runs_natively_and_changed_source_refuses[r]",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 0.6568945830222219
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e05_scripts.py::test_real_public_zip_path_runs_natively_and_changed_source_refuses[python]",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 1.1686359170125797
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e05_scripts.py::test_actual_snapshot_continues_but_fully_native_refuses[stata]",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 0.7619147080695257
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e05_scripts.py::test_actual_snapshot_continues_but_fully_native_refuses[r]",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 0.2533627499360591
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e05_scripts.py::test_actual_snapshot_continues_but_fully_native_refuses[python]",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 0.26067375007551163
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e06_classical.py::test_manual_failed_diagnostic_remains_visible_and_short_lags_unavailable",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 0.0789123330032453
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e06_classical.py::test_full_and_first_origin_match_stata_and_ignore_future_tail",
+      "phase": "call",
+      "outcome": "failed",
+      "duration": 1.077954625012353
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e07_entries.py::test_missing_glm_nb_alpha_rejects_all_public_entries",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 1.5281617910368368
+    }
+  ],
+  "final_counts": {
+    "passed": 47,
+    "failed": 1
+  },
+  "e06_definition": {
+    "definition": "ARMA(0,0), no constant, iid Gaussian MLE variance = sum(y^2)/n; no software refit",
+    "n": 144,
+    "closed_form_variance": 1.0841774164273454,
+    "closed_form_prefix_variance": 1.087712882300714,
+    "workbench_variance": 1.0841774164273454,
+    "native_stata_variance": 1.0841775206953714,
+    "workbench_prefix_variance": 1.0877128823007143,
+    "native_stata_prefix_variance": 1.0877129146043252,
+    "workbench_closed_form_abs": 0.0,
+    "stata_closed_form_abs": 1.0426802599106111e-07,
+    "workbench_prefix_closed_form_abs": 2.220446049250313e-16,
+    "stata_prefix_closed_form_abs": 3.230361111938862e-08,
+    "required_absolute_tolerance": 1e-08,
+    "status": "Native Stata finite optimization precision unresolved; not a confirmed Workbench model defect"
+  },
+  "actual_module_paths": {
+    "workbench": "/Users/jiayuanren/\u9879\u76ee\u89c4\u5212/.worktrees/codex-v1811-evaluation/backend/workbench/__init__.py",
+    "workbench.engine.packs.arma_garch.joint_mle": "/Users/jiayuanren/\u9879\u76ee\u89c4\u5212/.worktrees/codex-v1811-evaluation/backend/workbench/engine/packs/arma_garch/joint_mle.py",
+    "workbench.econometrics.count_models": "/Users/jiayuanren/\u9879\u76ee\u89c4\u5212/.worktrees/codex-v1811-evaluation/backend/workbench/econometrics/count_models.py",
+    "workbench.script_export.builder": "/Users/jiayuanren/\u9879\u76ee\u89c4\u5212/.worktrees/codex-v1811-evaluation/backend/workbench/script_export/builder.py"
+  },
+  "no_provider_run": true,
+  "no_production_changes": true,
+  "boundary_se_native_certified": false,
+  "e06_native_r": {
+    "R_version": "R version 4.6.0 (2026-04-24)",
+    "definition": "zero mean Gaussian: variance MLE = mean(y^2), no optimization",
+    "n": 144,
+    "closed": {
+      "variance": 1.0841774164273452,
+      "ll": -210.14630095143715,
+      "score": 1.4210854715202004e-14,
+      "score_per_observation": 9.868649107779169e-17
+    },
+    "workbench": {
+      "variance": 1.0841774164273454,
+      "ll": -210.14630095143715,
+      "score": 0,
+      "score_per_observation": 0
+    },
+    "stata": {
+      "variance": 1.0841775206953714,
+      "ll": -210.1463009514375,
+      "score": -6.386793145907177e-06,
+      "score_per_observation": -4.435273017991095e-08
+    },
+    "prefix_closed": {
+      "variance": 1.087712882300714,
+      "ll": -204.53679995507503,
+      "score": 1.4210854715202004e-14,
+      "score_per_observation": 1.0150610510858574e-16
+    },
+    "prefix_workbench": {
+      "variance": 1.0877128823007143,
+      "ll": -204.53679995507503,
+      "score": 0,
+      "score_per_observation": 0
+    },
+    "prefix_stata": {
+      "variance": 1.0877129146043252,
+      "ll": -204.53679995507514,
+      "score": -1.9112633964368797e-06,
+      "score_per_observation": -1.365188140312057e-08
+    }
+  },
+  "classification": "No confirmed production defect in covered scope; retained Stata optimizer-precision FAIL and boundary inference limitation"
+}

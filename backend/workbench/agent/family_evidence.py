@@ -12,7 +12,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
-from ..artifacts import read_json
+from ..artifacts import read_json, registered_artifacts_at, sha256_file
 from ..contracts.model.result_envelope_registry import (
     EvidenceField,
     ResultEnvelopeDeclaration,
@@ -41,6 +41,7 @@ from .bounds import (
     _bounded_schoenfeld,
     _bounded_survival_rows,
     _public_positive_int,
+    _public_stat_number,
 )
 
 
@@ -52,6 +53,14 @@ BOUNDS_BY_KIND: Mapping[str, Callable[[Any, Mapping[str, Any]], Any]] = {
     "label": lambda value, options: _bounded_label(value),
     "labels": lambda value, options: _bounded_labels(value),
     "positive_int": lambda value, options: _public_positive_int(value),
+    "number": lambda value, options: _public_stat_number(value),
+    "boolean": lambda value, options: value if type(value) is bool else None,
+    "numeric_records": lambda value, options: [
+        _bounded_numeric_fields(row, fields=_tuple(options, "fields"),
+            string_fields=_tuple(options, "string_fields"))
+        for row in (value if isinstance(value, list) else [])[:int(options["limit"])]
+        if isinstance(row, dict)
+    ],
     "numeric_list": lambda value, options: _bounded_numeric_list(value, limit=int(options["limit"])),
     "numeric_map": lambda value, options: _bounded_numeric_map(value, fields=_tuple(options, "fields")),
     "numeric_fields": lambda value, options: _bounded_numeric_fields(
@@ -107,6 +116,12 @@ def project_family_evidence(
         source = _read_document(run_root, declaration.evidence_document)
         if source is None:
             return None
+        registered = registered_artifacts_at(run_root, declaration.evidence_document)
+        document_ref = None
+        if registered:
+            if len(registered) != 1 or registered[0].get("sha256") != sha256_file(run_root / declaration.evidence_document):
+                return None
+            document_ref = {key: registered[0].get(key) for key in ("artifact_id", "path", "sha256")}
     else:
         source = dict(primary)
     sidecars = {
@@ -127,6 +142,15 @@ def project_family_evidence(
     for field in declaration.fields:
         bound = BOUNDS_BY_KIND[field.kind]
         projected[field.key] = bound(_field_value(field, source, sidecars), field.options)
+    model_id = primary.get("model_id")
+    if isinstance(model_id, str) and model_id:
+        projected["model_id"] = model_id
+        projected["evidence_ref"] = {"run_id": run_root.name, "model_id": model_id,
+                                     "result_ref": f"model_results:{model_id}"}
+        if declaration.evidence_document is not None:
+            projected["evidence_ref"].pop("result_ref")
+            if document_ref is not None and not any(field.sidecar for field in declaration.fields):
+                projected["evidence_ref"].update(document_ref)
     return projected
 
 
@@ -135,7 +159,7 @@ def bounded_model_family_evidence(run_root: Path, model_results: list[dict[str, 
     primary = next((item for item in model_results if isinstance(item, dict)), None)
     if primary is None:
         return None
-    declaration = declaration_for(primary.get("model_type"))
+    declaration = declaration_for(primary.get("kernel_family") or primary.get("model_type"))
     if declaration is None:
         return None
     return project_family_evidence(run_root, primary, declaration)

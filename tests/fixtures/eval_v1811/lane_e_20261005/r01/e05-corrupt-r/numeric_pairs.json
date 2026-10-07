@@ -1,0 +1,182 @@
+[
+  {
+    "expected": 640.0,
+    "abs": 0.0,
+    "rel": 0.0,
+    "label": "step_76b2427e32344554a37924aa:nrows"
+  },
+  {
+    "expected": 320.0,
+    "abs": 0.0,
+    "rel": 0.0,
+    "label": "step_eca26cfbad39adff69c00721:nrows"
+  },
+  {
+    "expected": 320.0,
+    "abs": 0.0,
+    "rel": 0.0,
+    "label": "step_226b4b10776b3612293e8e34:nrows"
+  },
+  {
+    "expected": 320.0,
+    "abs": 0.0,
+    "rel": 0.0,
+    "label": "step_5bb28f6498e4698e7347d1d5:nrows"
+  },
+  {
+    "expected": 0.9675178036793878,
+    "abs": 1e-08,
+    "rel": 1e-06,
+    "label": "step_59722572b3c11a55aa32ba09:coefficients"
+  },
+  {
+    "expected": 0.587233907457428,
+    "abs": 1e-08,
+    "rel": 1e-06,
+    "label": "step_59722572b3c11a55aa32ba09:coefficients"
+  },
+  {
+    "expected": -0.1324647468019746,
+    "abs": 1e-08,
+    "rel": 1e-06,
+    "label": "step_59722572b3c11a55aa32ba09:coefficients"
+  },
+  {
+    "expected": 0.2877185211968429,
+    "abs": 1e-08,
+    "rel": 1e-06,
+    "label": "step_59722572b3c11a55aa32ba09:coefficients"
+  },
+  {
+    "expected": 0.06938744595036184,
+    "abs": 1e-08,
+    "rel": 1e-05,
+    "label": "step_59722572b3c11a55aa32ba09:std_errors"
+  },
+  {
+    "expected": 0.05939583283342683,
+    "abs": 1e-08,
+    "rel": 1e-05,
+    "label": "step_59722572b3c11a55aa32ba09:std_errors"
+  },
+  {
+    "expected": 0.05576371929506281,
+    "abs": 1e-08,
+    "rel": 1e-05,
+    "label": "step_59722572b3c11a55aa32ba09:std_errors"
+  },
+  {
+    "expected": 0.060837730532374686,
+    "abs": 1e-08,
+    "rel": 1e-05,
+    "label": "step_59722572b3c11a55aa32ba09:std_errors"
+  },
+  {
+    "expected": 320.0,
+    "abs": 0.0,
+    "rel": 0.0,
+    "label": "step_59722572b3c11a55aa32ba09:nobs"
+  },
+  {
+    "expected": 13.943701060441503,
+    "abs": 1e-08,
+    "rel": 1e-05,
+    "label": "step_59722572b3c11a55aa32ba09:statistics.value"
+  },
+  {
+    "expected": 1.974202786152289e-11,
+    "abs": 1e-06,
+    "rel": 0.0,
+    "label": "step_59722572b3c11a55aa32ba09:statistics.p_value"
+  },
+  {
+    "expected": 19.0,
+    "abs": 0.0,
+    "rel": 0.0,
+    "label": "step_59722572b3c11a55aa32ba09:statistics.df"
+  },
+  {
+    "expected": 9.886786318903908,
+    "abs": 1e-08,
+    "rel": 1e-05,
+    "label": "step_59722572b3c11a55aa32ba09:statistics.value"
+  },
+  {
+    "expected": 6.320519792921724e-09,
+    "abs": 1e-06,
+    "rel": 0.0,
+    "label": "step_59722572b3c11a55aa32ba09:statistics.p_value"
+  },
+  {
+    "expected": 19.0,
+    "abs": 0.0,
+    "rel": 0.0,
+    "label": "step_59722572b3c11a55aa32ba09:statistics.df"
+  },
+  {
+    "expected": -2.375464701360096,
+    "abs": 1e-08,
+    "rel": 1e-05,
+    "label": "step_59722572b3c11a55aa32ba09:statistics.value"
+  },
+  {
+    "expected": 0.028205935498091514,
+    "abs": 1e-06,
+    "rel": 0.0,
+    "label": "step_59722572b3c11a55aa32ba09:statistics.p_value"
+  },
+  {
+    "expected": 19.0,
+    "abs": 0.0,
+    "rel": 0.0,
+    "label": "step_59722572b3c11a55aa32ba09:statistics.df"
+  },
+  {
+    "expected": 4.729277681450231,
+    "abs": 1e-08,
+    "rel": 1e-05,
+    "label": "step_59722572b3c11a55aa32ba09:statistics.value"
+  },
+  {
+    "expected": 0.00014595711024510102,
+    "abs": 1e-06,
+    "rel": 0.0,
+    "label": "step_59722572b3c11a55aa32ba09:statistics.p_value"
+  },
+  {
+    "expected": 19.0,
+    "abs": 0.0,
+    "rel": 0.0,
+    "label": "step_59722572b3c11a55aa32ba09:statistics.df"
+  },
+  {
+    "expected": 320.0,
+    "abs": 0.0,
+    "rel": 0.0,
+    "label": "step_522468aadb113d7b603dca9b:nobs"
+  },
+  {
+    "expected": 69.64771978987594,
+    "abs": 1e-08,
+    "rel": 1e-05,
+    "label": "step_522468aadb113d7b603dca9b:statistics.value"
+  },
+  {
+    "expected": 1.7914693344639517e-09,
+    "abs": 1e-06,
+    "rel": 0.0,
+    "label": "step_522468aadb113d7b603dca9b:statistics.p_value"
+  },
+  {
+    "expected": 2.0,
+    "abs": 0.0,
+    "rel": 0.0,
+    "label": "step_522468aadb113d7b603dca9b:statistics.df"
+  },
+  {
+    "expected": 19.0,
+    "abs": 0.0,
+    "rel": 0.0,
+    "label": "step_522468aadb113d7b603dca9b:statistics.df_denominator"
+  }
+]

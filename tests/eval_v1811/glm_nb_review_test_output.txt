@@ -1,0 +1,10 @@
+..................                                                       [100%]
+=============================== warnings summary ===============================
+tests/test_glm_nb_v1811_reference.py::test_actual_owner_coefficient_kernel_matches_final_native_eim
+tests/test_glm_nb_v1811_reference.py::test_actual_owner_coefficient_kernel_matches_final_native_eim
+tests/test_glm_nb_v1811_reference.py::test_actual_owner_coefficient_kernel_matches_final_native_eim
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/genmod/generalized_linear_model.py:1923: FutureWarning: The bic value is computed using the deviance formula. After 0.13 this will change to the log-likelihood based formula. This change has no impact on the relative rank of models compared using BIC. You can directly access the log-likelihood version using the `bic_llf` attribute. You can suppress this message by calling statsmodels.genmod.generalized_linear_model.SET_USE_BIC_LLF with True to get the LLF-based version now or False to retainthe deviance version.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+18 passed, 3 warnings in 3.90s

@@ -1,0 +1,135 @@
+...........FFF.................................                          [100%]
+=================================== FAILURES ===================================
+___ test_glm_nonfinite_inference_never_returns_a_packet[likelihood-poisson] ____
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x125174590>
+family = 'poisson', broken = 'likelihood'
+
+    @pytest.mark.parametrize("family", ["poisson", "negative_binomial", "binomial"])
+    @pytest.mark.parametrize("broken", ["parameters", "likelihood", "information", "covariance"])
+    def test_glm_nonfinite_inference_never_returns_a_packet(monkeypatch, family, broken):
+        original = count_models.smf.glm
+        def corrupted_model(**kwargs):
+            model = original(**kwargs)
+            original_fit = model.fit
+            def fit(**options):
+                fitted = original_fit(**options)
+                if broken == "parameters":
+                    fitted._results.params[0] = np.nan
+                elif broken == "likelihood":
+                    model.loglike = lambda *args, **kwargs: -np.inf
+                    fitted._results._cache.clear()
+                elif broken == "information":
+                    model.hessian = lambda *args, **kwargs: np.full((3, 3), np.nan)
+                else:
+                    fitted._results.normalized_cov_params[:] = np.inf
+                return fitted
+            model.fit = fit
+            return model
+        monkeypatch.setattr(count_models.smf, "glm", corrupted_model)
+        data = frame()
+        if family == "binomial":
+            data.y = (data.y > 1).astype(float)
+>       with pytest.raises(ValueError, match="GLM_RESULT_NONFINITE"):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE ValueError
+
+tests/test_count_models_remediation.py:63: Failed
+_ test_glm_nonfinite_inference_never_returns_a_packet[likelihood-negative_binomial] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x15f4791d0>
+family = 'negative_binomial', broken = 'likelihood'
+
+    @pytest.mark.parametrize("family", ["poisson", "negative_binomial", "binomial"])
+    @pytest.mark.parametrize("broken", ["parameters", "likelihood", "information", "covariance"])
+    def test_glm_nonfinite_inference_never_returns_a_packet(monkeypatch, family, broken):
+        original = count_models.smf.glm
+        def corrupted_model(**kwargs):
+            model = original(**kwargs)
+            original_fit = model.fit
+            def fit(**options):
+                fitted = original_fit(**options)
+                if broken == "parameters":
+                    fitted._results.params[0] = np.nan
+                elif broken == "likelihood":
+                    model.loglike = lambda *args, **kwargs: -np.inf
+                    fitted._results._cache.clear()
+                elif broken == "information":
+                    model.hessian = lambda *args, **kwargs: np.full((3, 3), np.nan)
+                else:
+                    fitted._results.normalized_cov_params[:] = np.inf
+                return fitted
+            model.fit = fit
+            return model
+        monkeypatch.setattr(count_models.smf, "glm", corrupted_model)
+        data = frame()
+        if family == "binomial":
+            data.y = (data.y > 1).astype(float)
+>       with pytest.raises(ValueError, match="GLM_RESULT_NONFINITE"):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE ValueError
+
+tests/test_count_models_remediation.py:63: Failed
+___ test_glm_nonfinite_inference_never_returns_a_packet[likelihood-binomial] ___
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x15f5b24e0>
+family = 'binomial', broken = 'likelihood'
+
+    @pytest.mark.parametrize("family", ["poisson", "negative_binomial", "binomial"])
+    @pytest.mark.parametrize("broken", ["parameters", "likelihood", "information", "covariance"])
+    def test_glm_nonfinite_inference_never_returns_a_packet(monkeypatch, family, broken):
+        original = count_models.smf.glm
+        def corrupted_model(**kwargs):
+            model = original(**kwargs)
+            original_fit = model.fit
+            def fit(**options):
+                fitted = original_fit(**options)
+                if broken == "parameters":
+                    fitted._results.params[0] = np.nan
+                elif broken == "likelihood":
+                    model.loglike = lambda *args, **kwargs: -np.inf
+                    fitted._results._cache.clear()
+                elif broken == "information":
+                    model.hessian = lambda *args, **kwargs: np.full((3, 3), np.nan)
+                else:
+                    fitted._results.normalized_cov_params[:] = np.inf
+                return fitted
+            model.fit = fit
+            return model
+        monkeypatch.setattr(count_models.smf, "glm", corrupted_model)
+        data = frame()
+        if family == "binomial":
+            data.y = (data.y > 1).astype(float)
+>       with pytest.raises(ValueError, match="GLM_RESULT_NONFINITE"):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE ValueError
+
+tests/test_count_models_remediation.py:63: Failed
+=============================== warnings summary ===============================
+tests/test_count_models_remediation.py::test_uncertified_natural_stationarity_fails_closed[constant]
+tests/eval_v1811/m2_review_assertions.py::test_uncertified_interior_ancillary_point_does_not_publish_regular_oim_inference[constant-1]
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/base/model.py:595: HessianInversionWarning: Inverting hessian failed, no bse or cov_params available
+    warnings.warn('Inverting hessian failed, no bse or cov_params '
+
+tests/test_count_models_remediation.py::test_uncertified_natural_stationarity_fails_closed[constant]
+tests/eval_v1811/m2_review_assertions.py::test_uncertified_interior_ancillary_point_does_not_publish_regular_oim_inference[constant-1]
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/base/model.py:607: ConvergenceWarning: Maximum Likelihood optimization failed to converge. Check mle_retvals
+    warnings.warn("Maximum Likelihood optimization failed to "
+
+tests/test_count_models_remediation.py::test_glm_nonfinite_inference_never_returns_a_packet[likelihood-poisson]
+tests/test_count_models_remediation.py::test_glm_nonfinite_inference_never_returns_a_packet[likelihood-negative_binomial]
+tests/test_count_models_remediation.py::test_glm_nonfinite_inference_never_returns_a_packet[likelihood-binomial]
+tests/test_count_models_remediation.py::test_fixed_fractional_nb_matches_native_stata_oim_and_r_eim
+tests/test_count_models_remediation.py::test_fixed_fractional_nb_matches_native_stata_oim_and_r_eim
+tests/test_count_models_remediation.py::test_binomial_fractional_response_remains_valid
+tests/test_count_models_contract.py::test_fixed_alpha_uses_observed_information_and_has_no_estimation_claim
+tests/test_count_models_contract.py::test_glm_fixed_alpha_matches_r_expected_information
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/genmod/generalized_linear_model.py:1923: FutureWarning: The bic value is computed using the deviance formula. After 0.13 this will change to the log-likelihood based formula. This change has no impact on the relative rank of models compared using BIC. You can directly access the log-likelihood version using the `bic_llf` attribute. You can suppress this message by calling statsmodels.genmod.generalized_linear_model.SET_USE_BIC_LLF with True to get the LLF-based version now or False to retainthe deviance version.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_count_models_remediation.py::test_glm_nonfinite_inference_never_returns_a_packet[likelihood-poisson]
+FAILED tests/test_count_models_remediation.py::test_glm_nonfinite_inference_never_returns_a_packet[likelihood-negative_binomial]
+FAILED tests/test_count_models_remediation.py::test_glm_nonfinite_inference_never_returns_a_packet[likelihood-binomial]
+3 failed, 44 passed, 1 deselected, 12 warnings in 1.78s

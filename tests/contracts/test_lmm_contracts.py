@@ -15,6 +15,7 @@ from workbench.contracts.common.envelope import ContractError, PacketEnvelope
 from workbench.contracts.model.linear_mixed_effects import (
     LMM_CONTRACT_VERSION,
     LMM_ESTIMATOR_VERSION,
+    LMM_READABLE_ESTIMATOR_VERSIONS,
     LMM_INFERENCE_METHOD,
     LMM_MISSING_POLICY,
     LMM_MODEL_TYPE,
@@ -120,7 +121,10 @@ def test_result_identity_changes_when_fit_method_changes() -> None:
 def test_lmm_contract_constants_lock_the_initial_recipe() -> None:
     assert LMM_MODEL_TYPE == "linear_mixed_effects"
     assert LMM_CONTRACT_VERSION == "1.0"
-    assert LMM_ESTIMATOR_VERSION == "statsmodels_mixedlm_v1"
+    # v2: fixed-effect inference on the GLS covariance (lme4 / Stata mixed);
+    # v1 packets stay readable as the earlier inverse-Hessian definition.
+    assert LMM_ESTIMATOR_VERSION == "statsmodels_mixedlm_v2"
+    assert LMM_READABLE_ESTIMATOR_VERSIONS == {"statsmodels_mixedlm_v1", "statsmodels_mixedlm_v2"}
     assert LMM_MISSING_POLICY == "complete_case_v1"
     assert LMM_PRIMARY_RESULT_ID == "group_time_interaction"
     assert LMM_INFERENCE_METHOD == "asymptotic_wald_z_v1"

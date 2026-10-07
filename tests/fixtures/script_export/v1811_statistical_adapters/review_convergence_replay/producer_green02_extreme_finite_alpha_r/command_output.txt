@@ -1,0 +1,2 @@
+Error: GLM_NB_NUMERIC_FAILURE: non-finite native mean or variance
+Execution halted

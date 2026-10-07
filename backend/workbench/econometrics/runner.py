@@ -100,6 +100,8 @@ def _normalize_linearmodels_result(
     entity_col: str | None = None,
     time_col: str | None = None,
     clustered_on_entity: bool = False,
+    inference: Any = None,
+    warnings: list[str] | None = None,
 ) -> dict[str, Any]:
     params = getattr(fitted, "params", {})
     std_errors = getattr(fitted, "std_errors", {})
@@ -152,8 +154,41 @@ def _normalize_linearmodels_result(
         "df_model": _json_safe_float(getattr(fitted, "df_model", None)),
         "df_resid": _json_safe_float(getattr(fitted, "df_resid", None)),
         "coefficients": coefficients,
-        "warnings": [],
+        "warnings": list(warnings or []),
     }
+    if inference is not None:
+        # Clustered by panel_inference: CR1, Stata's finite-sample rule, t(G - 1).
+        result.update(
+            {
+                "covariance": "clustered",
+                "covariance_estimator": (
+                    "clustered_entity" if inference.cluster_variable == entity_col else "clustered"
+                ),
+                "entity_col": entity_col,
+                "time_col": time_col,
+                "x_columns": [str(label) for label, _ in items],
+                "covariance_evidence": {
+                    "covariance": "clustered",
+                    "covariance_estimator": "CR1",
+                    "cluster_variable": inference.cluster_variable,
+                    "cluster_entity": inference.cluster_variable == entity_col,
+                    "cluster_count": inference.n_clusters,
+                    "small_sample_correction": True,
+                    "degrees_of_freedom_correction": True,
+                    "finite_sample_factor": "G/(G-1) * (N-1)/(N-K)",
+                    "parameters_counted": inference.parameters_counted,
+                    "use_t": True,
+                    "inference_version": INFERENCE_ENGINE_VERSION,
+                    "df_method": "clusters_minus_one",
+                    "inference_distribution": "t",
+                    "effective_df": inference.df,
+                    "confidence_level": 0.95,
+                    "df_resid": _json_safe_float(getattr(fitted, "df_resid", None)),
+                    "reference": "Stata xtreg, fe vce(cluster)",
+                },
+            }
+        )
+        return result
     if covariance is not None:
         cluster_count = None
         if clustered_on_entity and entity_col is not None:
@@ -177,6 +212,8 @@ def _normalize_linearmodels_result(
                     "cluster_count": cluster_count,
                     "confidence_level": 0.95,
                     "df_resid": _json_safe_float(getattr(fitted, "df_resid", None)),
+                    "inference_version": INFERENCE_ENGINE_VERSION,
+                    "inference_distribution": "t" if getattr(fitted, "debiased", False) else "z",
                 },
             }
         )
@@ -1214,29 +1251,24 @@ def run_negative_binomial(
     x: list[str],
     model_id: str,
     categorical_x: set[str] | None = None,
+    *,
+    dispersion: str = "mean",
+    alpha: float | None = None,
 ) -> tuple[dict[str, Any], Any]:
+    from .count_models import fit_negative_binomial
+
     frame = _ensure_numeric_y(frame, y)
     frame = _ensure_numeric_x(frame, x)
-    series = frame[y].dropna()
-    if (series < 0).any():
-        raise ValueError(
-            f"Negative Binomial model requires non-negative y, but '{y}' has negative values."
-        )
-    if not (series == series.astype(int)).all():
-        raise ValueError(
-            f"Negative Binomial model requires integer count y, but '{y}' has non-integer values."
-        )
     cat = categorical_x or set()
     formula = _ols_formula(y, [_formula_term(column, column in cat) for column in x])
     try:
-        fitted = smf.negativebinomial(formula=formula, data=frame).fit(disp=False, maxiter=100)
+        return fit_negative_binomial(frame, formula, model_id, dispersion=dispersion, alpha=alpha, y_column=y)
+    except ValueError:
+        raise
     except Exception as exc:
         raise ValueError(
             f"Negative Binomial model {model_id} failed to fit.{_root_cause_suffix(exc)}"
         ) from exc
-    result = normalize_statsmodels_result(fitted, model_id)
-    result["model_type"] = "negative_binomial"
-    return _add_engine(result), fitted
 
 
 def run_glm(
@@ -1246,31 +1278,23 @@ def run_glm(
     model_id: str,
     family_name: str,
     categorical_x: set[str] | None = None,
+    *,
+    alpha: float | None = None,
 ) -> tuple[dict[str, Any], Any]:
-    from statsmodels.genmod import families
+    from .count_models import fit_glm
 
-    family_map = {
-        "binomial": families.Binomial,
-        "poisson": families.Poisson,
-        "negative_binomial": families.NegativeBinomial,
-    }
-    family_cls = family_map.get(family_name)
-    if family_cls is None:
-        raise ValueError(f"Unsupported GLM family: {family_name}")
     frame = _ensure_numeric_y(frame, y)
     frame = _ensure_numeric_x(frame, x)
     cat = categorical_x or set()
     formula = _ols_formula(y, [_formula_term(column, column in cat) for column in x])
     try:
-        fitted = smf.glm(formula=formula, data=frame, family=family_cls()).fit(maxiter=100)
+        return fit_glm(frame, formula, model_id, family_name, alpha=alpha)
+    except ValueError:
+        raise
     except Exception as exc:
         raise ValueError(
             f"GLM model {model_id} failed to fit.{_root_cause_suffix(exc)}"
         ) from exc
-    result = normalize_statsmodels_result(fitted, model_id)
-    result["model_type"] = "glm"
-    result["glm_family"] = family_name
-    return _add_engine(result), fitted
 
 
 def run_fixed_effects(
@@ -1294,6 +1318,82 @@ def run_fixed_effects(
     return _add_engine(result), fitted
 
 
+PANEL_COVARIANCE_VALUES = ("clustered", "robust", "unadjusted")
+
+
+def _panel_covariance(covariance: str | None, cluster_col: str | None) -> str:
+    """The covariance a panel fit uses: clustered unless another is chosen."""
+    value = (covariance or "").strip().lower() or "clustered"
+    if value not in PANEL_COVARIANCE_VALUES:
+        raise ValueError(
+            f"PANEL_COVARIANCE_UNSUPPORTED: unsupported covariance {value!r}; panel and DID "
+            "models offer " + ", ".join(PANEL_COVARIANCE_VALUES) + "."
+        )
+    if cluster_col is not None and value != "clustered":
+        raise ValueError(
+            "PANEL_CLUSTER_WITHOUT_CLUSTERING: a cluster variable applies only to clustered "
+            f"standard errors, not to {value!r}."
+        )
+    return value
+
+
+def _panel_covariance_warnings(covariance: str) -> list[str]:
+    if covariance == "robust":
+        return [
+            "Heteroskedasticity-robust standard errors that ignore the clustering by entity are not "
+            "consistent with a fixed number of periods (Stock & Watson 2008); use them only to "
+            "reproduce earlier work. The default clusters by entity, as Stata's xtreg, fe vce(robust)."
+        ]
+    if covariance == "unadjusted":
+        return [
+            "Conventional standard errors assume independent, homoskedastic errors; within an entity "
+            "the errors are usually correlated over time."
+        ]
+    return []
+
+
+def _panel_estimation_rows(data: pd.DataFrame, columns: list[str], cluster_source: str) -> pd.DataFrame:
+    """The rows the fit uses: complete in the model's columns and the cluster variable."""
+    if cluster_source not in data.columns:
+        raise ValueError(
+            f"PANEL_CLUSTER_COLUMN_MISSING: the cluster variable {cluster_source!r} is not in the data."
+        )
+    return data.dropna(subset=[*dict.fromkeys([*columns, cluster_source])])
+
+
+def _cluster_panel_fit(
+    fitted: Any,
+    data: pd.DataFrame,
+    *,
+    y: str,
+    regressors: list[str],
+    entity_effects: bool,
+    time_effects: bool,
+    cluster_source: str,
+) -> Any:
+    from .panel_inference import ClusteredPanelResult, PanelInferenceError, clustered_covariance
+
+    entity_level, time_level = data.index.names[0], data.index.names[1]
+    clusters = (
+        pd.Series(data.index.get_level_values(entity_level), index=data.index)
+        if cluster_source == entity_level else data[cluster_source]
+    )
+    try:
+        inference = clustered_covariance(
+            data,
+            y=y,
+            regressors=regressors,
+            entity=pd.Series(data.index.get_level_values(entity_level)) if entity_effects else None,
+            time=pd.Series(data.index.get_level_values(time_level)) if time_effects else None,
+            clusters=clusters,
+            cluster_variable=cluster_source,
+            params=fitted.params,
+        )
+    except PanelInferenceError as error:
+        raise ValueError(f"PANEL_CLUSTER_INFERENCE_FAILED: {error}") from error
+    return ClusteredPanelResult(fitted, inference)
+
+
 def run_panel_ols(
     frame: pd.DataFrame,
     y: str,
@@ -1301,20 +1401,18 @@ def run_panel_ols(
     entity: str | None,
     time: str | None,
     model_id: str,
-    covariance: str = "robust",
+    covariance: str = "clustered",
+    cluster_col: str | None = None,
 ) -> tuple[dict[str, Any], Any]:
     if entity is None and time is None:
         raise ValueError(
             "PANEL_FIELDS_MISSING: PanelOLS requires at least an entity or time field."
         )
-    covariance = covariance.strip().lower()
-    if covariance not in {"robust", "clustered", "unadjusted"}:
+    covariance = _panel_covariance(covariance, cluster_col)
+    if covariance == "clustered" and entity is None and cluster_col is None:
         raise ValueError(
-            f"PANEL_COVARIANCE_UNSUPPORTED: unsupported covariance {covariance!r}."
-        )
-    if covariance == "clustered" and entity is None:
-        raise ValueError(
-            "PANEL_CLUSTER_ENTITY_REQUIRED: clustered PanelOLS requires an entity field."
+            "PANEL_CLUSTER_ENTITY_REQUIRED: clustered PanelOLS requires an entity field "
+            "or a cluster variable."
         )
 
     panel_module = require_optional_dependency(
@@ -1325,6 +1423,9 @@ def run_panel_ols(
     )
     data = _ensure_numeric_y(frame.copy(), y)
     data = _ensure_numeric_x(data, x)
+    cluster_source = cluster_col or entity
+    if covariance == "clustered":
+        data = _panel_estimation_rows(data, [y, *x], cluster_source)
 
     declared_entity = entity
     declared_time = time
@@ -1345,10 +1446,16 @@ def run_panel_ols(
     if index_cols[1] != "_panel_time":
         terms.append("TimeEffects")
     formula = f"{_linearmodels_term(y)} ~ {' + '.join(terms)}"
-    fit_kwargs: dict[str, Any] = {"cov_type": covariance}
     if covariance == "clustered":
-        fit_kwargs["cluster_entity"] = True
-    fitted = panel_module.PanelOLS.from_formula(formula, data=data).fit(**fit_kwargs)
+        fitted = panel_module.PanelOLS.from_formula(formula, data=data).fit(cov_type="unadjusted")
+        fitted = _cluster_panel_fit(
+            fitted, data, y=y, regressors=list(x),
+            entity_effects=index_cols[0] != "_panel_entity",
+            time_effects=index_cols[1] != "_panel_time",
+            cluster_source=cluster_source,
+        )
+    else:
+        fitted = panel_module.PanelOLS.from_formula(formula, data=data).fit(cov_type=covariance)
     return (
         _normalize_linearmodels_result(
             fitted,
@@ -1358,7 +1465,8 @@ def run_panel_ols(
             covariance=covariance,
             entity_col=declared_entity,
             time_col=declared_time,
-            clustered_on_entity=covariance == "clustered",
+            inference=getattr(fitted, "inference", None),
+            warnings=_panel_covariance_warnings(covariance),
         ),
         fitted,
     )
@@ -1409,23 +1517,39 @@ def run_did(
     entity: str,
     time: str,
     model_id: str,
-    covariance: str = "robust",
+    covariance: str = "clustered",
+    cluster_col: str | None = None,
 ) -> tuple[dict[str, Any], Any]:
     """TWFE DID: y ~ 1 + _did_D + x... + EntityEffects + TimeEffects. The
     coefficient on _did_D is the ATT. Expects the canonical cohort frame from
-    normalize_did_input (must contain _did_D)."""
+    normalize_did_input (must contain _did_D). Standard errors cluster by
+    unit unless another covariance is chosen (panel_inference)."""
     panel_module = require_optional_dependency(
         "linearmodels.panel", extra="panel", engine="linearmodels", model_type="did",
     )
+    covariance = _panel_covariance(covariance, cluster_col)
     data = _ensure_numeric_y(frame.copy(), y)
     data = _ensure_numeric_x(data, x)
+    cluster_source = cluster_col or entity
+    if covariance == "clustered":
+        data = _panel_estimation_rows(data, [y, "_did_D", *x], cluster_source)
     data = data.set_index([entity, time])
 
     terms = ["1", "_did_D", *[_linearmodels_term(c) for c in x],
              "EntityEffects", "TimeEffects"]
     formula = f"{_linearmodels_term(y)} ~ {' + '.join(terms)}"
-    fitted = panel_module.PanelOLS.from_formula(formula, data=data).fit(cov_type=covariance)
-    return _normalize_linearmodels_result(fitted, model_id, "did"), fitted
+    if covariance == "clustered":
+        fitted = panel_module.PanelOLS.from_formula(formula, data=data).fit(cov_type="unadjusted")
+        fitted = _cluster_panel_fit(
+            fitted, data, y=y, regressors=["_did_D", *x], entity_effects=True, time_effects=True,
+            cluster_source=cluster_source,
+        )
+    else:
+        fitted = panel_module.PanelOLS.from_formula(formula, data=data).fit(cov_type=covariance)
+    return _normalize_linearmodels_result(
+        fitted, model_id, "did", y_column=y, covariance=covariance, entity_col=entity, time_col=time,
+        inference=getattr(fitted, "inference", None), warnings=_panel_covariance_warnings(covariance),
+    ), fitted
 
 
 def run_event_study(
@@ -1436,7 +1560,8 @@ def run_event_study(
     time: str,
     event_time_col: str,
     ref_period: int = -1,
-    covariance: str = "robust",
+    covariance: str = "clustered",
+    cluster_col: str | None = None,
 ) -> dict[str, Any]:
     """Dynamic DID: regress y on event-time dummies (reference period omitted)
     under two-way FE. Returns the coefficient path keyed by event_time. Never-
@@ -1461,14 +1586,23 @@ def run_event_study(
         data[col] = (evt == k).astype(float)
         dummy_terms.append(col)
 
+    covariance = _panel_covariance(covariance, cluster_col)
+    cluster_source = cluster_col or entity
+    if covariance == "clustered":
+        data = _panel_estimation_rows(data, [y, *dummy_terms, *x], cluster_source)
     data = data.set_index([entity, time])
     terms = ["1", *dummy_terms, *[_linearmodels_term(c) for c in x],
              "EntityEffects", "TimeEffects"]
     formula = f"{_linearmodels_term(y)} ~ {' + '.join(terms)}"
     try:
         fitted = panel_module.PanelOLS.from_formula(formula, data=data).fit(
-            cov_type=covariance
+            cov_type="unadjusted" if covariance == "clustered" else covariance
         )
+        if covariance == "clustered":
+            fitted = _cluster_panel_fit(
+                fitted, data, y=y, regressors=[*dummy_terms, *x], entity_effects=True, time_effects=True,
+                cluster_source=cluster_source,
+            )
     except Exception as exc:
         # A single treatment cohort (no timing variation) makes the event-time
         # indicators collinear with the time fixed effects, so PanelOLS reports
@@ -1492,10 +1626,25 @@ def run_event_study(
         se.append(_json_safe_float(fitted.std_errors.get(col)))
         ci_lo.append(_json_safe_float(conf.loc[col, "lower"]))
         ci_hi.append(_json_safe_float(conf.loc[col, "upper"]))
+    leads = [f"_evt_m{abs(k)}" for k in event_values if k < 0]
+    inference = getattr(fitted, "inference", None)
     return {
         "event_time": event_values,
         "coef": coef, "se": se, "ci_lower": ci_lo, "ci_upper": ci_hi,
         "ref_period": ref_period,
+        "covariance": covariance,
+        "cluster_variable": inference.cluster_variable if inference is not None else None,
+        "n_clusters": inference.n_clusters if inference is not None else None,
+        "inference_distribution": "t" if inference is not None else "z",
+        "effective_df": inference.df if inference is not None else None,
+        # The pre-period leads' joint test needs their covariance, not only
+        # their standard errors.
+        "pre_period_terms": leads,
+        "pre_period_estimates": [_json_safe_float(fitted.params.get(term)) for term in leads],
+        "pre_period_covariance": (
+            [[_json_safe_float(value) for value in row] for row in fitted.cov.loc[leads, leads].to_numpy()]
+            if leads else []
+        ),
     }
 
 

@@ -70,6 +70,7 @@ TOOL_CONTENT_CLASSES: Mapping[str, str] = {
     "inspect_operation_contract": "workbench_state",
     "inspect_repeated_measures_recipe": "workbench_state",
     "export_dataset": "metadata",
+    "export_analysis_script": "workbench_state",
     "list_project_datasets": "metadata",
     "inspect_data_schema": "metadata",
     "inspect_project_dataset_schema": "metadata",
@@ -607,6 +608,21 @@ def _audit(
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as handle:
             handle.write(line)
+
+
+def authorize_local_artifact_export(project_root: Path, *, columns: Sequence[str], content_classes: Sequence[str]) -> None:
+    """Audit and enforce local export policy before a bundle is persisted."""
+    policy = load_policy(project_root)
+    allowed = policy.allowed_classes(provider_id="script-export", locality="local")
+    blocked = sorted(set(content_classes) - set(allowed))
+    protected = sorted({name for name in columns if policy.protected_column(name, locality="local")})
+    denied = bool(blocked or protected)
+    decisions = [_Decision(0, "tool", "rows", "withheld-export" if denied else "sent",
+        tool_id="export_analysis_script", redacted_columns=tuple(protected))]
+    _audit(project_root, policy, "local", "script-export", "http://localhost", "",
+        [{"role": "tool", "content": {"operation": "export_analysis_script", "classes": list(content_classes), "denied": denied}}], decisions)
+    if denied:
+        raise EgressPolicyError("Local script export is denied by the project sharing policy")
 
 
 def read_audit(project_root: Path | None, *, limit: int = 50) -> list[dict[str, Any]]:

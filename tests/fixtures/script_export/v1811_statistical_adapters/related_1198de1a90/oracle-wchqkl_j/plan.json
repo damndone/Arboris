@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "project_id": "model-oracle",
+  "run_id": "negative_binomial",
+  "workbench_version": "1.8.11",
+  "lineage_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+  "sources": [
+    {
+      "source_id": "source",
+      "format": "csv",
+      "filename": "data.csv",
+      "sha256": "0f643fba418a92bc7a08befa218425056e866314340e1148775107241af4e143",
+      "read_options": {}
+    }
+  ],
+  "steps": [
+    {
+      "step_id": "model",
+      "kind": "model",
+      "operation": "model.negative_binomial",
+      "label": "",
+      "parameters": {
+        "model_type": "negative_binomial",
+        "y": "nb",
+        "x": [
+          "x",
+          "z"
+        ],
+        "categorical_x": [],
+        "covariance": "unadjusted",
+        "cluster": null,
+        "hac_lags": null,
+        "weights": null,
+        "entity": null,
+        "time": null,
+        "model_options": {}
+      },
+      "inputs": [
+        "source"
+      ],
+      "output_dataset": null,
+      "expected": {
+        "nobs": 350,
+        "coefficients": {
+          "Intercept": 0.10851292261202276,
+          "x": 0.32492468922364875,
+          "z": -0.15375475867698613
+        },
+        "std_errors": {
+          "Intercept": 0.06669042046072572,
+          "x": 0.0653253220041807,
+          "z": 0.0705561035827149
+        },
+        "statistics": {
+          "Intercept": {
+            "value": 1.6271140871862773,
+            "df": null,
+            "p_value": 0.10371286966217054,
+            "distribution": "z"
+          },
+          "x": {
+            "value": 4.973946997197414,
+            "df": null,
+            "p_value": 6.560325292163608e-07,
+            "distribution": "z"
+          },
+          "z": {
+            "value": -2.179184377673791,
+            "df": null,
+            "p_value": 0.02931797400075623,
+            "distribution": "z"
+          }
+        }
+      },
+      "tolerances": {},
+      "seed": null,
+      "snapshot": null
+    }
+  ]
+}

@@ -415,7 +415,8 @@ def test_agent_core_timeout_closes_active_tool_execution_as_timed_out(
             tool_runtime=runtime,
         )
 
-        assert await agent.prompt("inspect this model", budget={"timeout_s": 0.01}) == ""
+        reply = await agent.prompt("inspect this model", budget={"timeout_s": 0.01})
+        assert reply and "agent_timeout" in reply
 
         branch = repository.get_branch("session-a")
         assert json.loads(branch[-2].payload["content"])["error"] == "agent_timeout"
@@ -685,13 +686,14 @@ def test_agent_core_timeout_persists_terminal_error_and_returns_idle(
         await adapter.started.wait()
         assert repository.get_metadata("session-a")["status"] == "running"
 
-        assert await running == ""
+        reply = await running
+        assert reply and "agent_timeout" in reply
         assert agent.phase == "idle"
         assert repository.get_metadata("session-a")["status"] == "failed"
         branch = repository.get_branch("session-a")
         assert branch[-1].payload == {
             "role": "assistant",
-            "content": "",
+            "content": reply,
             "stop_reason": "error",
             "error": "agent_timeout",
         }

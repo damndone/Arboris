@@ -284,6 +284,16 @@ _COMMON_MODEL_PARAMS = [
      "options": [o["key"] for o in COVARIANCE_UI], "value": _COVARIANCE_DEFAULT},
 ]
 
+# v1.8.11: panel and DID fits cluster by entity by default, as Stata's
+# xtreg, fe vce(robust); HAC is not offered (Driscoll-Kraay is not implemented).
+_PANEL_COVARIANCE_PARAM = {
+    "key": "covariance", "kind": "select", "label": "Covariance", "required": False,
+    "options": ["clustered", "robust", "unadjusted"], "value": "clustered",
+}
+_PANEL_COMMON_MODEL_PARAMS = [
+    _PANEL_COVARIANCE_PARAM if param["key"] == "covariance" else param for param in _COMMON_MODEL_PARAMS
+]
+
 _OLS_MODEL_PARAMS = _COMMON_MODEL_PARAMS + [
     {
         "key": "entity_col",
@@ -344,8 +354,10 @@ _MODEL_PARAMS: dict[str, list[dict]] = {
     "logit": _COMMON_MODEL_PARAMS,
     "probit": _COMMON_MODEL_PARAMS,
     "poisson": _COMMON_MODEL_PARAMS,
-    "negative_binomial": _COMMON_MODEL_PARAMS,
-    "panel_ols": _COMMON_MODEL_PARAMS + [
+    "negative_binomial": _COMMON_MODEL_PARAMS + [{"key": "model_options", "kind": "object",
+        "label": "Negative binomial options", "role": "model_options", "required": False,
+        "options": ["dispersion", "alpha"], "value": {}}],
+    "panel_ols": _PANEL_COMMON_MODEL_PARAMS + [
         {"key": "entity_col", "kind": "columns", "label": "Entity", "required": False, "role": "entity"},
         {"key": "time_col", "kind": "columns", "label": "Time", "required": False, "role": "time"},
         {
@@ -361,13 +373,24 @@ _MODEL_PARAMS: dict[str, list[dict]] = {
         {"key": "iv_endog", "kind": "columns", "label": "Endogenous", "required": True, "role": "endog"},
         {"key": "iv_instruments", "kind": "columns", "label": "Instruments", "required": True, "role": "instruments"},
     ],
-    "did": _COMMON_MODEL_PARAMS,
+    "did": _PANEL_COMMON_MODEL_PARAMS + [
+        {
+            "key": "model_options",
+            "kind": "object",
+            "label": "DID model options",
+            "required": False,
+            "role": "model_options",
+            "value": {},
+        },
+    ],
     "cs_did": _COHORT_DID_MODEL_PARAMS,
     "sa_did": _COHORT_DID_MODEL_PARAMS,
     "dcdh": _SWITCHING_DID_MODEL_PARAMS,
     "glm:binomial": _COMMON_MODEL_PARAMS,
     "glm:poisson": _COMMON_MODEL_PARAMS,
-    "glm:negative_binomial": _COMMON_MODEL_PARAMS,
+    "glm:negative_binomial": _COMMON_MODEL_PARAMS + [{"key": "model_options", "kind": "object",
+        "label": "Fixed alpha (required)", "role": "model_options", "required": True,
+        "options": ["alpha"], "value": {}}],
 }
 
 
@@ -437,6 +460,15 @@ def build_capabilities(*, bootstrap_packs: bool = True) -> dict:
     _attach_labels_param(model_types)
     _attach_weight_params(model_types)
     _attach_survey_design_params(model_types, survey["sampling_weight_families"])
+
+    # An editor must not offer a requested covariance that the model ignores.
+    # Use the same family declaration as workflow validation and run inputs.
+    from ..agent.workflow_contracts import MODEL_FAMILY_CONTRACTS
+
+    for entry in model_types:
+        contract = MODEL_FAMILY_CONTRACTS.get(entry["key"])
+        if contract is not None and not contract.allows_covariance:
+            entry["params"] = [param for param in entry["params"] if param["key"] != "covariance"]
 
     imputation_methods = [
         {

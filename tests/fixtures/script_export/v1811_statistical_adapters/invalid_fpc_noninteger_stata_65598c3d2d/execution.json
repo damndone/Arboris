@@ -1,0 +1,12 @@
+{
+  "run": null,
+  "language": "stata",
+  "command": [
+    "/Applications/Stata/StataMP.app/Contents/MacOS/stata-mp",
+    "-b",
+    "do",
+    "analysis.do"
+  ],
+  "os_exit": 0,
+  "normalized_exit": 9
+}

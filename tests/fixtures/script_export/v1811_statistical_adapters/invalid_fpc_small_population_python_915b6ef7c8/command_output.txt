@@ -1,0 +1,2 @@
+/Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/invalid_fpc_small_population_python_915b6ef7c8/analysis.py:55: RuntimeWarning: divide by zero encountered in divide
+  se=np.sqrt(np.diag(covariance));statistic=beta/se

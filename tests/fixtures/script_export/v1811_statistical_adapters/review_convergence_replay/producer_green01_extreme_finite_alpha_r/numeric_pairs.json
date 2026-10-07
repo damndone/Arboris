@@ -1,0 +1,11 @@
+[
+  {
+    "expected": 240.0,
+    "abs": 0.0,
+    "rel": 0.0,
+    "label": "model:nobs",
+    "actual": 240.0,
+    "difference": 0.0,
+    "allowed": 0.0
+  }
+]

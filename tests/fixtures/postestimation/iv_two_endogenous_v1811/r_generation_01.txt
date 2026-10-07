@@ -1,0 +1,43 @@
+Writing native R evidence to /Users/jiayuanren/项目规划/.worktrees/codex-v1811-iv-oracles/tests/fixtures/postestimation/iv_two_endogenous_v1811 
+R version 4.6.0 (2026-04-24)
+Platform: aarch64-apple-darwin24.6.0
+Running under: macOS Sequoia 15.1
+
+Matrix products: default
+BLAS:   /opt/homebrew/Cellar/openblas/0.3.33/lib/libopenblasp-r0.3.33.dylib 
+LAPACK: /opt/homebrew/Cellar/r/4.6.0/lib/R/lib/libRlapack.dylib;  LAPACK version 3.12.1
+
+locale:
+[1] en_US.UTF-8/en_US.UTF-8/en_US.UTF-8/C/en_US.UTF-8/en_US.UTF-8
+
+time zone: America/New_York
+tzcode source: internal
+
+attached base packages:
+[1] stats     graphics  grDevices utils     datasets  methods   base     
+
+other attached packages:
+[1] jsonlite_2.0.0
+
+loaded via a namespace (and not attached):
+[1] compiler_4.6.0
+           Intercept                   x1                  xe1 
+ 0.72512936595449939  0.34052038913250410  0.32802772307920047 
+                 xe2 
+-0.24035447189290554 
+           Intercept                   x1                  xe1 
+0.046876893338210962 0.059463453260369913 0.059681171721816910 
+                 xe2 
+0.048478259229114092 
+                       Intercept                     x1                     xe1
+Intercept 2.1974431290420074e-03  0.0004827426800875171  9.5484764593566462e-06
+x1        4.8274268008751715e-04  0.0035359022736481970 -1.2095204513665342e-03
+xe1       9.5484764593566699e-06 -0.0012095204513665339  3.5618422580889985e-03
+xe2       3.3042713154411024e-04  0.0003869157086385801 -1.0024846648797972e-04
+                              xe2
+Intercept  0.00033042713154411019
+x1         0.00038691570863858015
+xe1       -0.00010024846648797975
+xe2        0.00235014161788518576
+Joint Wald chi2(2): 52.966469476497025 p: 3.151209595435867e-12 
+Data SHA256: d3b46c7cf6c42c4dc1db66b3ae63a0ef02ffe10ff3b24983687355daa238c497 

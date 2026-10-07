@@ -182,41 +182,20 @@ def test_confirmation_mode_and_horizon_constraints_fail_closed(mutate) -> None:
     assert exc_info.value.code == "INVALID_ORDER"
 
 
-def test_joint_ma_request_returns_structured_unsupported_error() -> None:
+def test_joint_ma_student_t_returns_structured_unsupported_error() -> None:
     contract_type, error_type = _contract_types()
-    payload = {
-        **_minimal_payload(),
-        "selection_mode": "manual",
-        "arma": {"p": 1, "q": 1, "constant_mode": "include"},
-        "variance": {
-            "model": "garch",
-            "garch_p": 1,
-            "garch_q": 1,
-        },
-        "estimation_strategy": "joint",
-    }
-
+    payload = {**_minimal_payload(), "selection_mode": "manual",
+               "arma": {"p": 1, "q": 1, "constant_mode": "include"},
+               "variance": {"model": "garch", "garch_p": 1, "garch_q": 1},
+               "estimation_strategy": "joint", "innovation_distribution": "student_t"}
     with pytest.raises(error_type) as exc_info:
         contract_type.from_dict(payload)
-
-    error = exc_info.value
-    assert error.to_dict() == {
-        "severity": "blocking",
-        "code": "UNSUPPORTED_JOINT_ARMA_GARCH",
-        "message": "v1.8 does not support joint estimation when arma.q is greater than zero",
-        "evidence": {"arma_q": 1, "estimation_strategy": "joint"},
-        "impact": "当前公共后端不能联合估计包含 MA 项的 ARMA-GARCH",
-        "recommended_actions": [
-            {
-                "operation": "model.rerun",
-                "patch": {"estimation_strategy": "sequential"},
-            },
-            {
-                "operation": "model.rerun",
-                "patch": {"arma": {"q": 0}, "estimation_strategy": "joint"},
-            },
-        ],
-    }
+    error = exc_info.value.to_dict()
+    assert error["severity"] == "blocking"
+    assert error["code"] == "UNSUPPORTED_JOINT_DISTRIBUTION"
+    assert error["evidence"] == {"arma_q": 1, "distribution": "student_t"}
+    assert "normal innovations only" in error["message"]
+    assert error["recommended_actions"] == []
 
 
 def test_contract_rejects_unknown_fields_without_mutating_input() -> None:

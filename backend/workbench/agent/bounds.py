@@ -18,7 +18,10 @@ from typing import Any
 def _public_stat_number(value: Any) -> int | float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
-    return value if math.isfinite(float(value)) else None
+    try:
+        return value if math.isfinite(float(value)) else None
+    except OverflowError:
+        return None
 
 
 def _public_positive_int(value: Any) -> int | None:
@@ -336,6 +339,7 @@ def _bounded_effect_series(value: Any, *, limit: int = 24) -> dict[str, Any] | N
         if estimate is None:
             continue
         row: dict[str, Any] = {
+            "source_index": position,
             "label": label if _public_stat_number(label) is not None else _bounded_label(str(label)),
             "estimate": estimate,
             "std_error": _public_stat_number(errors[position]) if position < len(errors) else None,

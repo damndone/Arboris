@@ -1,0 +1,91 @@
+FFFFFF                                                                   [100%]
+=================================== FAILURES ===================================
+____ test_workbench_supported_selected_excel_sheet_exports_natively[stata] _____
+tests/eval_v1811/s_review_test_required_coverage.py:43: in test_workbench_supported_selected_excel_sheet_exports_natively
+    record_attempt(target, plan, language)
+tests/eval_v1811/s_review_test_required_coverage.py:19: in record_attempt
+    exported = export_script(plan, language, require_native=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/render.py:31: in export_script
+    lines += ctx.read(source.source_id,source.filename,source.sha256,source.format,source.read_options)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/runtime.py:104: in read
+    refuse('Reader options require an explicit supported translation','UNSUPPORTED_READ_OPTIONS')
+backend/workbench/script_export/syntax.py:12: in refuse
+    raise ScriptExportRefusal(code, message)
+E   workbench.script_export.plan.ScriptExportRefusal: Reader options require an explicit supported translation
+----------------------------- Captured stdout call -----------------------------
+Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_evidence/reader-selected-sheet-stata-433a3ce5
+______ test_workbench_supported_selected_excel_sheet_exports_natively[r] _______
+tests/eval_v1811/s_review_test_required_coverage.py:43: in test_workbench_supported_selected_excel_sheet_exports_natively
+    record_attempt(target, plan, language)
+tests/eval_v1811/s_review_test_required_coverage.py:19: in record_attempt
+    exported = export_script(plan, language, require_native=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/render.py:31: in export_script
+    lines += ctx.read(source.source_id,source.filename,source.sha256,source.format,source.read_options)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/runtime.py:104: in read
+    refuse('Reader options require an explicit supported translation','UNSUPPORTED_READ_OPTIONS')
+backend/workbench/script_export/syntax.py:12: in refuse
+    raise ScriptExportRefusal(code, message)
+E   workbench.script_export.plan.ScriptExportRefusal: Reader options require an explicit supported translation
+----------------------------- Captured stdout call -----------------------------
+Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_evidence/reader-selected-sheet-r-4dbec39c
+____ test_workbench_supported_selected_excel_sheet_exports_natively[python] ____
+tests/eval_v1811/s_review_test_required_coverage.py:43: in test_workbench_supported_selected_excel_sheet_exports_natively
+    record_attempt(target, plan, language)
+tests/eval_v1811/s_review_test_required_coverage.py:19: in record_attempt
+    exported = export_script(plan, language, require_native=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/render.py:31: in export_script
+    lines += ctx.read(source.source_id,source.filename,source.sha256,source.format,source.read_options)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/runtime.py:104: in read
+    refuse('Reader options require an explicit supported translation','UNSUPPORTED_READ_OPTIONS')
+backend/workbench/script_export/syntax.py:12: in refuse
+    raise ScriptExportRefusal(code, message)
+E   workbench.script_export.plan.ScriptExportRefusal: Reader options require an explicit supported translation
+----------------------------- Captured stdout call -----------------------------
+Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_evidence/reader-selected-sheet-python-ac9d0f04
+______ test_workbench_supported_complete_sampling_design_is_native[stata] ______
+tests/eval_v1811/s_review_test_required_coverage.py:64: in test_workbench_supported_complete_sampling_design_is_native
+    record_attempt(target, plan, language)
+tests/eval_v1811/s_review_test_required_coverage.py:19: in record_attempt
+    exported = export_script(plan, language, require_native=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/render.py:22: in export_script
+    raise ScriptExportRefusal('NOT_FULLY_NATIVE','Native export unavailable for: '+', '.join(blocked),steps=blocked)
+E   workbench.script_export.plan.ScriptExportRefusal: Native export unavailable for: model
+----------------------------- Captured stdout call -----------------------------
+Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_evidence/sampling-design-stata-e3b1c5bf
+________ test_workbench_supported_complete_sampling_design_is_native[r] ________
+tests/eval_v1811/s_review_test_required_coverage.py:64: in test_workbench_supported_complete_sampling_design_is_native
+    record_attempt(target, plan, language)
+tests/eval_v1811/s_review_test_required_coverage.py:19: in record_attempt
+    exported = export_script(plan, language, require_native=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/render.py:22: in export_script
+    raise ScriptExportRefusal('NOT_FULLY_NATIVE','Native export unavailable for: '+', '.join(blocked),steps=blocked)
+E   workbench.script_export.plan.ScriptExportRefusal: Native export unavailable for: model
+----------------------------- Captured stdout call -----------------------------
+Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_evidence/sampling-design-r-6bad33b1
+_____ test_workbench_supported_complete_sampling_design_is_native[python] ______
+tests/eval_v1811/s_review_test_required_coverage.py:64: in test_workbench_supported_complete_sampling_design_is_native
+    record_attempt(target, plan, language)
+tests/eval_v1811/s_review_test_required_coverage.py:19: in record_attempt
+    exported = export_script(plan, language, require_native=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/render.py:22: in export_script
+    raise ScriptExportRefusal('NOT_FULLY_NATIVE','Native export unavailable for: '+', '.join(blocked),steps=blocked)
+E   workbench.script_export.plan.ScriptExportRefusal: Native export unavailable for: model
+----------------------------- Captured stdout call -----------------------------
+Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_evidence/sampling-design-python-ac7e25b4
+=========================== short test summary info ============================
+FAILED tests/eval_v1811/s_review_test_required_coverage.py::test_workbench_supported_selected_excel_sheet_exports_natively[stata]
+FAILED tests/eval_v1811/s_review_test_required_coverage.py::test_workbench_supported_selected_excel_sheet_exports_natively[r]
+FAILED tests/eval_v1811/s_review_test_required_coverage.py::test_workbench_supported_selected_excel_sheet_exports_natively[python]
+FAILED tests/eval_v1811/s_review_test_required_coverage.py::test_workbench_supported_complete_sampling_design_is_native[stata]
+FAILED tests/eval_v1811/s_review_test_required_coverage.py::test_workbench_supported_complete_sampling_design_is_native[r]
+FAILED tests/eval_v1811/s_review_test_required_coverage.py::test_workbench_supported_complete_sampling_design_is_native[python]
+6 failed in 1.19s

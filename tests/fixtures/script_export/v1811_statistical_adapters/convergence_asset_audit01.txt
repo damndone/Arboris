@@ -1,0 +1,7 @@
+{
+  "frozen_commit": "678d9cc46d155a50aed47b210e2e6a6e82a12882",
+  "frozen_assets_unchanged": 2799,
+  "protected_native_logs": 108,
+  "scanned_texts": 3559,
+  "unredacted_header_findings": 0
+}

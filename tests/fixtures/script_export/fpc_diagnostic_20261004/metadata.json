@@ -1,0 +1,14 @@
+{
+  "producer_baseline": "bf346c18",
+  "engine_files": [
+    "backend/workbench/survey/design.py",
+    "backend/workbench/survey/engine.py"
+  ],
+  "command": [
+    "Rscript",
+    "fpc_probe.R"
+  ],
+  "python_expected_generation": "tests.test_script_export_survey_oracles.executed_oracle -> run_ols + _apply_survey_design_variance",
+  "native_method": "Single-stage stratified PSU linearization; population count 500 and n_h=2",
+  "policy": "Original fixtures/engine unchanged; no tolerance relaxation"
+}

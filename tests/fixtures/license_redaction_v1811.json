@@ -1,0 +1,102 @@
+{
+  "note": "Stata license header values redacted at the v1.8.11 tip; raw bytes kept only in ignored local/ (0600). Raw-log SHA-256 values are withheld everywhere (they let the redacted value be recovered by trial): withheld-raw-sha256-* placeholders are keyed digests whose real hashes are in the ignored local/v1811-license-raw/withheld-hash-map.json (scripts/withhold_raw_log_hashes.py).",
+  "pattern": "^(Serial number|Licensed to): <value> -> [REDACTED]",
+  "logs": [
+    {
+      "tracked_log": "tests/eval_v1811/count_public_review_stata/oracle.log",
+      "raw_sha256": "withheld-raw-sha256-b2b05aed03edc7573c5f9059",
+      "redacted_sha256": "bb8c7effcfa3eb1f09415b1afb8ac6764d8e2f7431d4ea43337168c2d8d7fcca",
+      "ignored_raw": "local/v1811-license-raw/tests/eval_v1811/count_public_review_stata/oracle.log"
+    },
+    {
+      "tracked_log": "tests/eval_v1811/m2_review_recheck_stata/oracle.log",
+      "raw_sha256": "withheld-raw-sha256-a1633c34dbabcbf49581f690",
+      "redacted_sha256": "2e1bdce69a1cc79c4a803f9176391bbf42f0d7a9b89b076f0ff1c04aaf659b62",
+      "ignored_raw": "local/v1811-license-raw/tests/eval_v1811/m2_review_recheck_stata/oracle.log"
+    },
+    {
+      "tracked_log": "tests/eval_v1811/m2_review_stata_boundary_constant/oracle.log",
+      "raw_sha256": "withheld-raw-sha256-ff719464932c00f009110789",
+      "redacted_sha256": "858aad14f66e1287cc3dcfec2f46761dc088694546da493c6f3754543e9f657c",
+      "ignored_raw": "local/v1811-license-raw/tests/eval_v1811/m2_review_stata_boundary_constant/oracle.log"
+    },
+    {
+      "tracked_log": "tests/eval_v1811/m2_review_stata_boundary_mean/oracle.log",
+      "raw_sha256": "withheld-raw-sha256-cfe0647131e371642704680b",
+      "redacted_sha256": "67e3e312594ec25bfba16c83d06a7a605ad0d8295aa9178d84f485a741e73aff",
+      "ignored_raw": "local/v1811-license-raw/tests/eval_v1811/m2_review_stata_boundary_mean/oracle.log"
+    },
+    {
+      "tracked_log": "tests/eval_v1811/m2_review_stata_invalid/oracle.log",
+      "raw_sha256": "withheld-raw-sha256-339489539c71ca7497030864",
+      "redacted_sha256": "10fe428b779390fa279627b1d7b74f78a363ee2cce87aa9c105f01dbe04d6736",
+      "ignored_raw": "local/v1811-license-raw/tests/eval_v1811/m2_review_stata_invalid/oracle.log"
+    },
+    {
+      "tracked_log": "tests/fixtures/count_models/p1-remediation-20261004/fractional-oracle/stata/oracle.log",
+      "raw_sha256": "withheld-raw-sha256-2d32af1ff745bad95f0ac1b7",
+      "redacted_sha256": "ffcce16776afc6a653be9857576252c2fb3b57a6a4173859eea4189317eda042",
+      "ignored_raw": "local/v1811-license-raw/tests/fixtures/count_models/p1-remediation-20261004/fractional-oracle/stata/oracle.log"
+    },
+    {
+      "tracked_log": "tests/fixtures/count_models/reference-v2/stata_fixed/oracle.log",
+      "raw_sha256": "withheld-raw-sha256-f29c5e8d9f87b5653e282b56",
+      "redacted_sha256": "11042fffa8b94c7edf618f67341386b18a1ad68d760bee68985db1c96b2c4082",
+      "ignored_raw": "local/v1811-license-raw/tests/fixtures/count_models/reference-v2/stata_fixed/oracle.log"
+    },
+    {
+      "tracked_log": "tests/fixtures/count_models/reference-v2/stata_nb1/oracle.log",
+      "raw_sha256": "withheld-raw-sha256-7474e1dfaf9016fad7ffb261",
+      "redacted_sha256": "81ac7076b23f803d5ac8c1f25759e5100da003656b86d1240cccd31a9f2d2664",
+      "ignored_raw": "local/v1811-license-raw/tests/fixtures/count_models/reference-v2/stata_nb1/oracle.log"
+    },
+    {
+      "tracked_log": "tests/fixtures/count_models/reference-v2/stata_nb2/oracle.log",
+      "raw_sha256": "withheld-raw-sha256-72acc850f5dcbf0a5413841a",
+      "redacted_sha256": "5f5a2f27bd75ddb9c8f47d53634fe21eab8f9ec838743d8eb9fc12c79ba10957",
+      "ignored_raw": "local/v1811-license-raw/tests/fixtures/count_models/reference-v2/stata_nb2/oracle.log"
+    },
+    {
+      "tracked_log": "tests/fixtures/count_models/reference-v2/stata_poisson/oracle.log",
+      "raw_sha256": "withheld-raw-sha256-1962840554b5bb0c68a28734",
+      "redacted_sha256": "9dc16d2366e12fead32c5dc1c783c7572fbe645b6c4f9b9061844a51745ec3e0",
+      "ignored_raw": "local/v1811-license-raw/tests/fixtures/count_models/reference-v2/stata_poisson/oracle.log"
+    },
+    {
+      "tracked_log": "tests/fixtures/count_models/reference-v3/stata_fixed/oracle.log",
+      "raw_sha256": "withheld-raw-sha256-2357006b97f43457b4802802",
+      "redacted_sha256": "e5435b9c09714f7c899ff601c14111b7e716bd1ad62aca58ae321c81a58241c5",
+      "ignored_raw": "local/v1811-license-raw/tests/fixtures/count_models/reference-v3/stata_fixed/oracle.log"
+    },
+    {
+      "tracked_log": "tests/fixtures/count_models/reference-v3/stata_nb1/oracle.log",
+      "raw_sha256": "withheld-raw-sha256-a3608a601b860cac5f94a470",
+      "redacted_sha256": "c02051474fc1aafc02b3f672099535e6c4006c5d6c036444e777041591d985e0",
+      "ignored_raw": "local/v1811-license-raw/tests/fixtures/count_models/reference-v3/stata_nb1/oracle.log"
+    },
+    {
+      "tracked_log": "tests/fixtures/count_models/reference-v3/stata_nb2/oracle.log",
+      "raw_sha256": "withheld-raw-sha256-6b54643080870a2bca27eea8",
+      "redacted_sha256": "d4ceaf50e66b1e4681fd14112bf7c03fe229f8f36651a7504104b1f049b28511",
+      "ignored_raw": "local/v1811-license-raw/tests/fixtures/count_models/reference-v3/stata_nb2/oracle.log"
+    },
+    {
+      "tracked_log": "tests/fixtures/count_models/reference-v3/stata_poisson/oracle.log",
+      "raw_sha256": "withheld-raw-sha256-4d4514f1f5b48a2c2ce0c167",
+      "redacted_sha256": "12b3986be6a69e71acc2ead86811b917ae4eb5f1f2f0dec58b54ac8804f29c75",
+      "ignored_raw": "local/v1811-license-raw/tests/fixtures/count_models/reference-v3/stata_poisson/oracle.log"
+    },
+    {
+      "tracked_log": "tests/fixtures/count_models/reference/stata_nb2/oracle.log",
+      "raw_sha256": "withheld-raw-sha256-2a9e034433da7b535f71913d",
+      "redacted_sha256": "25759a04dbf4cce31eb8b0729813b6d529e72294ab5c0a64db97c9d3232fbbc8",
+      "ignored_raw": "local/v1811-license-raw/tests/fixtures/count_models/reference/stata_nb2/oracle.log"
+    },
+    {
+      "tracked_log": "tests/fixtures/survey_fpc_v1811/stata_batch_dbf83950e9/survey_fpc.log",
+      "raw_sha256": "withheld-raw-sha256-68c434070403fa3de21a54a5",
+      "redacted_sha256": "0c973a32f14349974a5eb6ff1c7a00744c59abad79f85c1ee2b5bc2b2dbd18fd",
+      "ignored_raw": "local/v1811-license-raw/tests/fixtures/survey_fpc_v1811/stata_batch_dbf83950e9/survey_fpc.log"
+    }
+  ]
+}

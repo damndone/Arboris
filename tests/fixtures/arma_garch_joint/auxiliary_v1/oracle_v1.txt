@@ -1,0 +1,86 @@
+. do /Users/jiayuanren/项目规划/.worktrees/codex-v1811-m1/tests/fixtures/arma_g
+> arch_joint/probe_auxiliary.do /Users/jiayuanren/项目规划/.worktrees/codex-v18
+> 11-m1/tests/fixtures/arma_garch_joint/auxiliary_v1 /Users/jiayuanren/项目规划
+> /.worktrees/codex-v1811-m1/tests/fixtures/arma_garch_joint/oracle_v1 
+
+. // Independent Stata IC, variance-prime, persistence and diagnostic checks.
+. version 18
+
+. set more off
+
+. args output source
+
+. cd "`output'"
+/Users/jiayuanren/项目规划/.worktrees/codex-v1811-m1/tests/fixtures/arma_garch_
+> joint/auxiliary_v1
+
+. foreach case in garch11_constant garch11_zero garch21_constant arch2_constant
+>  {
+  2.     import delimited using "`source'/data_`case'.csv", asdouble clear case
+> (preserve)
+  3.     tsset t
+  4.     local ar "ar(1)"
+  5.     local variance "arch(1) garch(1)"
+  6.     local constant ""
+  7.     if "`case'" == "garch21_constant" local ar "ar(1/2)"
+  8.     if "`case'" == "arch2_constant" local variance "arch(1/2)"
+  9.     if "`case'" == "garch11_zero" local constant "noconstant"
+ 10.     quietly arch y, `ar' ma(1) `variance' `constant' arch0(xb) arma0(zero)
+>  vce(opg) tolerance(1e-12) ltolerance(1e-12) nrtolerance(1e-8)
+ 11.     matrix b = e(b)
+ 12.     local k = colsof(b)
+ 13.     quietly estat ic
+ 14.     matrix ic = r(S)
+ 15.     predict double residual, residuals
+ 16.     predict double variance, variance
+ 17.     generate double squared = residual^2
+ 18.     quietly summarize squared, meanonly
+ 19.     scalar prime = r(mean)
+ 20.     generate double standardized = residual/sqrt(variance)
+ 21.     generate double squared_standardized = standardized^2
+ 22.     file open out using auxiliary_`case'.tsv, write replace
+ 23.     file write out "aic" _tab %24.17g (ic[1,5]) _n
+ 24.     file write out "bic" _tab %24.17g (ic[1,6]) _n
+ 25.     file write out "prime" _tab %24.17g (prime) _n
+ 26.     if "`case'" != "arch2_constant" {
+ 27.         scalar persistence = b[1,`k'-2]+b[1,`k'-1]
+ 28.         file write out "persistence" _tab %24.17g (persistence) _n
+ 29.         file write out "half_life" _tab %24.17g (ln(.5)/ln(persistence)) _
+> n
+ 30.     }
+ 31.     foreach series in standardized squared_standardized {
+ 32.         foreach lag in 5 10 20 {
+ 33.             quietly wntestq `series', lags(`lag')
+ 34.             file write out "`series'_q`lag'" _tab %24.17g (r(stat)) _n
+ 35.             file write out "`series'_p`lag'" _tab %24.17g (r(p)) _n
+ 36.         }
+ 37.     }
+ 38.     file close out
+ 39. }
+(encoding automatically selected: ISO-8859-1)
+(2 vars, 2,540 obs)
+
+Time variable: t, 1 to 2540
+        Delta: 1 unit
+(file auxiliary_garch11_constant.tsv not found)
+(encoding automatically selected: ISO-8859-1)
+(2 vars, 1,800 obs)
+
+Time variable: t, 1 to 1800
+        Delta: 1 unit
+(file auxiliary_garch11_zero.tsv not found)
+(encoding automatically selected: ISO-8859-1)
+(2 vars, 1,800 obs)
+
+Time variable: t, 1 to 1800
+        Delta: 1 unit
+(file auxiliary_garch21_constant.tsv not found)
+(encoding automatically selected: ISO-8859-1)
+(2 vars, 1,800 obs)
+
+Time variable: t, 1 to 1800
+        Delta: 1 unit
+(file auxiliary_arch2_constant.tsv not found)
+
+. 
+end of do-file

@@ -9,7 +9,7 @@ Arboris is meant to cover the everyday work people do in Stata or SPSS, across
 disciplines, while being easier to start with: you can drive it from the menus,
 from a lineage graph, or by talking to the Agent.
 
-**Current release: v1.8.10** (2026-10-04) — [release notes](docs/releases/v1.8.10-release-notes.md) ·
+**Current release: v1.8.11** (2026-10-07) — [release notes](docs/releases/v1.8.11-release-notes.md) ·
 [all releases](docs/releases/) · [manual](docs/manual/README.md)
 
 ---

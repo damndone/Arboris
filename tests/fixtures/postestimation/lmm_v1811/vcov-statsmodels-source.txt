@@ -1,0 +1,114 @@
+Installed statsmodels source: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-m2/.venv/lib/python3.14/site-packages/statsmodels/regression/mixed_linear_model.py
+SHA256: 78260ba6293e3c0e959409bb8a4927d95dfedd07cb87d1c5b1034788da4ca0ad
+Read-only definition excerpts; no model fit or numeric evaluation.
+
+Lines 134-143:
+effects covariance matrix (used for optimization).
+
+The numerical optimization uses GLS to avoid explicitly optimizing
+over the fixed effects parameters.  The likelihood that is optimized
+is profiled over both the scale parameter (a scalar) and the fixed
+effects parameters (if any).  As a result of this profiling, it is
+difficult and unnecessary to calculate the Hessian of the profiled log
+likelihood function, so that calculation is not implemented here.
+Therefore, optimization methods requiring the Hessian matrix such as
+the Newton-Raphson algorithm cannot be used for model fitting.
+
+Lines 1482-1486:
+        -----
+        The scale parameter `scale` is always profiled out of the
+        log-likelihood.  In addition, if `profile_fe` is true the
+        fixed effects parameters are also profiled out.
+        """
+
+Lines 1895-1915:
+        else:
+            cov_re_inv = np.empty((0, 0))
+
+        # Blocks for the fixed and random effects parameters.
+        hess_fe = 0.
+        hess_re = np.zeros((self.k_re2 + self.k_vc, self.k_re2 + self.k_vc))
+        hess_fere = np.zeros((self.k_re2 + self.k_vc, self.k_fe))
+
+        fac = self.n_totobs
+        if self.reml:
+            fac -= self.exog.shape[1]
+
+        rvir = 0.
+        xtvix = 0.
+        xtax = [0., ] * (self.k_re2 + self.k_vc)
+        m = self.k_re2 + self.k_vc
+        B = np.zeros(m)
+        D = np.zeros((m, m))
+        F = [[0.] * m for k in range(m)]
+        for group_ix, group in enumerate(self.group_labels):
+
+
+Lines 1999-2028:
+                        if not sym2:
+                            u1 = np.dot(viexog.T, matr2)
+                            u2 = np.dot(matl2.T, ev)
+                            um = np.dot(u1, u2)
+                            F[jj1][jj2] += um + um.T
+
+        hess_fe -= fac * xtvix / rvir
+        hess_re = hess_re - 0.5 * fac * (D/rvir - np.outer(B, B) / rvir**2)
+        hess_fere = -fac * hess_fere / rvir
+
+        if self.reml:
+            QL = [np.linalg.solve(xtvix, x) for x in xtax]
+            for j1 in range(self.k_re2 + self.k_vc):
+                for j2 in range(j1 + 1):
+                    a = _dotsum(QL[j1].T, QL[j2])
+                    a -= np.trace(np.linalg.solve(xtvix, F[j1][j2]))
+                    a *= 0.5
+                    hess_re[j1, j2] += a
+                    if j1 > j2:
+                        hess_re[j2, j1] += a
+
+        # Put the blocks together to get the Hessian.
+        m = self.k_fe + self.k_re2 + self.k_vc
+        hess = np.zeros((m, m))
+        hess[0:self.k_fe, 0:self.k_fe] = hess_fe
+        hess[0:self.k_fe, self.k_fe:] = hess_fere.T
+        hess[self.k_fe:, 0:self.k_fe] = hess_fere
+        hess[self.k_fe:, self.k_fe:] = hess_re
+
+        return hess, sing
+
+Lines 2239-2257:
+        # Compute the Hessian at the MLE.  Note that this is the
+        # Hessian with respect to the random effects covariance matrix
+        # (not its square root).  It is used for obtaining standard
+        # errors, not for optimization.
+        hess, sing = self.hessian(params)
+        if sing:
+            warnings.warn(_warn_cov_sing)
+
+        hess_diag = np.diag(hess)
+        if free is not None:
+            pcov = np.zeros_like(hess)
+            pat = self._freepat.get_packed(use_sqrt=False, has_fe=True)
+            ii = np.flatnonzero(pat)
+            hess_diag = hess_diag[ii]
+            if len(ii) > 0:
+                hess1 = hess[np.ix_(ii, ii)]
+                pcov[np.ix_(ii, ii)] = np.linalg.inv(-hess1)
+        else:
+            pcov = np.linalg.inv(-hess)
+
+Lines 1561-1574 (REML loglike scale profile, no beta profile when profile_fe=False):
+                        np.log(self.n_totobs - self.k_fe) / 2.)
+            likeval -= (self.n_totobs - self.k_fe) / 2.
+        else:
+            likeval -= self.n_totobs * np.log(qf) / 2.
+            likeval -= self.n_totobs * np.log(2 * np.pi) / 2.
+            likeval += self.n_totobs * np.log(self.n_totobs) / 2.
+            likeval -= self.n_totobs / 2.
+
+        return likeval
+
+    def _gen_dV_dPar(self, ex_r, solver, group_ix, max_ix=None):
+        """
+        A generator that yields the element-wise derivative of the
+        marginal covariance matrix with respect to the random effects

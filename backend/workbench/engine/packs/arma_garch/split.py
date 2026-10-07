@@ -41,6 +41,7 @@ class FrozenTrainValidationSplit:
     _training_view: pd.DataFrame = field(repr=False)
     _validation_view: pd.DataFrame = field(repr=False)
     split_hash: str
+    evaluation_mode: Literal["train_validation", "classical_replication"] = "train_validation"
 
     @property
     def training_view(self) -> pd.DataFrame:
@@ -50,8 +51,39 @@ class FrozenTrainValidationSplit:
     def validation_view(self) -> pd.DataFrame:
         return self._validation_view.copy(deep=True)
 
+    @property
+    def estimation_view(self) -> pd.DataFrame:
+        if self.evaluation_mode == "classical_replication":
+            return pd.concat(
+                [self._training_view, self._validation_view], ignore_index=True
+            ).copy(deep=True)
+        return self.training_view
+
+    @property
+    def estimation_row_ids(self) -> tuple[str, ...]:
+        return (
+            (*self.training_row_ids, *self.validation_row_ids)
+            if self.evaluation_mode == "classical_replication"
+            else self.training_row_ids
+        )
+
+    @property
+    def validation_data_role(self) -> str:
+        return (
+            "retrospective_tail_evaluation"
+            if self.evaluation_mode == "classical_replication"
+            else "independent_evaluation_after_selection"
+        )
+
+    @property
+    def selection_data_role(self) -> str:
+        return "full_sample" if self.evaluation_mode == "classical_replication" else "training_only"
+
     def hash_payload(self) -> dict[str, object]:
         return {
+            **({"evaluation_mode": self.evaluation_mode,
+                "estimation_row_ids": list(self.estimation_row_ids)}
+               if self.evaluation_mode == "classical_replication" else {}),
             "analysis_view_hash": self.analysis_view_hash,
             "contract_hash": self.contract_hash,
             "split_index": self.split_index,
@@ -157,6 +189,9 @@ def freeze_train_validation_split(
         forecast_status = "inconclusive"
 
     hash_payload = {
+        **({"evaluation_mode": contract.validation.evaluation_mode,
+            "estimation_row_ids": list(row_ids)}
+           if contract.validation.evaluation_mode == "classical_replication" else {}),
         "analysis_view_hash": analysis_view_hash,
         "contract_hash": contract.contract_hash,
         "split_index": split_index,
@@ -186,6 +221,7 @@ def freeze_train_validation_split(
         _training_view=training,
         _validation_view=validation,
         split_hash=sha256_canonical(hash_payload),
+        evaluation_mode=contract.validation.evaluation_mode,
     )
 
 

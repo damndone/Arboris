@@ -132,6 +132,7 @@ def test_agent_session_turn_is_durable_and_replayable(
 
 def test_chain_session_canonicalizes_client_head_against_durable_chain(
     tmp_path: Path,
+    monkeypatch,
 ) -> None:
     """A selected historical node keeps its owner while Chain head is server-owned."""
 
@@ -149,6 +150,10 @@ def test_chain_session_canonicalizes_client_head_against_durable_chain(
     )
 
     packet = _context_packet()
+    packet["node_summary"] = {"params": {"covariance": "robust", "x": ["x1"]}}
+    # The persisted kernel reader has its own owner validation; this test
+    # exercises the HTTP projection of its result into initial Agent context.
+    monkeypatch.setattr("workbench.agent.context_tools._executed_covariance", lambda root, model_id: "nonrobust")
     packet.update(
         {
             "context_fingerprint": "client-preview-fingerprint",
@@ -203,6 +208,8 @@ def test_chain_session_canonicalizes_client_head_against_durable_chain(
     assert canonical_packet["ownership"]["owner_resolution"] == "selected_run_hint"
     assert canonical_packet["operation_target"]["owner_run_id"] == "run-a"
     assert canonical_packet["context_fingerprint"] != "client-preview-fingerprint"
+    assert canonical_packet["node_summary"]["params"] == {"x": ["x1"]}
+    assert canonical_packet["node_summary"]["covariance_executed"] == "nonrobust"
     assert any(
         "durable Chain active head" in warning
         for warning in canonical_packet["context_diagnostics"]["warnings"]

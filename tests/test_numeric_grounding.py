@@ -90,6 +90,18 @@ def test_a_calculation_counts_only_when_its_operands_come_from_results() -> None
     assert [f.text for f in grounding.check("两组差 1.2234", [RESULT, laundered])] == ["1.2234"]
 
 
+def test_a_calculated_value_carries_no_binary_rounding_noise() -> None:
+    # 33.76 - 32.295 is 1.465 in decimal; the double prints 1.4649999999999999,
+    # which made the correct reading 1.47 look unsupported.
+    result = grounding.calculate([{"label": "gap", "expression": "33.76 - 32.295"}])
+    assert result["results"][0]["value"] == "1.465"
+    evidence = _tool({"means": [33.76, 32.295]})
+    calculated = _tool(result, name="calculate")
+    for reading in ("1.465", "1.47", "1.46"):
+        assert grounding.check(f"差 {reading}", [evidence, calculated]) == ()
+    assert [f.text for f in grounding.check("差 1.48", [evidence, calculated])] == ["1.48"]
+
+
 def test_calculate_evaluates_arithmetic_and_refuses_anything_else() -> None:
     result = grounding.calculate(
         [
@@ -100,9 +112,9 @@ def test_calculate_evaluates_arithmetic_and_refuses_anything_else() -> None:
             {"expression": "1 / 0"},
         ]
     )["results"]
-    assert float(result[0]["value"]) == math.exp(0.4312)
+    assert float(result[0]["value"]) == pytest.approx(math.exp(0.4312), rel=1e-15, abs=0)
     assert result[0]["operands"] == ["0.4312"]
-    assert float(result[1]["value"]) == (5.1234 - 4.0221) / 4.0221 * 100
+    assert float(result[1]["value"]) == pytest.approx((5.1234 - 4.0221) / 4.0221 * 100, rel=1e-15, abs=0)
     assert result[2]["value"] == "8.0"
     assert "error" in result[3] and "error" in result[4]
 

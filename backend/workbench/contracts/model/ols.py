@@ -29,7 +29,12 @@ OLS_HAC_FIELDS = ("time_order", "hac_lags")
 _OLS_MODEL_OPTIONS_FIELDS = frozenset({"covariance", *OLS_HAC_FIELDS})
 #: Families whose model options are validated here but which do not offer HAC
 #: yet (v1.8.10 opens it for OLS only).
-_HAC_NOT_OFFERED = frozenset({"panel_ols"})
+_HAC_NOT_OFFERED = frozenset({"panel_ols", "did"})
+#: Panel and DID fits (v1.8.11): covariance is optional -- they cluster by
+#: entity unless told otherwise -- and `cluster` names another cluster column.
+PANEL_COVARIANCE_VALUES = ("clustered", "robust", "unadjusted")
+PANEL_COVARIANCE_FAMILIES = frozenset({"panel_ols", "did"})
+_PANEL_MODEL_OPTIONS_FIELDS = frozenset({"covariance", "cluster"})
 #: Above this the lag is no longer a truncation of a time series' memory but a
 #: sign of a mistyped value; Stata accepts any lag below the sample size.
 MAX_HAC_LAGS = 1000
@@ -80,8 +85,56 @@ def validate_ols_model_options(value: Mapping[str, Any], *, family: str = OLS_MO
     _validate_hac_fields(value, covariance, family)
 
 
+def validate_panel_model_options(value: Mapping[str, Any], *, family: str = "panel_ols") -> None:
+    """Validate a panel or DID fit's options: covariance and cluster column."""
+    if not isinstance(value, Mapping):
+        raise OLSModelOptionsError("PANEL_MODEL_OPTIONS_NOT_OBJECT", f"{family} model_options must be an object.")
+    unknown = sorted(set(value) - _PANEL_MODEL_OPTIONS_FIELDS - set(OLS_HAC_FIELDS))
+    if unknown:
+        raise OLSModelOptionsError(
+            "PANEL_MODEL_OPTIONS_UNKNOWN_FIELD",
+            f"{family} model_options contains unsupported field(s): " + ", ".join(str(item) for item in unknown),
+        )
+    covariance = value.get("covariance", "clustered")
+    if covariance == "hac" or any(field in value for field in OLS_HAC_FIELDS):
+        _validate_hac_fields({**value, "covariance": "hac"}, "hac", family)
+    if not isinstance(covariance, str) or covariance not in PANEL_COVARIANCE_VALUES:
+        raise OLSModelOptionsError(
+            "PANEL_MODEL_OPTIONS_INVALID_COVARIANCE",
+            f"{family} model_options.covariance must be one of: " + ", ".join(PANEL_COVARIANCE_VALUES),
+        )
+    cluster = value.get("cluster")
+    if cluster is not None:
+        if not isinstance(cluster, str) or not cluster.strip():
+            raise OLSModelOptionsError("PANEL_CLUSTER_INVALID", "model_options.cluster must name a column.")
+        if covariance != "clustered":
+            raise OLSModelOptionsError(
+                "PANEL_CLUSTER_WITHOUT_CLUSTERING",
+                f"model_options.cluster applies only to clustered standard errors, not to {covariance!r}.",
+            )
+
+
 def validate_panel_ols_model_options(value: Mapping[str, Any]) -> None:
-    validate_ols_model_options(value, family="panel_ols")
+    validate_panel_model_options(value, family="panel_ols")
+
+
+def validate_did_model_options(value: Mapping[str, Any]) -> None:
+    validate_panel_model_options(value, family="did")
+
+
+def effective_panel_covariance(
+    top_level_covariance: object, model_options: Mapping[str, Any] | None
+) -> tuple[str, str | None]:
+    """The covariance and cluster column a panel or DID fit uses.
+
+    A nested option wins over the top-level field, as for OLS; with neither,
+    the fit clusters by entity.
+    """
+    options = model_options or {}
+    nested = options.get("covariance")
+    value = str(nested or top_level_covariance or "").strip().lower() or "clustered"
+    cluster = options.get("cluster")
+    return value, (str(cluster).strip() if cluster else None)
 
 
 def _validate_hac_fields(value: Mapping[str, Any], covariance: str, family: str) -> None:

@@ -1,0 +1,8 @@
+Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_primitives_1.0_stata_0a4bd82d47 stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_primitives_1.0_r_4df5e45214 r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_primitives_1.0_python_0e97e8b48e python
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_primitives_0.5_stata_c56785b09c stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_primitives_0.5_r_f1a309cb06 r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_primitives_0.5_python_2450d94d00 python
+.
+6 passed, 105 deselected in 5.33s

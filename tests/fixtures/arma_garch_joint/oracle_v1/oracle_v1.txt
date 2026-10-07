@@ -1,0 +1,123 @@
+. do /Users/jiayuanren/项目规划/.worktrees/codex-v1811-m1/tests/fixtures/arma_g
+> arch_joint/generate.do /Users/jiayuanren/项目规划/.worktrees/codex-v1811-m1/t
+> ests/fixtures/arma_garch_joint/oracle_v1 
+
+. // VERIFICATION LEVEL: independent Stata 18 normal ARCH likelihood oracle.
+. // Usage: stata-mp -b do generate.do <fresh output directory>
+. version 18
+
+. set more off
+
+. args output
+
+. cd "`output'"
+/Users/jiayuanren/项目规划/.worktrees/codex-v1811-m1/tests/fixtures/arma_garch_
+> joint/oracle_v1
+
+. set seed 181104
+
+. foreach case in garch11_constant garch11_zero garch21_constant arch2_constant
+>  {
+  2.     clear
+  3.     local N = cond("`case'" == "garch11_constant",2540,1800)
+  4.     set obs `N'
+  5.     generate long t = _n
+  6.     generate double h = 1
+  7.     generate double e = 0
+  8.     generate double u = 0
+  9.     local mu = cond("`case'" == "garch11_zero",0,2)
+ 10.     forvalues i = 3/`N' {
+ 11.         if "`case'" == "arch2_constant" {
+ 12.             quietly replace h = .5 + .3*e[`i'-1]^2 + .15*e[`i'-2]^2 in `i'
+ 13.         }
+ 14.         else {
+ 15.             quietly replace h = .15 + .18*e[`i'-1]^2 + .67*h[`i'-1] in `i'
+ 16.         }
+ 17.         quietly replace e = sqrt(h)*rnormal() in `i'
+ 18.         quietly replace u = .55*u[`i'-1] + .35*e[`i'-1] + e in `i'
+ 19.         if "`case'" == "garch21_constant" {
+ 20.             quietly replace u = u - .2*u[`i'-2] in `i'
+ 21.         }
+ 22.     }
+ 23.     generate double y = `mu' + u
+ 24.     tsset t
+ 25.     format y %24.17g
+ 26.     export delimited t y using data_`case'.csv, replace
+ 27.     local ar "ar(1)"
+ 28.     local variance "arch(1) garch(1)"
+ 29.     local constant ""
+ 30.     if "`case'" == "garch21_constant" local ar "ar(1/2)"
+ 31.     if "`case'" == "arch2_constant" local variance "arch(1/2)"
+ 32.     if "`case'" == "garch11_zero" local constant "noconstant"
+ 33.     foreach vce in opg oim robust {
+ 34.         quietly arch y, `ar' ma(1) `variance' `constant' arch0(xb) arma0(z
+> ero) vce(`vce') tolerance(1e-12) ltolerance(1e-12) nrtolerance(1e-8) iterate(
+> 500)
+ 35.         matrix b = e(b)
+ 36.         matrix V = e(V)
+ 37.         local k = colsof(b)
+ 38.         file open out using stata_`case'_`vce'.tsv, write replace
+ 39.         file write out "ll" _tab %24.17g (e(ll)) _n
+ 40.         file write out "nobs" _tab %24.17g (e(N)) _n
+ 41.         file write out "converged" _tab %24.17g (e(converged)) _n
+ 42.         forvalues i=1/`k' {
+ 43.             file write out "b`i'" _tab %24.17g (b[1,`i']) _n
+ 44.             file write out "se`i'" _tab %24.17g (sqrt(V[`i',`i'])) _n
+ 45.             forvalues j=1/`k' {
+ 46.                 file write out "v`i'_`j'" _tab %24.17g (V[`i',`j']) _n
+ 47.             }
+ 48.         }
+ 49.         file close out
+ 50.         predict double residual_`vce', residuals
+ 51.         predict double variance_`vce', variance
+ 52.     }
+ 53.     export delimited t residual_* variance_* using series_`case'.csv, repl
+> ace
+ 54. }
+Number of observations (_N) was 0, now 2,540.
+
+Time variable: t, 1 to 2540
+        Delta: 1 unit
+(file data_garch11_constant.csv not found)
+file data_garch11_constant.csv saved
+(file stata_garch11_constant_opg.tsv not found)
+(file stata_garch11_constant_oim.tsv not found)
+(file stata_garch11_constant_robust.tsv not found)
+(file series_garch11_constant.csv not found)
+file series_garch11_constant.csv saved
+Number of observations (_N) was 0, now 1,800.
+
+Time variable: t, 1 to 1800
+        Delta: 1 unit
+(file data_garch11_zero.csv not found)
+file data_garch11_zero.csv saved
+(file stata_garch11_zero_opg.tsv not found)
+(file stata_garch11_zero_oim.tsv not found)
+(file stata_garch11_zero_robust.tsv not found)
+(file series_garch11_zero.csv not found)
+file series_garch11_zero.csv saved
+Number of observations (_N) was 0, now 1,800.
+
+Time variable: t, 1 to 1800
+        Delta: 1 unit
+(file data_garch21_constant.csv not found)
+file data_garch21_constant.csv saved
+(file stata_garch21_constant_opg.tsv not found)
+(file stata_garch21_constant_oim.tsv not found)
+(file stata_garch21_constant_robust.tsv not found)
+(file series_garch21_constant.csv not found)
+file series_garch21_constant.csv saved
+Number of observations (_N) was 0, now 1,800.
+
+Time variable: t, 1 to 1800
+        Delta: 1 unit
+(file data_arch2_constant.csv not found)
+file data_arch2_constant.csv saved
+(file stata_arch2_constant_opg.tsv not found)
+(file stata_arch2_constant_oim.tsv not found)
+(file stata_arch2_constant_robust.tsv not found)
+(file series_arch2_constant.csv not found)
+file series_arch2_constant.csv saved
+
+. 
+end of do-file

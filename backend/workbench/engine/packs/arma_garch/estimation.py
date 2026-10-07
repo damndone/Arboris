@@ -14,6 +14,7 @@ from workbench.contracts.common.envelope import freeze_json, thaw_json
 from workbench.contracts.model.arma_garch import ArmaGarchAnalysisContract
 from workbench.engine.packs.arma_garch.arma import ArmaCandidateResult
 from workbench.engine.packs.arma_garch.errors import ArmaGarchInputError, diagnostic
+from workbench.engine.packs.arma_garch.joint_mle import JointArmaGarchResult, fit_joint_arma_garch
 from workbench.engine.packs.arma_garch.statistics import modelling_warnings
 from workbench.engine.packs.arma_garch.volatility import (
     PersistenceResult,
@@ -31,7 +32,7 @@ from workbench.engine.packs.arma_garch.volatility import (
 )
 
 
-ResolvedStrategy = Literal["sequential_arma_garch", "joint_ar_garch"]
+ResolvedStrategy = Literal["sequential_arma_garch", "joint_ar_garch", "joint_arma_garch"]
 
 
 @dataclass(frozen=True)
@@ -159,9 +160,7 @@ def resolve_estimation_strategy(
     if requested_strategy == "sequential":
         return "sequential_arma_garch"
     if requested_strategy == "joint":
-        if mean_q > 0:
-            raise _unsupported_joint_error(mean_q)
-        return "joint_ar_garch"
+        return "joint_arma_garch" if mean_q > 0 else "joint_ar_garch"
     raise ValueError(f"unsupported estimation strategy: {requested_strategy}")
 
 
@@ -173,11 +172,9 @@ def estimate_arma_garch(
     variance_candidate: VarianceCandidateResult,
     frozen_hold_back: int,
     checkpoint: Callable[[], None] | None = None,
-) -> SequentialArmaGarchResult | JointArGarchResult:
+) -> SequentialArmaGarchResult | JointArGarchResult | JointArmaGarchResult:
     """Execute one frozen specification without changing the selected orders."""
 
-    if contract.estimation_strategy == "joint" and mean_candidate.q > 0:
-        raise _unsupported_joint_error(mean_candidate.q)
     _validate_candidate_mean_binding(variance_candidate, mean_candidate)
     resolved = resolve_estimation_strategy(
         contract.estimation_strategy,
@@ -212,6 +209,17 @@ def estimate_arma_garch(
             mean_candidate,
             variance_spec,
             hold_back=frozen_hold_back,
+            time_index_semantics=contract.time_index_semantics,
+        )
+    if resolved == "joint_arma_garch":
+        if frozen_hold_back != 0:
+            raise ValueError("joint ARMA-GARCH requires frozen_hold_back=0")
+        return fit_joint_arma_garch(
+            values,
+            mean_p=mean_candidate.p,
+            mean_q=mean_candidate.q,
+            include_constant=mean_candidate.constant,
+            variance_spec=variance_spec,
             time_index_semantics=contract.time_index_semantics,
         )
     return fit_joint_ar_garch(

@@ -1709,6 +1709,9 @@ def test_global_coefficient_inspector_returns_requested_persisted_intervals(
                 "r_squared_adj": 0.41,
                 "df_model": 2,
                 "df_resid": 97,
+                # Since v1.8.11 the inspector states how inference was done, so a
+                # design df is never confused with the residual df.
+                "inference": {"legacy_asymptotic": False},
                 "outcome": "outcome",
                 "predictors": ["share", "control"],
                 "predictors_omitted": 0,
@@ -1891,6 +1894,7 @@ def test_selected_model_result_summary_keeps_public_fit_and_interval_facts(
     assert output["result_summary"]["persisted_models"] == [
         {
             "model_id": "ols_1",
+            "evidence_ref": {"run_id": "run-a", "model_id": "ols_1", "result_ref": "model_results:ols_1"},
             "nobs": 100,
             "nobs_basis": "rows",
             "r_squared": 0.42,

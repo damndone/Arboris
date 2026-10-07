@@ -1,0 +1,4 @@
+Traceback (most recent call last):
+  File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-m2/tests/fixtures/count_models/integration-strict-v1811/prepare_integration_oracle.py", line 32, in <module>
+    raise AssertionError(f"Read-only input/production changed: {path}")
+AssertionError: Read-only input/production changed: backend/workbench/econometrics/runner.py

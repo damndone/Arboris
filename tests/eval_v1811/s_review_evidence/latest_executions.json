@@ -1,0 +1,410 @@
+[
+  {
+    "case": "aggregate-empty-group",
+    "language": "python",
+    "directory": "tests/eval_v1811/s_review_evidence/aggregate-empty-group-python-8d080146",
+    "command": [
+      "/Users/jiayuanren/项目规划/.venv/bin/python",
+      "analysis.py"
+    ],
+    "os_exit": 0,
+    "normalized_exit": 0,
+    "script_sha256": "80c79daa5d9f4d164039292ffcff8a655daf1091e1b5d121a40050ddf87bb4bc"
+  },
+  {
+    "case": "aggregate-empty-group",
+    "language": "r",
+    "directory": "tests/eval_v1811/s_review_evidence/aggregate-empty-group-r-35308a9d",
+    "command": [
+      "Rscript",
+      "analysis.R"
+    ],
+    "os_exit": 0,
+    "normalized_exit": 0,
+    "script_sha256": "c6dd5bef590f85ee7fa24c49dcb88a9fcc59982071b6ad9c03c77b767bba96e6"
+  },
+  {
+    "case": "aggregate-empty-group",
+    "language": "stata",
+    "directory": "tests/eval_v1811/s_review_evidence/aggregate-empty-group-stata-08dff25b",
+    "command": [
+      "/Applications/Stata/StataMP.app/Contents/MacOS/stata-mp",
+      "-b",
+      "do",
+      "analysis.do"
+    ],
+    "os_exit": 0,
+    "normalized_exit": 0,
+    "script_sha256": "332ac8b8dd920bdd9b5f65e25c615e8eb4273f677f90ee413683adabcca97072"
+  },
+  {
+    "case": "branch-isolation",
+    "language": "python",
+    "directory": "tests/eval_v1811/s_review_evidence/branch-isolation-python-1cb953ae",
+    "command": [
+      "/Users/jiayuanren/项目规划/.venv/bin/python",
+      "analysis.py"
+    ],
+    "os_exit": 0,
+    "normalized_exit": 0,
+    "script_sha256": "ed4d6c722335e62d77ce85e62202a38a7ee2791654935cf6819f6802b5e42d53"
+  },
+  {
+    "case": "branch-isolation",
+    "language": "r",
+    "directory": "tests/eval_v1811/s_review_evidence/branch-isolation-r-d4cd5917",
+    "command": [
+      "Rscript",
+      "analysis.R"
+    ],
+    "os_exit": 1,
+    "normalized_exit": 1,
+    "script_sha256": "ad7b8482ad6471173e1984eb3378554b60b6f7d39b946842ae321602c686fd93"
+  },
+  {
+    "case": "branch-isolation",
+    "language": "stata",
+    "directory": "tests/eval_v1811/s_review_evidence/branch-isolation-stata-21f53101",
+    "command": [
+      "/Applications/Stata/StataMP.app/Contents/MacOS/stata-mp",
+      "-b",
+      "do",
+      "analysis.do"
+    ],
+    "os_exit": 0,
+    "normalized_exit": 0,
+    "script_sha256": "c6cfb92189221c9172d6fc124e9913d685e57786784f5351f053fe3c52695901"
+  },
+  {
+    "case": "internal-column",
+    "language": "python",
+    "directory": "tests/eval_v1811/s_review_evidence/internal-column-python-faf5aa78",
+    "command": [
+      "/Users/jiayuanren/项目规划/.venv/bin/python",
+      "analysis.py"
+    ],
+    "os_exit": 0,
+    "normalized_exit": 0,
+    "script_sha256": "6e4adba84d649db3baf5413a053b2ead614750df6e335c95077289772f306a10"
+  },
+  {
+    "case": "internal-column",
+    "language": "r",
+    "directory": "tests/eval_v1811/s_review_evidence/internal-column-r-7ae18e02",
+    "command": [
+      "Rscript",
+      "analysis.R"
+    ],
+    "os_exit": 0,
+    "normalized_exit": 0,
+    "script_sha256": "f07a1f0ef1cbb280048c0502200badbd2227fd05a71fa2e22fc5b934f11d05a7"
+  },
+  {
+    "case": "internal-column",
+    "language": "stata",
+    "directory": "tests/eval_v1811/s_review_evidence/internal-column-stata-466de9e9",
+    "command": [
+      "/Applications/Stata/StataMP.app/Contents/MacOS/stata-mp",
+      "-b",
+      "do",
+      "analysis.do"
+    ],
+    "os_exit": 0,
+    "normalized_exit": 9,
+    "script_sha256": "c73f7f39d2452780540e381746da29c7122a3208332c8fce80413f5b3fea62b9"
+  },
+  {
+    "case": "iso-dates",
+    "language": "python",
+    "directory": "tests/eval_v1811/s_review_evidence/hac-iso-dates-python-138d1b3c",
+    "command": [
+      "/Users/jiayuanren/项目规划/.venv/bin/python",
+      "analysis.py"
+    ],
+    "os_exit": 0,
+    "normalized_exit": 0,
+    "script_sha256": "959ee481d3c833fb0fb3b2c3fb75f80ecf580bd7a2e2259a2fc5b3f4b6433f7f"
+  },
+  {
+    "case": "iso-dates",
+    "language": "r",
+    "directory": "tests/eval_v1811/s_review_evidence/hac-iso-dates-r-d73f728a",
+    "command": [
+      "Rscript",
+      "analysis.R"
+    ],
+    "os_exit": 0,
+    "normalized_exit": 0,
+    "script_sha256": "408cff73597e274a3ac755274bd9d2a1aee747077c2eb2719c061356f081e92a"
+  },
+  {
+    "case": "iso-dates",
+    "language": "stata",
+    "directory": "tests/eval_v1811/s_review_evidence/hac-iso-dates-stata-c17bba8f",
+    "command": [
+      "/Applications/Stata/StataMP.app/Contents/MacOS/stata-mp",
+      "-b",
+      "do",
+      "analysis.do"
+    ],
+    "os_exit": 0,
+    "normalized_exit": 9,
+    "script_sha256": "cb6af1c77ef3654717873e51674178e9733e1c73c08be8bed6ff1232d3968d36"
+  },
+  {
+    "case": "numeric-category",
+    "language": "python",
+    "directory": "tests/eval_v1811/s_review_evidence/numeric-category-python-e3c19723",
+    "command": [
+      "/Users/jiayuanren/项目规划/.venv/bin/python",
+      "analysis.py"
+    ],
+    "os_exit": 0,
+    "normalized_exit": 0,
+    "script_sha256": "bf8ff0d805bbce602506f781730785ac601628e91eef36444635b14d0916b439"
+  },
+  {
+    "case": "numeric-category",
+    "language": "r",
+    "directory": "tests/eval_v1811/s_review_evidence/numeric-category-r-81195458",
+    "command": [
+      "Rscript",
+      "analysis.R"
+    ],
+    "os_exit": 1,
+    "normalized_exit": 1,
+    "script_sha256": "6b87d123ee78006fc3f302fbc47619bbc28a6d83b321b7b7478920e4126b68d3"
+  },
+  {
+    "case": "numeric-category",
+    "language": "stata",
+    "directory": "tests/eval_v1811/s_review_evidence/numeric-category-stata-484d24a4",
+    "command": [
+      "/Applications/Stata/StataMP.app/Contents/MacOS/stata-mp",
+      "-b",
+      "do",
+      "analysis.do"
+    ],
+    "os_exit": 0,
+    "normalized_exit": 0,
+    "script_sha256": "d4ed7d09a62c22af1c0b8212022a8f5a03c78eb7e14d09b292fba7d903027f5c"
+  },
+  {
+    "case": "numeric-unit",
+    "language": "python",
+    "directory": "tests/eval_v1811/s_review_evidence/hac-numeric-unit-python-4f3a03f6",
+    "command": [
+      "/Users/jiayuanren/项目规划/.venv/bin/python",
+      "analysis.py"
+    ],
+    "os_exit": 0,
+    "normalized_exit": 0,
+    "script_sha256": "19596bc4b16360709eb92c3cfb780cd5b15b880814f71bd7e6e06e357e462a2c"
+  },
+  {
+    "case": "numeric-unit",
+    "language": "r",
+    "directory": "tests/eval_v1811/s_review_evidence/hac-numeric-unit-r-ea186e81",
+    "command": [
+      "Rscript",
+      "analysis.R"
+    ],
+    "os_exit": 0,
+    "normalized_exit": 0,
+    "script_sha256": "eafce5f4c5392702768dfb975bbe98237e658ad1e30a6a4bac84f8f7a0937886"
+  },
+  {
+    "case": "numeric-unit",
+    "language": "stata",
+    "directory": "tests/eval_v1811/s_review_evidence/hac-numeric-unit-stata-7d446921",
+    "command": [
+      "/Applications/Stata/StataMP.app/Contents/MacOS/stata-mp",
+      "-b",
+      "do",
+      "analysis.do"
+    ],
+    "os_exit": 0,
+    "normalized_exit": 0,
+    "script_sha256": "ca58c31c58c8b32439270177cb6e9abddc0c6041b8eb89b06e661daa62d2e435"
+  },
+  {
+    "case": "sampling-design",
+    "language": "python",
+    "directory": "tests/eval_v1811/s_review_evidence/sampling-design-python-1bff0249",
+    "refusal": {
+      "code": "NOT_FULLY_NATIVE",
+      "message": "Native export unavailable for: model",
+      "steps": [
+        "model"
+      ]
+    }
+  },
+  {
+    "case": "sampling-design",
+    "language": "r",
+    "directory": "tests/eval_v1811/s_review_evidence/sampling-design-r-3f48fbd4",
+    "refusal": {
+      "code": "NOT_FULLY_NATIVE",
+      "message": "Native export unavailable for: model",
+      "steps": [
+        "model"
+      ]
+    }
+  },
+  {
+    "case": "sampling-design",
+    "language": "stata",
+    "directory": "tests/eval_v1811/s_review_evidence/sampling-design-stata-4b4f90a5",
+    "refusal": {
+      "code": "NOT_FULLY_NATIVE",
+      "message": "Native export unavailable for: model",
+      "steps": [
+        "model"
+      ]
+    }
+  },
+  {
+    "case": "selected-sheet",
+    "language": "python",
+    "directory": "tests/eval_v1811/s_review_evidence/reader-selected-sheet-python-47f3d79c",
+    "refusal": {
+      "code": "UNSUPPORTED_READ_OPTIONS",
+      "message": "Reader options require an explicit supported translation",
+      "steps": []
+    }
+  },
+  {
+    "case": "selected-sheet",
+    "language": "r",
+    "directory": "tests/eval_v1811/s_review_evidence/reader-selected-sheet-r-40996fec",
+    "refusal": {
+      "code": "UNSUPPORTED_READ_OPTIONS",
+      "message": "Reader options require an explicit supported translation",
+      "steps": []
+    }
+  },
+  {
+    "case": "selected-sheet",
+    "language": "stata",
+    "directory": "tests/eval_v1811/s_review_evidence/reader-selected-sheet-stata-f163f01f",
+    "refusal": {
+      "code": "UNSUPPORTED_READ_OPTIONS",
+      "message": "Reader options require an explicit supported translation",
+      "steps": []
+    }
+  },
+  {
+    "case": "string-mode",
+    "language": "python",
+    "directory": "tests/eval_v1811/s_review_evidence/string-mode-python-9eefd17f",
+    "command": [
+      "/Users/jiayuanren/项目规划/.venv/bin/python",
+      "analysis.py"
+    ],
+    "os_exit": 0,
+    "normalized_exit": 0,
+    "script_sha256": "4f3e39bc507bf8cb458b759bc17979ca9430c40038678d6ac7de2b1bf9b919fa"
+  },
+  {
+    "case": "string-mode",
+    "language": "r",
+    "directory": "tests/eval_v1811/s_review_evidence/string-mode-r-41eea2ac",
+    "command": [
+      "Rscript",
+      "analysis.R"
+    ],
+    "os_exit": 0,
+    "normalized_exit": 0,
+    "script_sha256": "9aada2aee5b31e31d4507f6cdc6610987610c8aa777e813b451f7032f58ce2ce"
+  },
+  {
+    "case": "string-mode",
+    "language": "stata",
+    "directory": "tests/eval_v1811/s_review_evidence/string-mode-stata-5d14fa9c",
+    "command": [
+      "/Applications/Stata/StataMP.app/Contents/MacOS/stata-mp",
+      "-b",
+      "do",
+      "analysis.do"
+    ],
+    "os_exit": 0,
+    "normalized_exit": 0,
+    "script_sha256": "c5d79d49f86d5162bf1a2f910dc9b5ec28570366f6c86a712ff2787fabd8c6eb"
+  },
+  {
+    "case": "string-only-header",
+    "language": "python",
+    "directory": "tests/eval_v1811/s_review_evidence/string-only-header-python-0291244e",
+    "command": [
+      "/Users/jiayuanren/项目规划/.venv/bin/python",
+      "analysis.py"
+    ],
+    "os_exit": 0,
+    "normalized_exit": 0,
+    "script_sha256": "160eb7024820eb061f0bd6d50d1678be20da2f0afdc556bccfcdc28faa5ea4f0"
+  },
+  {
+    "case": "string-only-header",
+    "language": "r",
+    "directory": "tests/eval_v1811/s_review_evidence/string-only-header-r-e062514f",
+    "command": [
+      "Rscript",
+      "analysis.R"
+    ],
+    "os_exit": 0,
+    "normalized_exit": 0,
+    "script_sha256": "e941a34108562402839ffac0c89fa57db1066909f0f6ea275045eabd82c930ae"
+  },
+  {
+    "case": "string-only-header",
+    "language": "stata",
+    "directory": "tests/eval_v1811/s_review_evidence/string-only-header-stata-3ba4b085",
+    "command": [
+      "/Applications/Stata/StataMP.app/Contents/MacOS/stata-mp",
+      "-b",
+      "do",
+      "analysis.do"
+    ],
+    "os_exit": 0,
+    "normalized_exit": 9,
+    "script_sha256": "44c96113cf93754b7fd0afab7a1f67b0ea893f87dc8845e240de3d75cb5db179"
+  },
+  {
+    "case": "tsset-internal-column",
+    "language": "python",
+    "directory": "tests/eval_v1811/s_review_evidence/tsset-internal-column-python-e85c7e34",
+    "command": [
+      "/Users/jiayuanren/项目规划/.venv/bin/python",
+      "analysis.py"
+    ],
+    "os_exit": 1,
+    "normalized_exit": 1,
+    "script_sha256": "391df21bba64901878fd8ccdd44c3db66b0d19992bdc8bdf57e139f2ae20644d"
+  },
+  {
+    "case": "tsset-internal-column",
+    "language": "r",
+    "directory": "tests/eval_v1811/s_review_evidence/tsset-internal-column-r-fcf2102a",
+    "command": [
+      "Rscript",
+      "analysis.R"
+    ],
+    "os_exit": 0,
+    "normalized_exit": 0,
+    "script_sha256": "283bbf34b039b7a2402ad781e629e3a9bba1d95ddd48ff14c6540b727c263eda"
+  },
+  {
+    "case": "tsset-internal-column",
+    "language": "stata",
+    "directory": "tests/eval_v1811/s_review_evidence/tsset-internal-column-stata-a0653d49",
+    "command": [
+      "/Applications/Stata/StataMP.app/Contents/MacOS/stata-mp",
+      "-b",
+      "do",
+      "analysis.do"
+    ],
+    "os_exit": 0,
+    "normalized_exit": 0,
+    "script_sha256": "b51fd4956467cd1533d6f3071f339580e9bb63d31dbc9cead775a60bef9f1e4f"
+  }
+]

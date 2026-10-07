@@ -1,0 +1,221 @@
+FFFFF.....................................................               [100%]
+=================================== FAILURES ===================================
+______ test_complex_input_is_rejected_without_discarding_imaginary_values ______
+
+    def test_complex_input_is_rejected_without_discarding_imaginary_values():
+        args=arguments()
+        args["values"]=args["values"].astype(complex)+1j
+>       with pytest.raises(ArmaGarchInputError):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE ArmaGarchInputError
+
+tests/eval_v1811/m1_review_contract.py:25: Failed
+________ test_malformed_variance_orders_raise_structured_errors[None-1] ________
+
+p = None, q = 1
+
+    @pytest.mark.parametrize("p,q",[(None,1),(1,None),("bad",1),(1,"bad")])
+    def test_malformed_variance_orders_raise_structured_errors(p,q):
+        args=arguments()
+        args["variance_spec"]=VarianceCandidateSpec("invalid","garch",p,q,"normal","invalid")
+        with pytest.raises(ArmaGarchInputError):
+>           fit_joint_arma_garch(**args)
+
+tests/eval_v1811/m1_review_contract.py:33: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+backend/workbench/engine/packs/arma_garch/joint_mle.py:198: in fit_joint_arma_garch
+    VarianceCandidateSpec.create(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+cls = <class 'workbench.engine.packs.arma_garch.volatility.VarianceCandidateSpec'>
+model = 'garch', p = None, q = 1, distribution = 'normal'
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        model: str,
+        p: int,
+        q: int,
+        distribution: str,
+    ) -> "VarianceCandidateSpec":
+        if model not in {"constant_variance", "arch", "garch"}:
+            raise ValueError(f"unsupported variance model: {model}")
+        if distribution not in {"normal", "student_t"}:
+            raise ValueError(f"unsupported innovation distribution: {distribution}")
+        if model == "constant_variance":
+            if (p, q) != (0, 0):
+                raise ValueError("constant_variance requires p=0 and q=0")
+            display_name = "Constant Variance"
+            order_token = "constant"
+        elif model == "arch":
+            if p < 1 or q != 0:
+                raise ValueError("ARCH requires p>=1 and q=0")
+            display_name = f"ARCH({p})"
+            order_token = f"arch-p{p}"
+        else:
+>           if p < 1 or q < 1:
+               ^^^^^
+E           TypeError: '<' not supported between instances of 'NoneType' and 'int'
+
+backend/workbench/engine/packs/arma_garch/volatility.py:81: TypeError
+________ test_malformed_variance_orders_raise_structured_errors[1-None] ________
+
+p = 1, q = None
+
+    @pytest.mark.parametrize("p,q",[(None,1),(1,None),("bad",1),(1,"bad")])
+    def test_malformed_variance_orders_raise_structured_errors(p,q):
+        args=arguments()
+        args["variance_spec"]=VarianceCandidateSpec("invalid","garch",p,q,"normal","invalid")
+        with pytest.raises(ArmaGarchInputError):
+>           fit_joint_arma_garch(**args)
+
+tests/eval_v1811/m1_review_contract.py:33: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+backend/workbench/engine/packs/arma_garch/joint_mle.py:198: in fit_joint_arma_garch
+    VarianceCandidateSpec.create(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+cls = <class 'workbench.engine.packs.arma_garch.volatility.VarianceCandidateSpec'>
+model = 'garch', p = 1, q = None, distribution = 'normal'
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        model: str,
+        p: int,
+        q: int,
+        distribution: str,
+    ) -> "VarianceCandidateSpec":
+        if model not in {"constant_variance", "arch", "garch"}:
+            raise ValueError(f"unsupported variance model: {model}")
+        if distribution not in {"normal", "student_t"}:
+            raise ValueError(f"unsupported innovation distribution: {distribution}")
+        if model == "constant_variance":
+            if (p, q) != (0, 0):
+                raise ValueError("constant_variance requires p=0 and q=0")
+            display_name = "Constant Variance"
+            order_token = "constant"
+        elif model == "arch":
+            if p < 1 or q != 0:
+                raise ValueError("ARCH requires p>=1 and q=0")
+            display_name = f"ARCH({p})"
+            order_token = f"arch-p{p}"
+        else:
+>           if p < 1 or q < 1:
+                        ^^^^^
+E           TypeError: '<' not supported between instances of 'NoneType' and 'int'
+
+backend/workbench/engine/packs/arma_garch/volatility.py:81: TypeError
+________ test_malformed_variance_orders_raise_structured_errors[bad-1] _________
+
+p = 'bad', q = 1
+
+    @pytest.mark.parametrize("p,q",[(None,1),(1,None),("bad",1),(1,"bad")])
+    def test_malformed_variance_orders_raise_structured_errors(p,q):
+        args=arguments()
+        args["variance_spec"]=VarianceCandidateSpec("invalid","garch",p,q,"normal","invalid")
+        with pytest.raises(ArmaGarchInputError):
+>           fit_joint_arma_garch(**args)
+
+tests/eval_v1811/m1_review_contract.py:33: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+backend/workbench/engine/packs/arma_garch/joint_mle.py:198: in fit_joint_arma_garch
+    VarianceCandidateSpec.create(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+cls = <class 'workbench.engine.packs.arma_garch.volatility.VarianceCandidateSpec'>
+model = 'garch', p = 'bad', q = 1, distribution = 'normal'
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        model: str,
+        p: int,
+        q: int,
+        distribution: str,
+    ) -> "VarianceCandidateSpec":
+        if model not in {"constant_variance", "arch", "garch"}:
+            raise ValueError(f"unsupported variance model: {model}")
+        if distribution not in {"normal", "student_t"}:
+            raise ValueError(f"unsupported innovation distribution: {distribution}")
+        if model == "constant_variance":
+            if (p, q) != (0, 0):
+                raise ValueError("constant_variance requires p=0 and q=0")
+            display_name = "Constant Variance"
+            order_token = "constant"
+        elif model == "arch":
+            if p < 1 or q != 0:
+                raise ValueError("ARCH requires p>=1 and q=0")
+            display_name = f"ARCH({p})"
+            order_token = f"arch-p{p}"
+        else:
+>           if p < 1 or q < 1:
+               ^^^^^
+E           TypeError: '<' not supported between instances of 'str' and 'int'
+
+backend/workbench/engine/packs/arma_garch/volatility.py:81: TypeError
+________ test_malformed_variance_orders_raise_structured_errors[1-bad] _________
+
+p = 1, q = 'bad'
+
+    @pytest.mark.parametrize("p,q",[(None,1),(1,None),("bad",1),(1,"bad")])
+    def test_malformed_variance_orders_raise_structured_errors(p,q):
+        args=arguments()
+        args["variance_spec"]=VarianceCandidateSpec("invalid","garch",p,q,"normal","invalid")
+        with pytest.raises(ArmaGarchInputError):
+>           fit_joint_arma_garch(**args)
+
+tests/eval_v1811/m1_review_contract.py:33: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+backend/workbench/engine/packs/arma_garch/joint_mle.py:198: in fit_joint_arma_garch
+    VarianceCandidateSpec.create(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+cls = <class 'workbench.engine.packs.arma_garch.volatility.VarianceCandidateSpec'>
+model = 'garch', p = 1, q = 'bad', distribution = 'normal'
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        model: str,
+        p: int,
+        q: int,
+        distribution: str,
+    ) -> "VarianceCandidateSpec":
+        if model not in {"constant_variance", "arch", "garch"}:
+            raise ValueError(f"unsupported variance model: {model}")
+        if distribution not in {"normal", "student_t"}:
+            raise ValueError(f"unsupported innovation distribution: {distribution}")
+        if model == "constant_variance":
+            if (p, q) != (0, 0):
+                raise ValueError("constant_variance requires p=0 and q=0")
+            display_name = "Constant Variance"
+            order_token = "constant"
+        elif model == "arch":
+            if p < 1 or q != 0:
+                raise ValueError("ARCH requires p>=1 and q=0")
+            display_name = f"ARCH({p})"
+            order_token = f"arch-p{p}"
+        else:
+>           if p < 1 or q < 1:
+                        ^^^^^
+E           TypeError: '<' not supported between instances of 'str' and 'int'
+
+backend/workbench/engine/packs/arma_garch/volatility.py:81: TypeError
+=============================== warnings summary ===============================
+tests/eval_v1811/m1_review_contract.py::test_complex_input_is_rejected_without_discarding_imaginary_values
+  /Users/jiayuanren/项目规划/.worktrees/codex-v1811-m1/backend/workbench/engine/packs/arma_garch/joint_mle.py:207: ComplexWarning: Casting complex values to real discards the imaginary part
+    y = np.asarray(values, dtype=float)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/eval_v1811/m1_review_contract.py::test_complex_input_is_rejected_without_discarding_imaginary_values
+FAILED tests/eval_v1811/m1_review_contract.py::test_malformed_variance_orders_raise_structured_errors[None-1]
+FAILED tests/eval_v1811/m1_review_contract.py::test_malformed_variance_orders_raise_structured_errors[1-None]
+FAILED tests/eval_v1811/m1_review_contract.py::test_malformed_variance_orders_raise_structured_errors[bad-1]
+FAILED tests/eval_v1811/m1_review_contract.py::test_malformed_variance_orders_raise_structured_errors[1-bad]
+5 failed, 53 passed, 1 warning in 2.18s

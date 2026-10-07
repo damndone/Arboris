@@ -1,0 +1,103 @@
+{
+  "schema_version": 1,
+  "project_id": "fpc",
+  "run_id": "lonely_census",
+  "workbench_version": "1.8.11",
+  "lineage_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "sources": [
+    {
+      "source_id": "source",
+      "format": "csv",
+      "filename": "data.csv",
+      "sha256": "5454925d4e077ef8a5e59cfa02e7583b8b5f54e81b4796eb03283abfaa3a7e8e",
+      "read_options": {}
+    }
+  ],
+  "steps": [
+    {
+      "step_id": "model",
+      "kind": "model",
+      "operation": "model.ols",
+      "label": "",
+      "parameters": {
+        "model_type": "ols",
+        "y": "y",
+        "x": [
+          "x1",
+          "x2"
+        ],
+        "covariance": "survey_design",
+        "weights": {
+          "kind": "sampling",
+          "column": "weight"
+        },
+        "model_options": {
+          "survey_design": {
+            "sampling_weight": "weight",
+            "survey_fpc_col": "certainty_fpc",
+            "survey_df": "design",
+            "survey_psu_col": "psu",
+            "survey_strata_col": "stratum"
+          }
+        }
+      },
+      "inputs": [
+        "source"
+      ],
+      "output_dataset": null,
+      "expected": {
+        "nobs": 75,
+        "coefficients": {
+          "Intercept": 4.767273406190168,
+          "x1": 1.4497508730783055,
+          "x2": -0.3932150269716509
+        },
+        "std_errors": {
+          "Intercept": 1.6023580455582087,
+          "x1": 0.19039549323983382,
+          "x2": 0.0772979676980629
+        },
+        "statistics": {
+          "Intercept": {
+            "value": 2.9751611504090567,
+            "p_value": 0.02065603572372509,
+            "df": 7,
+            "distribution": "t"
+          },
+          "x1": {
+            "value": 7.6144180117336635,
+            "p_value": 0.00012477645384923564,
+            "df": 7,
+            "distribution": "t"
+          },
+          "x2": {
+            "value": -5.0870034320644235,
+            "p_value": 0.0014199052469754407,
+            "df": 7,
+            "distribution": "t"
+          }
+        }
+      },
+      "tolerances": {
+        "coefficients": {
+          "abs": 1e-08,
+          "rel": 0
+        },
+        "std_errors": {
+          "abs": 1e-06,
+          "rel": 0
+        },
+        "statistics.value": {
+          "abs": 1e-08,
+          "rel": 1e-06
+        },
+        "statistics.p_value": {
+          "abs": 0,
+          "rel": 1e-05
+        }
+      },
+      "seed": null,
+      "snapshot": null
+    }
+  ]
+}

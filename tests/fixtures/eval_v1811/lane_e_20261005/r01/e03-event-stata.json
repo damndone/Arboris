@@ -1,0 +1,35 @@
+{
+  "values": {
+    "b_evt_m5": -0.10540499445982383,
+    "s_evt_m5": 0.32002228090947743,
+    "b_evt_m4": 0.07001726833482,
+    "s_evt_m4": 0.3568053209289961,
+    "b_evt_m3": -0.09627786745870663,
+    "s_evt_m3": 0.27828245806116486,
+    "b_evt_m2": 0.17572437213057907,
+    "s_evt_m2": 0.3207286120564505,
+    "b_evt_p0": 0.6001496930624985,
+    "s_evt_p0": 0.3066955247509296,
+    "b_evt_p1": 0.7188846073337047,
+    "s_evt_p1": 0.26005363677521404,
+    "b_evt_p2": 1.1143378394944186,
+    "s_evt_p2": 0.27280698960290223,
+    "b_evt_p3": 1.033248713209821,
+    "s_evt_p3": 0.36899023989661545,
+    "b_evt_p4": 1.2338926887901784,
+    "s_evt_p4": 0.4058000229264783,
+    "F": 0.19185303170321671,
+    "df": 4.0,
+    "den": 59.0,
+    "p": 0.9417329561068509
+  },
+  "raw_log": "/private/tmp/v1811-evaluation-8d8a2fd4c7d44af693b267e6d893d16f-r01/test_event_study_final_leads_f0/native-e03-event/lane_e.log",
+  "error_type": null,
+  "public_log": "/Users/jiayuanren/\u9879\u76ee\u89c4\u5212/.worktrees/codex-v1811-evaluation/tests/fixtures/eval_v1811/lane_e_20261005/r01/e03-event-stata-output.txt",
+  "command": [
+    "/Applications/Stata/StataMP.app/Contents/MacOS/stata-mp",
+    "-b",
+    "do",
+    "lane_e.do"
+  ]
+}

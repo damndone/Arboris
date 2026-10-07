@@ -1,0 +1,105 @@
+{
+  "schema_version": 1,
+  "project_id": "categories",
+  "run_id": "branches",
+  "workbench_version": "1.8.11",
+  "lineage_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+  "sources": [
+    {
+      "source_id": "source",
+      "format": "csv",
+      "filename": "data.csv",
+      "sha256": "050b189f5fcd4768e53803d4dfeed0b822fe264a03c4d5414075e42e6a313024",
+      "read_options": {}
+    }
+  ],
+  "steps": [
+    {
+      "step_id": "weighted",
+      "kind": "model",
+      "operation": "model.ols",
+      "label": "",
+      "parameters": {
+        "model_type": "ols",
+        "y": "y",
+        "x": [
+          "x",
+          "region"
+        ],
+        "categorical_x": [
+          "region"
+        ],
+        "covariance": "unadjusted",
+        "weights": {
+          "kind": "frequency",
+          "column": "fw"
+        },
+        "model_options": {}
+      },
+      "inputs": [
+        "source"
+      ],
+      "output_dataset": null,
+      "expected": {
+        "nobs": 692,
+        "coefficients": {
+          "Intercept": 1.1406181831101954,
+          "C(Q('region'))[T.south]": -0.08780030675457805,
+          "C(Q('region'))[T.west]": -0.10670733571832419,
+          "x": 0.5668151259087681
+        },
+        "std_errors": {
+          "Intercept": 0.06512778819857358,
+          "C(Q('region'))[T.south]": 0.0938599257916859,
+          "C(Q('region'))[T.west]": 0.0910083263007167,
+          "x": 0.036096598808836394
+        }
+      },
+      "tolerances": {},
+      "seed": null,
+      "snapshot": null
+    },
+    {
+      "step_id": "plain",
+      "kind": "model",
+      "operation": "model.ols",
+      "label": "",
+      "parameters": {
+        "model_type": "ols",
+        "y": "y",
+        "x": [
+          "x",
+          "region"
+        ],
+        "categorical_x": [
+          "region"
+        ],
+        "covariance": "unadjusted",
+        "weights": null,
+        "model_options": {}
+      },
+      "inputs": [
+        "source"
+      ],
+      "output_dataset": null,
+      "expected": {
+        "nobs": 350,
+        "coefficients": {
+          "Intercept": 1.1525369575209923,
+          "C(Q('region'))[T.south]": -0.07713734612483514,
+          "C(Q('region'))[T.west]": -0.12606025144491617,
+          "x": 0.5722984010583434
+        },
+        "std_errors": {
+          "Intercept": 0.0907095488404284,
+          "C(Q('region'))[T.south]": 0.12857751264891099,
+          "C(Q('region'))[T.west]": 0.1283082512402164,
+          "x": 0.051233154659256375
+        }
+      },
+      "tolerances": {},
+      "seed": null,
+      "snapshot": null
+    }
+  ]
+}

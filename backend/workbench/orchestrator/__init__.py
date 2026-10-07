@@ -263,12 +263,18 @@ def run_workflow(
     normalized_model_options = bound_model_options.payload
     normalized_labels = _normalize_labels(labels)
     effective_covariance = covariance
-    if model_type in {"ols", "panel_ols"} and normalized_model_options:
+    from ..contracts.model.ols import PANEL_COVARIANCE_FAMILIES, effective_panel_covariance
+
+    if model_type == "ols" and normalized_model_options:
         from ..contracts.model.ols import effective_ols_covariance
 
         effective_covariance = effective_ols_covariance(
             covariance, normalized_model_options
         )
+    elif model_type in PANEL_COVARIANCE_FAMILIES:
+        # Recorded resolved, so the run inputs say what was fitted; the cluster
+        # column is resolved with it in the estimation stage.
+        effective_covariance = effective_panel_covariance(covariance, normalized_model_options)[0]
     model_options_binding = (
         bound_model_options.binding.to_dict()
         if bound_model_options.binding is not None
@@ -695,12 +701,18 @@ def _run_workflow(
     )
     normalized_labels = _normalize_labels(labels)
     effective_covariance = covariance
-    if model_type in {"ols", "panel_ols"} and normalized_model_options:
+    from ..contracts.model.ols import PANEL_COVARIANCE_FAMILIES, effective_panel_covariance
+
+    if model_type == "ols" and normalized_model_options:
         from ..contracts.model.ols import effective_ols_covariance
 
         effective_covariance = effective_ols_covariance(
             covariance, normalized_model_options
         )
+    elif model_type in PANEL_COVARIANCE_FAMILIES:
+        # Recorded resolved, so the run inputs say what was fitted; the cluster
+        # column is resolved with it in the estimation stage.
+        effective_covariance = effective_panel_covariance(covariance, normalized_model_options)[0]
 
     _graph_store = GraphStore(runs_root=run_root.parent)
     _recorder = GraphRecorder(run_id=run_id, store=_graph_store)

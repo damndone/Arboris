@@ -1,0 +1,230 @@
+{
+  "baseline": "6f0f87c6d8241a93d81e2c34f8ef8e9408a907b3",
+  "review_baseline": "87e5c5decfaea3512300a35d06258d443b7d7670",
+  "functional_tip": "3d4c73c0ef3763057fd1ca250c9165638b9e577e",
+  "code_commit": "96f356fc8606dfc32323dfb9d45b6fbbaa6c3051",
+  "old_manifest_total": 82,
+  "old_manifest_unchanged_count": 80,
+  "old_manifest_changed": [
+    {
+      "path": "backend/workbench/econometrics/count_models.py",
+      "sha256": "ebe3530bab91a342f7ee1830dc0416e05c80f6b069b8ef483b319b0a0a0f7229",
+      "actual_sha256": "143b75513c18d4a5aa0a20ea08b61169f65d1a358a533ee0d497c768cff7dd50"
+    },
+    {
+      "path": "docs/superpowers/handoffs/2026-10-04-codex-v1811-m2-report.md",
+      "sha256": "d080ee234316b35dfed4b26770a4f77520c6a417ed5a7825c521a3a5576a168a",
+      "actual_sha256": "677321f0453ba8cc95c03a260410c1b6b357fbd9ae3ff0b36d0c9940ce620023"
+    }
+  ],
+  "author_changed_paths": [
+    "backend/workbench/econometrics/count_models.py",
+    "docs/superpowers/handoffs/2026-10-04-codex-v1811-m2-report.md",
+    "tests/fixtures/count_models/p1-remediation-20261004/author-red.txt",
+    "tests/fixtures/count_models/p1-remediation-20261004/author-review-green.txt",
+    "tests/fixtures/count_models/p1-remediation-20261004/capture_precision.R",
+    "tests/fixtures/count_models/p1-remediation-20261004/capture_remediation.py",
+    "tests/fixtures/count_models/p1-remediation-20261004/final-production-green.txt",
+    "tests/fixtures/count_models/p1-remediation-20261004/first-green.txt",
+    "tests/fixtures/count_models/p1-remediation-20261004/focused-final.txt",
+    "tests/fixtures/count_models/p1-remediation-20261004/focused-first.txt",
+    "tests/fixtures/count_models/p1-remediation-20261004/fractional-oracle/data.csv",
+    "tests/fixtures/count_models/p1-remediation-20261004/fractional-oracle/r.json",
+    "tests/fixtures/count_models/p1-remediation-20261004/fractional-oracle/stata.json",
+    "tests/fixtures/count_models/p1-remediation-20261004/fractional-oracle/stata/oracle.do",
+    "tests/fixtures/count_models/p1-remediation-20261004/fractional-oracle/stata/oracle.log",
+    "tests/fixtures/count_models/p1-remediation-20261004/fractional-oracle/stata/wb_results.tsv",
+    "tests/fixtures/count_models/p1-remediation-20261004/fractional.R",
+    "tests/fixtures/count_models/p1-remediation-20261004/generate_fractional.py",
+    "tests/fixtures/count_models/p1-remediation-20261004/native-output.txt",
+    "tests/fixtures/count_models/p1-remediation-20261004/r-full-precision.json",
+    "tests/fixtures/count_models/p1-remediation-20261004/remediation-evidence-final-output.txt",
+    "tests/fixtures/count_models/p1-remediation-20261004/remediation-evidence-output.txt",
+    "tests/fixtures/count_models/p1-remediation-20261004/scope-audit.json",
+    "tests/fixtures/count_models/p1-remediation-20261004/workbench-remediation-final.json",
+    "tests/fixtures/count_models/p1-remediation-20261004/workbench-remediation.json",
+    "tests/test_count_models_remediation.py"
+  ],
+  "old_manifest_sha256": "77ed73882578db333160e1cf661e8b2e3fa777de849d5b5a2735f85bf0ee1872",
+  "contract_lock_verified": true,
+  "author_files": [
+    {
+      "path": "backend/workbench/econometrics/count_models.py",
+      "sha256": "143b75513c18d4a5aa0a20ea08b61169f65d1a358a533ee0d497c768cff7dd50"
+    },
+    {
+      "path": "docs/superpowers/handoffs/2026-10-04-codex-v1811-m2-report.md",
+      "sha256": "677321f0453ba8cc95c03a260410c1b6b357fbd9ae3ff0b36d0c9940ce620023"
+    },
+    {
+      "path": "tests/fixtures/count_models/p1-remediation-20261004/author-red.txt",
+      "sha256": "321bfc53cb97c608775105ff8d87f65b2e7306d9e3f0d60bdf75f602377ce058"
+    },
+    {
+      "path": "tests/fixtures/count_models/p1-remediation-20261004/author-review-green.txt",
+      "sha256": "916d0373bee73b8d990d128a3ecd7133d15a7ecfc39f040eae5c2bfffcace12a"
+    },
+    {
+      "path": "tests/fixtures/count_models/p1-remediation-20261004/capture_precision.R",
+      "sha256": "c64eac1d934bf9b9cc5eeb2a8ef61820b7b7c8efca3df3c8ade0cc61631c8839"
+    },
+    {
+      "path": "tests/fixtures/count_models/p1-remediation-20261004/capture_remediation.py",
+      "sha256": "ac3e920307fe8b948e91b8832127f8b2eb0d4aa32987520408b54a357103ffed"
+    },
+    {
+      "path": "tests/fixtures/count_models/p1-remediation-20261004/final-production-green.txt",
+      "sha256": "5d4d0b2c7b54e45476a66b48ec8d88f41ec448c8cdb88d294fbe6f4868e87771"
+    },
+    {
+      "path": "tests/fixtures/count_models/p1-remediation-20261004/first-green.txt",
+      "sha256": "7af942a9ebf02d0e7d5cf6208d6f883b75945b1083b79aec08eb77174899c363"
+    },
+    {
+      "path": "tests/fixtures/count_models/p1-remediation-20261004/focused-final.txt",
+      "sha256": "6b98d8ac6ff8cdb1ab1dba7a2d23f445a85e947f2919481c10f9c055c30924a4"
+    },
+    {
+      "path": "tests/fixtures/count_models/p1-remediation-20261004/focused-first.txt",
+      "sha256": "0782ed862601c94fdde2879983e9419245334ad9ee6c10df42f90d20ff3e9714"
+    },
+    {
+      "path": "tests/fixtures/count_models/p1-remediation-20261004/fractional-oracle/data.csv",
+      "sha256": "79ce76f3d07c60446a57b40b53f276345cca98423a20c8f193f3f475db34e1a9"
+    },
+    {
+      "path": "tests/fixtures/count_models/p1-remediation-20261004/fractional-oracle/r.json",
+      "sha256": "0c9dd300aead5475696f0fc5fae3e29165d695acbe65ab3885f01df7eb255910"
+    },
+    {
+      "path": "tests/fixtures/count_models/p1-remediation-20261004/fractional-oracle/stata.json",
+      "sha256": "5c14236ff68dd25159c96f1d03ee6cd911bc27095abaa4fb1ecfa3c1107a5245"
+    },
+    {
+      "path": "tests/fixtures/count_models/p1-remediation-20261004/fractional-oracle/stata/oracle.do",
+      "sha256": "d645f5427bc04fa5fd505fdf70e2a3e5379af775b3b058b1bada89a24741251a"
+    },
+    {
+      "path": "tests/fixtures/count_models/p1-remediation-20261004/fractional-oracle/stata/oracle.log",
+      "sha256": "withheld-raw-sha256-2d32af1ff745bad95f0ac1b7"
+    },
+    {
+      "path": "tests/fixtures/count_models/p1-remediation-20261004/fractional-oracle/stata/wb_results.tsv",
+      "sha256": "4e04bf0470ad37728971e69cdd72ce00af78861d126c7a40c70ab6232d197da2"
+    },
+    {
+      "path": "tests/fixtures/count_models/p1-remediation-20261004/fractional.R",
+      "sha256": "aabe9d427c7845314d71a6bd597f7b5f9679898195655956da5781a5762fefcb"
+    },
+    {
+      "path": "tests/fixtures/count_models/p1-remediation-20261004/generate_fractional.py",
+      "sha256": "85e6673776d9cc9cbe14cf390f4664afd660f3c6b143f467e54d45f6b32ee4b6"
+    },
+    {
+      "path": "tests/fixtures/count_models/p1-remediation-20261004/native-output.txt",
+      "sha256": "d5cc9da923fd90f2567de734ae008fad304d58b1ac938690ac6fd24466699e88"
+    },
+    {
+      "path": "tests/fixtures/count_models/p1-remediation-20261004/r-full-precision.json",
+      "sha256": "b2a59d03ae1ede1e486601b6208e64defdc2594c78f164ee353f0806b84f8ba1"
+    },
+    {
+      "path": "tests/fixtures/count_models/p1-remediation-20261004/remediation-evidence-final-output.txt",
+      "sha256": "6b6597de91a1fe8053b3bca45e0447419eb1def628da1a7b0fb90ba5e849cedf"
+    },
+    {
+      "path": "tests/fixtures/count_models/p1-remediation-20261004/remediation-evidence-output.txt",
+      "sha256": "b79cf479331f2d98bd68dcda73a8b99184850d03973071205dd93beb3ae4a870"
+    },
+    {
+      "path": "tests/fixtures/count_models/p1-remediation-20261004/scope-audit.json",
+      "sha256": "3af2457af6beecfb8aee78028f2be33c4fb531475918fca08762164751903e9a"
+    },
+    {
+      "path": "tests/fixtures/count_models/p1-remediation-20261004/workbench-remediation-final.json",
+      "sha256": "3e7d1ab2ca7bd304822049438df1ee8a80873c357e1c3d3a0c47d12c8f85e0b3"
+    },
+    {
+      "path": "tests/fixtures/count_models/p1-remediation-20261004/workbench-remediation.json",
+      "sha256": "41a90680a7fe7cf1a9e63fadaeaee77a7be734d85120b04843eff0c94a57d0a8"
+    },
+    {
+      "path": "tests/test_count_models_remediation.py",
+      "sha256": "249ad1e580cdbfa2d2d7c2601e1d8e0142e45b6f3c8d87aa44f225e29529f045"
+    }
+  ],
+  "files": [
+    {
+      "path": "tests/eval_v1811/m2_review_recheck_assertions.py",
+      "sha256": "ee632afde96b596c99e601aaef02015ea127725c443e7f29baf9354c2c97ae2f"
+    },
+    {
+      "path": "tests/eval_v1811/m2_review_recheck_evidence.json",
+      "sha256": "e75c96d4d511a48c8b2d88711fc2b98e649a05eaa4032d2b0b77ef6d890ea7fc"
+    },
+    {
+      "path": "tests/eval_v1811/m2_review_recheck_focused.txt",
+      "sha256": "08c869cf3274913538483891912e8a3ba58c51a3635bc3019aaf432dc6e6d7be"
+    },
+    {
+      "path": "tests/eval_v1811/m2_review_recheck_integration_gaps.txt",
+      "sha256": "38fc9927f305b8587be9964c9d50722326c160a861b44a674631f140ed47b94d"
+    },
+    {
+      "path": "tests/eval_v1811/m2_review_recheck_oracle.R",
+      "sha256": "473570e6428ebe891f3c8750f93e95971c5453e7a31894d69148f66be3352b3c"
+    },
+    {
+      "path": "tests/eval_v1811/m2_review_recheck_original_red.txt",
+      "sha256": "c825eb133a6c189587e2694cb0585dcbb13b0a85250d8ab227cb6acdb11c06c9"
+    },
+    {
+      "path": "tests/eval_v1811/m2_review_recheck_points.json",
+      "sha256": "fd5364a499a05ffadd553d1c858f9b3c04bc7da044a4d8f51f63cafd7ca4fad0"
+    },
+    {
+      "path": "tests/eval_v1811/m2_review_recheck_probe.py",
+      "sha256": "11f3ce87907fee4b33d6f4734dc578dc26c8a610deab253da79ad2c2b040f2f1"
+    },
+    {
+      "path": "tests/eval_v1811/m2_review_recheck_probe_output.txt",
+      "sha256": "178cfc24d79b4f909e8e4e46bc8020819ac2ca3994926bcd055f709c44c2a459"
+    },
+    {
+      "path": "tests/eval_v1811/m2_review_recheck_r.json",
+      "sha256": "c47a034e1d58d5e6210d7a77f2fe60f49001b3c9d9646c529956ac8e1f144470"
+    },
+    {
+      "path": "tests/eval_v1811/m2_review_recheck_scope.py",
+      "sha256": "0295d5c44df111450436de387a8eae0c6f883f46b09602ca503523c9bec7243c"
+    },
+    {
+      "path": "tests/eval_v1811/m2_review_recheck_stata/wb_results.tsv",
+      "sha256": "3dd31fc667f30dea635e6920554f73023f9adeb8e07e71fc2a85f7ea549f1fec"
+    },
+    {
+      "path": "tests/eval_v1811/m2_review_recheck_stata/oracle.log",
+      "sha256": "withheld-raw-sha256-a1633c34dbabcbf49581f690"
+    },
+    {
+      "path": "tests/eval_v1811/m2_review_recheck_stata/oracle.do",
+      "sha256": "19ccc05c8c83b1256684260fb5a095d2d44ac48dafe5eb90791fd26e3b330a06"
+    },
+    {
+      "path": "tests/eval_v1811/m2_review_recheck_stata.json",
+      "sha256": "dfdf066342676e3708a998da6725759a7ea3b4970c39736bedda1b69857f58c1"
+    },
+    {
+      "path": "docs/superpowers/handoffs/2026-10-04-v1.8.11-m2-independent-recheck.md",
+      "sha256": "d18634c2ff2d0c0e86883b23ac69fa813538d981a6057e26f14e9028611ddbec"
+    }
+  ],
+  "command_cwd": "/Users/jiayuanren/\u9879\u76ee\u89c4\u5212/.worktrees/codex-v1811-m2",
+  "commands": [
+    "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python /Users/jiayuanren/\u9879\u76ee\u89c4\u5212/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py .venv/bin/python tests/eval_v1811/m2_review_recheck_probe.py > tests/eval_v1811/m2_review_recheck_probe_output.txt 2>&1",
+    "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python /Users/jiayuanren/\u9879\u76ee\u89c4\u5212/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py .venv/bin/python -m pytest -q 'tests/eval_v1811/m2_review_assertions.py::test_count_glm_rejects_negative_support_before_returning_inference' 'tests/eval_v1811/m2_review_assertions.py::test_uncertified_interior_ancillary_point_does_not_publish_regular_oim_inference' > tests/eval_v1811/m2_review_recheck_original_red.txt 2>&1",
+    "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python /Users/jiayuanren/\u9879\u76ee\u89c4\u5212/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py .venv/bin/python -m pytest -q -s tests/eval_v1811/m2_review_recheck_assertions.py 'tests/eval_v1811/m2_review_assertions.py::test_count_glm_rejects_negative_support_before_returning_inference' 'tests/eval_v1811/m2_review_assertions.py::test_uncertified_interior_ancillary_point_does_not_publish_regular_oim_inference' tests/test_count_models_contract.py tests/test_count_models_remediation.py tests/test_count_models_performance.py > tests/eval_v1811/m2_review_recheck_focused.txt 2>&1",
+    "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python /Users/jiayuanren/\u9879\u76ee\u89c4\u5212/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py .venv/bin/python -m pytest -q 'tests/test_count_models_boundary.py::test_underdispersed_sample_reports_poisson_boundary_and_valid_test' 'tests/test_count_models_boundary.py::test_boundary_packet_can_be_serialized_without_nonfinite_numbers' 'tests/test_count_models_boundary.py::test_invalid_response_is_rejected_for_joint_and_fixed[0.5-0.5]' 'tests/test_count_models_glm_precision.py::test_explicit_alpha_one_matches_high_precision_admission_oracle' tests/test_admission_oracle_glm_negative_binomial.py > tests/eval_v1811/m2_review_recheck_integration_gaps.txt 2>&1",
+    ".venv/bin/python tests/eval_v1811/m2_review_recheck_scope.py"
+  ]
+}

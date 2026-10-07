@@ -1,0 +1,248 @@
+{
+  "schema_version": 1,
+  "project_id": "sidecar",
+  "run_id": "executed",
+  "workbench_version": "1.8.11",
+  "lineage_hash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+  "sources": [
+    {
+      "source_id": "source",
+      "format": "csv",
+      "filename": "data.csv",
+      "sha256": "5f8d0cc66fc9efdfd08e6a06640ea410d58671fe93ac5cac2ad90d6aa68de937",
+      "read_options": {}
+    }
+  ],
+  "steps": [
+    {
+      "step_id": "completed",
+      "kind": "model",
+      "operation": "model.ols",
+      "label": "Sampling OLS completed in Workbench",
+      "parameters": {
+        "model_type": "ols",
+        "y": "y",
+        "x": [
+          "x1",
+          "x2"
+        ],
+        "categorical_x": [],
+        "covariance": "survey_design",
+        "weights": {
+          "kind": "sampling",
+          "column": "weight"
+        },
+        "model_options": {
+          "survey_design": {
+            "sampling_weight": "weight",
+            "survey_strata_col": "stratum",
+            "survey_psu_col": "psu",
+            "survey_fpc_col": "fpc",
+            "survey_df": "design"
+          }
+        }
+      },
+      "inputs": [
+        "source"
+      ],
+      "output_dataset": null,
+      "expected": {
+        "nobs": 80,
+        "coefficients": {
+          "Intercept": 4.652711573943123,
+          "x1": 1.475820771771979,
+          "x2": -0.40404481777033774
+        },
+        "std_errors": {
+          "Intercept": 1.5955241455226616,
+          "x1": 0.17732404110690134,
+          "x2": 0.08888234469730581
+        },
+        "statistics": {
+          "Intercept": {
+            "value": 2.9161022645752492,
+            "p_value": 0.019406798019796175,
+            "df": 8,
+            "distribution": "t"
+          },
+          "x1": {
+            "value": 8.322733694537604,
+            "p_value": 3.2813378097179405e-05,
+            "df": 8,
+            "distribution": "t"
+          },
+          "x2": {
+            "value": -4.545838874371921,
+            "p_value": 0.0018846599328036571,
+            "df": 8,
+            "distribution": "t"
+          }
+        }
+      },
+      "tolerances": {},
+      "seed": null,
+      "snapshot": {
+        "filename": "completed.csv",
+        "format": "csv",
+        "sha256": "5f8d0cc66fc9efdfd08e6a06640ea410d58671fe93ac5cac2ad90d6aa68de937",
+        "nrows": 80,
+        "columns": [
+          "stratum",
+          "psu",
+          "y",
+          "x1",
+          "x2",
+          "weight",
+          "fpc",
+          "subpop"
+        ]
+      }
+    },
+    {
+      "step_id": "post",
+      "kind": "postestimation",
+      "operation": "postestimation.wald",
+      "label": "Actual persisted design Wald",
+      "parameters": {
+        "constraints": [
+          {
+            "terms": {
+              "x1": 1
+            },
+            "value": 0.2
+          },
+          {
+            "terms": {
+              "x2": 1
+            },
+            "value": 0
+          }
+        ],
+        "models": [
+          "completed"
+        ]
+      },
+      "inputs": [
+        "completed"
+      ],
+      "output_dataset": null,
+      "expected": {
+        "statistics": {
+          "test": {
+            "value": 88.6728244577567,
+            "df": 2,
+            "df_denominator": 7.0,
+            "p_value": 1.0669105752740756e-05,
+            "distribution": "F"
+          }
+        }
+      },
+      "tolerances": {},
+      "seed": null,
+      "snapshot": null
+    },
+    {
+      "step_id": "selected",
+      "kind": "data_operation",
+      "operation": "data.subset",
+      "label": "",
+      "parameters": {
+        "columns": [
+          "y",
+          "x1",
+          "x2"
+        ]
+      },
+      "inputs": [
+        "post"
+      ],
+      "output_dataset": null,
+      "expected": {
+        "nrows": 80,
+        "columns": [
+          "y",
+          "x1",
+          "x2"
+        ]
+      },
+      "tolerances": {},
+      "seed": null,
+      "snapshot": null
+    },
+    {
+      "step_id": "independent",
+      "kind": "model",
+      "operation": "model.ols",
+      "label": "",
+      "parameters": {
+        "model_type": "ols",
+        "y": "y",
+        "x": [
+          "x1",
+          "x2"
+        ],
+        "covariance": "unadjusted"
+      },
+      "inputs": [
+        "selected"
+      ],
+      "output_dataset": null,
+      "expected": {
+        "nobs": 80,
+        "coefficients": {
+          "Intercept": 4.596321816357483,
+          "x1": 1.497109631010229,
+          "x2": -0.4181990460548318
+        },
+        "std_errors": {
+          "Intercept": 0.6751924283923509,
+          "x1": 0.09246563897577949,
+          "x2": 0.08312412958648425
+        }
+      },
+      "tolerances": {},
+      "seed": null,
+      "snapshot": null
+    },
+    {
+      "step_id": "native_post",
+      "kind": "postestimation",
+      "operation": "postestimation.lincom",
+      "label": "",
+      "parameters": {
+        "terms": {
+          "x1": 1,
+          "x2": 2
+        },
+        "constant": -0.5,
+        "models": [
+          "independent"
+        ]
+      },
+      "inputs": [
+        "independent"
+      ],
+      "output_dataset": null,
+      "expected": {
+        "coefficients": {
+          "estimate": 0.16071153890056533
+        },
+        "std_errors": {
+          "estimate": 0.19736344202024553
+        },
+        "statistics": {
+          "test": {
+            "value": 0.8142923393283724,
+            "df": 77.0,
+            "df_denominator": null,
+            "p_value": 0.4179887213597638,
+            "distribution": "t"
+          }
+        }
+      },
+      "tolerances": {},
+      "seed": null,
+      "snapshot": null
+    }
+  ]
+}

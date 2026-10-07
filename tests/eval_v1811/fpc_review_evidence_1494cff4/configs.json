@@ -1,0 +1,86 @@
+[
+  {
+    "name": "design_heterogeneous_count_fail",
+    "source": "design",
+    "policy": "fail",
+    "domain": false
+  },
+  {
+    "name": "design_certainty_plus_lonely_fail",
+    "source": "design",
+    "policy": "fail",
+    "domain": false
+  },
+  {
+    "name": "lonely_heterogeneous_count_fail",
+    "source": "lonely",
+    "policy": "fail",
+    "domain": false
+  },
+  {
+    "name": "lonely_certainty_plus_lonely_fail",
+    "source": "lonely",
+    "policy": "fail",
+    "domain": false
+  },
+  {
+    "name": "lonely_heterogeneous_count_remove",
+    "source": "lonely",
+    "policy": "remove",
+    "domain": false
+  },
+  {
+    "name": "lonely_certainty_plus_lonely_remove",
+    "source": "lonely",
+    "policy": "remove",
+    "domain": false
+  },
+  {
+    "name": "lonely_heterogeneous_count_certainty",
+    "source": "lonely",
+    "policy": "certainty",
+    "domain": false
+  },
+  {
+    "name": "lonely_certainty_plus_lonely_certainty",
+    "source": "lonely",
+    "policy": "certainty",
+    "domain": false
+  },
+  {
+    "name": "lonely_heterogeneous_count_adjust",
+    "source": "lonely",
+    "policy": "adjust",
+    "domain": false
+  },
+  {
+    "name": "lonely_certainty_plus_lonely_adjust",
+    "source": "lonely",
+    "policy": "adjust",
+    "domain": false
+  },
+  {
+    "name": "lonely_heterogeneous_count_average",
+    "source": "lonely",
+    "policy": "average",
+    "domain": false
+  },
+  {
+    "name": "lonely_certainty_plus_lonely_average",
+    "source": "lonely",
+    "policy": "average",
+    "domain": false
+  },
+  {
+    "name": "subpop_heterogeneous_count_fail",
+    "source": "subpop",
+    "policy": "fail",
+    "domain": true
+  },
+  {
+    "name": "subpop_certainty_plus_lonely_fail",
+    "source": "subpop",
+    "policy": "fail",
+    "domain": true
+  }
+]

@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "project_id": "review",
+  "run_id": "reader",
+  "workbench_version": "1.8.11",
+  "lineage_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "sources": [
+    {
+      "source_id": "source",
+      "format": "csv",
+      "filename": "reader.csv",
+      "sha256": "253520e44c4003839663047f39812a4e6b9f84b8d74c97c27f75d4649a43ed1a",
+      "read_options": {
+        "encoding": "latin1",
+        "delimiter": "|",
+        "header": 0
+      }
+    }
+  ],
+  "steps": [
+    {
+      "step_id": "result",
+      "kind": "data_operation",
+      "operation": "data.subset",
+      "label": "",
+      "parameters": {
+        "columns": [
+          "city",
+          "value"
+        ]
+      },
+      "inputs": [
+        "source"
+      ],
+      "output_dataset": null,
+      "expected": {
+        "nrows": 2,
+        "columns": [
+          "city",
+          "value"
+        ]
+      },
+      "tolerances": {},
+      "seed": null,
+      "snapshot": null
+    }
+  ]
+}

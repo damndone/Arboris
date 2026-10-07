@@ -16,6 +16,7 @@ NO_ANALYSIS = "runs no analysis and changes no data"
 EXEMPT: dict[tuple[str, str], str] = {
     # Agent: proposals are records; execution is recorded by the lifecycle.
     ("POST", "/agent/sessions"): NO_ANALYSIS,
+    ("POST", "/llm/providers/models/discover"): "lists a provider's models; persists nothing",
     ("POST", "/agent/sessions/{session_id}/analysis-loop/context"): NO_ANALYSIS,
     ("POST", "/agent/sessions/{session_id}/analysis-loop/intents"): NO_ANALYSIS,
     ("POST", "/agent/sessions/{session_id}/analysis-loop/proposals"): NO_ANALYSIS,

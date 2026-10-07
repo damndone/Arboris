@@ -1,0 +1,11 @@
+{
+  "command": [
+    "/Applications/Stata/StataMP.app/Contents/MacOS/stata-mp",
+    "-b",
+    "do",
+    "analysis.do"
+  ],
+  "os_exit": 0,
+  "normalized_exit": 0,
+  "script_sha256": "6a3498bb9e09599664bec0f82f2bdb92e1a882cfd57e3c32cf5302146f056617"
+}

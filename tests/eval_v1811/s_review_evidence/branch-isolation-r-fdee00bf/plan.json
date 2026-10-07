@@ -1,0 +1,144 @@
+{
+  "schema_version": 1,
+  "project_id": "review",
+  "run_id": "branch-isolation",
+  "workbench_version": "1.8.11",
+  "lineage_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+  "sources": [
+    {
+      "source_id": "source",
+      "format": "csv",
+      "filename": "data.csv",
+      "sha256": "77e230da52c861b9d444e9de64f930a4ae7654d30b1bffc7d9f4a96343f3a7b4",
+      "read_options": {}
+    }
+  ],
+  "steps": [
+    {
+      "step_id": "categorical",
+      "kind": "model",
+      "operation": "model.ols",
+      "label": "",
+      "parameters": {
+        "model_type": "ols",
+        "y": "y",
+        "x": [
+          "x",
+          "category"
+        ],
+        "categorical_x": [
+          "category"
+        ],
+        "covariance": "unadjusted",
+        "weights": null,
+        "model_options": {}
+      },
+      "inputs": [
+        "source"
+      ],
+      "output_dataset": null,
+      "expected": {
+        "nobs": 240,
+        "coefficients": {
+          "Intercept": 1.2708994017897324,
+          "C(Q('category'))[T.2.0]": 0.7035527108942035,
+          "C(Q('category'))[T.3.0]": 1.5708783411633434,
+          "x": 0.3286601725683639
+        },
+        "std_errors": {
+          "Intercept": 0.10937400678256705,
+          "C(Q('category'))[T.2.0]": 0.1563678541895355,
+          "C(Q('category'))[T.3.0]": 0.1535480729297494,
+          "x": 0.0642479068074436
+        },
+        "statistics": {
+          "Intercept": {
+            "value": 11.619757190721288,
+            "p_value": 5.575649993018833e-25,
+            "df": 236.0,
+            "distribution": "t"
+          },
+          "C(Q('category'))[T.2.0]": {
+            "value": 4.499343644131729,
+            "p_value": 1.070297878290555e-05,
+            "df": 236.0,
+            "distribution": "t"
+          },
+          "C(Q('category'))[T.3.0]": {
+            "value": 10.230531137190138,
+            "p_value": 1.4335782806912002e-20,
+            "df": 236.0,
+            "distribution": "t"
+          },
+          "x": {
+            "value": 5.115500082413364,
+            "p_value": 6.477886934670725e-07,
+            "df": 236.0,
+            "distribution": "t"
+          }
+        }
+      },
+      "tolerances": {},
+      "seed": null,
+      "snapshot": null
+    },
+    {
+      "step_id": "continuous",
+      "kind": "model",
+      "operation": "model.ols",
+      "label": "",
+      "parameters": {
+        "model_type": "ols",
+        "y": "y",
+        "x": [
+          "x",
+          "category"
+        ],
+        "categorical_x": [],
+        "covariance": "unadjusted",
+        "weights": null,
+        "model_options": {}
+      },
+      "inputs": [
+        "source"
+      ],
+      "output_dataset": null,
+      "expected": {
+        "nobs": 240,
+        "coefficients": {
+          "Intercept": 0.4566572648686139,
+          "x": 0.33613214971634603,
+          "category": 0.7861311171736707
+        },
+        "std_errors": {
+          "Intercept": 0.1656192709774661,
+          "x": 0.06297017907816094,
+          "category": 0.07666303913940116
+        },
+        "statistics": {
+          "Intercept": {
+            "value": 2.757271313739486,
+            "p_value": 0.006282536599842314,
+            "df": 237.0,
+            "distribution": "t"
+          },
+          "x": {
+            "value": 5.337957659277517,
+            "p_value": 2.1978864882588204e-07,
+            "df": 237.0,
+            "distribution": "t"
+          },
+          "category": {
+            "value": 10.254369328408696,
+            "p_value": 1.1722180535591328e-20,
+            "df": 237.0,
+            "distribution": "t"
+          }
+        }
+      },
+      "tolerances": {},
+      "seed": null,
+      "snapshot": null
+    }
+  ]
+}

@@ -24,7 +24,10 @@ from workbench.contracts.common.envelope import (
 
 LMM_MODEL_TYPE = "linear_mixed_effects"
 LMM_CONTRACT_VERSION = "1.0"
-LMM_ESTIMATOR_VERSION = "statsmodels_mixedlm_v1"
+# v2 (v1.8.11): fixed-effect inference on the GLS covariance lme4 and Stata
+# report. v1 results used the inverse profiled Hessian and stay readable as such.
+LMM_ESTIMATOR_VERSION = "statsmodels_mixedlm_v2"
+LMM_READABLE_ESTIMATOR_VERSIONS = frozenset({"statsmodels_mixedlm_v1", LMM_ESTIMATOR_VERSION})
 LMM_MISSING_POLICY = "complete_case_v1"
 LMM_PRIMARY_RESULT_ID = "group_time_interaction"
 LMM_INFERENCE_METHOD = "asymptotic_wald_z_v1"

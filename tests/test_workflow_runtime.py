@@ -209,7 +209,8 @@ def test_count_model_families_refuse_non_count_outcomes_before_execution(
     assert validator is not None
     with pytest.raises(
         OperationValidationError,
-        match=f"model.genesis {model_family} requires a non-negative integer count outcome",
+        match=("NB_COUNTS_INVALID" if model_family == "negative_binomial" else
+               f"model.genesis {model_family} requires a non-negative integer count outcome"),
     ):
         validator(
             pd.DataFrame({"outcome": [0, 1.5, -1]}),

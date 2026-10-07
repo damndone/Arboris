@@ -1,0 +1,103 @@
+
+  ___  ____  ____  ____  ____ ®
+ /__    /   ____/   /   ____/      18.0
+___/   /   /___/   /   /___/       MP—Parallel Edition
+
+ Statistics and Data Science       Copyright 1985-2023 StataCorp LLC
+                                   StataCorp
+                                   4905 Lakeway Drive
+                                   College Station, Texas 77845 USA
+                                   800-STATA-PC        https://www.stata.com
+                                   979-696-4600        stata@stata.com
+
+Stata license: Single-user 2-core  perpetual
+Serial number: [REDACTED]
+  Licensed to: [REDACTED]
+               
+
+Notes:
+      1. Stata is running in batch mode.
+      2. Unicode is supported; see help unicode_advice.
+      3. More than 2 billion observations are allowed; see help obs_advice.
+      4. Maximum number of variables is set to 5,000 but can be increased;
+          see help set_maxvar.
+
+
+Running /Applications/Stata/profile.do ...
+command window is unrecognized
+r(199);
+
+. do analysis.do 
+
+. * Workbench 1.8.11
+. * project: invalid_fpc
+. * run: noninteger
+. * lineage_hash: ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+> ccc
+. * Coverage
+. * model | model.ols | native_with_equivalence_note | Full single-stage linear
+> ization design including supplied FPC and domain; coefficient and joint-test 
+> df preserve the executed Workbench convention.
+. version 18
+
+. set more off
+
+. set type double
+
+. capture program drop wb_repost
+
+. program define wb_repost, eclass
+  1.     args beta covariance
+  2.     ereturn repost b=`beta' V=`covariance', rename
+  3. end
+
+. capture program drop wb_sha
+
+. program define wb_sha
+  1.     args filename expected
+  2.     tempfile digestfile
+  3.     shell shasum -a 256 "`filename'" > "`digestfile'"
+  4.     tempname fh
+  5.     file open `fh' using "`digestfile'", read text
+  6.     file read `fh' line
+  7.     file close `fh'
+  8.     if substr("`line'",1,64) != "`expected'" {
+  9.         display as error "SHA256 mismatch"
+ 10.         exit 9
+ 11.     }
+ 12. end
+
+. 
+. wb_sha "data.csv" "72662d285cba5b02d151d744f4fc578861476897b11f1937e771dcae1d
+> 9c7f01"
+
+
+. frame create wb_src0
+
+. frame change wb_src0
+
+. import delimited using "data.csv", varnames(1) delimiters(",") encoding("UTF-
+> 8") asdouble clear case(preserve)
+(15 vars, 80 obs)
+
+. frame copy wb_src0 wb_model_data1
+
+. frame change wb_model_data1
+
+. drop if missing(y) | missing(x1) | missing(x2)
+(0 observations deleted)
+
+. assert !missing(population) & population >= 0
+
+. quietly summarize population, meanonly
+
+. scalar wb_fpc_fraction = (r(max)<=1)
+
+. if !wb_fpc_fraction assert population>1 & population==floor(population)
+80 contradictions in 80 observations
+assertion is false
+r(9);
+r(9);
+
+end of do-file
+r(9);

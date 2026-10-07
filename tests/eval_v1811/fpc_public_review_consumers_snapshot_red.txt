@@ -1,0 +1,54 @@
+
+Fontconfig error: No writable cache directories
+	/opt/homebrew/var/cache/fontconfig
+	/Users/jiayuanren/.cache/fontconfig
+	/Users/jiayuanren/.fontconfig
+{"run_root": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-774/test_report_retains_each_full_0/review/runs/20261004_202019_023119_fc82291c", "options": {"survey_fpc_col": "population_fpc"}, "status": "completed"}
+F{"run_root": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-774/test_census_owner_warning_is_a0/projects/review/runs/20261004_202029_331956_cc7374c1", "options": {"survey_fpc_col": "review_census"}, "status": "completed"}
+F
+=================================== FAILURES ===================================
+_ test_report_retains_each_full_design_stratum_instead_of_only_generic_fpc_label _
+
+tmp_path = PosixPath('/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-774/test_report_retains_each_full_0')
+
+    def test_report_retains_each_full_design_stratum_instead_of_only_generic_fpc_label(tmp_path):
+        outcome, root = public_run(tmp_path, survey_fpc_col='population_fpc')
+        assert outcome['status'] == 'completed'
+        packet, _ = result(root)
+        facts = '\n'.join(_survey_design_facts(root))
+        missing = [row['stratum'] for row in packet['survey_design']['fpc']['strata']
+            if row['stratum'] not in facts]
+>       assert not missing, {'missing_full_design_strata': missing, 'actual_report_facts': facts}
+E       AssertionError: {'missing_full_design_strata': ['h01', 'h02', 'h03', 'h04', 'h05', 'h06', ...], 'actual_report_facts': 'Standard error...ch stratum uses its full-design sampling fraction.
+E         Design effect 1.63; effective sample size 75.6 of 80 observations'}
+E       assert not ['h01', 'h02', 'h03', 'h04', 'h05', 'h06', ...]
+
+tests/eval_v1811/fpc_public_review_consumers.py:32: AssertionError
+------------------------------ Captured log call -------------------------------
+WARNING  matplotlib:__init__.py:577 /Users/jiayuanren/.matplotlib is not a writable directory
+WARNING  matplotlib:__init__.py:593 Matplotlib created a temporary cache directory at /var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/matplotlib-wsw9lrno because there was an issue with the default path ({configdir}); it is highly recommended to set the MPLCONFIGDIR environment variable to a writable directory, in particular to speed up the import of Matplotlib and to better support multiprocessing.
+WARNING  matplotlib.font_manager:font_manager.py:1249 Matplotlib is building the font cache; this may take a moment.
+_________ test_census_owner_warning_is_available_through_shared_issues _________
+
+tmp_path = PosixPath('/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-774/test_census_owner_warning_is_a0')
+
+    def test_census_owner_warning_is_available_through_shared_issues(tmp_path):
+        frame = pd.read_csv(FIXTURES / 'design.csv')
+        frame['review_census'] = 1.0
+        source = tmp_path / 'census.csv'; frame.to_csv(source, index=False)
+        outcome, root = public_run(tmp_path / 'projects', source, survey_fpc_col='review_census')
+        assert outcome['status'] == 'completed'
+        packet, _ = result(root)
+        code = 'SURVEY_ZERO_VARIANCE_INFERENCE_UNAVAILABLE'
+        assert any(warning.get('code') == code for warning in packet['warnings'])
+        shared = read_json(root / 'errors.json')['issues']
+>       assert any(issue.get('code') == code for issue in shared), shared
+E       AssertionError: []
+E       assert False
+E        +  where False = any(<generator object test_census_owner_warning_is_available_through_shared_issues.<locals>.<genexpr> at 0x12bf33ae0>)
+
+tests/eval_v1811/fpc_public_review_consumers.py:45: AssertionError
+=========================== short test summary info ============================
+FAILED tests/eval_v1811/fpc_public_review_consumers.py::test_report_retains_each_full_design_stratum_instead_of_only_generic_fpc_label
+FAILED tests/eval_v1811/fpc_public_review_consumers.py::test_census_owner_warning_is_available_through_shared_issues
+2 failed in 12.06s

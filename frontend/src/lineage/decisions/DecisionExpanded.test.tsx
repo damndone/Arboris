@@ -25,6 +25,13 @@ const dp: DecisionPoint = {
 };
 
 describe("DecisionExpanded", () => {
+  it("uses the actual reason and candidates for an explicit decision", () => {
+    const actual: DecisionPoint = {...dp, decision_id: "ols_default_robust_se", selected: "Design-based (linearization)", candidates: [], source: "user_explicit", reason: {...dp.reason!, explanation: "Covariance follows the supplied sampling design."}};
+    render(<DecisionExpanded dp={actual} />);
+    expect(screen.getByText("Covariance follows the supplied sampling design.")).toBeInTheDocument();
+    expect(screen.queryByText(/^Alternatives$/)).toBeNull();
+    expect(screen.queryByText(/Confirm HC1/)).toBeNull();
+  });
   it("renders all 6 sections", () => {
     render(<DecisionExpanded dp={dp} />);
     expect(screen.getByText(/Selected choice/i)).toBeInTheDocument();

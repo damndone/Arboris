@@ -1,0 +1,3 @@
+# Preserve local raw Stata logs without committing host license metadata.
+*.log
+oracle_reproduce_v2/

@@ -1,0 +1,132 @@
+.........................................................F.............. [ 35%]
+................................................................F....... [ 71%]
+..........................................................               [100%]
+=================================== FAILURES ===================================
+________ test_joint_q_greater_than_zero_runtime_error_never_downgrades _________
+
+    def test_joint_q_greater_than_zero_runtime_error_never_downgrades() -> None:
+        from workbench.engine.packs.arma_garch.estimation import estimate_arma_garch
+        from workbench.engine.packs.arma_garch.volatility import search_variance_candidates
+    
+        contract = _contract(strategy="sequential", q=1)
+        values = _arma_garch_values(n=180)
+        mean = fit_arma_candidate(
+            values,
+            ArmaCandidateSpec(candidate_id="arma-p1-q1-c", p=1, q=1, constant=True),
+        )
+        search = search_variance_candidates(
+            np.asarray(mean.residuals, dtype=float),
+            contract,
+            mean_candidate_id=mean.candidate_id,
+            mean_order=(mean.p, mean.q),
+            mean_constant=mean.constant,
+        )
+        selected = next(
+            item for item in search.candidates if item.candidate_id == search.selected_candidate_id
+        )
+        unsafe_joint_contract = object.__new__(ArmaGarchAnalysisContract)
+        for field_name in contract.__dataclass_fields__:
+            object.__setattr__(unsafe_joint_contract, field_name, getattr(contract, field_name))
+        object.__setattr__(unsafe_joint_contract, "estimation_strategy", "joint")
+    
+        with pytest.raises(ArmaGarchInputError) as caught:
+>           estimate_arma_garch(
+                values,
+                unsafe_joint_contract,
+                mean_candidate=mean,
+                variance_candidate=selected,
+                frozen_hold_back=search.common_hold_back,
+            )
+
+tests/models/arma_garch/test_estimation.py:160: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+values = array([ 0.00000000e+00,  4.81472712e-01,  1.21314415e+00,  1.19394553e+00,
+       -4.12472084e-01,  5.30632849e-01,  1...0777e-01,  4.17778619e-01, -1.04157962e+00,
+        1.07597339e-01, -1.47015033e-01, -1.13443491e+00, -2.17875861e-02])
+contract = ArmaGarchAnalysisContract(dataset_ref='dataset:estimation:1', time_column='when', value_column='value', time_index_sem...=1, interval_level=0.95, lower_quantile=0.05), random_seed=0, pack_id='time_series.arma_garch', contract_version='1.0')
+mean_candidate = ArmaCandidateResult(candidate_id='arma-p1-q1-c', p=1, q=1, constant=True, nobs=180, effective_sample=180, converged=Tr...onst': 0.08381872923819958, 'ar.L1': -0.04008963360964917, 'ma.L1': 0.6851282626893348, 'sigma2': 0.6907805813049576}))
+variance_candidate = VarianceCandidateResult(candidate_id='variance-garch-p1-q1-normal', display_name='GARCH(1,1)', model='garch', p=1, q=1...01162, 0.5950726769605208, 0.13079478953015836), warnings=(), failure_code=None, elapsed_seconds=0.0047528750146739185)
+frozen_hold_back = 1, checkpoint = None
+
+    def estimate_arma_garch(
+        values: np.ndarray,
+        contract: ArmaGarchAnalysisContract,
+        *,
+        mean_candidate: ArmaCandidateResult,
+        variance_candidate: VarianceCandidateResult,
+        frozen_hold_back: int,
+        checkpoint: Callable[[], None] | None = None,
+    ) -> SequentialArmaGarchResult | JointArGarchResult | JointArmaGarchResult:
+        """Execute one frozen specification without changing the selected orders."""
+    
+        _validate_candidate_mean_binding(variance_candidate, mean_candidate)
+        resolved = resolve_estimation_strategy(
+            contract.estimation_strategy,
+            mean_q=mean_candidate.q,
+        )
+        expected_candidate_strategy = (
+            "sequential" if resolved == "sequential_arma_garch" else "joint"
+        )
+        if (
+            variance_candidate.estimation_strategy != expected_candidate_strategy
+            or variance_candidate.joint_likelihood
+            != (expected_candidate_strategy == "joint")
+        ):
+>           raise ValueError("variance candidate strategy does not match final estimation strategy")
+E           ValueError: variance candidate strategy does not match final estimation strategy
+
+backend/workbench/engine/packs/arma_garch/estimation.py:191: ValueError
+__ test_arma11_garch11_is_sequential_and_joint_request_is_explicitly_rejected __
+
+    def test_arma11_garch11_is_sequential_and_joint_request_is_explicitly_rejected() -> None:
+        from workbench.engine.packs.arma_garch.arma import (
+            ArmaCandidateSpec,
+            fit_arma_candidate,
+        )
+        from workbench.engine.packs.arma_garch.errors import ArmaGarchInputError
+        from workbench.engine.packs.arma_garch.estimation import (
+            fit_sequential_arma_garch,
+            resolve_estimation_strategy,
+        )
+    
+        fixture = sequential_arma11_garch11()
+        mean = fit_arma_candidate(
+            fixture.values,
+            ArmaCandidateSpec("known-sequential-arma11", p=1, q=1, constant=False),
+        )
+        result = fit_sequential_arma_garch(
+            fixture.values,
+            mean,
+            _variance_spec("garch", 1, 1),
+            hold_back=10,
+            time_index_semantics="observation_order",
+        )
+        payload = result.to_dict()
+    
+        assert result.resolved_strategy == "sequential_arma_garch"
+        assert result.joint_likelihood is False
+        assert resolve_estimation_strategy("auto", mean_q=1) == "sequential_arma_garch"
+        assert not {"aic", "bic", "log_likelihood"}.intersection(payload)
+        assert "aic" in payload["mean_stage"]
+        assert "aic" in payload["variance_stage"]
+    
+>       with pytest.raises(ArmaGarchInputError) as exc_info:
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE ArmaGarchInputError
+
+tests/models/arma_garch/test_known_truth.py:195: Failed
+=============================== warnings summary ===============================
+tests/models/arma_garch/test_dofile_insample_charts.py: 15 warnings
+tests/models/arma_garch/test_dofile_series_charts.py: 20 warnings
+tests/models/arma_garch/test_forecast.py: 15 warnings
+tests/models/arma_garch/test_pack_runtime.py: 29 warnings
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/tsa/statespace/mlemodel.py:174: DeprecationWarning: Setting the shape on a NumPy array has been deprecated in NumPy 2.5.
+  As an alternative, you can create a new view using np.reshape (with copy=False if needed).
+    endog.shape = (endog.shape[0], 1)  # this will be C-contiguous
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/models/arma_garch/test_estimation.py::test_joint_q_greater_than_zero_runtime_error_never_downgrades
+FAILED tests/models/arma_garch/test_known_truth.py::test_arma11_garch11_is_sequential_and_joint_request_is_explicitly_rejected
+2 failed, 200 passed, 79 warnings in 8.30s

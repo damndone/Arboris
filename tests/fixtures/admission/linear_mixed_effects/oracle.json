@@ -1,0 +1,29 @@
+{
+  "meta": {
+    "generator": "tests/fixtures/admission/linear_mixed_effects/generate_oracle.R",
+    "r_version": "R version 4.6.0 (2026-04-24)",
+    "seed": 20261003,
+    "n": 360,
+    "verification_level": "R-only provisional reference: REML random intercept, arm*time+x; real Workbench workflow blocked by local containment admission; NOT cross-verified"
+  },
+  "inference": {
+    "covariance_estimator": "R REML model covariance; Workbench unavailable",
+    "df_method": "R asymptotic; Workbench unavailable",
+    "reference_distribution": "z",
+    "df_resid": 353
+  },
+  "coefficients": {
+    "Intercept": 1.01579060014181,
+    "armb": 0.333955377110224,
+    "time": 0.282961128263055,
+    "x": 0.549433982699276,
+    "armb:time": 0.217199018870884
+  },
+  "std_error": {
+    "Intercept": 0.15023331951118,
+    "armb": 0.212486941648354,
+    "time": 0.0262867746295367,
+    "x": 0.0361901164849792,
+    "armb:time": 0.0371849109746993
+  }
+}

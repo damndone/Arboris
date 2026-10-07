@@ -462,6 +462,17 @@ def _canonicalize_chain_context_packet(
     canonical_diagnostics["warnings"] = warnings
     canonical["context_diagnostics"] = canonical_diagnostics
     canonical["context_fingerprint"] = snapshot["context_fingerprint"]
+    if "covariance_executed" in snapshot:
+        summary = canonical.get("node_summary")
+        summary = dict(summary) if isinstance(summary, dict) else {}
+        params = summary.get("params")
+        if isinstance(params, dict):
+            params = dict(params)
+            # Requested wire defaults are not evidence of executed inference.
+            params.pop("covariance", None)
+            summary["params"] = params
+        summary["covariance_executed"] = snapshot["covariance_executed"]
+        canonical["node_summary"] = summary
     return canonical
 
 

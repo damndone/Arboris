@@ -6,6 +6,13 @@ import os
 
 import pytest
 
+# Retained evaluation sources are evidence copies, never part of the suite. The
+# Lane E harness writes its own write-once evidence and needs real Stata, so it
+# is collected only when its output directory is named explicitly.
+collect_ignore_glob = ["fixtures/eval_v1811/*"]
+if not os.environ.get("WB_LANE_E_OUT"):
+    collect_ignore_glob.append("eval_v1811/lane_e_*")
+
 
 @pytest.fixture(autouse=True, scope="session")
 def _egress_audit_outside_the_home_directory(tmp_path_factory):

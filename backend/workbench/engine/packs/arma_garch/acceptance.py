@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Literal
 
 from workbench.contracts.common.envelope import freeze_json, thaw_json
 from workbench.engine.packs.arma_garch.forecast import ForecastMetrics
+from workbench.engine.packs.arma_garch.statistics import LJUNG_BOX_SIGNIFICANCE_LEVEL
 
 
 AcceptanceStatus = Literal[
@@ -80,6 +81,8 @@ def assess_acceptance(
     squared_standardized_residual_arch: bool | None,
     normality_rejected: bool | None,
     volatility_value_added: bool | None,
+    mean_residual_diagnostics: Sequence[Mapping[str, object]] = (),
+    squared_residual_diagnostics: Sequence[Mapping[str, object]] = (),
 ) -> AcceptanceResult:
     """Apply the approved hard failures without collapsing all evidence to pass/fail."""
 
@@ -147,6 +150,9 @@ def assess_acceptance(
         volatility_adequacy = _dimension(
             "accepted", "no material ARCH remains in standardized squared residuals", {}
         )
+
+    mean_adequacy = _with_ljung_box_scope(mean_adequacy, mean_residual_diagnostics)
+    volatility_adequacy = _with_ljung_box_scope(volatility_adequacy, squared_residual_diagnostics)
 
     if normality_rejected is None:
         distribution_adequacy = _dimension(
@@ -237,6 +243,34 @@ def assess_acceptance(
         dimensions=dimensions,
         overall_status=overall,
         model_fit_succeeded=fit_succeeded,
+    )
+
+
+def _with_ljung_box_scope(
+    dimension: AcceptanceDimension, rows: Sequence[Mapping[str, object]]
+) -> AcceptanceDimension:
+    if not rows:
+        return dimension
+    available = [int(row["lag"]) for row in rows if row.get("p_value") is not None]
+    unavailable = [int(row["lag"]) for row in rows if row.get("p_value") is None]
+    reasons = dimension.reasons
+    status = dimension.status
+    if unavailable:
+        scope = (
+            f"Ljung-Box unavailable lags: {', '.join(map(str, unavailable))}; "
+            f"conclusion based only on lags: {', '.join(map(str, available)) or 'none'}."
+        )
+        reasons = (*reasons, scope)
+        if status == "accepted":
+            status = "accepted_with_warnings"
+    return AcceptanceDimension(
+        status=status, reasons=reasons,
+        evidence={
+            **dimension.evidence,
+            "ljung_box_threshold": LJUNG_BOX_SIGNIFICANCE_LEVEL,
+            "available_lags": available,
+            "unavailable_lags": unavailable,
+        },
     )
 
 

@@ -16,6 +16,7 @@ from workbench.contracts.common.envelope import PacketEnvelope
 from workbench.canonical import canonical_json_v1
 from workbench.services.pinned_run_directory import PinnedRunDirectory, PinnedRunError, SealedExecutionInput
 
+from .covariance import REML_LIKELIHOOD_REASON, GlsFixedEffectResults
 from .diagnostics import terminal_input_error_diagnostic
 from .input import LmmInputError, prepare_lmm_input
 from .packets import build_lmm_diagnostic_packet, build_lmm_recovery_packet
@@ -33,7 +34,7 @@ _TERMINAL_RESULT_PATH = "artifacts/model_results/linear_mixed_effects_1.result.j
 def _fit_prepared(prepared: Any) -> Any:
     with warnings.catch_warnings(record=True):
         warnings.simplefilter("always")
-        return smf.mixedlm(
+        model = smf.mixedlm(
             prepared.formula,
             prepared.frame,
             groups=prepared.frame[prepared.input.subject_id],
@@ -42,12 +43,29 @@ def _fit_prepared(prepared: Any) -> Any:
                 if prepared.input.random_slope
                 else "1"
             ),
-        ).fit(
-            reml=prepared.input.fit_method == "reml",
-            method="lbfgs",
-            maxiter=200,
-            disp=False,
         )
+        reml = prepared.input.fit_method == "reml"
+        fitted = model.fit(reml=reml, method="lbfgs", maxiter=200, disp=False)
+        if not fitted.converged:
+            return fitted
+        fitted = _refined(model, reml, fitted)
+    # Report fixed-effect inference on the covariance lme4 and Stata report.
+    return GlsFixedEffectResults(fitted)
+
+
+def _refined(model: Any, reml: bool, fitted: Any) -> Any:
+    # L-BFGS-B's default stopping leaves variance ratios ~1e-5 short of the
+    # (RE)ML optimum that lme4 reaches. A tighter refit reaches it to ~1e-8;
+    # it is kept only when it also converges without lowering the likelihood,
+    # so boundary fits it cannot certify keep the first result.
+    with warnings.catch_warnings(record=True):
+        warnings.simplefilter("always")
+        refined = model.fit(
+            reml=reml, method="lbfgs", maxiter=200, pgtol=1e-10, factr=10, disp=False
+        )
+    if refined.converged and refined.llf >= fitted.llf:
+        return refined
+    return fitted
 
 
 def _persist_result_packets(admission: object, result_packet: Mapping[str, Any]) -> None:
@@ -234,6 +252,47 @@ def fit_linear_mixed_effects(
     return result, fitted
 
 
+def _record_fixed_effects_kernel(ctx: Any, fitted: Any, *, result_status: str = "complete") -> None:
+    """Expose fixed effects, with their actual fitted covariance block.
+
+    Only a completed result offers them: a fit that did not converge or failed
+    its diagnostics has no estimates fit to test.
+    """
+    from workbench.contracts.model.inference_kernel import kernel_from_fitted, unavailable_inference_kernel
+    from workbench.engine.inference_kernels import record_inference_kernel
+    from workbench.econometrics.normalize import _public_term
+
+    if fitted is None:
+        return
+    if result_status != "complete":
+        record_inference_kernel(ctx, unavailable_inference_kernel(model_id="linear_mixed_effects_1",
+            model_type="linear_mixed_effects", nobs=int(getattr(fitted, "nobs", 0) or 0),
+            reason="The LMM fit did not complete (it did not converge or failed its diagnostics), "
+                   "so its estimates are not offered for post-estimation."))
+        return
+    fixed = getattr(fitted, "fe_params", None)
+    params = getattr(fitted, "params", None)
+    try:
+        names = list(params.index)
+        fixed_names = list(fixed.index)
+        if len(set(names)) != len(names) or len(set(fixed_names)) != len(fixed_names):
+            raise ValueError("Fixed-effect parameter mapping is ambiguous.")
+        positions = tuple(names.index(name) for name in fixed_names)
+        view = fitted.kernel_view() if isinstance(fitted, GlsFixedEffectResults) else fitted
+        reml = isinstance(fitted, GlsFixedEffectResults) and fitted.is_reml
+        kernel = kernel_from_fitted(view, model_id="linear_mixed_effects_1",
+            model_type="linear_mixed_effects", nobs=int(fitted.nobs),
+            param_positions=positions, public_name=_public_term,
+            unavailable={"loglik": REML_LIKELIHOOD_REASON} if reml else None)
+    except (AttributeError, ValueError, TypeError):
+        kernel = None
+    if kernel is None:
+        kernel = unavailable_inference_kernel(model_id="linear_mixed_effects_1",
+            model_type="linear_mixed_effects", nobs=int(getattr(fitted,"nobs",0)),
+            reason="The runtime cannot identify the fixed-effect covariance block.")
+    record_inference_kernel(ctx, kernel)
+
+
 def fit_from_context(ctx: Any, env: Any) -> tuple[str, dict[str, Any], Any]:
     """Engine-handler adapter using only normalized context and bound options."""
 
@@ -285,6 +344,7 @@ def fit_from_context(ctx: Any, env: Any) -> tuple[str, dict[str, Any], Any]:
     )
     _require_live_seal(seal, live_pinned_run, env.run_root, options, ctx.artifacts.get("_model_options_binding"))
     ctx.artifacts["_linear_mixed_effects_result"] = result
+    _record_fixed_effects_kernel(ctx, fitted, result_status=str(result["payload"]["status"]))
     _persist_result_packets(admission, result)
     env.progress("linear_mixed_effects", "Linear Mixed Effects fit completed.")
     env.checkpoint()

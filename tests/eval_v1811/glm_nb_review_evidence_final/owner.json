@@ -1,0 +1,321 @@
+{
+  "kernels": {
+    "full": {
+      "contract": "workbench.inference_kernel.v1",
+      "model_id": "glm_1",
+      "model_type": "glm:negative_binomial",
+      "param_names": [
+        "Intercept",
+        "x1",
+        "x2",
+        "x3"
+      ],
+      "params": [
+        0.5240333982754993,
+        0.37889378683705344,
+        -0.2889451515437183,
+        -0.10121807811343853
+      ],
+      "vcov": [
+        [
+          0.028853272460587356,
+          -0.00018703369026302574,
+          -0.0001220058983949169,
+          -0.022391429324453177
+        ],
+        [
+          -0.00018703369026302574,
+          0.005767891855748447,
+          -8.623713348999286e-05,
+          -0.0007567698511704156
+        ],
+        [
+          -0.00012200589839491675,
+          -8.623713348999286e-05,
+          0.004327063479060742,
+          0.0005314706280484546
+        ],
+        [
+          -0.022391429324453177,
+          -0.0007567698511704157,
+          0.0005314706280484547,
+          0.021741218508598944
+        ]
+      ],
+      "vcov_param_names": [
+        "Intercept",
+        "x1",
+        "x2",
+        "x3"
+      ],
+      "vcov_scope": "full",
+      "reference_distribution": "z",
+      "df_resid": 296.0,
+      "df_method": "asymptotic",
+      "n_clusters": null,
+      "loglik": -513.2564335673467,
+      "nobs": 300,
+      "covariance_estimator": "nonrobust",
+      "estimation_sample_fingerprint": "rows-sha256:fa37fb75ef7c31d8e3197b9238acd691810bc518040aa3689c9cab30d3739296",
+      "weights": "none",
+      "interfaces": [
+        "coef_vcov",
+        "loglik"
+      ],
+      "unavailable": {}
+    },
+    "restricted": {
+      "contract": "workbench.inference_kernel.v1",
+      "model_id": "glm_1",
+      "model_type": "glm:negative_binomial",
+      "param_names": [
+        "Intercept",
+        "x1"
+      ],
+      "params": [
+        0.46165056064224824,
+        0.40098998148951087
+      ],
+      "vcov": [
+        [
+          0.005621458847849627,
+          -0.000978058581915735
+        ],
+        [
+          -0.0009780585819157352,
+          0.00561250501096471
+        ]
+      ],
+      "vcov_param_names": [
+        "Intercept",
+        "x1"
+      ],
+      "vcov_scope": "full",
+      "reference_distribution": "z",
+      "df_resid": 298.0,
+      "df_method": "asymptotic",
+      "n_clusters": null,
+      "loglik": -523.7176853729072,
+      "nobs": 300,
+      "covariance_estimator": "nonrobust",
+      "estimation_sample_fingerprint": "rows-sha256:fa37fb75ef7c31d8e3197b9238acd691810bc518040aa3689c9cab30d3739296",
+      "weights": "none",
+      "interfaces": [
+        "coef_vcov",
+        "loglik"
+      ],
+      "unavailable": {}
+    }
+  },
+  "outcomes": {
+    "full": "completed",
+    "restricted": "completed"
+  },
+  "wj": {
+    "operation": "wald",
+    "model_id": "glm_1",
+    "model_type": "glm:negative_binomial",
+    "covariance_estimator": "nonrobust",
+    "nobs": 300,
+    "df_method": "asymptotic",
+    "n_clusters": null,
+    "constraints": [
+      {
+        "terms": {
+          "x1": 1.0
+        },
+        "value": 0.0
+      },
+      {
+        "terms": {
+          "x2": 1.0
+        },
+        "value": 0.0
+      }
+    ],
+    "distribution": "chi2",
+    "statistic": 43.440653744956535,
+    "df_num": 2,
+    "df_den": null,
+    "p_value": 3.6896221611677756e-10
+  },
+  "ws": {
+    "operation": "wald",
+    "model_id": "glm_1",
+    "model_type": "glm:negative_binomial",
+    "covariance_estimator": "nonrobust",
+    "nobs": 300,
+    "df_method": "asymptotic",
+    "n_clusters": null,
+    "constraints": [
+      {
+        "terms": {
+          "x1": 1.0,
+          "x2": -1.0
+        },
+        "value": 1.0
+      }
+    ],
+    "distribution": "chi2",
+    "statistic": 10.745724600516064,
+    "df_num": 1,
+    "df_den": null,
+    "p_value": 0.0010452050791135592
+  },
+  "lc": {
+    "operation": "lincom",
+    "model_id": "glm_1",
+    "model_type": "glm:negative_binomial",
+    "covariance_estimator": "nonrobust",
+    "nobs": 300,
+    "df_method": "asymptotic",
+    "n_clusters": null,
+    "terms": {
+      "x1": 1.0,
+      "x2": 2.0
+    },
+    "constant": -0.5,
+    "estimate": -0.6989965162503832,
+    "std_error": 0.15076868785670133,
+    "statistic": -4.636218078084934,
+    "distribution": "z",
+    "df": null,
+    "p_value": 3.5484159873044968e-06,
+    "level": 0.95,
+    "ci": [
+      -0.9944977144458792,
+      -0.40349531805488714
+    ]
+  },
+  "nl": {
+    "operation": "nlcom",
+    "model_id": "glm_1",
+    "model_type": "glm:negative_binomial",
+    "covariance_estimator": "nonrobust",
+    "nobs": 300,
+    "df_method": "asymptotic",
+    "n_clusters": null,
+    "expression": "x1/x2",
+    "estimate": -1.3113000332858176,
+    "std_error": 0.39432819176154726,
+    "statistic": -3.3254026992794086,
+    "distribution": "z",
+    "df": null,
+    "p_value": 0.000882909112184926,
+    "level": 0.95,
+    "ci": [
+      -2.084169087227254,
+      -0.5384309793443809
+    ],
+    "warnings": [
+      "The expression is strongly non-linear near the estimates; the delta-method interval may be inaccurate."
+    ]
+  },
+  "lr": {
+    "operation": "lr",
+    "full": {
+      "model_id": "glm_1",
+      "model_type": "glm:negative_binomial",
+      "covariance_estimator": "nonrobust",
+      "nobs": 300,
+      "df_method": "asymptotic",
+      "n_clusters": null
+    },
+    "restricted": {
+      "model_id": "glm_1",
+      "model_type": "glm:negative_binomial",
+      "covariance_estimator": "nonrobust",
+      "nobs": 300,
+      "df_method": "asymptotic",
+      "n_clusters": null
+    },
+    "dropped_parameters": [
+      "x2",
+      "x3"
+    ],
+    "distribution": "chi2",
+    "statistic": 20.9225036111211,
+    "df": 2,
+    "p_value": 2.8624378573147222e-05,
+    "loglik_full": -513.2564335673467,
+    "loglik_restricted": -523.7176853729072
+  },
+  "margins": {
+    "ma": {
+      "operation": "margins",
+      "model_id": "glm_1",
+      "model_type": "glm:negative_binomial",
+      "covariance_estimator": "nonrobust",
+      "at": "average",
+      "label": "average marginal effect",
+      "scale": "response",
+      "inverse_link": "log",
+      "nobs": 300,
+      "distribution": "z",
+      "df": null,
+      "level": 0.95,
+      "effects": [
+        {
+          "variable": "x1",
+          "estimate": 0.6517441126385616,
+          "std_error": 0.15148571731568122,
+          "statistic": 4.302346941925828,
+          "p_value": 1.6899841012125723e-05,
+          "ci": [
+            0.35483756252761073,
+            0.9486506627495124
+          ]
+        },
+        {
+          "variable": "x2",
+          "estimate": -0.49702134987783086,
+          "std_error": 0.12705412459058169,
+          "statistic": -3.911886776438222,
+          "p_value": 9.157784646191274e-05,
+          "ci": [
+            -0.7460428581626358,
+            -0.24799984159302593
+          ]
+        }
+      ]
+    },
+    "mm": {
+      "operation": "margins",
+      "model_id": "glm_1",
+      "model_type": "glm:negative_binomial",
+      "covariance_estimator": "nonrobust",
+      "at": "means",
+      "label": "marginal effect at the means",
+      "scale": "response",
+      "inverse_link": "log",
+      "nobs": 300,
+      "distribution": "z",
+      "df": null,
+      "level": 0.95,
+      "effects": [
+        {
+          "variable": "x1",
+          "estimate": 0.5730412360949684,
+          "std_error": 0.11678574791502931,
+          "statistic": 4.906773697351327,
+          "p_value": 9.258675622639314e-07,
+          "ci": [
+            0.3441453762739372,
+            0.8019370959159995
+          ]
+        },
+        {
+          "variable": "x2",
+          "estimate": -0.4370023804994943,
+          "std_error": 0.10080764078252001,
+          "statistic": -4.3350124763089415,
+          "p_value": 1.4575185563387768e-05,
+          "ci": [
+            -0.6345817257996846,
+            -0.23942303519930394
+          ]
+        }
+      ]
+    }
+  }
+}

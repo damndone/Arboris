@@ -1,0 +1,11 @@
+Traceback (most recent call last):
+  File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_recheck_evidence/sidecars/literal-null-python-399f54a5/analysis.py", line 61, in <module>
+    wb_result_values2 = read_result_snapshot(base,ResultSnapshotRef(**{'filename': 'post_result.json', 'sha256': '065887861510f9b890d53662983c92d249d006a2d9876cd281fdb866d9a9a4cd', 'schema_version': 1}),expected_binding={'project_id': 'sidecar', 'run_id': 'executed', 'lineage_hash': 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff', 'step_id': 'post', 'kind': 'postestimation', 'operation': 'postestimation.wald', 'parameters_sha256': 'eae0c2c236d26de1d6f48d962cef577e23609bfdaf6abe2c2495e30e1b72f8ce', 'inputs': ['completed'], 'models': ['completed']})
+  File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/backend/workbench/script_export/result_snapshot.py", line 187, in read_result_snapshot
+    return validate_result_snapshot(_strict_json(raw), expected_binding=expected_binding)
+  File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/backend/workbench/script_export/result_snapshot.py", line 144, in validate_result_snapshot
+    _text(entry["distribution"], "statistic.distribution")
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/backend/workbench/script_export/result_snapshot.py", line 35, in _text
+    raise ContractError(f"{field} must be a nonempty text identity")
+workbench.contracts.common.envelope.ContractError: statistic.distribution must be a nonempty text identity

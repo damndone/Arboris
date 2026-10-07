@@ -1,0 +1,28 @@
+{
+  "meta": {
+    "generator": "tests/fixtures/count_models/integration-strict-v1811/generate_reference.R",
+    "r_version": "R version 4.6.0 (2026-04-24)",
+    "seed": 20261003,
+    "n": 450,
+    "epsilon": 1e-16,
+    "verification_level": "Same original CSV, log GLM fixed alpha=1; final expected information, scale=1; no alpha estimation",
+    "source": "native-reference/glm-fixed-alpha-reference.json"
+  },
+  "inference": {
+    "covariance_estimator": "nonrobust",
+    "df_method": "asymptotic",
+    "reference_distribution": "z",
+    "df_resid": 447
+  },
+  "coefficients": {
+    "Intercept": 0.42100526154473,
+    "x1": 0.37898441178694714,
+    "x2": -0.2293064553582519
+  },
+  "std_error": {
+    "Intercept": 0.06192391527053146,
+    "x1": 0.06423158311977484,
+    "x2": 0.06134533870127498
+  }
+}
+Original seven reference inputs unchanged from Integration merge; production unchanged from declared exact identity

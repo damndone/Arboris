@@ -1,0 +1,8 @@
+Warning message:
+There were 2 warnings in `dplyr::summarise()`.
+The first warning was:
+ℹ In argument: `minimum = min(x, na.rm = TRUE)`.
+ℹ In group 2: `group = "b"`.
+Caused by warning in `min()`:
+! no non-missing arguments to min; returning Inf
+ℹ Run `dplyr::last_dplyr_warnings()` to see the 1 remaining warning. 

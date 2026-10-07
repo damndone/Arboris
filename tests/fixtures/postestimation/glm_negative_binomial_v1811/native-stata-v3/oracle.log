@@ -1,0 +1,269 @@
+
+  ___  ____  ____  ____  ____ ®
+ /__    /   ____/   /   ____/      18.0
+___/   /   /___/   /   /___/       MP—Parallel Edition
+
+ Statistics and Data Science       Copyright 1985-2023 StataCorp LLC
+                                   StataCorp
+                                   4905 Lakeway Drive
+                                   College Station, Texas 77845 USA
+                                   800-STATA-PC        https://www.stata.com
+                                   979-696-4600        stata@stata.com
+
+Stata license: Single-user 2-core  perpetual
+Serial number: [REDACTED]
+  Licensed to: [REDACTED]
+               
+
+Notes:
+      1. Stata is running in batch mode.
+      2. Unicode is supported; see help unicode_advice.
+      3. More than 2 billion observations are allowed; see help obs_advice.
+      4. Maximum number of variables is set to 5,000 but can be increased;
+          see help set_maxvar.
+
+
+Running /Applications/Stata/profile.do ...
+command window is unrecognized
+r(199);
+
+. do oracle.do 
+
+. version 18
+
+. set more off
+
+. file open wbout using "wb_results.tsv", write replace
+(file wb_results.tsv not found)
+
+. import delimited "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-final-ora
+> cles/tests/fixtures/postestimation/data.csv", asdouble clear case(preserve)
+(encoding automatically selected: ISO-8859-1)
+(10 vars, 300 obs)
+
+. glm ynb x1 x2 x3, family(nbinomial 1) link(log) ml vce(eim) scale(1) iterate(
+> 1000) tolerance(1e-12) ltolerance(1e-12)
+
+Iteration 0:  Log likelihood =   -515.107  
+Iteration 1:  Log likelihood = -513.25813  
+Iteration 2:  Log likelihood = -513.25643  
+Iteration 3:  Log likelihood = -513.25643  
+Iteration 4:  Log likelihood = -513.25643  
+
+Generalized linear models                         Number of obs   =        300
+Optimization     : ML                             Residual df     =        296
+                                                  Scale parameter =          1
+Deviance         =  241.7671342                   (1/df) Deviance =   .8167809
+Pearson          =  221.4504133                   (1/df) Pearson  =   .7481433
+
+Variance function: V(u) = u+(1)u^2                [Neg. Binomial]
+Link function    : g(u) = ln(u)                   [Log]
+
+                                                  AIC             =   3.448376
+Log likelihood   = -513.2564336                   BIC             =  -1446.552
+
+------------------------------------------------------------------------------
+             |                 EIM
+         ynb | Coefficient  std. err.      z    P>|z|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+          x1 |   .3788938   .0759466     4.99   0.000     .2300411    .5277465
+          x2 |  -.2889452   .0657804    -4.39   0.000    -.4178724   -.1600179
+          x3 |  -.1012181    .147449    -0.69   0.492    -.3902129    .1877767
+       _cons |   .5240334   .1698625     3.09   0.002      .191109    .8569578
+------------------------------------------------------------------------------
+
+. file write wbout "b__cons" _tab %24.17g (_b[_cons]) _n
+
+. file write wbout "se__cons" _tab %24.17g (_se[_cons]) _n
+
+. file write wbout "b_x1" _tab %24.17g (_b[x1]) _n
+
+. file write wbout "se_x1" _tab %24.17g (_se[x1]) _n
+
+. file write wbout "b_x2" _tab %24.17g (_b[x2]) _n
+
+. file write wbout "se_x2" _tab %24.17g (_se[x2]) _n
+
+. file write wbout "b_x3" _tab %24.17g (_b[x3]) _n
+
+. file write wbout "se_x3" _tab %24.17g (_se[x3]) _n
+
+. file write wbout "ll_full" _tab %24.17g (e(ll)) _n
+
+. file write wbout "nobs" _tab %24.17g (e(N)) _n
+
+. file write wbout "df_resid" _tab %24.17g (e(df)) _n
+
+. file write wbout "converged" _tab %24.17g (e(converged)) _n
+
+. estimates store full
+
+. test x1 x2
+
+ ( 1)  [ynb]x1 = 0
+ ( 2)  [ynb]x2 = 0
+
+           chi2(  2) =   43.44
+         Prob > chi2 =    0.0000
+
+. file write wbout "wj_stat" _tab %24.17g (r(chi2)) _n
+
+. file write wbout "wj_df" _tab %24.17g (r(df)) _n
+
+. file write wbout "wj_p" _tab %24.17g (r(p)) _n
+
+. test x1-x2=1
+
+ ( 1)  [ynb]x1 - [ynb]x2 = 1
+
+           chi2(  1) =   10.75
+         Prob > chi2 =    0.0010
+
+. file write wbout "ws_stat" _tab %24.17g (r(chi2)) _n
+
+. file write wbout "ws_df" _tab %24.17g (r(df)) _n
+
+. file write wbout "ws_p" _tab %24.17g (r(p)) _n
+
+. lincom x1+2*x2-.5
+
+ ( 1)  [ynb]x1 + 2*[ynb]x2 = .5
+
+------------------------------------------------------------------------------
+         ynb | Coefficient  Std. err.      z    P>|z|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+         (1) |  -.6989965   .1507687    -4.64   0.000    -.9944977   -.4034953
+------------------------------------------------------------------------------
+
+. file write wbout "lc_est" _tab %24.17g (r(estimate)) _n
+
+. file write wbout "lc_se" _tab %24.17g (r(se)) _n
+
+. nlcom _b[x1]/_b[x2]
+
+       _nl_1: _b[x1]/_b[x2]
+
+------------------------------------------------------------------------------
+         ynb | Coefficient  Std. err.      z    P>|z|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+       _nl_1 |    -1.3113   .3943282    -3.33   0.001    -2.084169    -.538431
+------------------------------------------------------------------------------
+
+. matrix nb_nl_b=r(b)
+
+. matrix nb_nl_v=r(V)
+
+. file write wbout "nl_est" _tab %24.17g (nb_nl_b[1,1]) _n
+
+. file write wbout "nl_se" _tab %24.17g (sqrt(nb_nl_v[1,1])) _n
+
+. margins, dydx(x1 x2)
+
+Average marginal effects                                   Number of obs = 300
+Model VCE: EIM
+
+Expression: Predicted mean ynb, predict()
+dy/dx wrt:  x1 x2
+
+------------------------------------------------------------------------------
+             |            Delta-method
+             |      dy/dx   std. err.      z    P>|z|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+          x1 |   .6517441   .1514857     4.30   0.000     .3548376    .9486507
+          x2 |  -.4970214   .1270541    -3.91   0.000    -.7460429   -.2479998
+------------------------------------------------------------------------------
+
+. matrix nb_ma_b=r(b)
+
+. matrix nb_ma_v=r(V)
+
+. file write wbout "ma_x1_est" _tab %24.17g (nb_ma_b[1,1]) _n
+
+. file write wbout "ma_x1_se" _tab %24.17g (sqrt(nb_ma_v[1,1])) _n
+
+. file write wbout "ma_x2_est" _tab %24.17g (nb_ma_b[1,2]) _n
+
+. file write wbout "ma_x2_se" _tab %24.17g (sqrt(nb_ma_v[2,2])) _n
+
+. margins, dydx(x1 x2) atmeans
+
+Conditional marginal effects                               Number of obs = 300
+Model VCE: EIM
+
+Expression: Predicted mean ynb, predict()
+dy/dx wrt:  x1 x2
+At: x1 = .0235377 (mean)
+    x2 = .0484558 (mean)
+    x3 = 1.039823 (mean)
+
+------------------------------------------------------------------------------
+             |            Delta-method
+             |      dy/dx   std. err.      z    P>|z|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+          x1 |   .5730412   .1167857     4.91   0.000     .3441454    .8019371
+          x2 |  -.4370024   .1008076    -4.34   0.000    -.6345817    -.239423
+------------------------------------------------------------------------------
+
+. matrix nb_mm_b=r(b)
+
+. matrix nb_mm_v=r(V)
+
+. file write wbout "mm_x1_est" _tab %24.17g (nb_mm_b[1,1]) _n
+
+. file write wbout "mm_x1_se" _tab %24.17g (sqrt(nb_mm_v[1,1])) _n
+
+. file write wbout "mm_x2_est" _tab %24.17g (nb_mm_b[1,2]) _n
+
+. file write wbout "mm_x2_se" _tab %24.17g (sqrt(nb_mm_v[2,2])) _n
+
+. glm ynb x1, family(nbinomial 1) link(log) ml vce(eim) scale(1) iterate(1000) 
+> tolerance(1e-12) ltolerance(1e-12)
+
+Iteration 0:  Log likelihood = -526.67785  
+Iteration 1:  Log likelihood =  -523.7201  
+Iteration 2:  Log likelihood = -523.71769  
+Iteration 3:  Log likelihood = -523.71769  
+Iteration 4:  Log likelihood = -523.71769  
+
+Generalized linear models                         Number of obs   =        300
+Optimization     : ML                             Residual df     =        298
+                                                  Scale parameter =          1
+Deviance         =  262.6896378                   (1/df) Deviance =   .8815089
+Pearson          =  261.2849493                   (1/df) Pearson  =   .8767951
+
+Variance function: V(u) = u+(1)u^2                [Neg. Binomial]
+Link function    : g(u) = ln(u)                   [Log]
+
+                                                  AIC             =   3.504785
+Log likelihood   = -523.7176854                   BIC             =  -1437.038
+
+------------------------------------------------------------------------------
+             |                 EIM
+         ynb | Coefficient  std. err.      z    P>|z|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+          x1 |     .40099   .0749167     5.35   0.000      .254156    .5478239
+       _cons |   .4616506   .0749764     6.16   0.000     .3146995    .6086016
+------------------------------------------------------------------------------
+
+. file write wbout "ll_restricted" _tab %24.17g (e(ll)) _n
+
+. estimates store restricted
+
+. lrtest full restricted
+
+Likelihood-ratio test
+Assumption: restricted nested within full
+
+ LR chi2(2) =  20.92
+Prob > chi2 = 0.0000
+
+. file write wbout "lr_stat" _tab %24.17g (r(chi2)) _n
+
+. file write wbout "lr_df" _tab %24.17g (r(df)) _n
+
+. file write wbout "lr_p" _tab %24.17g (r(p)) _n
+
+. file close wbout
+
+. 
+end of do-file

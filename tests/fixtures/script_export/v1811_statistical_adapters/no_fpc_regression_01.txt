@@ -1,0 +1,21 @@
+Related retained evidence: tests/fixtures/script_export/v1811_statistical_adapters/related_5d8abe5553
+Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/related_5d8abe5553/oracle-hps07lka
+.Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/related_5d8abe5553/oracle-p8oz5wk9
+.Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/related_5d8abe5553/oracle-gu72z0wx
+.Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/related_5d8abe5553/oracle-2rh6s9u0
+.Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/related_5d8abe5553/oracle-gq0z8jk2
+.Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/related_5d8abe5553/oracle-g2kpwzu4
+.Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/related_5d8abe5553/oracle-f_5bquyq
+.Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/related_5d8abe5553/oracle-951vksyd
+.Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/related_5d8abe5553/oracle-62xcbdyd
+.Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/related_5d8abe5553/oracle-dhxqwcb_
+.Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/related_5d8abe5553/oracle-hi27ovw1
+.Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/related_5d8abe5553/oracle-wchu60lg
+.Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/related_5d8abe5553/oracle-538rfjt0
+.Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/related_5d8abe5553/oracle-z2x8wr5_
+.Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/related_5d8abe5553/oracle-bg2qe1v9
+.Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/related_5d8abe5553/oracle-evg6hyp1
+.Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/related_5d8abe5553/oracle-q2wf2amb
+.Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/related_5d8abe5553/oracle-sx672s_s
+.
+18 passed, 64 deselected in 15.18s

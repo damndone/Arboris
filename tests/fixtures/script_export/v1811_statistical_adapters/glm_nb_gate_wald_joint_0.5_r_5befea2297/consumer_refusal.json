@@ -1,0 +1,1 @@
+{"code": "NOT_YET_VALIDATED", "message": "NOT_YET_VALIDATED: wald has not yet been checked against a reference implementation for glm:negative_binomial models, so it is not offered yet. What is missing is that check, not the model's ability: no post-estimation operation has been validated for this model yet."}

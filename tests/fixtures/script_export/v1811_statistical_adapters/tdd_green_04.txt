@@ -1,0 +1,226 @@
+Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_population_stata_40d92cb6df stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_population_r_f3392e3850 r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_population_python_24e77a79d7 python
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_fraction_stata_5d0c3cc5da stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_fraction_r_137c6c77ab r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_fraction_python_01c3acfb2f python
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_subpopulation_stata_175adf745a stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_subpopulation_r_90e36540c4 r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_subpopulation_python_14dfba1690 python
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_lonely_census_stata_6a221e840e stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_lonely_census_r_acaa53814f r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_lonely_census_python_2cbb10224e python
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_no_psu_stata_8a00c34474 stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_no_psu_r_d7b3f94423 r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_no_psu_python_3b3f1735b3 python
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_no_strata_stata_15dada72e4 stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_no_strata_r_7c912d3f47 r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_no_strata_python_aad36fb46b python
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_zero_fraction_stata_2f71c46b1c stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_zero_fraction_r_64bfdd56f3 r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_zero_fraction_python_ce0dd3a41c python
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_stata_False_3279802b87 stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_r_False_2c83ea1234 r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_python_False_e29139423e python
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_stata_True_6974690ed0 stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_r_True_e725697d0b r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_python_True_9d63db7a95 python
+...........................................Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_alpha_half_stata_e31122d8fe stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_alpha_half_r_270a8a1fa5 r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_alpha_half_python_6378ad8524 python
+......Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_primitives_1.0_stata_f093bbc2ed stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_primitives_1.0_r_6e55c46c07 r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_primitives_1.0_python_4fe9f977eb python
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_primitives_0.5_stata_ae06c17681 stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_primitives_0.5_r_4d65244012 r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_primitives_0.5_python_59f4a46535 python
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/invalid_fpc_mixed_stata_eaa2ede1f6 stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/invalid_fpc_mixed_r_a8a67e60fe r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/invalid_fpc_mixed_python_0d4a541258 python
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/invalid_fpc_missing_stata_96e8a79700 stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/invalid_fpc_missing_r_fa05bfbcff r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/invalid_fpc_missing_python_bcca3991d2 python
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/invalid_fpc_within_stratum_stata_105075e439 stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/invalid_fpc_within_stratum_r_67e5c740e0 r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/invalid_fpc_within_stratum_python_c489388766 python
+.FFFNative evidence: tests/fixtures/script_export/v1811_statistical_adapters/invalid_fpc_noninteger_stata_65598c3d2d stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/invalid_fpc_noninteger_r_75a0bcf7da r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/invalid_fpc_noninteger_python_b86ec4a7f9 python
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/invalid_fpc_negative_stata_926a89e79a stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/invalid_fpc_negative_r_0a7a3edeb5 r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/invalid_fpc_negative_python_eb9d4afd5d python
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/invalid_fpc_boolean_stata_fc2f58d4a7 stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/invalid_fpc_boolean_r_f06e03d1d1 r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/invalid_fpc_boolean_python_369e3e2911 python
+.......
+=================================== FAILURES ===================================
+_____ test_invalid_fpc_fails_before_numeric_checks[small_population-stata] _____
+tests/test_script_export_v1811_statistical_adapters.py:300: in test_invalid_fpc_fails_before_numeric_checks
+    run_exported(export_script(plan, language, require_native=True), plan, path, monkeypatch, expect_failure=True)
+tests/test_script_export_v1811_statistical_adapters.py:69: in run_exported
+    assert (code != 0 if expect_failure else code == 0), output
+E   AssertionError: . do analysis.do 
+E     
+E     . * Workbench 1.8.11
+E     . * project: invalid_fpc
+E     . * run: small_population
+E     . * lineage_hash: ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+E     > ccc
+E     . * Coverage
+E     . * model | model.ols | native_with_equivalence_note | Full single-stage linear
+E     > ization design including supplied FPC and domain; coefficient and joint-test 
+E     > df preserve the executed Workbench convention.
+E     . version 18
+E     
+E     . set more off
+E     
+E     . set type double
+E     
+E     . capture program drop wb_repost
+E     
+E     . program define wb_repost, eclass
+E       1.     args beta covariance
+E       2.     ereturn repost b=`beta' V=`covariance', rename
+E       3. end
+E     
+E     . capture program drop wb_sha
+E     
+E     . program define wb_sha
+E       1.     args filename expected
+E       2.     tempfile digestfile
+E       3.     shell shasum -a 256 "`filename'" > "`digestfile'"
+E       4.     tempname fh
+E       5.     file open `fh' using "`digestfile'", read text
+E       6.     file read `fh' line
+E       7.     file close `fh'
+E       8.     if substr("`line'",1,64) != "`expected'" {
+E       9.         display as error "SHA256 mismatch"
+E      10.         exit 9
+E      11.     }
+E      12. end
+E     
+E     . 
+E     . wb_sha "data.csv" "5c9b770902640ded7af370a8fe7f0e419edec815176c477cbf0bf849d8
+E     > f5ece4"
+E     
+E     
+E     . frame create wb_src0
+E     
+E     . frame change wb_src0
+E     
+E     . import delimited using "data.csv", varnames(1) delimiters(",") encoding("UTF-
+E     > 8") asdouble clear case(preserve)
+E     (15 vars, 80 obs)
+E     
+E     . frame copy wb_src0 wb_model_data1
+E     
+E     . frame change wb_model_data1
+E     
+E     . drop if missing(y) | missing(x1) | missing(x2)
+E     (0 observations deleted)
+E     
+E     . assert !missing(population) & population >= 0
+E     
+E     . quietly summarize population, meanonly
+E     
+E     . scalar wb_fpc_fraction = (r(max)<=1)
+E     
+E     . if !wb_fpc_fraction assert population>1 & population==floor(population)
+E     
+E     . tempvar wb_fpc_order wb_fpc_stratum wb_fpc_psu wb_fpc_tag wb_fpc_n
+E     
+E     . generate long `wb_fpc_order' = _n
+E     
+E     . egen long `wb_fpc_stratum' = group(stratum)
+E     
+E     . egen long `wb_fpc_psu' = group(`wb_fpc_stratum' psu)
+E     
+E     . egen byte `wb_fpc_tag' = tag(`wb_fpc_stratum' `wb_fpc_psu')
+E     
+E     . bysort `wb_fpc_stratum': egen long `wb_fpc_n' = total(`wb_fpc_tag')
+E     
+E     . bysort `wb_fpc_stratum': assert population==population[1]
+E     
+E     . if !wb_fpc_fraction assert population>=`wb_fpc_n'
+E     
+E     . sort `wb_fpc_order'
+E     
+E     . svyset psu [pw=weight], strata(stratum) fpc(population) singleunit(missing)
+E     
+E     Sampling weights: weight
+E                  VCE: linearized
+E          Single unit: missing
+E             Strata 1: stratum
+E      Sampling unit 1: psu
+E                FPC 1: population
+E     
+E     . svy: regress y x1 x2
+E     (running regress on estimation sample)
+E     
+E     Survey: Linear regression
+E     
+E     Number of strata =  8                                 Number of obs   =     80
+E     Number of PSUs   = 16                                 Population size =  1,520
+E                                                           Design df       =      8
+E                                                           F(0, 8)         =      .
+E                                                           Prob > F        =      .
+E                                                           R-squared       = 0.7871
+E     
+E     ------------------------------------------------------------------------------
+E                  |             Linearized
+E                y | Coefficient  std. err.      t    P>|t|     [95% conf. interval]
+E     -------------+----------------------------------------------------------------
+E               x1 |   1.475821          .        .       .            .           .
+E               x2 |  -.4040448          .        .       .            .           .
+E            _cons |   4.652712          .        .       .            .           .
+E     ------------------------------------------------------------------------------
+E     
+E     . assert e(df_r) > 0
+E     
+E     . matrix wb_survey_v = e(V)
+E     
+E     . mata: assert(!hasmissing(st_matrix("wb_survey_v")))
+E     
+E     . estimates store wb_model1
+E     
+E     . generate long wb_sample_row = _n
+E     
+E     . generate byte wb_sample1 = e(sample)
+E     
+E     . scalar wb_number_0 = e(N)
+E     
+E     . file open wb_numbers using "numeric_actual.tsv", write text replace
+E     (file numeric_actual.tsv not found)
+E     
+E     . file write wb_numbers %21.17g (wb_number_0) _n
+E     
+E     . file close wb_numbers
+E     
+E     . * Closing self-checks
+E     . assert !missing(wb_number_0) & abs(wb_number_0-(80)) <= 0.0+0.0*abs(80)
+E     
+E     . 
+E     end of do-file
+E     
+E   assert False
+_______ test_invalid_fpc_fails_before_numeric_checks[small_population-r] _______
+tests/test_script_export_v1811_statistical_adapters.py:300: in test_invalid_fpc_fails_before_numeric_checks
+    run_exported(export_script(plan, language, require_native=True), plan, path, monkeypatch, expect_failure=True)
+tests/test_script_export_v1811_statistical_adapters.py:69: in run_exported
+    assert (code != 0 if expect_failure else code == 0), output
+E   AssertionError: 
+E   assert False
+____ test_invalid_fpc_fails_before_numeric_checks[small_population-python] _____
+tests/test_script_export_v1811_statistical_adapters.py:300: in test_invalid_fpc_fails_before_numeric_checks
+    run_exported(export_script(plan, language, require_native=True), plan, path, monkeypatch, expect_failure=True)
+tests/test_script_export_v1811_statistical_adapters.py:69: in run_exported
+    assert (code != 0 if expect_failure else code == 0), output
+E   AssertionError: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/invalid_fpc_small_population_python_915b6ef7c8/analysis.py:55: RuntimeWarning: divide by zero encountered in divide
+E       se=np.sqrt(np.diag(covariance));statistic=beta/se
+E     
+E   assert False
+=========================== short test summary info ============================
+FAILED tests/test_script_export_v1811_statistical_adapters.py::test_invalid_fpc_fails_before_numeric_checks[small_population-stata]
+FAILED tests/test_script_export_v1811_statistical_adapters.py::test_invalid_fpc_fails_before_numeric_checks[small_population-r]
+FAILED tests/test_script_export_v1811_statistical_adapters.py::test_invalid_fpc_fails_before_numeric_checks[small_population-python]
+3 failed, 107 passed in 38.14s

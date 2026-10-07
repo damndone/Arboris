@@ -1,0 +1,7 @@
+d <- read.csv("data.csv")
+a <- survey::svydesign(ids=~psu,strata=~stratum,weights=~weight,data=d,nest=TRUE)
+b <- survey::svydesign(ids=~psu,strata=~stratum,weights=~weight,fpc=~fpc,data=d,nest=TRUE)
+fa <- survey::svyglm(y~x1+x2,design=a)
+fb <- survey::svyglm(y~x1+x2,design=b)
+write.csv(data.frame(term=names(coef(fa)),estimate=coef(fa),without_fpc=sqrt(diag(vcov(fa))),with_fpc=sqrt(diag(vcov(fb)))),"fpc_pairs.csv",row.names=FALSE)
+print(sessionInfo())

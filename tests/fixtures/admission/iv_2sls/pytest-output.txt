@@ -1,0 +1,10 @@
+
+Fontconfig error: No writable cache directories
+	/opt/homebrew/var/cache/fontconfig
+	/Users/jiayuanren/.cache/fontconfig
+	/Users/jiayuanren/.fontconfig
+first three coefficients and SE (Workbench / R): [('Intercept', 1.0693412648674825, 1.06934126486748, 0.049217870431445286, 0.0492178704314452), ('x1', 0.5552201253208324, 0.555220125320833, 0.052079051756544974, 0.0520790517565449), ('xe', 0.8041549151923951, 0.804154915192396, 0.05155227948506298, 0.051552279485063)]
+kernel settings: {'covariance_estimator': 'robust', 'df_method': 'asymptotic', 'reference_distribution': 'z', 'df_resid': 447.0}
+max absolute differences: 2.4424906541753444e-15 8.326672684688674e-17
+..
+2 passed in 11.17s

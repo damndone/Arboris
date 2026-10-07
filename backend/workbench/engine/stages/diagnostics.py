@@ -15,6 +15,26 @@ _V186_FAMILY_TYPES = frozenset(
 )
 
 
+def _promote_structured_warnings(result, artifact_id, issue_dicts):
+    """Expose owner-issued code/message warnings without guessing their family."""
+    warnings = result.get("warnings")
+    if not isinstance(warnings, list):
+        return
+    for warning in warnings:
+        if not isinstance(warning, dict):
+            continue  # Legacy string warnings retain their owner-specific policy.
+        code, message = warning.get("code"), warning.get("message")
+        if not isinstance(code, str) or not code or not isinstance(message, str) or not message:
+            continue
+        if any(issue.get("code") == code and issue.get("evidence", {}).get("artifact_id") == artifact_id
+               for issue in issue_dicts):
+            continue
+        issue_dicts.append(GuardrailIssue(Severity.WARNING, code, message, {
+            "artifact_id": artifact_id, "model_id": result.get("model_id"),
+            "model_type": result.get("model_type"),
+        }).to_dict())
+
+
 def _family_owned_diagnostic(model_type: str, model_id: str) -> dict[str, Any]:
     """Return a typed pointer for families whose diagnostics are not OLS-shaped."""
 
@@ -172,6 +192,9 @@ class DiagnosticsStage:
         time_candidates = ctx.artifacts["_time_candidates"]
 
         env.step("diagnostics", "start", "Running regression diagnostics...")
+        for artifact_id, packet in model_results:
+            _promote_structured_warnings(packet, artifact_id, issue_dicts)
+        write_json(run_root / "errors.json", {"issues": issue_dicts})
         did_event_study: dict | None = None  # v1.6.6 V: TWFE event-study figure
         diag_x = [v for v in normalized_x if v != exposure_col] if exposure_col else normalized_x
         exog = modeling_frame[diag_x] if diag_x else pd.DataFrame(index=modeling_frame.index)
@@ -214,14 +237,6 @@ class DiagnosticsStage:
             diag["model_type"] = fitted_model_type
             diag_path = run_root / "model_results" / f"diagnostics_{model_id}.json"
             write_json(diag_path, diag)
-            register_artifact(
-                run_root,
-                f"diagnostics_{model_id}",
-                diag_path,
-                "model_diagnostic",
-                "econometrics",
-                model_input_ids,
-            )
             diagnostic_artifacts[model_id] = diag
             # v1.8.10 check library: checks apply by the family's declared
             # traits, and what they find reaches the run's issues.
@@ -258,6 +273,12 @@ class DiagnosticsStage:
                 write_json(run_root / "errors.json", {"issues": issue_dicts})
             if not family_owned:
                 _check_model_validity(diag, model_id, issue_dicts, run_root)
+            # Checks can replace GVIF or withdraw residual diagnostics; register
+            # the final bytes once, after all owner updates have been written.
+            register_artifact(
+                run_root, f"diagnostics_{model_id}", diag_path,
+                "model_diagnostic", "econometrics", model_input_ids,
+            )
             # Separation and overdispersion are reported by the check library
             # (fit.separation, fit.overdispersion), which applies them by
             # trait and with sourced thresholds; the older logit-only and
@@ -301,9 +322,9 @@ class DiagnosticsStage:
                 # A failure here must NOT fail the run — degrade to an
                 # "unavailable" artifact and continue.
                 try:
+                    covariance, cluster = ctx.artifacts.get("_panel_covariance") or ("clustered", None)
                     did_diag = build_did_diagnostics(
-                        did_fitted, norm, norm.frame,
-                        covariance=ctx.artifacts.get("_covariance") or "robust",
+                        did_fitted, norm, norm.frame, covariance=covariance, cluster_col=cluster,
                     )
                 except Exception as exc:  # noqa: BLE001 - any failure degrades
                     did_diag = {"available": False, "error": str(exc)}

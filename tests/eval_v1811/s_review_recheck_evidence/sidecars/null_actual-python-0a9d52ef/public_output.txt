@@ -1,0 +1,5 @@
+Traceback (most recent call last):
+  File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_recheck_evidence/sidecars/null_actual-python-0a9d52ef/analysis.py", line 63, in <module>
+    checks.append(float(wb_result_values2['statistics']['test']['value']))
+                  ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: float() argument must be a string or a real number, not 'NoneType'

@@ -1,0 +1,222 @@
+$r_version
+[1] "R version 4.6.0 (2026-04-24)"
+
+$platform
+[1] "aarch64-apple-darwin24.6.0"
+
+$packages
+$packages$MASS
+[1] "7.3.65"
+
+$packages$car
+[1] "3.1.5"
+
+$packages$lmtest
+[1] "0.9.40"
+
+$packages$marginaleffects
+[1] "1.0.0"
+
+$packages$jsonlite
+[1] "2.0.0"
+
+
+Deviance = 242.291 Iterations - 1
+Deviance = 241.7721 Iterations - 2
+Deviance = 241.7672 Iterations - 3
+Deviance = 241.7671 Iterations - 4
+Deviance = 241.7671 Iterations - 5
+Deviance = 241.7671 Iterations - 6
+Deviance = 241.7671 Iterations - 7
+Deviance = 241.7671 Iterations - 8
+Deviance = 241.7671 Iterations - 9
+Deviance = 241.7671 Iterations - 10
+Deviance = 241.7671 Iterations - 11
+Deviance = 241.7671 Iterations - 12
+Deviance = 241.7671 Iterations - 13
+Deviance = 241.7671 Iterations - 14
+Deviance = 241.7671 Iterations - 15
+Deviance = 241.7671 Iterations - 16
+Deviance = 241.7671 Iterations - 17
+Deviance = 241.7671 Iterations - 18
+Deviance = 241.7671 Iterations - 19
+Deviance = 263.4398 Iterations - 1
+Deviance = 262.6906 Iterations - 2
+Deviance = 262.6896 Iterations - 3
+Deviance = 262.6896 Iterations - 4
+Deviance = 262.6896 Iterations - 5
+Deviance = 262.6896 Iterations - 6
+Deviance = 262.6896 Iterations - 7
+Deviance = 262.6896 Iterations - 8
+Deviance = 262.6896 Iterations - 9
+$params
+$params$`(Intercept)`
+[1] 0.5240334
+
+$params$x1
+[1] 0.3788938
+
+$params$x2
+[1] -0.2889452
+
+$params$x3
+[1] -0.1012181
+
+
+$wald_joint
+$wald_joint$distribution
+[1] "chi2"
+
+$wald_joint$statistic
+[1] 43.44065
+
+$wald_joint$df_num
+[1] 2
+
+$wald_joint$p_value
+[1] 3.689622e-10
+
+
+$wald_shifted
+$wald_shifted$distribution
+[1] "chi2"
+
+$wald_shifted$statistic
+[1] 10.74572
+
+$wald_shifted$df_num
+[1] 1
+
+$wald_shifted$p_value
+[1] 0.001045205
+
+
+$lincom
+$lincom$estimate
+[1] -0.6989965
+
+$lincom$std_error
+[1] 0.1507687
+
+
+$nlcom
+$nlcom$estimate
+[1] -1.3113
+
+$nlcom$std_error
+[1] 0.3943282
+
+
+$lr_drop_x2_x3
+$lr_drop_x2_x3$statistic
+[1] 20.9225
+
+$lr_drop_x2_x3$df
+[1] 2
+
+$lr_drop_x2_x3$p_value
+[1] 2.862438e-05
+
+$lr_drop_x2_x3$loglik_full
+[1] -513.2564
+
+$lr_drop_x2_x3$loglik_restricted
+[1] -523.7177
+
+
+$margins
+$margins$average
+$margins$average$x1
+$margins$average$x1$estimate
+[1] 0.6517441
+
+$margins$average$x1$std_error
+[1] 0.1514857
+
+
+$margins$average$x2
+$margins$average$x2$estimate
+[1] -0.4970214
+
+$margins$average$x2$std_error
+[1] 0.1270541
+
+
+
+$margins$at_means
+$margins$at_means$x1
+$margins$at_means$x1$estimate
+[1] 0.5730412
+
+$margins$at_means$x1$std_error
+[1] 0.1167857
+
+
+$margins$at_means$x2
+$margins$at_means$x2$estimate
+[1] -0.4370024
+
+$margins$at_means$x2$std_error
+[1] 0.1008076
+
+
+
+
+Native R fixed-alpha five-operation oracle saved
+Traceback (most recent call last):
+  File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-final-oracles/tests/fixtures/postestimation/glm_negative_binomial_v1811/generate_native.py", line 43, in <module>
+    reference=run(HERE/"native-stata","\n".join(lines))
+  File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-final-oracles/tests/stata_oracle.py", line 64, in run
+    raise RuntimeError(f"Stata failed:\n{log[-3000:]}")
+RuntimeError: Stata failed:
+
+  ___  ____  ____  ____  ____ ®
+ /__    /   ____/   /   ____/      18.0
+___/   /   /___/   /   /___/       MP—Parallel Edition
+
+ Statistics and Data Science       Copyright 1985-2023 StataCorp LLC
+                                   StataCorp
+                                   4905 Lakeway Drive
+                                   College Station, Texas 77845 USA
+                                   800-STATA-PC        https://www.stata.com
+                                   979-696-4600        stata@stata.com
+
+Stata license: Single-user 2-core  perpetual
+Serial number: [REDACTED]
+  Licensed to: [REDACTED]
+               
+
+Notes:
+      1. Stata is running in batch mode.
+      2. Unicode is supported; see help unicode_advice.
+      3. More than 2 billion observations are allowed; see help obs_advice.
+      4. Maximum number of variables is set to 5,000 but can be increased;
+          see help set_maxvar.
+
+
+Running /Applications/Stata/profile.do ...
+command window is unrecognized
+r(199);
+
+. do oracle.do 
+
+. version 18
+
+. set more off
+
+. file open wbout using "wb_results.tsv", write replace
+(file wb_results.tsv not found)
+
+. import delimited "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-final-ora
+> cles/tests/fixtures/postestimation/data.csv", asdouble clear case(preserve)
+(encoding automatically selected: ISO-8859-1)
+(10 vars, 300 obs)
+
+. glm ynb x1 x2 x3, family(nbinomial 1) link(log) irls scale(1) iterate(1000) t
+> olerance(1e-14)
+option tolerance() not allowed
+r(198);
+
+end of do-file
+r(198);
+

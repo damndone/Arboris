@@ -1,0 +1,70 @@
+Loading required package: Matrix
+[1] ‘2.0.1’
+function (object, correlation = TRUE, sigm = sigma(object), use.hessian = NULL, 
+    full = FALSE, noScale = NULL, ...) 
+{
+    if (full) 
+        return(vcov_full(object, sigm))
+    hess.avail <- (!is.null(h <- object@optinfo$derivs$Hessian) && 
+        nrow(h) > (ntheta <- length(object@theta)))
+    if (is.null(use.hessian)) 
+        use.hessian <- hess.avail
+    if (use.hessian && !hess.avail) 
+        stop(shQuote("use.hessian"), "=TRUE specified, ", "but Hessian is unavailable")
+    calc.vcov.hess <- function(h) {
+        h <- tryCatch(solve(h), error = function(e) matrix(NA, 
+            nrow = nrow(h), ncol = ncol(h)))
+        i <- -seq_len(ntheta)
+        h <- h[i, i]
+        forceSymmetric(h + t(h))
+    }
+    V <- sigm^2 * object@pp$unsc()
+    if (hess.avail) {
+        V.hess <- calc.vcov.hess(h)
+        bad.V.hess <- any(is.na(V.hess))
+        if (!bad.V.hess) {
+            e.hess <- eigen(V.hess, symmetric = TRUE, only.values = TRUE)$values
+            if (min(e.hess) <= 0) 
+                bad.V.hess <- TRUE
+        }
+    }
+    if (!use.hessian && hess.avail) {
+        var.hess.tol <- 1e-04
+        if (!bad.V.hess && any(abs(V - V.hess) > var.hess.tol * 
+            V.hess)) 
+            warning("variance-covariance matrix computed ", "from finite-difference Hessian\nand ", 
+                "from RX differ by >", var.hess.tol, ": ", "consider ", 
+                shQuote("use.hessian=TRUE"))
+    }
+    if (use.hessian) {
+        if (!bad.V.hess) {
+            V <- V.hess
+        }
+        else {
+            warning("variance-covariance matrix computed ", "from finite-difference Hessian is\n", 
+                "not positive definite or contains NA values: falling back to ", 
+                "var-cov estimated from RX")
+        }
+    }
+    rr <- tryCatch(as(V, "dpoMatrix"), error = function(e) e)
+    if (inherits(rr, "error")) {
+        warning(gettextf("Computed variance-covariance matrix problem: %s;\nreturning NA matrix", 
+            rr$message), domain = NA)
+        rr <- matrix(NA, nrow(V), ncol(V))
+    }
+    nmsX <- colnames(object@pp$X)
+    dimnames(rr) <- list(nmsX, nmsX)
+    if (correlation) 
+        rr@factors$correlation <- if (!is.na(sigm)) 
+            as(rr, "corMatrix")
+        else rr
+    if (is.null(noScale) || (!is.null(noScale) && !noScale)) {
+        if (!is.null(sc <- attr(object@pp$X, "scaled:scale"))) {
+            ce <- attr(object@pp$X, "scaled:center")
+            rr <- scale_vcov(rr, sc, ce)
+        }
+    }
+    rr
+}
+<bytecode: 0x12fc1ec70>
+<environment: namespace:lme4>

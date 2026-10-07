@@ -1,0 +1,38 @@
+..................F..................FF..................                [100%]
+=================================== FAILURES ===================================
+____ test_every_coefficient_in_a_real_run_carries_the_design_standard_error ____
+tests/test_survey_design_engine_v187.py:424: in test_every_coefficient_in_a_real_run_carries_the_design_standard_error
+    assert entry["std_error"] == pytest.approx(oracle["se"][oracle_term], rel=1e-8), (
+E   AssertionError: Intercept kept a standard error the design engine did not produce
+E   assert 1.5923298997852287 == 1.59552414552266 ± 1.6e-08
+E     
+E     comparison failed
+E     Obtained: 1.5923298997852287
+E     Expected: 1.59552414552266 ± 1.6e-08
+__________ test_the_default_is_the_design_df_and_the_korn_graubard_f ___________
+tests/test_survey_df_convention.py:61: in test_the_default_is_the_design_df_and_the_korn_graubard_f
+    assert wald["statistic"] == pytest.approx(w * 7 / (8 * 2), rel=1e-7)
+E   assert 107.72947903698243 == 107.29856112083755 ± 1.1e-05
+E     
+E     comparison failed
+E     Obtained: 107.72947903698243
+E     Expected: 107.29856112083755 ± 1.1e-05
+__________________ test_the_r_convention_reproduces_r_survey ___________________
+tests/test_survey_df_convention.py:72: in test_the_r_convention_reproduces_r_survey
+    assert packet["coefficients"]["x1"]["ci_lower"] == pytest.approx(oracle["ci_lower"]["x1"], rel=1e-8)
+E   assert 1.0427931362224692 == 1.04192447409458 ± 1.0e-08
+E     
+E     comparison failed
+E     Obtained: 1.0427931362224692
+E     Expected: 1.04192447409458 ± 1.0e-08
+=============================== warnings summary ===============================
+../../.venv/lib/python3.14/site-packages/fastapi/testclient.py:1
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_survey_design_engine_v187.py::test_every_coefficient_in_a_real_run_carries_the_design_standard_error
+FAILED tests/test_survey_df_convention.py::test_the_default_is_the_design_df_and_the_korn_graubard_f
+FAILED tests/test_survey_df_convention.py::test_the_r_convention_reproduces_r_survey
+3 failed, 54 passed, 1 warning in 13.65s

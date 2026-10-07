@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "project_id": "model-oracle",
+  "run_id": "glm_poisson",
+  "workbench_version": "1.8.11",
+  "lineage_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+  "sources": [
+    {
+      "source_id": "source",
+      "format": "csv",
+      "filename": "data.csv",
+      "sha256": "0f643fba418a92bc7a08befa218425056e866314340e1148775107241af4e143",
+      "read_options": {}
+    }
+  ],
+  "steps": [
+    {
+      "step_id": "model",
+      "kind": "model",
+      "operation": "model.glm",
+      "label": "",
+      "parameters": {
+        "model_type": "glm",
+        "y": "count",
+        "x": [
+          "x",
+          "z"
+        ],
+        "categorical_x": [],
+        "covariance": "unadjusted",
+        "cluster": null,
+        "hac_lags": null,
+        "weights": null,
+        "entity": null,
+        "time": null,
+        "model_options": {
+          "family": "poisson"
+        }
+      },
+      "inputs": [
+        "source"
+      ],
+      "output_dataset": null,
+      "expected": {
+        "nobs": 350,
+        "coefficients": {
+          "Intercept": 0.10396571524991229,
+          "x": 0.37818762298179404,
+          "z": -0.22000781353014975
+        },
+        "std_errors": {
+          "Intercept": 0.05268928385125403,
+          "x": 0.04757957492734309,
+          "z": 0.05226849883001865
+        },
+        "statistics": {
+          "Intercept": {
+            "value": 1.9731852029611112,
+            "df": null,
+            "p_value": 0.04847446569865196,
+            "distribution": "z"
+          },
+          "x": {
+            "value": 7.948528829005084,
+            "df": null,
+            "p_value": 1.887394208540221e-15,
+            "distribution": "z"
+          },
+          "z": {
+            "value": -4.209185617624734,
+            "df": null,
+            "p_value": 2.5629277905377592e-05,
+            "distribution": "z"
+          }
+        }
+      },
+      "tolerances": {},
+      "seed": null,
+      "snapshot": null
+    }
+  ]
+}

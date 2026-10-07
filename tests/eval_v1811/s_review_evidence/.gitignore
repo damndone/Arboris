@@ -1,0 +1,4 @@
+**/*.log
+**/output.txt
+pytest-*.txt
+!pytest-*.public.txt

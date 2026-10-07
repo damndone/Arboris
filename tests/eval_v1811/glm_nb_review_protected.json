@@ -1,0 +1,89 @@
+{
+  "asset_hashes_verified": 24,
+  "asset_errors": [],
+  "protected": [
+    {
+      "path": "tests/fixtures/postestimation/data.csv",
+      "sha256": "2e1b92f07632a8c88d047074f77cd6e5f9552b4f932f7d6ed2499161a0bf3084",
+      "baseline_identical": true,
+      "manifest_hash_matches": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/oracle.json",
+      "sha256": "d80dbc69f91648cbd17443f89deaf21df63296f1296a6d674c3ef9e135b9302c",
+      "baseline_identical": true,
+      "manifest_hash_matches": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/generate_oracle.R",
+      "sha256": "82b35d95a30650daf85de157c93eed380ddcb151557e64cf3ac5b9f0d4d459ef",
+      "baseline_identical": true,
+      "manifest_hash_matches": true
+    },
+    {
+      "path": "backend/workbench/econometrics/count_models.py",
+      "sha256": "143b75513c18d4a5aa0a20ea08b61169f65d1a358a533ee0d497c768cff7dd50",
+      "baseline_identical": true,
+      "manifest_hash_matches": true
+    },
+    {
+      "path": "backend/workbench/econometrics/runner.py",
+      "sha256": "ebcb7948da81fcf9af203017f58c88c962c55844d4800a79b07c1782d7f36b41",
+      "baseline_identical": true,
+      "manifest_hash_matches": true
+    },
+    {
+      "path": "backend/workbench/contracts/model/inference_kernel.py",
+      "sha256": "be94249889597607e00c62e330f14ea311b1434b23d43dfcb584fac32cf2b431",
+      "baseline_identical": true,
+      "manifest_hash_matches": true
+    },
+    {
+      "path": "backend/workbench/postestimation/core.py",
+      "sha256": "c83b5759142abc3443e1c8f14b29f9bb4334d96d4070990ebb8c2f4c1af80f9e",
+      "baseline_identical": true,
+      "manifest_hash_matches": true
+    },
+    {
+      "path": "backend/workbench/postestimation/margins.py",
+      "sha256": "9cf29e9fd1fe4198f300ed346b462a4e718a0447cab80c2d45f17827a29b0bb7",
+      "baseline_identical": true,
+      "manifest_hash_matches": true
+    },
+    {
+      "path": "docs/superpowers/handoffs/2026-10-04-v1.8.11-final-oracle-interface-freeze.md",
+      "sha256": "53bb2b5ad6448f13615bc5746119ded5299328e9f7f23f792cfb4e429d9b7f27",
+      "baseline_identical": true,
+      "manifest_hash_matches": true
+    }
+  ],
+  "changes": [
+    "A\tdocs/superpowers/handoffs/2026-10-04-v1811-glm-nb-final-oracle-report.md",
+    "A\ttests/fixtures/postestimation/glm_negative_binomial_v1811/capture_owner.py",
+    "A\ttests/fixtures/postestimation/glm_negative_binomial_v1811/generate_native.py",
+    "A\ttests/fixtures/postestimation/glm_negative_binomial_v1811/generate_oracle.R",
+    "A\ttests/fixtures/postestimation/glm_negative_binomial_v1811/manifest.json",
+    "A\ttests/fixtures/postestimation/glm_negative_binomial_v1811/native-output.txt",
+    "A\ttests/fixtures/postestimation/glm_negative_binomial_v1811/native-r/oracle.json",
+    "A\ttests/fixtures/postestimation/glm_negative_binomial_v1811/native-stata-v2-output.txt",
+    "A\ttests/fixtures/postestimation/glm_negative_binomial_v1811/native-stata-v2/oracle.do",
+    "A\ttests/fixtures/postestimation/glm_negative_binomial_v1811/native-stata-v2/oracle.log",
+    "A\ttests/fixtures/postestimation/glm_negative_binomial_v1811/native-stata-v2/wb_results.tsv",
+    "A\ttests/fixtures/postestimation/glm_negative_binomial_v1811/native-stata-v3-output.txt",
+    "A\ttests/fixtures/postestimation/glm_negative_binomial_v1811/native-stata-v3/oracle.do",
+    "A\ttests/fixtures/postestimation/glm_negative_binomial_v1811/native-stata-v3/oracle.log",
+    "A\ttests/fixtures/postestimation/glm_negative_binomial_v1811/native-stata-v3/reference.json",
+    "A\ttests/fixtures/postestimation/glm_negative_binomial_v1811/native-stata-v3/wb_results.tsv",
+    "A\ttests/fixtures/postestimation/glm_negative_binomial_v1811/native-stata/oracle.do",
+    "A\ttests/fixtures/postestimation/glm_negative_binomial_v1811/native-stata/oracle.log",
+    "A\ttests/fixtures/postestimation/glm_negative_binomial_v1811/native-stata/wb_results.tsv",
+    "A\ttests/fixtures/postestimation/glm_negative_binomial_v1811/numeric-diff.md",
+    "A\ttests/fixtures/postestimation/glm_negative_binomial_v1811/owner-capture-output.txt",
+    "A\ttests/fixtures/postestimation/glm_negative_binomial_v1811/owner-evidence.json",
+    "A\ttests/fixtures/postestimation/glm_negative_binomial_v1811/owner-final-green.txt",
+    "A\ttests/fixtures/postestimation/glm_negative_binomial_v1811/owner-first-green.txt",
+    "A\ttests/fixtures/postestimation/glm_negative_binomial_v1811/tdd-red.txt",
+    "A\ttests/test_glm_nb_v1811_reference.py"
+  ],
+  "all_changes_are_additions": true
+}

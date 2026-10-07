@@ -1,0 +1,16 @@
+{
+  "definition": "ARMA(0,0), no constant, iid Gaussian MLE variance = sum(y^2)/n; no software refit",
+  "n": 144,
+  "closed_form_variance": 1.0841774164273454,
+  "closed_form_prefix_variance": 1.087712882300714,
+  "workbench_variance": 1.0841774164273454,
+  "native_stata_variance": 1.0841775206953714,
+  "workbench_prefix_variance": 1.0877128823007143,
+  "native_stata_prefix_variance": 1.0877129146043252,
+  "workbench_closed_form_abs": 0.0,
+  "stata_closed_form_abs": 1.0426802599106111e-07,
+  "workbench_prefix_closed_form_abs": 2.220446049250313e-16,
+  "stata_prefix_closed_form_abs": 3.230361111938862e-08,
+  "required_absolute_tolerance": 1e-08,
+  "status": "Native Stata finite optimization precision unresolved; not a confirmed Workbench model defect"
+}

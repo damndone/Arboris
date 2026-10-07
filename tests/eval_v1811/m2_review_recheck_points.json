@@ -1,0 +1,430 @@
+{
+  "nb2": {
+    "returned": true,
+    "params": [
+      0.38636443172056784,
+      0.37879429805878007,
+      -0.19864200777322277,
+      0.6810091359881993
+    ],
+    "se": [
+      0.0343664739492729,
+      0.034751519774094464,
+      0.03510461797875411,
+      0.062182073289668155
+    ],
+    "ll": -2007.5082891629145,
+    "score": [
+      8.218463197096071e-06,
+      5.399887932355796e-07,
+      -9.28737335925689e-08,
+      -9.524067687353554e-06
+    ],
+    "n": 1200,
+    "information": [
+      [
+        881.0019748696745,
+        155.06114762937582,
+        -75.24182411195191,
+        0.1015353539068542
+      ],
+      [
+        155.06114762937582,
+        855.4797716036925,
+        -22.564342770341387,
+        -3.1595879365557114
+      ],
+      [
+        -75.24182411195191,
+        -22.564342770341387,
+        817.999133622048,
+        -0.044062702514958474
+      ],
+      [
+        0.1015353539068542,
+        -3.1595879365557114,
+        -0.044062702514958474,
+        258.63667258419974
+      ]
+    ],
+    "covariance": [
+      [
+        0.0011810545317060528,
+        -0.00021137319642358809,
+        0.00010280581383411862,
+        -3.0283450586246263e-06
+      ],
+      [
+        -0.00021137319642358806,
+        0.0012076681266092787,
+        1.3871391859568651e-05,
+        1.4838602233665739e-05
+      ],
+      [
+        0.00010280581383411862,
+        1.3871391859568651e-05,
+        0.0012323342034342663,
+        3.3904485477706456e-07
+      ],
+      [
+        -3.0283450586246267e-06,
+        1.483860223366574e-05,
+        3.3904485477706456e-07,
+        0.0038666102386016622
+      ]
+    ],
+    "information_eigenvalues": [
+      258.6184799717005,
+      701.0248054694835,
+      807.4228900058907,
+      1046.0513772325398
+    ],
+    "covariance_eigenvalues": [
+      0.0009559759891006745,
+      0.0012385083608327026,
+      0.001426483046245831,
+      0.003866699704172051
+    ],
+    "inverse_residual": 1.1102230246251565e-16,
+    "convergence": {
+      "converged": true,
+      "iterations": 11,
+      "tolerance": 1e-08,
+      "criterion": "maximum absolute natural-parameter score per observation (beta and ancillary)"
+    },
+    "information_matrix": "observed",
+    "alpha_estimated": true,
+    "ancillary": [
+      {
+        "name": "lnalpha",
+        "estimate": -0.3841795573745957,
+        "std_error": 0.0913087211369594,
+        "conf_low": -0.5631413622774473,
+        "conf_high": -0.2052177524717441,
+        "scale": "log"
+      },
+      {
+        "name": "alpha",
+        "estimate": 0.6810091359881993,
+        "std_error": 0.062182073289668155,
+        "conf_low": 0.5694175046845744,
+        "conf_high": 0.8144699442569796,
+        "scale": "natural"
+      }
+    ],
+    "strict_json": true
+  },
+  "boundary_mean": {
+    "returned": false,
+    "message": "NB_INFERENCE_UNCERTIFIED: regular interior inference is unavailable; maximum absolute natural-parameter score per observation=0.010249274019403664 exceeds tolerance=1e-08. Optimizer log-coordinate stopping does not certify this point."
+  },
+  "nb1": {
+    "returned": true,
+    "params": [
+      0.4269437848106901,
+      0.349441861867247,
+      -0.16051477207474898,
+      0.9944067252149127
+    ],
+    "se": [
+      0.030150250590380574,
+      0.027795953434381654,
+      0.026566569277574982,
+      0.09017876132187366
+    ],
+    "ll": -2529.4275230328135,
+    "score": [
+      7.982931951033834e-06,
+      3.1966501090607835e-07,
+      -1.0587675625117754e-07,
+      -2.85333249694375e-06
+    ],
+    "n": 1500,
+    "information": [
+      [
+        1364.4344311913057,
+        387.28674970020745,
+        -184.1040094133318,
+        -137.26812831621805
+      ],
+      [
+        387.28674970020745,
+        1418.7202550591505,
+        7.746197097438099,
+        -1.0154446811528608
+      ],
+      [
+        -184.1040094133318,
+        7.746197097438099,
+        1446.3300036831508,
+        5.0835131907489695
+      ],
+      [
+        -137.26812831621805,
+        -1.0154446811528608,
+        5.0835131907489695,
+        138.04022495243447
+      ]
+    ],
+    "covariance": [
+      [
+        0.0009090376106627442,
+        -0.0002481310826574493,
+        0.0001138847164934366,
+        0.0008979338709481256
+      ],
+      [
+        -0.00024813108265744926,
+        0.0007726150273263132,
+        -3.487990617693277e-05,
+        -0.00023977524682859715
+      ],
+      [
+        0.00011388471649343658,
+        -3.4879906176932776e-05,
+        0.000705782603180191,
+        8.699977193416799e-05
+      ],
+      [
+        0.0008979338709481256,
+        -0.0002397752468285971,
+        8.699977193416797e-05,
+        0.008132208993547458
+      ]
+    ],
+    "information_eigenvalues": [
+      121.16589192757098,
+      972.77946783813,
+      1447.2364850661406,
+      1826.3430700541994
+    ],
+    "covariance_eigenvalues": [
+      0.0005475422533677217,
+      0.0006909720770025351,
+      0.0010279822231675628,
+      0.008253147681178885
+    ],
+    "inverse_residual": 2.7755575615628914e-17,
+    "convergence": {
+      "converged": true,
+      "iterations": 11,
+      "tolerance": 1e-08,
+      "criterion": "maximum absolute natural-parameter score per observation (beta and ancillary)"
+    },
+    "information_matrix": "observed",
+    "alpha_estimated": true,
+    "ancillary": [
+      {
+        "name": "lndelta",
+        "estimate": -0.005608975720298626,
+        "std_error": 0.0906859929998805,
+        "conf_low": -0.18335025590231585,
+        "conf_high": 0.17213230446171862,
+        "scale": "log"
+      },
+      {
+        "name": "delta",
+        "estimate": 0.9944067252149127,
+        "std_error": 0.09017876132187366,
+        "conf_low": 0.8324765248509843,
+        "conf_high": 1.1878349786856186,
+        "scale": "natural"
+      }
+    ],
+    "strict_json": true
+  },
+  "boundary_constant": {
+    "returned": false,
+    "message": "NB_INFERENCE_UNCERTIFIED: regular interior inference is unavailable; maximum absolute natural-parameter score per observation=0.013047503308911673 exceeds tolerance=1e-08. Optimizer log-coordinate stopping does not certify this point."
+  },
+  "fractional_fixed": {
+    "returned": true,
+    "params": [
+      0.554012805943494,
+      0.3236619397308465,
+      -0.1709455600904584
+    ],
+    "se": [
+      0.030417146259706165,
+      0.03052283044564355,
+      0.030967194708885346
+    ],
+    "ll": -2099.695127550683,
+    "score": [
+      -3.339550858072471e-13,
+      -2.2639667918156192e-12,
+      -2.7782220968219917e-12
+    ],
+    "n": 1200,
+    "information": [
+      [
+        1118.1125840608527,
+        183.4095696409871,
+        -89.41238393204847
+      ],
+      [
+        183.40956964098712,
+        1103.6867785750248,
+        -30.11727063012375
+      ],
+      [
+        -89.41238393204848,
+        -30.11727063012374,
+        1050.1610047132822
+      ]
+    ],
+    "covariance": [
+      [
+        0.0009252027865843568,
+        -0.0001517184550021642,
+        7.442215112675541e-05
+      ],
+      [
+        -0.0001517184550021642,
+        0.0009316431784135048,
+        1.380077999631532e-05
+      ],
+      [
+        7.442215112675544e-05,
+        1.3800779996315314e-05,
+        0.0009589671481380165
+      ]
+    ],
+    "information_eigenvalues": [
+      913.5535914306532,
+      1036.728203900799,
+      1321.6785720177081
+    ],
+    "covariance_eigenvalues": [
+      0.0007566136133034029,
+      0.0009645729673769796,
+      0.0010946265324554953
+    ],
+    "inverse_residual": 2.7755575615628914e-17,
+    "convergence": {
+      "converged": true,
+      "iterations": 10,
+      "tolerance": 1e-12,
+      "criterion": "absolute parameter change"
+    },
+    "information_matrix": "observed",
+    "alpha_estimated": false,
+    "ancillary": [],
+    "strict_json": true
+  },
+  "fractional_glm": {
+    "returned": true,
+    "params": [
+      0.554012805943494,
+      0.3236619397308465,
+      -0.1709455600904584
+    ],
+    "se": [
+      0.0304158292994835,
+      0.03023550390975323,
+      0.03056524208842346
+    ],
+    "ll": -2099.695127550683,
+    "score": [
+      -3.339550858072471e-13,
+      -2.2639667918156192e-12,
+      -2.7782220968219917e-12
+    ],
+    "n": 1200,
+    "information": [
+      [
+        1118.067227580616,
+        183.99365376809072,
+        -88.46725624177884
+      ],
+      [
+        183.99365376809072,
+        1124.1736686792972,
+        -9.357856183953464
+      ],
+      [
+        -88.46725624177886,
+        -9.357856183953468,
+        1077.4203240645431
+      ]
+    ],
+    "covariance": [
+      [
+        0.0009251226719753188,
+        -0.0001507935289341537,
+        7.465235110477153e-05
+      ],
+      [
+        -0.00015079352893415372,
+        0.0009141856966767028,
+        -4.441601278541784e-06
+      ],
+      [
+        7.465235110477155e-05,
+        -4.441601278541785e-06,
+        0.0009342340239239329
+      ]
+    ],
+    "information_eigenvalues": [
+      915.7476144059387,
+      1079.0407933200581,
+      1324.872812598459
+    ],
+    "covariance_eigenvalues": [
+      0.0007547894337409719,
+      0.0009267490220857538,
+      0.0010920039367492286
+    ],
+    "inverse_residual": 2.220446049250313e-16,
+    "convergence": {
+      "converged": true,
+      "iterations": 10,
+      "tolerance": 1e-12,
+      "criterion": "absolute parameter change"
+    },
+    "information_matrix": "expected",
+    "alpha_estimated": false,
+    "ancillary": [],
+    "strict_json": true
+  },
+  "fractional_joint": {
+    "returned": false,
+    "message": "NB_COUNTS_INVALID: response must contain finite nonnegative integer counts."
+  },
+  "invalid_poisson_-1.0": {
+    "returned": false,
+    "message": "GLM_RESPONSE_INVALID: estimation response is outside the family's finite support."
+  },
+  "invalid_negative_binomial_-1.0": {
+    "returned": false,
+    "message": "GLM_RESPONSE_INVALID: estimation response is outside the family's finite support."
+  },
+  "invalid_fixed_-1.0": {
+    "returned": false,
+    "message": "NB_COUNTS_INVALID: estimation response is outside the family's finite support."
+  },
+  "invalid_poisson_inf": {
+    "returned": false,
+    "message": "GLM_RESPONSE_INVALID: estimation response is outside the family's finite support."
+  },
+  "invalid_negative_binomial_inf": {
+    "returned": false,
+    "message": "GLM_RESPONSE_INVALID: estimation response is outside the family's finite support."
+  },
+  "invalid_fixed_inf": {
+    "returned": false,
+    "message": "NB_COUNTS_INVALID: estimation response is outside the family's finite support."
+  },
+  "invalid_poisson_-inf": {
+    "returned": false,
+    "message": "GLM_RESPONSE_INVALID: estimation response is outside the family's finite support."
+  },
+  "invalid_negative_binomial_-inf": {
+    "returned": false,
+    "message": "GLM_RESPONSE_INVALID: estimation response is outside the family's finite support."
+  },
+  "invalid_fixed_-inf": {
+    "returned": false,
+    "message": "NB_COUNTS_INVALID: estimation response is outside the family's finite support."
+  }
+}

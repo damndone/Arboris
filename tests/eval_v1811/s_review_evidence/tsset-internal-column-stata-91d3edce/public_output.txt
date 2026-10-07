@@ -1,0 +1,88 @@
+. do analysis.do 
+
+. * Workbench 1.8.11
+. * project: review
+. * run: tsset-internal-column
+. * lineage_hash: 4444444444444444444444444444444444444444444444444444444444444
+> 444
+. * Coverage
+. * result | data.tsset | native | 
+. version 18
+
+. set more off
+
+. set type double
+
+. capture program drop wb_repost
+
+. program define wb_repost, eclass
+  1.     args beta covariance
+  2.     ereturn repost b=`beta' V=`covariance', rename
+  3. end
+
+. capture program drop wb_sha
+
+. program define wb_sha
+  1.     args filename expected
+  2.     tempfile digestfile
+  3.     shell shasum -a 256 "`filename'" > "`digestfile'"
+  4.     tempname fh
+  5.     file open `fh' using "`digestfile'", read text
+  6.     file read `fh' line
+  7.     file close `fh'
+  8.     if substr("`line'",1,64) != "`expected'" {
+  9.         display as error "SHA256 mismatch"
+ 10.         exit 9
+ 11.     }
+ 12. end
+
+. 
+. wb_sha "data.csv" "939eb0dbfb058ae46a294f9560682d2169e55d365d0a4255344bb1aba7
+> a21853"
+
+
+. frame create wb_src0
+
+. frame change wb_src0
+
+. import delimited using "data.csv", asdouble clear case(preserve)
+(encoding automatically selected: ISO-8859-2)
+(2 vars, 2 obs)
+
+. frame copy wb_src0 wb1
+
+. frame change wb1
+
+. tempvar wb_time
+
+. capture confirm string variable time
+
+. if !_rc generate double `wb_time' = cond(missing(clock(time, "YMDhms")), cloc
+> k(time, "YMD"), clock(time, "YMDhms"))
+
+. else generate double `wb_time' = time
+
+. assert !missing(`wb_time')
+
+. sort  `wb_time'
+
+. drop `wb_time'
+
+. scalar wb_number_0 = _N
+
+. unab wb_columns: _all
+
+. scalar wb_check_1 = (`"`wb_columns'"' == "time __wb_time")
+
+. * Closing self-checks
+. assert !missing(wb_number_0) & abs(wb_number_0-(2)) <= 0.0+0.0*abs(2)
+
+. assert wb_check_1 == 1
+
+. 
+. frame wb1: export delimited using "actual.csv", replace
+(file actual.csv not found)
+file actual.csv saved
+
+. 
+end of do-file

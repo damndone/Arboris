@@ -1,0 +1,25 @@
+/Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/genmod/families/varfuncs.py:265: RuntimeWarning: overflow encountered in multiply
+  return p + self.alpha*p**2
+/Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/genmod/families/family.py:1406: RuntimeWarning: divide by zero encountered in log
+  resid_dev -= endog_alpha * np.log(endog_alpha / mu_alpha)
+/Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/genmod/families/varfuncs.py:265: RuntimeWarning: overflow encountered in square
+  return p + self.alpha*p**2
+/Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/genmod/families/family.py:143: RuntimeWarning: invalid value encountered in multiply
+  return 1. / (self.link.deriv(mu)**2 * self.variance(mu))
+Traceback (most recent call last):
+  File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/review_convergence_replay/producer_green01_extreme_finite_alpha_python/analysis.py", line 54, in <module>
+    wb_fit = smf.glm("Q('y') ~ Q('x1') + Q('x2')", data=data['source'], family=families.NegativeBinomial(alpha=1e+308)).fit(maxiter=1000,tol=1e-12,tol_criterion="params",scale=1)
+  File "/Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/genmod/generalized_linear_model.py", line 1192, in fit
+    return self._fit_irls(start_params=start_params, maxiter=maxiter,
+           ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                          tol=tol, scale=scale, cov_type=cov_type,
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                          cov_kwds=cov_kwds, use_t=use_t, **kwargs)
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/genmod/generalized_linear_model.py", line 1330, in _fit_irls
+    wls_mod = reg_tools._MinimalWLS(wlsendog, wlsexog,
+                                    self.weights, check_endog=True,
+                                    check_weights=True)
+  File "/Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/regression/_tools.py", line 48, in __init__
+    raise ValueError(self.msg.format('weights'))
+ValueError: NaN, inf or invalid value detected in weights, estimation infeasible.

@@ -1,0 +1,36 @@
+{
+  "owner": "/private/tmp/v1811-evaluation-8d8a2fd4c7d44af693b267e6d893d16f-r01/e04-native0/public-post/runs/20261005_091807_115397_a5e99ccc",
+  "expected": {
+    "estimate": 0.44314263733917286,
+    "std_error": 0.03654411174540423
+  },
+  "actual": {
+    "schema_version": "workbench.postestimation.result/v1",
+    "model_run_id": "20261005_091807_115397_a5e99ccc",
+    "operation": "margins",
+    "model_id": "glm_1",
+    "model_type": "glm:poisson",
+    "covariance_estimator": "nonrobust",
+    "at": "means",
+    "label": "marginal effect at the means",
+    "scale": "response",
+    "inverse_link": "log",
+    "nobs": 850,
+    "distribution": "z",
+    "df": null,
+    "level": 0.95,
+    "effects": [
+      {
+        "variable": "x1",
+        "estimate": 0.44314263650688457,
+        "std_error": 0.0365441115419899,
+        "statistic": 12.12623916161445,
+        "p_value": 7.669131592801302e-34,
+        "ci": [
+          0.37151749403756984,
+          0.5147677789761993
+        ]
+      }
+    ]
+  }
+}

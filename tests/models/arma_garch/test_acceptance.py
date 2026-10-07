@@ -24,6 +24,41 @@ def _metrics(*, validation_n: int = 30, successful_n: int = 30):
     )
 
 
+def test_ljung_box_acceptance_uses_the_selection_threshold() -> None:
+    from workbench.engine.packs.arma_garch.runner import _has_significant_p_value
+    from workbench.engine.packs.arma_garch.statistics import ljung_box_warnings
+
+    rows = ({"lag": 10, "p_value": 0.03, "status": "ok"},)
+    assert _has_significant_p_value(rows) is False
+    assert ljung_box_warnings(rows) == []
+    assert _has_significant_p_value(({"lag": 10, "p_value": 0.009},)) is True
+    assert _has_significant_p_value(({"lag": 5, "p_value": None},)) is None
+
+
+def test_partial_ljung_box_evidence_limits_acceptance_to_available_lags() -> None:
+    from workbench.engine.packs.arma_garch.acceptance import assess_acceptance
+
+    result = assess_acceptance(
+        forecast_metrics=_metrics(), split_forecast_status="pending",
+        estimation_converged=True, finite_parameters=True,
+        variance_parameters_valid=True, mean_residual_autocorrelation=False,
+        squared_standardized_residual_arch=False, normality_rejected=False,
+        volatility_value_added=True,
+        mean_residual_diagnostics=(
+            {"lag": 5, "p_value": None, "status": "unavailable"},
+            {"lag": 10, "p_value": 0.3, "status": "ok"},
+            {"lag": 20, "p_value": 0.4, "status": "ok"},
+        ),
+    )
+    dimension = result.dimensions["mean_adequacy"]
+    assert dimension.status == "accepted_with_warnings"
+    assert "unavailable lags: 5" in " ".join(dimension.reasons)
+    assert "based only on lags: 10, 20" in " ".join(dimension.reasons)
+    assert dimension.evidence["ljung_box_threshold"] == 0.01
+    assert dimension.evidence["available_lags"] == (10, 20)
+    assert dimension.evidence["unavailable_lags"] == (5,)
+
+
 def test_acceptance_rejects_invalid_variance_parameters() -> None:
     from workbench.engine.packs.arma_garch.acceptance import assess_acceptance
 

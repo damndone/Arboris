@@ -1,0 +1,145 @@
+{
+  "schema_version": 1,
+  "project_id": "fixture-project",
+  "run_id": "fixture-run",
+  "workbench_version": "1.8.11",
+  "lineage_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "sources": [
+    {
+      "source_id": "source:1",
+      "format": "csv",
+      "filename": "data.csv",
+      "sha256": "dc82ffc5e7649b9ff9886d1c55818a10888175a1f783648d8638a4a38a677094",
+      "read_options": {}
+    }
+  ],
+  "steps": [
+    {
+      "step_id": "step:subset",
+      "kind": "data_operation",
+      "operation": "data.subset",
+      "label": "Keep ages 25 to 55",
+      "parameters": {
+        "filters": [
+          {
+            "column": "age",
+            "op": "between",
+            "value": [
+              25,
+              55
+            ]
+          }
+        ]
+      },
+      "inputs": [
+        "source:1"
+      ],
+      "output_dataset": "d1",
+      "expected": {},
+      "tolerances": {},
+      "seed": null,
+      "snapshot": null
+    },
+    {
+      "step_id": "step:recode",
+      "kind": "data_operation",
+      "operation": "data.recode",
+      "label": "Age group",
+      "parameters": {
+        "column": "age",
+        "output": "age_group",
+        "rules": [
+          {
+            "from": {
+              "low": 25,
+              "high": 39
+            },
+            "to": 1
+          },
+          {
+            "from": {
+              "low": 40,
+              "high": 55
+            },
+            "to": 2
+          }
+        ]
+      },
+      "inputs": [
+        "step:subset"
+      ],
+      "output_dataset": "d2",
+      "expected": {},
+      "tolerances": {},
+      "seed": null,
+      "snapshot": null
+    },
+    {
+      "step_id": "step:ols",
+      "kind": "model",
+      "operation": "model.ols",
+      "label": "OLS, clustered by firm",
+      "parameters": {
+        "model_type": "ols",
+        "y": "wage",
+        "x": [
+          "educ",
+          "age",
+          "age_group",
+          "region"
+        ],
+        "categorical_x": [
+          "region"
+        ],
+        "covariance": "clustered",
+        "cluster": "firm",
+        "hac_lags": null,
+        "weights": null,
+        "entity": null,
+        "time": null,
+        "model_options": {}
+      },
+      "inputs": [
+        "step:recode"
+      ],
+      "output_dataset": null,
+      "expected": {},
+      "tolerances": {},
+      "seed": null,
+      "snapshot": null
+    },
+    {
+      "step_id": "step:wald",
+      "kind": "postestimation",
+      "operation": "postestimation.wald",
+      "label": "educ = age = 0",
+      "parameters": {
+        "models": [
+          "step:ols"
+        ],
+        "constraints": [
+          {
+            "terms": {
+              "educ": 1
+            },
+            "value": 0
+          },
+          {
+            "terms": {
+              "age": 1
+            },
+            "value": 0
+          }
+        ]
+      },
+      "inputs": [
+        "step:ols"
+      ],
+      "output_dataset": null,
+      "expected": {},
+      "tolerances": {},
+      "seed": null,
+      "snapshot": null
+    }
+  ]
+}

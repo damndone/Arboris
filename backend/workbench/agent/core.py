@@ -906,8 +906,7 @@ class AgentCore:
             )
             self._active_message_started = True
 
-        # A budget stop still owes the user an explanation; other errors keep
-        # the empty content their callers already handle.
+        # Budget stops and timeouts owe the user a visible explanation.
         content = (
             budget_exhausted_message(
                 detect_language(getattr(self, "_user_text", None)),
@@ -916,6 +915,8 @@ class AgentCore:
                 getattr(self, "_last_tool_failure", None),
             )
             if error in {"max_steps_exceeded", "repeated_tool_call_limit"}
+            else provider_failure_message(detect_language(getattr(self, "_user_text", None)), error)
+            if error == "agent_timeout"
             else ""
         )
         entry = self.repository.append(

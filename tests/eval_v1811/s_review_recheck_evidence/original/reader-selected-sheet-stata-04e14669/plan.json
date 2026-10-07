@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "project_id": "review",
+  "run_id": "selected-sheet",
+  "workbench_version": "1.8.11",
+  "lineage_hash": "6666666666666666666666666666666666666666666666666666666666666666",
+  "sources": [
+    {
+      "source_id": "source",
+      "format": "xlsx",
+      "filename": "data.xlsx",
+      "sha256": "556c1e00b493dbb8c32c5cee748dba23ee37f3ad860eaef9610c3c04715af8fc",
+      "read_options": {
+        "sheet_name": "Chosen",
+        "transpose": false
+      }
+    }
+  ],
+  "steps": [
+    {
+      "step_id": "result",
+      "kind": "data_operation",
+      "operation": "data.subset",
+      "label": "",
+      "parameters": {
+        "columns": [
+          "x"
+        ]
+      },
+      "inputs": [
+        "source"
+      ],
+      "output_dataset": null,
+      "expected": {
+        "nrows": 3,
+        "columns": [
+          "x"
+        ]
+      },
+      "tolerances": {},
+      "seed": null,
+      "snapshot": null
+    }
+  ]
+}

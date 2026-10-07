@@ -1,0 +1,3 @@
+{
+  "error": "NB_INFERENCE_UNCERTIFIED: regular interior inference is unavailable; maximum absolute natural-parameter score per observation=0.49999999872484763 exceeds tolerance=1e-08. Optimizer log-coordinate stopping does not certify this point."
+}

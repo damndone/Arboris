@@ -16,6 +16,8 @@ import { validatePanelPrediction } from "../App";
 import { ModelTypeSelect } from "./ModelTypeSelect";
 import { ImputationControls } from "./ImputationControls";
 import { PanelControls } from "./PanelControls";
+import { CountModelControls, isCountModelType, buildCountModelOptions,
+  countModelValidationError, emptyCountOptions, type CountModelOptions } from "./CountModelControls";
 import { LmmControls, type LmmControlValue } from "./LmmControls";
 import { PredictionControls } from "./PredictionControls";
 import { IVControls, type IVRoleValue } from "./IVControls";
@@ -98,6 +100,7 @@ export function RunForm(props: RunFormProps) {
 
   const [mode, setMode] = useState("auto");
   const [modelType, setModelType] = useState("auto");
+  const [countOptions, setCountOptions] = useState<CountModelOptions>(emptyCountOptions);
   // V1.5.4.1: imputation method key (null = not requested). Driven by the
   // same `capabilities` manifest as ModelTypeSelect.
   const [imputationMethod, setImputationMethod] = useState<string | null>(null);
@@ -291,6 +294,10 @@ export function RunForm(props: RunFormProps) {
   ]);
 
   const runErrors: Record<string, string> = {};
+  if (isCountModelType(modelType)) {
+    const error = countModelValidationError(modelType, countOptions);
+    if (error) runErrors.countOptions = error;
+  }
   if (projectRoot.trim() === "") runErrors.projectRoot = "Create a project first";
   if (isArmaGarch) {
     armaGarchValidationErrors(armaGarchValue).forEach((error, index) => {
@@ -485,7 +492,9 @@ export function RunForm(props: RunFormProps) {
           honestDid: usesCsParams ? csValue.honestDid : undefined,
           didTreatmentPath: isDcdh ? dcdhValue.treatmentPath : undefined,
           modelOptions:
-            modelType === "linear_mixed_effects"
+            isCountModelType(modelType)
+              ? buildCountModelOptions(modelType, countOptions)
+              : modelType === "linear_mixed_effects"
               ? lmmValue
               : isArmaGarch
                 ? buildArmaGarchModelOptions(
@@ -630,6 +639,10 @@ export function RunForm(props: RunFormProps) {
               )}
             </>
           )}
+          {isCountModelType(modelType) && <>
+            <CountModelControls modelType={modelType} value={countOptions} onChange={setCountOptions}/>
+            {runErrors.countOptions && <span className="field-error">{runErrors.countOptions}</span>}
+          </>}
           {modelType === "anova" && (
             <AnovaControls
               columns={columnNames}

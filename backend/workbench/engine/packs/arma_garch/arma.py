@@ -17,8 +17,10 @@ from workbench.contracts.common.envelope import freeze_json
 from workbench.engine.packs.arma_garch.split import FrozenTrainValidationSplit
 from workbench.engine.packs.arma_garch.errors import ArmaGarchDiagnostic, diagnostic
 from workbench.engine.packs.arma_garch.statistics import (
+    LJUNG_BOX_SIGNIFICANCE_LEVEL,
     calculate_aicc,
     ljung_box_results,
+    ljung_box_warnings,
     modelling_warnings,
 )
 from workbench.engine.packs.arma_garch.transforms import TRANSFORMED_VALUE_COLUMN
@@ -57,7 +59,7 @@ class ArmaCandidateResult:
     aicc: float | None
     bic: float | None
     residual_variance: float | None
-    ljung_box_results: tuple[Mapping[str, float | int | None], ...]
+    ljung_box_results: tuple[Mapping[str, object], ...]
     warnings: tuple[str, ...]
     failure_code: str | None
     elapsed_seconds: float
@@ -168,6 +170,8 @@ def enumerate_arma_candidates(
 def fit_arma_candidate(
     values: np.ndarray,
     spec: ArmaCandidateSpec,
+    *,
+    selection_mode: str = "auto",
 ) -> ArmaCandidateResult:
     """Fit one ARMA candidate; optimizer failures become table rows."""
 
@@ -230,7 +234,9 @@ def fit_arma_candidate(
             stationary=stationary,
             invertible=invertible,
             ljung_box=ljung_box,
+            selection_mode=selection_mode,
         )
+        captured.extend(ljung_box_warnings(ljung_box))
         return ArmaCandidateResult(
             candidate_id=spec.candidate_id,
             p=spec.p,
@@ -274,16 +280,20 @@ def search_arma_candidates(
     *,
     checkpoint: Callable[[], None] | None = None,
 ) -> ArmaSearchResult:
-    """Fit the bounded grid once using only the frozen training values."""
+    """Fit the bounded grid once on the declared frozen estimation scope."""
 
-    training = split.training_view
+    training = split.estimation_view
     values = training[TRANSFORMED_VALUE_COLUMN].to_numpy(dtype=float, copy=True)
     results: list[ArmaCandidateResult] = []
     for spec in enumerate_arma_candidates(contract):
         if checkpoint is not None:
             checkpoint()
         try:
-            result = fit_arma_candidate(values.copy(), spec)
+            result = (
+                fit_arma_candidate(values.copy(), spec, selection_mode="manual")
+                if contract.selection_mode == "manual"
+                else fit_arma_candidate(values.copy(), spec)
+            )
         except Exception as exc:
             result = _failed_candidate(
                 spec,
@@ -292,7 +302,7 @@ def search_arma_candidates(
                 elapsed_seconds=0.0,
             )
         results.append(result)
-    selection = select_arma_candidate(tuple(results))
+    selection = select_arma_candidate(tuple(results), selection_mode=contract.selection_mode)
     blocking_diagnostic = (
         None
         if selection.selected_candidate_id is not None
@@ -315,10 +325,15 @@ def select_arma_candidate(
     candidates: Sequence[ArmaCandidateResult],
     *,
     delta_aicc_threshold: float = 2.0,
+    selection_mode: str = "auto",
 ) -> ArmaSelection:
     """Apply validity gates, then AICc shortlist and parsimony selection."""
 
-    eligible = [candidate for candidate in candidates if _eligible(candidate)]
+    eligible = [
+        candidate
+        for candidate in candidates
+        if _eligible(candidate, selection_mode=selection_mode)
+    ]
     excluded = tuple(
         sorted(
             candidate.candidate_id
@@ -440,7 +455,8 @@ def _candidate_failure_code(
     finite_parameters: bool,
     stationary: bool,
     invertible: bool,
-    ljung_box: tuple[Mapping[str, float | int | None], ...],
+    ljung_box: tuple[Mapping[str, object], ...],
+    selection_mode: str = "auto",
 ) -> str | None:
     if not converged:
         return "ARMA_NOT_CONVERGED"
@@ -450,15 +466,15 @@ def _candidate_failure_code(
         return "ARMA_NONSTATIONARY"
     if not invertible:
         return "ARMA_NONINVERTIBLE"
-    if any(
-        item["p_value"] is not None and float(item["p_value"]) < 0.01
+    if selection_mode != "manual" and any(
+        item["p_value"] is not None and float(item["p_value"]) < LJUNG_BOX_SIGNIFICANCE_LEVEL
         for item in ljung_box
     ):
         return "ARMA_RESIDUAL_AUTOCORRELATION"
     return None
 
 
-def _eligible(candidate: ArmaCandidateResult) -> bool:
+def _eligible(candidate: ArmaCandidateResult, *, selection_mode: str = "auto") -> bool:
     return bool(
         candidate.failure_code is None
         and candidate.converged
@@ -467,9 +483,12 @@ def _eligible(candidate: ArmaCandidateResult) -> bool:
         and candidate.invertible
         and candidate.aicc is not None
         and math.isfinite(candidate.aicc)
-        and not any(
-            item["p_value"] is not None and float(item["p_value"]) < 0.01
-            for item in candidate.ljung_box_results
+        and (
+            selection_mode == "manual"
+            or not any(
+                item["p_value"] is not None and float(item["p_value"]) < LJUNG_BOX_SIGNIFICANCE_LEVEL
+                for item in candidate.ljung_box_results
+            )
         )
     )
 

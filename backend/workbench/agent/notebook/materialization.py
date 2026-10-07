@@ -854,7 +854,7 @@ class NotebookOptionMaterializer:
                 family_spec,
                 {"outcome": y, "predictors": x},
                 list(x),
-                str(model_params.get("covariance", "unadjusted")),
+                str(model_params.get("covariance") or family_contract.default_covariance),
             )
         model_params = {key: value for key, value in model_params.items() if key not in run_level}
         model_params.update(genesis_run_params(run_level))

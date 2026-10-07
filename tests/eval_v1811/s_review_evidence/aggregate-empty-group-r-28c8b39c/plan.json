@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "project_id": "review",
+  "run_id": "aggregate-empty-group",
+  "workbench_version": "1.8.11",
+  "lineage_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+  "sources": [
+    {
+      "source_id": "source",
+      "format": "csv",
+      "filename": "data.csv",
+      "sha256": "1609211b4fec4d01adf93da8d4bfbdaae21706bb8256859bb6c6da400fcc5c14",
+      "read_options": {}
+    }
+  ],
+  "steps": [
+    {
+      "step_id": "result",
+      "kind": "data_operation",
+      "operation": "data.aggregate",
+      "label": "",
+      "parameters": {
+        "group_by": [
+          "group"
+        ],
+        "aggregations": [
+          {
+            "column": "x",
+            "func": "min",
+            "output": "minimum"
+          },
+          {
+            "column": "x",
+            "func": "max",
+            "output": "maximum"
+          }
+        ]
+      },
+      "inputs": [
+        "source"
+      ],
+      "output_dataset": null,
+      "expected": {
+        "nrows": 2,
+        "columns": [
+          "group",
+          "minimum",
+          "maximum"
+        ]
+      },
+      "tolerances": {},
+      "seed": null,
+      "snapshot": null
+    }
+  ]
+}

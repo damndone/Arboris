@@ -1,0 +1,56 @@
+
+Fontconfig error: No writable cache directories
+	/opt/homebrew/var/cache/fontconfig
+	/Users/jiayuanren/.cache/fontconfig
+	/Users/jiayuanren/.fontconfig
+first three coefficients and SE (Workbench / R): [('Intercept', 0.4210052437400521, 0.421004806491937, 0.06192390917649085, 0.0619237585798245), ('x1', 0.37898457477130565, 0.378988576606836, 0.06423157733626034, 0.0642314345883351), ('x2', -0.22930643303336998, -0.229305872140697, 0.06134533797429939, 0.0613453191328153)]
+kernel settings: {'covariance_estimator': 'nonrobust', 'df_method': 'asymptotic', 'reference_distribution': 'z', 'df_resid': 447.0}
+max absolute differences: 4.001835530342834e-06 1.5059666634564817e-07
+F.
+=================================== FAILURES ===================================
+________________ test_coefficients_and_standard_errors_match_r _________________
+
+fitted = {'contract': 'workbench.inference_kernel.v1', 'model_id': 'glm_1', 'model_type': 'glm', 'param_names': ['Intercept', 'x1', 'x2'], ...}
+
+    def test_coefficients_and_standard_errors_match_r(fitted):
+        names = fitted["param_names"]
+        assert set(names) == set(ORACLE["coefficients"]), (names, ORACLE["coefficients"])
+        assert fitted["nobs"] == ORACLE["meta"]["n"]
+        rows = []
+        for index, term in enumerate(names):
+            rows.append((term, fitted["params"][index], ORACLE["coefficients"][term],
+                         math.sqrt(fitted["vcov"][index][index]), ORACLE["std_error"][term]))
+        print("first three coefficients and SE (Workbench / R):", rows[:3])
+        print("kernel settings:", {key: fitted.get(key) for key in (
+            "covariance_estimator", "df_method", "reference_distribution", "df_resid")})
+        print("max absolute differences:", max(abs(a-b) for _,a,b,_,_ in rows),
+              max(abs(a-b) for _,_,_,a,b in rows))
+        errors = []
+        for term, estimate, reference, se, reference_se in rows:
+            if abs(estimate-reference) > 1e-8:
+                errors.append((term, "estimate", estimate, reference, estimate-reference))
+            # LMM's 1e-4 allowance is exclusively for REML optimizer differences.
+            if abs(se-reference_se) > 1e-06:
+                errors.append((term, "std_error", se, reference_se, se-reference_se))
+>       assert not errors, errors
+E       AssertionError: [('Intercept', 'estimate', 0.4210052437400521, 0.421004806491937, 4.3724811510381656e-07), ('x1', 'estimate', 0.378984...6606836, -4.001835530342834e-06), ('x2', 'estimate', -0.22930643303336998, -0.229305872140697, -5.608926729738783e-07)]
+E       assert not [('Intercept', 'estimate', 0.4210052437400521, 0.421004806491937, 4.3724811510381656e-07), ('x1', 'estimate', 0.378984...6606836, -4.001835530342834e-06), ('x2', 'estimate', -0.22930643303336998, -0.229305872140697, -5.608926729738783e-07)]
+
+tests/test_admission_oracle_glm_negative_binomial.py:45: AssertionError
+------------------------------ Captured log setup ------------------------------
+WARNING  matplotlib:__init__.py:577 /Users/jiayuanren/.matplotlib is not a writable directory
+WARNING  matplotlib:__init__.py:593 Matplotlib created a temporary cache directory at /var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/matplotlib-ktw635zb because there was an issue with the default path ({configdir}); it is highly recommended to set the MPLCONFIGDIR environment variable to a writable directory, in particular to speed up the import of Matplotlib and to better support multiprocessing.
+WARNING  matplotlib.font_manager:font_manager.py:1249 Matplotlib is building the font cache; this may take a moment.
+=============================== warnings summary ===============================
+tests/test_admission_oracle_glm_negative_binomial.py::test_coefficients_and_standard_errors_match_r
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/genmod/families/family.py:1367: ValueWarning: Negative binomial dispersion parameter alpha not set. Using default value alpha=1.0.
+    warnings.warn("Negative binomial dispersion parameter alpha not "
+
+tests/test_admission_oracle_glm_negative_binomial.py::test_coefficients_and_standard_errors_match_r
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/genmod/generalized_linear_model.py:1923: FutureWarning: The bic value is computed using the deviance formula. After 0.13 this will change to the log-likelihood based formula. This change has no impact on the relative rank of models compared using BIC. You can directly access the log-likelihood version using the `bic_llf` attribute. You can suppress this message by calling statsmodels.genmod.generalized_linear_model.SET_USE_BIC_LLF with True to get the LLF-based version now or False to retainthe deviance version.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_admission_oracle_glm_negative_binomial.py::test_coefficients_and_standard_errors_match_r
+1 failed, 1 passed, 2 warnings in 10.40s

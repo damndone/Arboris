@@ -1,0 +1,9 @@
+Traceback (most recent call last):
+  File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_python_True_85f0cc15c6/analysis.py", line 58, in <module>
+    assert np.isfinite(wb_fit.params).all() and np.isfinite(wb_fit.cov_params()).all()
+                                                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/pandas/core/generic.py", line 1501, in __bool__
+    raise ValueError(
+    ...<2 lines>...
+    )
+ValueError: The truth value of a Series is ambiguous. Use a.empty, a.bool(), a.item(), a.any() or a.all().

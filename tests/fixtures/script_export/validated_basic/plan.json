@@ -1,0 +1,204 @@
+{
+  "schema_version": 1,
+  "project_id": "fixture-project",
+  "run_id": "fixture-run",
+  "workbench_version": "1.8.11",
+  "lineage_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "sources": [
+    {
+      "source_id": "source:1",
+      "format": "csv",
+      "filename": "data.csv",
+      "sha256": "dc82ffc5e7649b9ff9886d1c55818a10888175a1f783648d8638a4a38a677094",
+      "read_options": {}
+    }
+  ],
+  "steps": [
+    {
+      "step_id": "step:subset",
+      "kind": "data_operation",
+      "operation": "data.subset",
+      "label": "Keep ages 25 to 55",
+      "parameters": {
+        "filters": [
+          {
+            "column": "age",
+            "op": "between",
+            "value": [
+              25,
+              55
+            ]
+          }
+        ],
+        "columns": [
+          "id",
+          "firm",
+          "age",
+          "educ",
+          "region",
+          "wage"
+        ]
+      },
+      "inputs": [
+        "source:1"
+      ],
+      "output_dataset": "d1",
+      "expected": {
+        "nrows": 374,
+        "columns": [
+          "id",
+          "firm",
+          "age",
+          "educ",
+          "region",
+          "wage"
+        ]
+      },
+      "tolerances": {},
+      "seed": null,
+      "snapshot": null
+    },
+    {
+      "step_id": "step:recode",
+      "kind": "data_operation",
+      "operation": "data.recode",
+      "label": "Age group",
+      "parameters": {
+        "column": "age",
+        "output": "age_group",
+        "rules": [
+          {
+            "from": {
+              "low": 25,
+              "high": 39
+            },
+            "to": 1
+          },
+          {
+            "from": {
+              "low": 40,
+              "high": 55
+            },
+            "to": 2
+          }
+        ]
+      },
+      "inputs": [
+        "step:subset"
+      ],
+      "output_dataset": "d2",
+      "expected": {
+        "nrows": 374,
+        "columns": [
+          "id",
+          "firm",
+          "age",
+          "educ",
+          "region",
+          "wage",
+          "age_group"
+        ]
+      },
+      "tolerances": {},
+      "seed": null,
+      "snapshot": null
+    },
+    {
+      "step_id": "step:ols",
+      "kind": "model",
+      "operation": "model.ols",
+      "label": "OLS, clustered by firm",
+      "parameters": {
+        "model_type": "ols",
+        "y": "wage",
+        "x": [
+          "educ",
+          "age",
+          "age_group",
+          "region"
+        ],
+        "categorical_x": [
+          "region"
+        ],
+        "covariance": "clustered",
+        "cluster": "firm",
+        "hac_lags": null,
+        "weights": null,
+        "entity": null,
+        "time": null,
+        "model_options": {}
+      },
+      "inputs": [
+        "step:recode"
+      ],
+      "output_dataset": null,
+      "expected": {
+        "nobs": 368,
+        "coefficients": {
+          "Intercept": 1.476111525279607,
+          "C(Q('region'))[T.north]": -0.12117350337143339,
+          "C(Q('region'))[T.south]": -0.2094250433328843,
+          "C(Q('region'))[T.west]": -0.16099337563024796,
+          "educ": 0.08130065224244855,
+          "age": 0.0040281644255432455,
+          "age_group": 0.021759128365677213
+        },
+        "std_errors": {
+          "Intercept": 0.22734577137866313,
+          "C(Q('region'))[T.north]": 0.09529187132344039,
+          "C(Q('region'))[T.south]": 0.08892559053438566,
+          "C(Q('region'))[T.west]": 0.08935301328837976,
+          "educ": 0.007800058781949661,
+          "age": 0.006937600305070096,
+          "age_group": 0.11050990245307929
+        }
+      },
+      "tolerances": {},
+      "seed": null,
+      "snapshot": null
+    },
+    {
+      "step_id": "step:wald",
+      "kind": "postestimation",
+      "operation": "postestimation.wald",
+      "label": "educ = age = 0",
+      "parameters": {
+        "models": [
+          "step:ols"
+        ],
+        "constraints": [
+          {
+            "terms": {
+              "educ": 1
+            },
+            "value": 0
+          },
+          {
+            "terms": {
+              "age": 1
+            },
+            "value": 0
+          }
+        ]
+      },
+      "inputs": [
+        "step:ols"
+      ],
+      "output_dataset": null,
+      "expected": {
+        "statistics": {
+          "test": {
+            "value": 54.741006828302886,
+            "df": 2,
+            "df_denominator": 39.0,
+            "p_value": 4.765624154540682e-12,
+            "distribution": "F"
+          }
+        }
+      },
+      "tolerances": {},
+      "seed": null,
+      "snapshot": null
+    }
+  ]
+}

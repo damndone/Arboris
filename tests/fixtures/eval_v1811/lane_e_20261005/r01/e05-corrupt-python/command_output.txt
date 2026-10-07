@@ -1,0 +1,7 @@
+Traceback (most recent call last):
+  File "/private/tmp/v1811-evaluation-8d8a2fd4c7d44af693b267e6d893d16f-r01/test_real_public_zip_path_runs2/changed/analysis.py", line 46, in <module>
+    data['source_82b3c8c1d9e8aa2c806987d4'] = wb_read('source_1ce21051b81091ccc6d9f8b2.dta', '1ce21051b81091ccc6d9f8b22102b1560bc1b11924f2076b1e94db0b3b002e2f', 'dta', {})
+                                              ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/private/tmp/v1811-evaluation-8d8a2fd4c7d44af693b267e6d893d16f-r01/test_real_public_zip_path_runs2/changed/analysis.py", line 26, in wb_read
+    raise AssertionError('SHA256 mismatch: ' + name)
+AssertionError: SHA256 mismatch: source_1ce21051b81091ccc6d9f8b2.dta

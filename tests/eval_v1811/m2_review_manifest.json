@@ -1,0 +1,426 @@
+{
+  "baseline": "6f0f87c6d8241a93d81e2c34f8ef8e9408a907b3",
+  "functional_tip": "cda5c2f14a82928826bae526d780201add0f30f2",
+  "branch": "lane/v1811-m2-negative-binomial",
+  "worktree": "/Users/jiayuanren/\u9879\u76ee\u89c4\u5212/.worktrees/codex-v1811-m2",
+  "runner_outside_owned_functions": "AST identical to baseline",
+  "producer_scope": "all changed files inside M2 work order",
+  "changed_paths": [
+    "backend/workbench/econometrics/count_models.py",
+    "backend/workbench/econometrics/runner.py",
+    "docs/superpowers/handoffs/2026-10-04-codex-v1811-m2-report.md",
+    "tests/fixtures/count_models/README.md",
+    "tests/fixtures/count_models/boundary_profile.R",
+    "tests/fixtures/count_models/boundary_profile.json",
+    "tests/fixtures/count_models/boundary_profile_stable.json",
+    "tests/fixtures/count_models/capture_evidence.py",
+    "tests/fixtures/count_models/direct-count-output.txt",
+    "tests/fixtures/count_models/final-focused-output.txt",
+    "tests/fixtures/count_models/generate_oracle.R",
+    "tests/fixtures/count_models/generate_oracle.py",
+    "tests/fixtures/count_models/glm_precision.R",
+    "tests/fixtures/count_models/glm_precision.json",
+    "tests/fixtures/count_models/reference-v2/nb1.csv",
+    "tests/fixtures/count_models/reference-v2/nb2.csv",
+    "tests/fixtures/count_models/reference-v2/poisson.csv",
+    "tests/fixtures/count_models/reference-v2/r.json",
+    "tests/fixtures/count_models/reference-v2/stata.json",
+    "tests/fixtures/count_models/reference-v2/stata_fixed/oracle.do",
+    "tests/fixtures/count_models/reference-v2/stata_fixed/oracle.log",
+    "tests/fixtures/count_models/reference-v2/stata_fixed/wb_results.tsv",
+    "tests/fixtures/count_models/reference-v2/stata_nb1/oracle.do",
+    "tests/fixtures/count_models/reference-v2/stata_nb1/oracle.log",
+    "tests/fixtures/count_models/reference-v2/stata_nb1/wb_results.tsv",
+    "tests/fixtures/count_models/reference-v2/stata_nb2/oracle.do",
+    "tests/fixtures/count_models/reference-v2/stata_nb2/oracle.log",
+    "tests/fixtures/count_models/reference-v2/stata_nb2/wb_results.tsv",
+    "tests/fixtures/count_models/reference-v2/stata_poisson/oracle.do",
+    "tests/fixtures/count_models/reference-v2/stata_poisson/oracle.log",
+    "tests/fixtures/count_models/reference-v2/stata_poisson/wb_results.tsv",
+    "tests/fixtures/count_models/reference-v3/nb1.csv",
+    "tests/fixtures/count_models/reference-v3/nb2.csv",
+    "tests/fixtures/count_models/reference-v3/poisson.csv",
+    "tests/fixtures/count_models/reference-v3/r.json",
+    "tests/fixtures/count_models/reference-v3/stata.json",
+    "tests/fixtures/count_models/reference-v3/stata_fixed/oracle.do",
+    "tests/fixtures/count_models/reference-v3/stata_fixed/oracle.log",
+    "tests/fixtures/count_models/reference-v3/stata_fixed/wb_results.tsv",
+    "tests/fixtures/count_models/reference-v3/stata_nb1/oracle.do",
+    "tests/fixtures/count_models/reference-v3/stata_nb1/oracle.log",
+    "tests/fixtures/count_models/reference-v3/stata_nb1/wb_results.tsv",
+    "tests/fixtures/count_models/reference-v3/stata_nb2/oracle.do",
+    "tests/fixtures/count_models/reference-v3/stata_nb2/oracle.log",
+    "tests/fixtures/count_models/reference-v3/stata_nb2/wb_results.tsv",
+    "tests/fixtures/count_models/reference-v3/stata_poisson/oracle.do",
+    "tests/fixtures/count_models/reference-v3/stata_poisson/oracle.log",
+    "tests/fixtures/count_models/reference-v3/stata_poisson/wb_results.tsv",
+    "tests/fixtures/count_models/reference/nb1.csv",
+    "tests/fixtures/count_models/reference/nb2.csv",
+    "tests/fixtures/count_models/reference/poisson.csv",
+    "tests/fixtures/count_models/reference/stata_nb2/oracle.do",
+    "tests/fixtures/count_models/reference/stata_nb2/oracle.log",
+    "tests/fixtures/count_models/reference/stata_nb2/wb_results.tsv",
+    "tests/fixtures/count_models/workbench_evidence.json",
+    "tests/test_count_models_boundary.py",
+    "tests/test_count_models_contract.py",
+    "tests/test_count_models_glm_precision.py",
+    "tests/test_count_models_performance.py"
+  ],
+  "contract_lock_verified": [
+    {
+      "path": "docs/superpowers/specs/2026-10-04-v1.8.11-lane-contracts.md",
+      "sha256": "14ac3849647e10cee38e2adfc1ed5002375f8c24f49c0dee35eb007e91fc6049",
+      "verified": true
+    },
+    {
+      "path": "backend/workbench/script_export/plan.py",
+      "sha256": "5cc33431693692348eab881d722145f081cf28f0dbf9011e2a752f5159636294",
+      "verified": true
+    },
+    {
+      "path": "backend/workbench/script_export/__init__.py",
+      "sha256": "ac80f52d70646b14e5266fe1b2dacacb500e075d6b795e2a53bf3aa1bb66a39b",
+      "verified": true
+    },
+    {
+      "path": "tests/test_script_export_plan_contract.py",
+      "sha256": "aae591553800460b6ef2b0948a344f7f6e41e774684aae0e26f936e1b2f864ba",
+      "verified": true
+    },
+    {
+      "path": "tests/fixtures/script_export/basic/plan.json",
+      "sha256": "10651da29e9bdcaf215a4c20dab1cac0ec267c60a477b503c9845bc47d0aeda5",
+      "verified": true
+    }
+  ],
+  "files": [
+    {
+      "path": "backend/workbench/econometrics/count_models.py",
+      "sha256": "ebe3530bab91a342f7ee1830dc0416e05c80f6b069b8ef483b319b0a0a0f7229"
+    },
+    {
+      "path": "backend/workbench/econometrics/runner.py",
+      "sha256": "9948cf3319691f2b193365b451c78209622efb35c4fa0618967dcddbf06f2f60"
+    },
+    {
+      "path": "docs/superpowers/handoffs/2026-10-04-codex-v1811-m2-report.md",
+      "sha256": "d080ee234316b35dfed4b26770a4f77520c6a417ed5a7825c521a3a5576a168a"
+    },
+    {
+      "path": "tests/fixtures/count_models/README.md",
+      "sha256": "e0c187e897a0206f3d841d425932736417e710e71d7eba431937e2aae6feb617"
+    },
+    {
+      "path": "tests/fixtures/count_models/boundary_profile.R",
+      "sha256": "c50edcea8ecd7a308ecabc2dd24043e220f7ac09439ce353056c790afa67ff55"
+    },
+    {
+      "path": "tests/fixtures/count_models/boundary_profile.json",
+      "sha256": "52ea402e443baf4a2e4c176f20e93671be76b8df88b3470415a1a15aa8206f25"
+    },
+    {
+      "path": "tests/fixtures/count_models/boundary_profile_stable.json",
+      "sha256": "f98366e54d0a75a0101af51513a89cc33c6c1d0e9d25291296478ab24c6bdd14"
+    },
+    {
+      "path": "tests/fixtures/count_models/capture_evidence.py",
+      "sha256": "5e2aeb89484d71e09dcfb1e8fdeffba36dfcf15c0d4c99fe50378a751c3c495d"
+    },
+    {
+      "path": "tests/fixtures/count_models/direct-count-output.txt",
+      "sha256": "c2cd1b8cd93dada8c203495e8428963aa46d6985c949a2f3abc0d2196147f712"
+    },
+    {
+      "path": "tests/fixtures/count_models/final-focused-output.txt",
+      "sha256": "1399177aad9eea0f1b84a52d6d29d17b9387a4b25a05fbc90376d532e63bc99c"
+    },
+    {
+      "path": "tests/fixtures/count_models/generate_oracle.R",
+      "sha256": "f32b1156fc7f9e22a969b7c31c6b3af5c78b848a52eb1d14333656b14fb3843c"
+    },
+    {
+      "path": "tests/fixtures/count_models/generate_oracle.py",
+      "sha256": "2850791c7ffae656b3d3d19f1717f11df16df64321918f11996bd6477dfc292a"
+    },
+    {
+      "path": "tests/fixtures/count_models/glm_precision.R",
+      "sha256": "b02b7cbab9db0026054225a892d3698a09a87df1937116f6c64d10648854a039"
+    },
+    {
+      "path": "tests/fixtures/count_models/glm_precision.json",
+      "sha256": "78b7686960beb5a3cf7b29d50f7403c1b4101824d215de7208a84312d7c93768"
+    },
+    {
+      "path": "tests/fixtures/count_models/reference-v2/nb1.csv",
+      "sha256": "be2371955d7a316f8ba759a7c75132a905391f61f790df038f492729fa15ed9e"
+    },
+    {
+      "path": "tests/fixtures/count_models/reference-v2/nb2.csv",
+      "sha256": "19a1c289412b41a05a8e7d418084eb30232bc2f239036dd41e3be4689db90c43"
+    },
+    {
+      "path": "tests/fixtures/count_models/reference-v2/poisson.csv",
+      "sha256": "54a08ab664e82c35dfaa02f69111063398994eacd0440881203beb79f0e04a1c"
+    },
+    {
+      "path": "tests/fixtures/count_models/reference-v2/r.json",
+      "sha256": "a7ce3b2ce3783919c1a6548fc13a384e9bfc6e5b855ef5d1addac43235a2b5e8"
+    },
+    {
+      "path": "tests/fixtures/count_models/reference-v2/stata.json",
+      "sha256": "9d045525900d5dcba3bb07e2276430be758b13d6030a56e9833cf7c00e4f5a07"
+    },
+    {
+      "path": "tests/fixtures/count_models/reference-v2/stata_fixed/oracle.do",
+      "sha256": "1c29c2e5f20b1e71a23e0798d2c6770bc89de7a5c61dac597b9ba9021b3ab4a1"
+    },
+    {
+      "path": "tests/fixtures/count_models/reference-v2/stata_fixed/oracle.log",
+      "sha256": "withheld-raw-sha256-f29c5e8d9f87b5653e282b56"
+    },
+    {
+      "path": "tests/fixtures/count_models/reference-v2/stata_fixed/wb_results.tsv",
+      "sha256": "f53b9f7b813c01775458c89195ae6d90cab73a19526f1faedca22815d2aa90b2"
+    },
+    {
+      "path": "tests/fixtures/count_models/reference-v2/stata_nb1/oracle.do",
+      "sha256": "4d8dcb47ca0eff4feea579ae087008e64626bf3f548a3f6f95f7ad4c8e708f78"
+    },
+    {
+      "path": "tests/fixtures/count_models/reference-v2/stata_nb1/oracle.log",
+      "sha256": "withheld-raw-sha256-7474e1dfaf9016fad7ffb261"
+    },
+    {
+      "path": "tests/fixtures/count_models/reference-v2/stata_nb1/wb_results.tsv",
+      "sha256": "16ffdcffd6950e23d70fe6bec34f52ee7e95fdd80fbe8a216550067e70d3a423"
+    },
+    {
+      "path": "tests/fixtures/count_models/reference-v2/stata_nb2/oracle.do",
+      "sha256": "b1a83bc93e4a0d053bd6fd0d177d10523ddfab5d40a1c3f25778f6e1db7b450f"
+    },
+    {
+      "path": "tests/fixtures/count_models/reference-v2/stata_nb2/oracle.log",
+      "sha256": "withheld-raw-sha256-72acc850f5dcbf0a5413841a"
+    },
+    {
+      "path": "tests/fixtures/count_models/reference-v2/stata_nb2/wb_results.tsv",
+      "sha256": "2540fac46b655468a6954e7388b92c40e5a8a2b319e0267be37fa25151d2f892"
+    },
+    {
+      "path": "tests/fixtures/count_models/reference-v2/stata_poisson/oracle.do",
+      "sha256": "14c1c0ba19eca4b3c800b44fa1b68519eafe7128be706b380c973ff9153514be"
+    },
+    {
+      "path": "tests/fixtures/count_models/reference-v2/stata_poisson/oracle.log",
+      "sha256": "withheld-raw-sha256-1962840554b5bb0c68a28734"
+    },
+    {
+      "path": "tests/fixtures/count_models/reference-v2/stata_poisson/wb_results.tsv",
+      "sha256": "abc4f90ca3b9ce5018fc1b13a2bffff07682db5f459fa3321f1956bdf7206d11"
+    },
+    {
+      "path": "tests/fixtures/count_models/reference-v3/nb1.csv",
+      "sha256": "be2371955d7a316f8ba759a7c75132a905391f61f790df038f492729fa15ed9e"
+    },
+    {
+      "path": "tests/fixtures/count_models/reference-v3/nb2.csv",
+      "sha256": "19a1c289412b41a05a8e7d418084eb30232bc2f239036dd41e3be4689db90c43"
+    },
+    {
+      "path": "tests/fixtures/count_models/reference-v3/poisson.csv",
+      "sha256": "a40ba1945dca20fce973b9ea82970710def5de86237d0f83b496d192d8bf728a"
+    },
+    {
+      "path": "tests/fixtures/count_models/reference-v3/r.json",
+      "sha256": "95833aa084367536e6e166d5cfa3dbd993c66e3402ef61cfc69d99f4da4ef8a0"
+    },
+    {
+      "path": "tests/fixtures/count_models/reference-v3/stata.json",
+      "sha256": "e2d1b91a2adafc60f9a4e5d7a2ad5902df97614d1ab1a7a02b73d0608e79e2c1"
+    },
+    {
+      "path": "tests/fixtures/count_models/reference-v3/stata_fixed/oracle.do",
+      "sha256": "217638e3658cc5cbfc771a2e81cf84e65e4b771e25719980ebff66cca052d664"
+    },
+    {
+      "path": "tests/fixtures/count_models/reference-v3/stata_fixed/oracle.log",
+      "sha256": "withheld-raw-sha256-2357006b97f43457b4802802"
+    },
+    {
+      "path": "tests/fixtures/count_models/reference-v3/stata_fixed/wb_results.tsv",
+      "sha256": "f53b9f7b813c01775458c89195ae6d90cab73a19526f1faedca22815d2aa90b2"
+    },
+    {
+      "path": "tests/fixtures/count_models/reference-v3/stata_nb1/oracle.do",
+      "sha256": "d9fba72415cb42351ea9d18c5046b21d7c330dec640eef16eb484d8c623b1665"
+    },
+    {
+      "path": "tests/fixtures/count_models/reference-v3/stata_nb1/oracle.log",
+      "sha256": "withheld-raw-sha256-a3608a601b860cac5f94a470"
+    },
+    {
+      "path": "tests/fixtures/count_models/reference-v3/stata_nb1/wb_results.tsv",
+      "sha256": "57231c15a428eaa553c084fc53aae49d8a5f82aa4509a9d1723676bdedb59145"
+    },
+    {
+      "path": "tests/fixtures/count_models/reference-v3/stata_nb2/oracle.do",
+      "sha256": "e94d27922de94680061c735fbf3c6341fc8371c0b0587b9cc53c21e96151a9ca"
+    },
+    {
+      "path": "tests/fixtures/count_models/reference-v3/stata_nb2/oracle.log",
+      "sha256": "withheld-raw-sha256-6b54643080870a2bca27eea8"
+    },
+    {
+      "path": "tests/fixtures/count_models/reference-v3/stata_nb2/wb_results.tsv",
+      "sha256": "7398b06b5d0de49fa1aa53a0a21a90bd18e79719bda2aecd04e28a865fd8f456"
+    },
+    {
+      "path": "tests/fixtures/count_models/reference-v3/stata_poisson/oracle.do",
+      "sha256": "65e45c979ad3cc129e8939579bf74d2c9aad97ccb3ff8e20aba33957788bdd27"
+    },
+    {
+      "path": "tests/fixtures/count_models/reference-v3/stata_poisson/oracle.log",
+      "sha256": "withheld-raw-sha256-4d4514f1f5b48a2c2ce0c167"
+    },
+    {
+      "path": "tests/fixtures/count_models/reference-v3/stata_poisson/wb_results.tsv",
+      "sha256": "5b09ad3d028e0cdf42b40a4ff81bbbcc0ae0d9d5f02aedad440fedf3f90fbf5b"
+    },
+    {
+      "path": "tests/fixtures/count_models/reference/nb1.csv",
+      "sha256": "be2371955d7a316f8ba759a7c75132a905391f61f790df038f492729fa15ed9e"
+    },
+    {
+      "path": "tests/fixtures/count_models/reference/nb2.csv",
+      "sha256": "19a1c289412b41a05a8e7d418084eb30232bc2f239036dd41e3be4689db90c43"
+    },
+    {
+      "path": "tests/fixtures/count_models/reference/poisson.csv",
+      "sha256": "54a08ab664e82c35dfaa02f69111063398994eacd0440881203beb79f0e04a1c"
+    },
+    {
+      "path": "tests/fixtures/count_models/reference/stata_nb2/oracle.do",
+      "sha256": "9edcb4b497912f02f33968b11b428c2f73b8dfe2421bd38a73e0792b056a0d72"
+    },
+    {
+      "path": "tests/fixtures/count_models/reference/stata_nb2/oracle.log",
+      "sha256": "withheld-raw-sha256-2a9e034433da7b535f71913d"
+    },
+    {
+      "path": "tests/fixtures/count_models/reference/stata_nb2/wb_results.tsv",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "tests/fixtures/count_models/workbench_evidence.json",
+      "sha256": "9b01ad9d5ddcf84ccb56725ebf0ab39a6fc8f38b4decfbda2b8629a030607f0c"
+    },
+    {
+      "path": "tests/test_count_models_boundary.py",
+      "sha256": "6c3d80ec9dca60f35f0a605b7f259d8352c95d684d0d2b65fecda2dfaa4449b9"
+    },
+    {
+      "path": "tests/test_count_models_contract.py",
+      "sha256": "1f0c0a6b093cdea726781f182c41b6b45755c5db4b99e11ea5a188fa99c576e1"
+    },
+    {
+      "path": "tests/test_count_models_glm_precision.py",
+      "sha256": "abe651168a0a7d5a8a109d76fddc755774cdbfc10ca0f856740a1d7b986056c9"
+    },
+    {
+      "path": "tests/test_count_models_performance.py",
+      "sha256": "4c11b2a273266ecee3730af22963e1dc09286e882b3c89e9b6da31c38ca413fc"
+    },
+    {
+      "path": "tests/eval_v1811/m2_review_probe.py",
+      "sha256": "598ffdf3b6ca370ab53c9dd4096e8ba6b6f4d1d6654d4bb03a240c5f4eb05e2c"
+    },
+    {
+      "path": "tests/eval_v1811/m2_review_evidence.json",
+      "sha256": "3e1ff7c270a033da0c74bfdf7ba6958b18a6e432fd9fd3637ddf79e8113a8294"
+    },
+    {
+      "path": "tests/eval_v1811/m2_review_output.txt",
+      "sha256": "be92495c8079a258dd1853cc36a65cf370335e4ba7a21b1d775f75763b376653"
+    },
+    {
+      "path": "tests/eval_v1811/m2_review_r.json",
+      "sha256": "9de3b65589103ef1b158c256fdc9930f61946126de13936f8b40136d3db830ce"
+    },
+    {
+      "path": "tests/eval_v1811/m2_review_assertions.py",
+      "sha256": "80a2fb04703fd5895f66aba511baa05fb50e59447bb17730726366108445cd95"
+    },
+    {
+      "path": "tests/eval_v1811/m2_review_output_final.txt",
+      "sha256": "5fe659c04ea1ec3fbd408a9bc53dd54e7f960c19ec05dbc97c45c80b0c52f0a9"
+    },
+    {
+      "path": "tests/eval_v1811/m2_review_stata_invalid/oracle.do",
+      "sha256": "d466398875b87d6e35c0fddfd7de16f6267d961ed28aac0321b52a277ad4b2f9"
+    },
+    {
+      "path": "tests/eval_v1811/m2_review_stata_invalid/oracle.log",
+      "sha256": "withheld-raw-sha256-339489539c71ca7497030864"
+    },
+    {
+      "path": "tests/eval_v1811/m2_review_stata_invalid/wb_results.tsv",
+      "sha256": "be1b5e677e3bc6fc1e08aaa666c8941b68ddf92ac593ec38bf477e51b5c799ed"
+    },
+    {
+      "path": "tests/eval_v1811/m2_review_stata_boundary_mean/oracle.do",
+      "sha256": "76b8a6c881f7fccb5ae88c3173745affc6d2e8bc4e44923b14ee95d50f6aaa7b"
+    },
+    {
+      "path": "tests/eval_v1811/m2_review_stata_boundary_mean/oracle.log",
+      "sha256": "withheld-raw-sha256-cfe0647131e371642704680b"
+    },
+    {
+      "path": "tests/eval_v1811/m2_review_stata_boundary_mean/wb_results.tsv",
+      "sha256": "c2ac0719a9bf5e971a485aebbf19f4dcc0b10a1c40a27f142403cd69bd65d87e"
+    },
+    {
+      "path": "tests/eval_v1811/m2_review_stata_boundary_constant/oracle.do",
+      "sha256": "bc49b12c98f233de7672bc10887eb20678ea15c4d51e5c3c1e7cc4d361a55427"
+    },
+    {
+      "path": "tests/eval_v1811/m2_review_stata_boundary_constant/oracle.log",
+      "sha256": "withheld-raw-sha256-ff719464932c00f009110789"
+    },
+    {
+      "path": "tests/eval_v1811/m2_review_stata_boundary_constant/wb_results.tsv",
+      "sha256": "3b35c08643751688d9f8f1b2264af881b63b02561a164c89ea6290aeffe600d3"
+    },
+    {
+      "path": "tests/eval_v1811/m2_review_output_complete.txt",
+      "sha256": "870a197b7aa663cfcab8f4c08c88b748f7f80ca37b0d3add006d173f8c6a84d7"
+    },
+    {
+      "path": "tests/eval_v1811/m2_review_output_v3.txt",
+      "sha256": "ff5ce793053a0a092b973ce66df7f3586057979c5b09254611e43099182b1606"
+    },
+    {
+      "path": "tests/eval_v1811/m2_review_output_v2.txt",
+      "sha256": "3016c6130b46b6bf6e51e720c307db2830dd6505be269e2932a2297a744be6c5"
+    },
+    {
+      "path": "tests/eval_v1811/m2_review_pytest_final.txt",
+      "sha256": "7ea7204e9deacc009ea4cefe76532f841cb30bab096d26dc2f6a2c61a207cb84"
+    },
+    {
+      "path": "tests/eval_v1811/m2_review_pytest_output.txt",
+      "sha256": "562a5e07bbe2046811b976d4d46a455e53e1bbb1153a23b1468f486645b87c13"
+    },
+    {
+      "path": "tests/eval_v1811/m2_review_manifest.py",
+      "sha256": "55a509fa7a2f6eae092f781c71a114e939d156596d66aca1b38108a25cf58694"
+    },
+    {
+      "path": "tests/eval_v1811/m2_review_oracle.R",
+      "sha256": "1a6b1c7c3faf75778510d5fdfe442fc4e6f6068518313d98a48ed5821d02be76"
+    },
+    {
+      "path": "docs/superpowers/handoffs/2026-10-04-v1.8.11-m2-independent-review.md",
+      "sha256": "69fb63d58a6100a22732f26ef23c75abe98eedb00a495169dfc769c10fd9c1a6"
+    }
+  ]
+}

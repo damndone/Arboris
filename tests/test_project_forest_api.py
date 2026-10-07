@@ -109,11 +109,16 @@ def test_project_forest_uses_newest_presentation_for_shared_result_node(tmp_path
 
     root = _mkproject(tmp_path)
     older_run = _execute_genesis_run(root)
+    middle_run = _execute_genesis_run(root)
     newer_run = _execute_genesis_run(root)
+    newer_inputs_path = Path(root) / "runs" / newer_run / "run_inputs.json"
+    newer_inputs = json.loads(newer_inputs_path.read_text())
+    newer_inputs["rerun_of"] = older_run
+    newer_inputs_path.write_text(json.dumps(newer_inputs))
 
     graph_paths = {
         run_id: Path(root) / "runs" / run_id / "graph.json"
-        for run_id in (older_run, newer_run)
+        for run_id in (older_run, middle_run, newer_run)
     }
     graphs = {
         run_id: json.loads(path.read_text(encoding="utf-8"))
@@ -127,13 +132,15 @@ def test_project_forest_uses_newest_presentation_for_shared_result_node(tmp_path
     assert model_id in graphs[newer_run]["nodes"]
     for run_id, label, summary, created_at in (
         (older_run, "legacy presentation", "legacy summary", "2026-01-01T00:00:00+00:00"),
-        (newer_run, "canonical presentation", "canonical summary", "2026-01-02T00:00:00+00:00"),
+        (middle_run, "middle presentation", "middle summary", "2026-01-02T00:00:00+00:00"),
+        (newer_run, "canonical presentation", "canonical summary", "2026-01-03T00:00:00+00:00"),
     ):
         graphs[run_id]["nodes"][model_id].update(
             {
                 "display_label": label,
                 "summary": summary,
                 "created_at": created_at,
+                "decision_points": [{"decision_id": "variance", "selected": summary}],
             }
         )
         graph_paths[run_id].write_text(json.dumps(graphs[run_id]), encoding="utf-8")
@@ -144,16 +151,21 @@ def test_project_forest_uses_newest_presentation_for_shared_result_node(tmp_path
     newer_index = json.loads(newer_index_path.read_text(encoding="utf-8"))
     newer_index[model_id]["node_hash"] = older_index[model_id]["node_hash"]
     newer_index_path.write_text(json.dumps(newer_index), encoding="utf-8")
+    middle_index_path = Path(root) / "runs" / middle_run / "node_index.json"
+    middle_index = json.loads(middle_index_path.read_text())
+    middle_index[model_id]["node_hash"] = older_index[model_id]["node_hash"]
+    middle_index_path.write_text(json.dumps(middle_index))
 
     body = client.get("/graph", params={"project_root": root}).json()
     shared_model = next(
         node
         for node in body["nodes"].values()
         if node.get("id") == model_id
-        and set(node.get("runs", [])) == {older_run, newer_run}
+        and set(node.get("runs", [])) == {older_run, middle_run, newer_run}
     )
     assert shared_model["display_label"] == "canonical presentation"
     assert shared_model["summary"] == "canonical summary"
+    assert shared_model["decision_points"][0]["selected"] == "canonical summary"
 
 
 def test_project_forest_unicode_root(tmp_path):

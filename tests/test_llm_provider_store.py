@@ -141,7 +141,7 @@ def test_environment_provider_does_not_invent_deepseek_model_choices(monkeypatch
 
     assert provider is not None
     assert provider.models == [
-        ModelRecord("DeepSeek V4 Flash", "deepseek-v4-flash", None, False)
+        ModelRecord("deepseek-v4-flash", "deepseek-v4-flash", None, False)
     ]
 
 

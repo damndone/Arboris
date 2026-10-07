@@ -1,0 +1,123 @@
+...F..F..........                                                        [100%]
+=================================== FAILURES ===================================
+__ test_public_family_fixture_owner_and_native_fields[glm:negative_binomial] ___
+
+tmp_path = PosixPath('/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-851/test_public_family_fixture_own3')
+family = 'glm:negative_binomial'
+
+    @pytest.mark.parametrize("family", FAMILIES)
+    def test_public_family_fixture_owner_and_native_fields(tmp_path, family):
+        packet = load_packets()[family]
+        root = harness.create_project(tmp_path, "public").root
+        with harness.TestClient(harness.app) as client:
+            if family == "linear_mixed_effects":
+                # Actual public canary may be blocked under nested containment. A
+                # blocker is evidence of truthful refusal, never a live-family PASS.
+                try:
+                    run = harness._seed_family(client, root, packet)
+                except ValueError as exc:
+                    assert "blocked" in str(exc) or "failed" in str(exc)
+                    return
+            else:
+                run = harness._seed_family(client, root, packet)
+>           evidence = harness._read_verified_run(root, run, packet)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_agent_live_eval_v1811_harness.py:172: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+scripts/agent_live_eval.py:222: in _read_verified_run
+    _assert_params(params, packet["params"])
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+actual = {'mode': 'auto', 'model_type': 'glm', 'y': 'y', 'x': ['x1', 'x2'], ...}
+expected = {'model_type': 'glm:negative_binomial', 'y': 'y', 'x': ['x1', 'x2'], 'model_options': {'alpha': 1.0}}
+
+    def _assert_params(actual: dict, expected: dict) -> None:
+        actual = _normalized_params(actual)
+        for key, value in expected.items():
+            observed = actual.get(key)
+            if key == "model_options":
+                if not isinstance(observed, dict) or any(observed.get(k) != v for k, v in value.items()):
+                    raise ValueError(f"executed model_options mismatch: {observed!r} vs {value!r}")
+            elif observed != value:
+>               raise ValueError(f"executed parameter mismatch {key}: {observed!r} vs {value!r}")
+E               ValueError: executed parameter mismatch model_type: 'glm' vs 'glm:negative_binomial'
+
+scripts/agent_live_eval.py:180: ValueError
+___ test_public_family_fixture_owner_and_native_fields[linear_mixed_effects] ___
+
+tmp_path = PosixPath('/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-851/test_public_family_fixture_own6')
+family = 'linear_mixed_effects'
+
+    @pytest.mark.parametrize("family", FAMILIES)
+    def test_public_family_fixture_owner_and_native_fields(tmp_path, family):
+        packet = load_packets()[family]
+        root = harness.create_project(tmp_path, "public").root
+        with harness.TestClient(harness.app) as client:
+            if family == "linear_mixed_effects":
+                # Actual public canary may be blocked under nested containment. A
+                # blocker is evidence of truthful refusal, never a live-family PASS.
+                try:
+>                   run = harness._seed_family(client, root, packet)
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_agent_live_eval_v1811_harness.py:166: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+client = <starlette.testclient.TestClient object at 0x17d762250>
+root = PosixPath('/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-851/test_public_family_fixture_own6/public')
+packet = {'source_path': 'tests/fixtures/admission/linear_mixed_effects/data.csv', 'source_sha256': 'f971e489477c8c912580aa09b2...': 'arm', 'fit_method': 'reml', ...}}, 'oracle_path': 'tests/fixtures/admission/linear_mixed_effects/oracle.json', ...}
+
+    def _seed_family(client, root: Path, packet: dict) -> str:
+        source = Path(__file__).resolve().parents[1] / packet["source_path"]
+        if _sha(source) != packet["source_sha256"]:
+            raise ValueError("fixture/source SHA mismatch")
+        params = packet["params"]
+        form = {key: json.dumps(value) if isinstance(value, (list, dict)) else str(value) for key, value in params.items()}
+        with source.open("rb") as handle:
+            response = client.post("/runs", data={"project_root": str(root), "mode": "auto", **form},
+                                   files={"file": (source.name, handle, "text/csv")})
+        if response.status_code != 200:
+>           raise ValueError(f"public seed HTTP {response.status_code}: {response.text}")
+E           ValueError: public seed HTTP 422: {"detail":"LMM_FROZEN_CONTAINMENT_REQUIRED"}
+
+scripts/agent_live_eval.py:303: ValueError
+
+During handling of the above exception, another exception occurred:
+
+tmp_path = PosixPath('/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-851/test_public_family_fixture_own6')
+family = 'linear_mixed_effects'
+
+    @pytest.mark.parametrize("family", FAMILIES)
+    def test_public_family_fixture_owner_and_native_fields(tmp_path, family):
+        packet = load_packets()[family]
+        root = harness.create_project(tmp_path, "public").root
+        with harness.TestClient(harness.app) as client:
+            if family == "linear_mixed_effects":
+                # Actual public canary may be blocked under nested containment. A
+                # blocker is evidence of truthful refusal, never a live-family PASS.
+                try:
+                    run = harness._seed_family(client, root, packet)
+                except ValueError as exc:
+>                   assert "blocked" in str(exc) or "failed" in str(exc)
+E                   assert ('blocked' in 'public seed HTTP 422: {"detail":"LMM_FROZEN_CONTAINMENT_REQUIRED"}' or 'failed' in 'public seed HTTP 422: {"detail":"LMM_FROZEN_CONTAINMENT_REQUIRED"}')
+E                    +  where 'public seed HTTP 422: {"detail":"LMM_FROZEN_CONTAINMENT_REQUIRED"}' = str(ValueError('public seed HTTP 422: {"detail":"LMM_FROZEN_CONTAINMENT_REQUIRED"}'))
+E                    +  and   'public seed HTTP 422: {"detail":"LMM_FROZEN_CONTAINMENT_REQUIRED"}' = str(ValueError('public seed HTTP 422: {"detail":"LMM_FROZEN_CONTAINMENT_REQUIRED"}'))
+
+tests/test_agent_live_eval_v1811_harness.py:168: AssertionError
+=============================== warnings summary ===============================
+../../.venv/lib/python3.14/site-packages/fastapi/testclient.py:1
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+tests/test_agent_live_eval_v1811_harness.py::test_public_family_fixture_owner_and_native_fields[glm:binomial]
+tests/test_agent_live_eval_v1811_harness.py::test_public_family_fixture_owner_and_native_fields[glm:poisson]
+tests/test_agent_live_eval_v1811_harness.py::test_public_family_fixture_owner_and_native_fields[glm:negative_binomial]
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/genmod/generalized_linear_model.py:1923: FutureWarning: The bic value is computed using the deviance formula. After 0.13 this will change to the log-likelihood based formula. This change has no impact on the relative rank of models compared using BIC. You can directly access the log-likelihood version using the `bic_llf` attribute. You can suppress this message by calling statsmodels.genmod.generalized_linear_model.SET_USE_BIC_LLF with True to get the LLF-based version now or False to retainthe deviance version.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_public_family_fixture_owner_and_native_fields[glm:negative_binomial]
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_public_family_fixture_owner_and_native_fields[linear_mixed_effects]
+2 failed, 15 passed, 4 warnings in 21.68s

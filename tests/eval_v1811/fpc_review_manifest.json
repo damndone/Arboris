@@ -1,0 +1,284 @@
+{
+  "baseline": "3c8679c273c20ed31c2f58e493d420c2d98952c7",
+  "reviewed_producer_tip": "cdfe11e8a25cb08e2c1330f91526a467d433a192",
+  "worktree": "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-fpc",
+  "branch": "codex/v1811-fpc",
+  "producer_paths": [
+    {
+      "path": "backend/workbench/survey/design.py",
+      "sha256": "d3de7acefb85ce73adca6a41ea4a5917f51cda1c311cc332ba0b3c7e764d93d4"
+    },
+    {
+      "path": "docs/superpowers/handoffs/2026-10-04-v1.8.11-survey-fpc-report.md",
+      "sha256": "2cec9c1bd39af3d804c8283f3fb7b9078871965ed6dbaa6240dfc6e31567dfdb"
+    },
+    {
+      "path": "tests/fixtures/survey_fpc_v1811/comparison.json",
+      "sha256": "ff5b145e24793a1f59d7be001afff536d1c82533bc9a06bbb57d819b200ad221"
+    },
+    {
+      "path": "tests/fixtures/survey_fpc_v1811/comparison_output.txt",
+      "sha256": "9c6ceba7385be6d978e5814117d90a77caa434bbe7d7e0e15d262d968c69853a"
+    },
+    {
+      "path": "tests/fixtures/survey_fpc_v1811/design.csv",
+      "sha256": "d6c3244395f440ef24f0b303518793e44019118314c84e3554a96e142389e478"
+    },
+    {
+      "path": "tests/fixtures/survey_fpc_v1811/generate_oracle.R",
+      "sha256": "215d26cc93d7013bc2d0643a1b1c8bda8451db66b64ced20193d2d905cc4a5e7"
+    },
+    {
+      "path": "tests/fixtures/survey_fpc_v1811/generate_stata_oracle.py",
+      "sha256": "3f39fa5f0387883d99a76f2482171a9fbae2953f7773a72d077f198cfd0d69c7"
+    },
+    {
+      "path": "tests/fixtures/survey_fpc_v1811/lonely.csv",
+      "sha256": "a7706a1616986af707cbdb93c024ec520e78a10feabf54303848200f9e37eae4"
+    },
+    {
+      "path": "tests/fixtures/survey_fpc_v1811/oracle.json",
+      "sha256": "793f8bbd256254ec0a2bec1e2aca94ab4eb63f2b5d13a4b202576513fdca3826"
+    },
+    {
+      "path": "tests/fixtures/survey_fpc_v1811/oracle_reference.json",
+      "sha256": "bf70ff45fc6522ff7fdb514cd6a00cf5b7754b0d9417cf672d32af8437c3f662"
+    },
+    {
+      "path": "tests/fixtures/survey_fpc_v1811/oracle_v2.json",
+      "sha256": "d10feb2e84c80b682f6ad0064ba222cae48b5d0a6430be4938bc1790b19110da"
+    },
+    {
+      "path": "tests/fixtures/survey_fpc_v1811/pytest_green_01.txt",
+      "sha256": "3e4f331b771931192025b5d91511df41bfd75975e13d0f4ef92e34a9448f2d45"
+    },
+    {
+      "path": "tests/fixtures/survey_fpc_v1811/pytest_green_02.txt",
+      "sha256": "80fa8df4950954ed14f333ea97a4ca671b29e228fa083ed0e76aecd243216eff"
+    },
+    {
+      "path": "tests/fixtures/survey_fpc_v1811/pytest_red_01.txt",
+      "sha256": "be551d38485201bd3ae4979274d360edd1ed9ded3bdff095f7e5ff14fbb5e5db"
+    },
+    {
+      "path": "tests/fixtures/survey_fpc_v1811/pytest_red_02.txt",
+      "sha256": "d08777db75dab44e8a0eaaafa83b46e3edff2bf0a7fac13396c1d013a0e25dd1"
+    },
+    {
+      "path": "tests/fixtures/survey_fpc_v1811/pytest_regression_01.txt",
+      "sha256": "5477c9afeba448752f884f8e9e0a39591c5cc9721c634d5f34e4a264931bab11"
+    },
+    {
+      "path": "tests/fixtures/survey_fpc_v1811/r_oracle_01.txt",
+      "sha256": "dc254194a07ba9dfe5393c802f4284e87a751ac6d33d054ed8afbae17504687e"
+    },
+    {
+      "path": "tests/fixtures/survey_fpc_v1811/r_oracle_02.txt",
+      "sha256": "9c1aebba0b05379536871ef38319ec1392f3085339b662bd253cff50146ec524"
+    },
+    {
+      "path": "tests/fixtures/survey_fpc_v1811/r_oracle_03.txt",
+      "sha256": "7ad372181a0dc18144cccb5ed134c3f3dade08305a1606f97defa8a7e78fa6b5"
+    },
+    {
+      "path": "tests/fixtures/survey_fpc_v1811/stata_batch_dbf83950e9/survey_fpc.do",
+      "sha256": "483e3cd132892f2ee59487165730a53db62a2a93a8b069d9af3ee13d2eceda70"
+    },
+    {
+      "path": "tests/fixtures/survey_fpc_v1811/stata_batch_dbf83950e9/survey_fpc.log",
+      "sha256": "withheld-raw-sha256-68c434070403fa3de21a54a5"
+    },
+    {
+      "path": "tests/fixtures/survey_fpc_v1811/stata_batch_dbf83950e9/wb_results.tsv",
+      "sha256": "b818c6459977db84d962036cd58a348297e3570b5153a2b74a9790cbdb5103e8"
+    },
+    {
+      "path": "tests/fixtures/survey_fpc_v1811/stata_oracle_01.txt",
+      "sha256": "f3cc5ae128df8f31ec3982a28ecf9cd291380d63bb433a12000d8571f29dc760"
+    },
+    {
+      "path": "tests/fixtures/survey_fpc_v1811/stata_reference.json",
+      "sha256": "bdf30c0b1f7da60e7a13577088ddb923f611f033068a62d7a0ecac126b5b0111"
+    },
+    {
+      "path": "tests/fixtures/survey_fpc_v1811/subpop.csv",
+      "sha256": "0ec3a86f23b75610577d5f0951a189cf36ebb6836323d614078f73ae72b0b1e2"
+    },
+    {
+      "path": "tests/fixtures/survey_fpc_v1811/verify_evidence.py",
+      "sha256": "c93d1fc77f8cf3a16b0f408567ae244b133dd579bd35d9055a9b6baa18d0ff37"
+    },
+    {
+      "path": "tests/test_survey_fpc_v1811.py",
+      "sha256": "57358074eac27f8e000698dae1e022287862e265e0ea417d37e1407de8adb493"
+    }
+  ],
+  "review_evidence": [
+    {
+      "path": "tests/eval_v1811/fpc_review_evidence_1494cff4/comparisons.json",
+      "sha256": "884490ff81320a16768f45b3c78f7e25888cc8782729287d3d02b6047a8eea76",
+      "local_only": false
+    },
+    {
+      "path": "tests/eval_v1811/fpc_review_evidence_1494cff4/configs.json",
+      "sha256": "2c997c9991b8fd48ed6cc916d5a9445bbcb72e4dc18dc6cbb0a787ea0092e6fd",
+      "local_only": false
+    },
+    {
+      "path": "tests/eval_v1811/fpc_review_evidence_1494cff4/design_certainty_plus_lonely_fail.csv",
+      "sha256": "b5d0296d0688feecbb326e18e8e6eb528c3fe02e71738bf006b7f56744680331",
+      "local_only": false
+    },
+    {
+      "path": "tests/eval_v1811/fpc_review_evidence_1494cff4/design_heterogeneous_count_fail.csv",
+      "sha256": "5c4cdac9bed13c1d289f58d7d4b0bda99ff8574949d72752860d4e3a2914f321",
+      "local_only": false
+    },
+    {
+      "path": "tests/eval_v1811/fpc_review_evidence_1494cff4/failures.json",
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "local_only": false
+    },
+    {
+      "path": "tests/eval_v1811/fpc_review_evidence_1494cff4/lonely_certainty_plus_lonely_adjust.csv",
+      "sha256": "a712888500e2cb1213692a022f53e4a60a6c41fe7f36220627ef47dc3cf7769e",
+      "local_only": false
+    },
+    {
+      "path": "tests/eval_v1811/fpc_review_evidence_1494cff4/lonely_certainty_plus_lonely_average.csv",
+      "sha256": "a712888500e2cb1213692a022f53e4a60a6c41fe7f36220627ef47dc3cf7769e",
+      "local_only": false
+    },
+    {
+      "path": "tests/eval_v1811/fpc_review_evidence_1494cff4/lonely_certainty_plus_lonely_certainty.csv",
+      "sha256": "a712888500e2cb1213692a022f53e4a60a6c41fe7f36220627ef47dc3cf7769e",
+      "local_only": false
+    },
+    {
+      "path": "tests/eval_v1811/fpc_review_evidence_1494cff4/lonely_certainty_plus_lonely_fail.csv",
+      "sha256": "a712888500e2cb1213692a022f53e4a60a6c41fe7f36220627ef47dc3cf7769e",
+      "local_only": false
+    },
+    {
+      "path": "tests/eval_v1811/fpc_review_evidence_1494cff4/lonely_certainty_plus_lonely_remove.csv",
+      "sha256": "a712888500e2cb1213692a022f53e4a60a6c41fe7f36220627ef47dc3cf7769e",
+      "local_only": false
+    },
+    {
+      "path": "tests/eval_v1811/fpc_review_evidence_1494cff4/lonely_heterogeneous_count_adjust.csv",
+      "sha256": "c1edc7c6d0acfc327d43230709baf738afb5c9d94fe931628e3afa6938781435",
+      "local_only": false
+    },
+    {
+      "path": "tests/eval_v1811/fpc_review_evidence_1494cff4/lonely_heterogeneous_count_average.csv",
+      "sha256": "c1edc7c6d0acfc327d43230709baf738afb5c9d94fe931628e3afa6938781435",
+      "local_only": false
+    },
+    {
+      "path": "tests/eval_v1811/fpc_review_evidence_1494cff4/lonely_heterogeneous_count_certainty.csv",
+      "sha256": "c1edc7c6d0acfc327d43230709baf738afb5c9d94fe931628e3afa6938781435",
+      "local_only": false
+    },
+    {
+      "path": "tests/eval_v1811/fpc_review_evidence_1494cff4/lonely_heterogeneous_count_fail.csv",
+      "sha256": "c1edc7c6d0acfc327d43230709baf738afb5c9d94fe931628e3afa6938781435",
+      "local_only": false
+    },
+    {
+      "path": "tests/eval_v1811/fpc_review_evidence_1494cff4/lonely_heterogeneous_count_remove.csv",
+      "sha256": "c1edc7c6d0acfc327d43230709baf738afb5c9d94fe931628e3afa6938781435",
+      "local_only": false
+    },
+    {
+      "path": "tests/eval_v1811/fpc_review_evidence_1494cff4/r_reproduced.json",
+      "sha256": "bf70ff45fc6522ff7fdb514cd6a00cf5b7754b0d9417cf672d32af8437c3f662",
+      "local_only": false
+    },
+    {
+      "path": "tests/eval_v1811/fpc_review_evidence_1494cff4/r_totals.json",
+      "sha256": "3b05373086ff6f52dc9e7d6cd7f802f0023c2e28b8e083d53905149368668a41",
+      "local_only": false
+    },
+    {
+      "path": "tests/eval_v1811/fpc_review_evidence_1494cff4/stata/fpc_review_oracle.do",
+      "sha256": "a4924afb283950c21217156fbfcd03b585825460d3ab6c19ea283fd406123edd",
+      "local_only": false
+    },
+    {
+      "path": "tests/eval_v1811/fpc_review_evidence_1494cff4/stata/fpc_review_oracle.log",
+      "sha256": "777ee7367332ad559417e4cb6dd9dcfde7688ff172f963468d9a98f42ad6f108",
+      "local_only": true
+    },
+    {
+      "path": "tests/eval_v1811/fpc_review_evidence_1494cff4/stata/wb_results.tsv",
+      "sha256": "00856ddcfbfbf97ea0b97cb6b8058509fc7c3b39f91644746f670ff63461a782",
+      "local_only": false
+    },
+    {
+      "path": "tests/eval_v1811/fpc_review_evidence_1494cff4/stata_reproduced.json",
+      "sha256": "faa941865dcdf41f57da0be4b7288290f20b12b9ef495a04cd1e80f2b11bffec",
+      "local_only": false
+    },
+    {
+      "path": "tests/eval_v1811/fpc_review_evidence_1494cff4/subpop_certainty_plus_lonely_fail.csv",
+      "sha256": "6c7b04e786b04acfbe0881ff3b7013c29ebf761453eb8f2cd0cf0ce9cc391148",
+      "local_only": false
+    },
+    {
+      "path": "tests/eval_v1811/fpc_review_evidence_1494cff4/subpop_heterogeneous_count_fail.csv",
+      "sha256": "d75e966fb8012ca293cfb80756513d9a087681b657746c9f867a8c3130a8d7a6",
+      "local_only": false
+    },
+    {
+      "path": "tests/eval_v1811/fpc_review_evidence_1494cff4/totals.R",
+      "sha256": "facb88918a2952042469e1fefa8ab10fc73c5d0235cb0ed17ed297aca774a4fb",
+      "local_only": false
+    },
+    {
+      "path": "tests/eval_v1811/fpc_review_live.py",
+      "sha256": "311cd26d54f9c478dc9f5ef9b9e07a96600d20cad0d59d1dcf90018a9672f545"
+    },
+    {
+      "path": "tests/eval_v1811/fpc_review_contract.py",
+      "sha256": "cf4fa68d264b0dd45e725ceb210ca31a9d5a711cda15c1a34d0239d852cd84fb"
+    },
+    {
+      "path": "tests/eval_v1811/fpc_review_live_output_v2.txt",
+      "sha256": "eda1c4a704fc8e39b58362073d59bd0ea6ab161c40a98bf642eced6cc106b3ab"
+    },
+    {
+      "path": "tests/eval_v1811/fpc_review_contract_output_v2.txt",
+      "sha256": "4b2acd4e537aab00c4ec652228d807a2680cc1f6f9af75d9f10b36a31f3c2541"
+    },
+    {
+      "path": "tests/eval_v1811/fpc_review_regression_output.txt",
+      "sha256": "a53d051e5b4b471130fc6c1e963c49fe2b968c8fc2da32d3c534b3ac1184b2ed"
+    },
+    {
+      "path": "docs/superpowers/handoffs/2026-10-04-v1.8.11-survey-fpc-independent-review.md",
+      "sha256": "26544f0f18916c4c025e4d46c28bd2f0146b049f19a3ed7bacbb02d4be319309"
+    }
+  ],
+  "commands": [
+    {
+      "command": "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 MPLCONFIGDIR=/private/tmp/fpc-review-mpl XDG_CACHE_HOME=/private/tmp/fpc-review-cache PYTHONPATH=backend .venv/bin/python /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py .venv/bin/python tests/eval_v1811/fpc_review_live.py",
+      "exit_code": 0
+    },
+    {
+      "command": "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 MPLCONFIGDIR=/private/tmp/fpc-review-mpl XDG_CACHE_HOME=/private/tmp/fpc-review-cache PYTHONPATH=backend .venv/bin/python /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py .venv/bin/python -m pytest -q tests/eval_v1811/fpc_review_contract.py tests/test_survey_fpc_v1811.py",
+      "exit_code": 0,
+      "result": "78 passed in 3.26s"
+    },
+    {
+      "command": "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 MPLCONFIGDIR=/private/tmp/fpc-review-mpl XDG_CACHE_HOME=/private/tmp/fpc-review-cache PYTHONPATH=backend .venv/bin/python /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py .venv/bin/python -m pytest -q tests/test_survey_design_engine_v187.py tests/test_survey_design_composition_v187.py tests/test_survey_design_wiring_v187.py tests/test_survey_report_visibility_v187.py tests/test_survey_df_convention.py tests/test_survey_replicate_adapter.py tests/test_survey_composition_limits_v187.py tests/test_by_group_survey.py --tb=short",
+      "exit_code": 1,
+      "result": "3 known legacy FPC conflicts failed, 54 passed in 13.65s"
+    }
+  ],
+  "raw_native_source_verification": {
+    "stata_cases": 10,
+    "native_tsv_values_exactly_equal_to_json": 280,
+    "own_do_log_no_error": true
+  },
+  "result": "PASS for approved producer scope; Integration gates remain"
+}

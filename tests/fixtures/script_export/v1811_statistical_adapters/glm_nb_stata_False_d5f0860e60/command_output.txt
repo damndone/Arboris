@@ -1,0 +1,164 @@
+. do analysis.do 
+
+. * Workbench 1.8.11
+. * project: glm_nb
+. * run: 1.0
+. * lineage_hash: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+> bbb
+. * Coverage
+. * full | model.glm:negative_binomial | native | 
+. version 18
+
+. set more off
+
+. set type double
+
+. capture program drop wb_repost
+
+. program define wb_repost, eclass
+  1.     args beta covariance
+  2.     ereturn repost b=`beta' V=`covariance', rename
+  3. end
+
+. capture program drop wb_sha
+
+. program define wb_sha
+  1.     args filename expected
+  2.     tempfile digestfile
+  3.     shell shasum -a 256 "`filename'" > "`digestfile'"
+  4.     tempname fh
+  5.     file open `fh' using "`digestfile'", read text
+  6.     file read `fh' line
+  7.     file close `fh'
+  8.     if substr("`line'",1,64) != "`expected'" {
+  9.         display as error "SHA256 mismatch"
+ 10.         exit 9
+ 11.     }
+ 12. end
+
+. 
+. wb_sha "data.csv" "2e1b92f07632a8c88d047074f77cd6e5f9552b4f932f7d6ed2499161a0
+> bf3084"
+
+
+. frame create wb_src0
+
+. frame change wb_src0
+
+. import delimited using "data.csv", varnames(1) delimiters(",") encoding("UTF-
+> 8") asdouble clear case(preserve)
+(10 vars, 300 obs)
+
+. frame copy wb_src0 wb_model_data1
+
+. frame change wb_model_data1
+
+. glm ynb x1 x2 x3, family(nbinomial 1.0) link(log) ml vce(eim) scale(1) iterat
+> e(1000) tolerance(1e-12) ltolerance(1e-12)
+
+Iteration 0:  Log likelihood =   -515.107  
+Iteration 1:  Log likelihood = -513.25813  
+Iteration 2:  Log likelihood = -513.25643  
+Iteration 3:  Log likelihood = -513.25643  
+Iteration 4:  Log likelihood = -513.25643  
+
+Generalized linear models                         Number of obs   =        300
+Optimization     : ML                             Residual df     =        296
+                                                  Scale parameter =          1
+Deviance         =  241.7671342                   (1/df) Deviance =   .8167809
+Pearson          =  221.4504133                   (1/df) Pearson  =   .7481433
+
+Variance function: V(u) = u+(1)u^2                [Neg. Binomial]
+Link function    : g(u) = ln(u)                   [Log]
+
+                                                  AIC             =   3.448376
+Log likelihood   = -513.2564336                   BIC             =  -1446.552
+
+------------------------------------------------------------------------------
+             |                 EIM
+         ynb | Coefficient  std. err.      z    P>|z|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+          x1 |   .3788938   .0759466     4.99   0.000     .2300411    .5277465
+          x2 |  -.2889452   .0657804    -4.39   0.000    -.4178724   -.1600179
+          x3 |  -.1012181    .147449    -0.69   0.492    -.3902129    .1877767
+       _cons |   .5240334   .1698625     3.09   0.002      .191109    .8569578
+------------------------------------------------------------------------------
+
+. assert e(converged) == 1
+
+. estimates store wb_model1
+
+. generate long wb_sample_row = _n
+
+. generate byte wb_sample1 = e(sample)
+
+. scalar wb_number_0 = _b[_cons]
+
+. scalar wb_number_1 = _b[x1]
+
+. scalar wb_number_2 = _b[x2]
+
+. scalar wb_number_3 = _b[x3]
+
+. scalar wb_number_4 = _se[_cons]
+
+. scalar wb_number_5 = _se[x1]
+
+. scalar wb_number_6 = _se[x2]
+
+. scalar wb_number_7 = _se[x3]
+
+. scalar wb_number_8 = e(N)
+
+. file open wb_numbers using "numeric_actual.tsv", write text replace
+(file numeric_actual.tsv not found)
+
+. file write wb_numbers %21.17g (wb_number_0) _n
+
+. file write wb_numbers %21.17g (wb_number_1) _n
+
+. file write wb_numbers %21.17g (wb_number_2) _n
+
+. file write wb_numbers %21.17g (wb_number_3) _n
+
+. file write wb_numbers %21.17g (wb_number_4) _n
+
+. file write wb_numbers %21.17g (wb_number_5) _n
+
+. file write wb_numbers %21.17g (wb_number_6) _n
+
+. file write wb_numbers %21.17g (wb_number_7) _n
+
+. file write wb_numbers %21.17g (wb_number_8) _n
+
+. file close wb_numbers
+
+. * Closing self-checks
+. assert !missing(wb_number_0) & abs(wb_number_0-(0.524033398275554)) <= 1e-08+
+> 0*abs(0.524033398275554)
+
+. assert !missing(wb_number_1) & abs(wb_number_1-(0.37889378683709035)) <= 1e-0
+> 8+0*abs(0.37889378683709035)
+
+. assert !missing(wb_number_2) & abs(wb_number_2-(-0.28894515154376593)) <= 1e-
+> 08+0*abs(-0.28894515154376593)
+
+. assert !missing(wb_number_3) & abs(wb_number_3-(-0.10121807811349151)) <= 1e-
+> 08+0*abs(-0.10121807811349151)
+
+. assert !missing(wb_number_4) & abs(wb_number_4-(0.16986251046239487)) <= 1e-0
+> 6+0*abs(0.16986251046239487)
+
+. assert !missing(wb_number_5) & abs(wb_number_5-(0.07594663821229021)) <= 1e-0
+> 6+0*abs(0.07594663821229021)
+
+. assert !missing(wb_number_6) & abs(wb_number_6-(0.06578041865981685)) <= 1e-0
+> 6+0*abs(0.06578041865981685)
+
+. assert !missing(wb_number_7) & abs(wb_number_7-(0.14744903698769615)) <= 1e-0
+> 6+0*abs(0.14744903698769615)
+
+. assert !missing(wb_number_8) & abs(wb_number_8-(300)) <= 0.0+0.0*abs(300)
+
+. 
+end of do-file

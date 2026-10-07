@@ -9,6 +9,10 @@ import numpy as np
 from statsmodels.stats.diagnostic import acorr_ljungbox
 
 
+# Preserve the automatic-selection policy required by the v1.8.11 objective.
+LJUNG_BOX_SIGNIFICANCE_LEVEL = 0.01
+
+
 # Warnings about library upkeep, not about this model. statsmodels emits a
 # NumPy shape-assignment DeprecationWarning on every ARIMA fit; captured
 # verbatim it was repeated on each candidate, filled a large share of the
@@ -58,7 +62,7 @@ def ljung_box_results(
     *,
     model_df: int = 0,
     requested_lags: tuple[int, ...] = (5, 10, 20),
-) -> tuple[dict[str, float | int | None], ...]:
+) -> tuple[dict[str, object], ...]:
     """Return bounded, JSON-ready Ljung-Box results."""
 
     finite = np.asarray(values, dtype=float)
@@ -71,9 +75,9 @@ def ljung_box_results(
     finite = finite / scale
     if float(np.ptp(finite)) == 0.0:
         return ()
-    lags = tuple(lag for lag in requested_lags if model_df < lag < len(finite))
-    if not lags and len(finite) > model_df + 1:
-        lags = (min(len(finite) - 1, model_df + 1),)
+    lags = tuple(lag for lag in requested_lags if 0 < lag < len(finite))
+    if not lags and len(finite) > 1:
+        lags = (len(finite) - 1,)
     if not lags:
         return ()
     with runtime_warnings.catch_warnings():
@@ -89,9 +93,30 @@ def ljung_box_results(
             "lag": int(lag),
             "statistic": _finite_or_none(frame.loc[lag, "lb_stat"]),
             "p_value": _finite_or_none(frame.loc[lag, "lb_pvalue"]),
+            "df": int(lag - model_df) if lag > model_df else None,
+            "status": "ok" if lag > model_df else "unavailable",
+            "reason_code": None if lag > model_df else "LJUNG_BOX_NONPOSITIVE_DF",
+            "reason": None if lag > model_df else (
+                f"Adjusted Ljung-Box p-value is unavailable: lag {lag} <= model_df {model_df}."
+            ),
         }
         for lag in lags
     )
+
+
+def ljung_box_warnings(results: tuple[dict[str, object], ...]) -> list[str]:
+    """Keep the test and lag visible when diagnostics cannot establish adequacy."""
+
+    messages = []
+    for row in results:
+        if row.get("status") == "unavailable":
+            messages.append(str(row["reason"]))
+        elif row.get("p_value") is not None and float(row["p_value"]) < LJUNG_BOX_SIGNIFICANCE_LEVEL:
+            messages.append(
+                f"Ljung-Box residual autocorrelation at lag {row['lag']} "
+                f"(p={float(row['p_value']):.6g}, threshold={LJUNG_BOX_SIGNIFICANCE_LEVEL:g})."
+            )
+    return messages
 
 
 def _finite_or_none(value: float) -> float | None:
@@ -99,4 +124,4 @@ def _finite_or_none(value: float) -> float | None:
     return numeric if math.isfinite(numeric) else None
 
 
-__all__ = ["calculate_aicc", "ljung_box_results"]
+__all__ = ["LJUNG_BOX_SIGNIFICANCE_LEVEL", "calculate_aicc", "ljung_box_results", "ljung_box_warnings"]

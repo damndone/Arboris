@@ -1,0 +1,106 @@
+{
+  "fresh_R_to_author_R": {
+    "params": {
+      "max_absolute_error": 1.1102230246251565e-15,
+      "max_relative_error": 1.5310689054273126e-15
+    },
+    "std_error": {
+      "max_absolute_error": 5.551115123125783e-17,
+      "max_relative_error": 1.0019389742893255e-15
+    },
+    "covariance": {
+      "max_absolute_error": 6.5052130349130266e-18,
+      "max_relative_error": 1.649981846422388e-14
+    },
+    "wald_statistic": {
+      "actual": 52.96646947649709,
+      "reference": 52.966469476497025,
+      "absolute_error": 6.394884621840902e-14,
+      "relative_error": 1.2073458331366645e-15
+    },
+    "wald_p_value": {
+      "actual": 3.1512095954357664e-12,
+      "reference": 3.151209595435867e-12,
+      "absolute_error": 1.0057029908481635e-25,
+      "relative_error": 3.191482382843714e-14
+    }
+  },
+  "fresh_R_to_author_Stata": {
+    "params": {
+      "max_absolute_error": 3.885780586188048e-16,
+      "max_relative_error": 1.5012097763837236e-15
+    },
+    "std_error": {
+      "max_absolute_error": 5.551115123125783e-17,
+      "max_relative_error": 1.1450731134735146e-15
+    },
+    "covariance": {
+      "max_absolute_error": 9.540979117872439e-18,
+      "max_relative_error": 1.635791392460848e-14
+    },
+    "wald_statistic": {
+      "actual": 52.96646947649709,
+      "reference": 52.9664694764971,
+      "absolute_error": 1.4210854715202004e-14,
+      "relative_error": 2.682990740303695e-16
+    },
+    "wald_p_value": {
+      "actual": 3.1512095954357664e-12,
+      "reference": 3.15120959543578e-12,
+      "absolute_error": 1.3732490638087374e-26,
+      "relative_error": 4.357847430389126e-15
+    }
+  },
+  "fresh_Stata_to_fresh_R": {
+    "params": {
+      "max_absolute_error": 1.1102230246251565e-16,
+      "max_relative_error": 3.384540227891347e-16
+    },
+    "std_error": {
+      "max_absolute_error": 9.020562075079397e-17,
+      "max_relative_error": 1.8607438093944633e-15
+    },
+    "covariance": {
+      "max_absolute_error": 9.107298248878237e-18,
+      "max_relative_error": 2.0819163176774088e-14
+    },
+    "wald_statistic": {
+      "actual": 52.96646947649708,
+      "reference": 52.96646947649709,
+      "absolute_error": 7.105427357601002e-15,
+      "relative_error": 1.341495370151848e-16
+    },
+    "wald_p_value": {
+      "actual": 3.1512095954357774e-12,
+      "reference": 3.1512095954357664e-12,
+      "absolute_error": 1.0905213153775267e-26,
+      "relative_error": 3.4606435476619684e-15
+    }
+  },
+  "fresh_owner_to_fresh_R": {
+    "params": {
+      "max_absolute_error": 5.551115123125783e-16,
+      "max_relative_error": 7.655344527136575e-16
+    },
+    "std_error": {
+      "max_absolute_error": 5.551115123125783e-17,
+      "max_relative_error": 9.33533930298223e-16
+    },
+    "covariance": {
+      "max_absolute_error": 6.5052130349130266e-18,
+      "max_relative_error": 3.4951228359699474e-14
+    },
+    "wald_statistic": {
+      "actual": 52.966469476497096,
+      "reference": 52.96646947649709,
+      "absolute_error": 7.105427357601002e-15,
+      "relative_error": 1.341495370151848e-16
+    },
+    "wald_p_value": {
+      "actual": 3.1512095954357576e-12,
+      "reference": 3.1512095954357664e-12,
+      "absolute_error": 8.885729236409477e-27,
+      "relative_error": 2.8197836314282705e-15
+    }
+  }
+}

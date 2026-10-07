@@ -82,8 +82,8 @@ def _stream_timeout(config: LLMConfig) -> httpx.Timeout:
 
 def fetch_models(config: LLMConfig) -> list[dict[str, str]]:
     """GET {base_url}/models and return the provider's model summaries."""
-    if not config.is_configured():
-        raise LLMNotConfiguredError(config.configuration_error_message())
+    if not config.base_url.strip() or not config.api_key.strip():
+        raise LLMNotConfiguredError("Provider base URL and API key are required to fetch models.")
     try:
         with _client_factory(config) as client:
             response = client.get(

@@ -686,18 +686,27 @@ def normalize_ols_genesis_model_params(model_params: Mapping[str, Any]) -> dict[
     both prevents Genesis from accepting a typed option and then silently
     dropping the server-owned contract before execution.
     """
-    normalized = dict(model_params)
-    if normalized.get("model_type") not in {"ols", "panel_ols"} or "model_options" not in normalized:
-        return normalized
-    from ..contracts.model.ols import validate_ols_model_options
+    from ..contracts.model.ols import (
+        PANEL_COVARIANCE_FAMILIES,
+        validate_ols_model_options,
+        validate_panel_model_options,
+    )
 
+    normalized = dict(model_params)
+    family = normalized.get("model_type")
+    if (family != "ols" and family not in PANEL_COVARIANCE_FAMILIES) or "model_options" not in normalized:
+        return normalized
     options = normalized.get("model_options")
     if not isinstance(options, Mapping):
         raise ValueError("MODEL_OPTIONS_UNSUPPORTED_FOR_OLS_GENESIS")
     options = dict(options)
     if options:
         try:
-            validate_ols_model_options(options, family=str(normalized["model_type"]))
+            # Panel and DID fits validate their own options (cluster column).
+            if family in PANEL_COVARIANCE_FAMILIES:
+                validate_panel_model_options(options, family=str(family))
+            else:
+                validate_ols_model_options(options, family=str(family))
         except ValueError as exc:
             raise ValueError(getattr(exc, "error_code", str(exc))) from exc
     normalized["model_options"] = options

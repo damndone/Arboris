@@ -1,6 +1,11 @@
 import type { Capabilities } from "../capabilities/types";
 
-export function covarianceDefault(capabilities: Capabilities | null | undefined): string {
+export function covarianceDefault(capabilities: Capabilities | null | undefined, modelType?: string): string {
+  // v1.8.11: a family may declare its own default (panel and DID cluster by
+  // entity); it is the value of that family's covariance control.
+  const family = modelType ? capabilities?.model_types?.find((entry) => entry.key === modelType) : undefined;
+  const declared = family?.params?.find((param) => param.key === "covariance")?.value;
+  if (typeof declared === "string" && declared) return declared;
   // U3: read the option the backend flags as default. Fall back to the first
   // option only if none is flagged (defensive) — never assume ordering.
   const options = capabilities?.covariance_options ?? [];

@@ -1,0 +1,24 @@
+
+Fontconfig error: No writable cache directories
+	/opt/homebrew/var/cache/fontconfig
+	/Users/jiayuanren/.cache/fontconfig
+	/Users/jiayuanren/.fontconfig
+/Users/runner/work/crossbow/crossbow/arrow/cpp/src/arrow/util/cpu_info.cc:242: IOError: sysctlbyname failed for 'hw.l1dcachesize'. Detail: [errno 1] Operation not permitted
+/Users/runner/work/crossbow/crossbow/arrow/cpp/src/arrow/util/cpu_info.cc:242: IOError: sysctlbyname failed for 'hw.l2cachesize'. Detail: [errno 1] Operation not permitted
+/Users/runner/work/crossbow/crossbow/arrow/cpp/src/arrow/util/cpu_info.cc:242: IOError: sysctlbyname failed for 'hw.l3cachesize'. Detail: [errno 1] Operation not permitted
+/Users/runner/work/crossbow/crossbow/arrow/cpp/src/arrow/util/cpu_info.cc:242: IOError: sysctlbyname failed for 'hw.optional.neon'. Detail: [errno 1] Operation not permitted
+{"named_regressor": "alpha", "run_root": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-804/test_real_ancillary_named_cova0/projects/named-glm/runs/20261004_204437_053644_feedefc8", "fixed_alpha": 2.0, "operations": ["wald", "lincom", "nlcom", "margins"]}
+.{"named_regressor": "lnalpha", "run_root": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-804/test_real_ancillary_named_cova1/projects/named-glm/runs/20261004_204438_531364_57c6063b", "fixed_alpha": 2.0, "operations": ["wald", "lincom", "nlcom", "margins"]}
+.
+=============================== warnings summary ===============================
+../../.venv/lib/python3.14/site-packages/fastapi/testclient.py:1
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+tests/eval_v1811/glm_nb_public_review_named_regressors.py::test_real_ancillary_named_covariate_remains_available_for_fixed_glm_post[alpha]
+tests/eval_v1811/glm_nb_public_review_named_regressors.py::test_real_ancillary_named_covariate_remains_available_for_fixed_glm_post[lnalpha]
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/genmod/generalized_linear_model.py:1923: FutureWarning: The bic value is computed using the deviance formula. After 0.13 this will change to the log-likelihood based formula. This change has no impact on the relative rank of models compared using BIC. You can directly access the log-likelihood version using the `bic_llf` attribute. You can suppress this message by calling statsmodels.genmod.generalized_linear_model.SET_USE_BIC_LLF with True to get the LLF-based version now or False to retainthe deviance version.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+2 passed, 3 warnings in 13.54s

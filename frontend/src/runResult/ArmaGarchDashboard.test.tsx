@@ -122,3 +122,16 @@ test("renders nothing without a report artifact", () => {
   const { container } = render(<ArmaGarchDashboard artifacts={{}} />);
   expect(container.firstChild).toBeNull();
 });
+
+test("classical results expose full estimation scope and retrospective evaluation", () => {
+  const data = artifacts();
+  data.report!.sample = {
+    source_n: 120, training_n: 116, validation_n: 4, estimation_n: 120,
+    evaluation_mode: "classical_replication", validation_data_role: "retrospective_tail_evaluation",
+  };
+  render(<ArmaGarchDashboard artifacts={data} />);
+  expect(screen.getByText("Classical replication")).toBeTruthy();
+  expect(screen.getByText("Full-sample estimation observations")).toBeTruthy();
+  expect(screen.getByText("120")).toBeTruthy();
+  expect(screen.getByText(/retrospective.*independent/i)).toBeTruthy();
+});

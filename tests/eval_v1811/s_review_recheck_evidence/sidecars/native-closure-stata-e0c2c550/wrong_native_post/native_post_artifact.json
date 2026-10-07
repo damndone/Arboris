@@ -1,0 +1,25 @@
+{
+  "operation": "lincom",
+  "model_id": "independent",
+  "model_type": "ols",
+  "covariance_estimator": "nonrobust",
+  "nobs": 80,
+  "df_method": "residual",
+  "n_clusters": null,
+  "terms": {
+    "x1": 1.0,
+    "x2": 2.0
+  },
+  "constant": -0.5,
+  "estimate": 0.16071153890056533,
+  "std_error": 0.19736344202024553,
+  "statistic": 0.8142923393283724,
+  "distribution": "t",
+  "df": 77.0,
+  "p_value": 0.4179887213597638,
+  "level": 0.95,
+  "ci": [
+    -0.23228928251122916,
+    0.5537123603123598
+  ]
+}

@@ -668,9 +668,43 @@ class NodeOperationContextProvider:
                 "notes_omitted": max(len(report["notes"]) - 40, 0),
             }
 
+        def export_analysis_script(arguments: dict[str, Any], context: ToolContext) -> dict[str, Any]:
+            if context.session_id != session_id:
+                raise ValueError("tool session is outside the registered chain scope")
+            from ..services.script_export import export_analysis_script as write_script
+            from ..egress import EgressPolicyError
+            from ..script_export.plan import ScriptExportRefusal
+            run_id = str(arguments.get("run_id") or "")
+            self._project_run_root(run_id)
+            try:
+                result = write_script(self.project_root, run_id, str(arguments.get("target") or ""),
+                    str(arguments.get("language") or ""), require_native=arguments.get("require_native", False))
+            except (ScriptExportRefusal, EgressPolicyError) as exc:
+                raise ToolVisibleError(f"SCRIPT_EXPORT_UNAVAILABLE: {exc}") from exc
+            from ..analysis_ledger import record_agent_action
+            record_agent_action(self.project_root, source="agent.export_analysis_script", steps=["export.analysis_script"],
+                session_id=context.session_id, run_id=run_id, node_id=str(arguments.get("target") or ""),
+                summary="Local " + result["language"] + " script export")
+            # Keep the download and coverage useful without sending local data,
+            # script parameters, file-system locations, or numeric results.
+            return {key: result[key] for key in ("artifact_id", "filename", "language", "fully_native", "coverage", "required_packages", "sha256", "bytes")} | {
+                "download_url": f"/runs/{run_id}/artifacts/{result['artifact_id']}"}
+
         return [
             self.show_dataset_rows_tool(session_id=session_id, scope_requirements=("project", "chain")),
             self.calculate_tool(session_id=session_id, scope_requirements=("project", "chain")),
+            ToolDefinition(
+                tool_id="export_analysis_script", version="v1", side_effect="artifact",
+                scope_requirements=("project", "chain"), max_output_budget=16384,
+                input_schema={"type": "object", "required": ["run_id", "target", "language"],
+                    "properties": {"run_id": {"type": "string", "minLength": 1, "maxLength": 200},
+                        "target": {"type": "string", "minLength": 1, "maxLength": 300,
+                            "description": "Completed model node model:<artifact_id> or recorded post-estimation artifact:<artifact_id>."},
+                        "language": {"type": "string", "enum": ["stata", "r", "python"]},
+                        "require_native": {"type": "boolean", "default": False}}, "additionalProperties": False},
+                handler=export_analysis_script,
+                description="Export the completed analysis path to a local Stata, R or Python script bundle with source data, snapshots and closing numeric self-checks. Report every snapshot coverage reason; require_native refuses before writing if any step requires a snapshot. Returns download and coverage metadata only; never share the local bundle with the model or a remote provider.",
+            ),
             ToolDefinition(
                 tool_id="export_dataset",
                 version="v1",
@@ -1682,6 +1716,10 @@ class NodeOperationContextProvider:
         return {
             **canonical,
             "node": _bounded_node(node),
+            **({"covariance_executed": _executed_covariance(
+                self.project_root / "runs" / request.owner_run_id,
+                request.op_node_id.removeprefix("model:"),
+            )} if node.get("stage") == "model" and request.op_node_id.startswith("model:") else {}),
             "run": {
                 "run_id": request.owner_run_id,
                 "status": manifest.get("status"),
@@ -1975,7 +2013,8 @@ class NodeOperationContextProvider:
             summary,
             summary_status=summary_status,
             preview=preview,
-            model_results=model_results,
+            # The exact published LMM estimand too, not only the rounded rows.
+            model_results=[*model_results, *_lmm_published_results(run_root)],
             run_root=run_root,
         )
         omitted_sections = ["raw_model_results"]
@@ -2196,7 +2235,7 @@ class NodeOperationContextProvider:
         for run_id in request.run_ids:
             run_root = self._project_run_root(run_id)
             labeler = _run_term_labeler(run_root)
-            for result in read_model_results(run_root):
+            for result in [*read_model_results(run_root), *_lmm_published_results(run_root)]:
                 public_model = _public_requested_model_coefficients(
                     run_id=run_id,
                     result=result,
@@ -3439,6 +3478,83 @@ def _notebook_option_revision_key(value: Any) -> str | None:
     return None
 
 
+def _lmm_published_results(run_root: Path) -> list[dict[str, Any]]:
+    """An LMM result in the shared result shape: its published estimand and,
+    from its validated inference kernel, every fixed effect.
+
+    LMM keeps its versioned packet as the only result source, so it has no
+    model_results/*.json; without this the coefficient reader had nothing
+    exact for it, and the Agent could not see the terms Wald/lincom/nlcom
+    accept (it reported time and x as absent from a model that estimated them).
+    The kernel's covariance is the GLS form checked against lme4 and Stata.
+    """
+    from ..services.lmm_result_adapter import VersionedResultReadError, read_lmm_public_results
+
+    try:
+        records = read_lmm_public_results(run_root)
+    except VersionedResultReadError:
+        return []
+    results = []
+    for record in records:
+        payload = record.get("payload")
+        if not isinstance(payload, dict) or payload.get("status") != "complete":
+            continue
+        coefficients = {}
+        for target, entry in (payload.get("coefficients") or {}).items():
+            if not isinstance(entry, dict):
+                continue
+            interval = entry.get("confidence_interval")
+            bounds = interval if isinstance(interval, list) and len(interval) == 2 else [None, None]
+            coefficients[target] = {**entry, "ci_lower": bounds[0], "ci_upper": bounds[1]}
+        fixed_terms = _kernel_fixed_effects(run_root, payload.get("model_id"))
+        for term, entry in fixed_terms.items():
+            coefficients.setdefault(term, entry)
+        results.append({
+            "model_id": payload.get("model_id"), "model_type": payload.get("model_type"),
+            "nobs": payload.get("nobs"), "coefficients": coefficients,
+            "x_columns": list(fixed_terms),
+            "estimator_version": payload.get("estimator_version"),
+        })
+    return results
+
+
+def _kernel_fixed_effects(run_root: Path, model_id: Any) -> dict[str, dict[str, Any]]:
+    """Estimate, SE, z-test and 95% interval of every kernel parameter (z reference)."""
+    from scipy import stats
+
+    from ..contracts.model.inference_kernel import kernel_relative_path, validate_inference_kernel
+    from ..postestimation.comparison_data import assert_completed_kernel
+
+    if not isinstance(model_id, str) or not model_id:
+        return {}
+    path = run_root / kernel_relative_path(model_id)
+    try:
+        if not path.is_file():
+            return {}
+        kernel = read_json(path)
+        validate_inference_kernel(kernel)
+        assert_completed_kernel(run_root, kernel)
+    except (OSError, ValueError):
+        return {}
+    if kernel.get("model_id") != model_id or kernel.get("vcov_scope") != "full" or kernel.get("reference_distribution") != "z":
+        return {}
+    critical = float(stats.norm.ppf(0.975))
+    terms: dict[str, dict[str, Any]] = {}
+    for index, name in enumerate(kernel.get("param_names") or []):
+        estimate = float(kernel["params"][index])
+        variance = float(kernel["vcov"][index][index])
+        if not variance > 0:
+            continue
+        std_error = variance ** 0.5
+        terms[str(name)] = {
+            "estimate": estimate, "std_error": std_error,
+            "p_value": float(2 * stats.norm.sf(abs(estimate / std_error))),
+            "ci_lower": estimate - critical * std_error, "ci_upper": estimate + critical * std_error,
+            "source_id": f"model_results.inference_kernels.{model_id}.params.{name}",
+        }
+    return terms
+
+
 def _public_requested_model_coefficients(
     *,
     run_id: str,
@@ -3505,6 +3621,7 @@ def _public_requested_model_coefficients(
         **_fit_statistics(result),
         "df_model": _public_stat_number(result.get("df_model")),
         "df_resid": _public_stat_number(result.get("df_resid")),
+        "inference": _bounded_inference(result),
         "outcome": result.get("y_column") if isinstance(result.get("y_column"), str) else None,
         "predictors": public_predictors,
         "predictors_omitted": max(predictor_count - len(public_predictors), 0),
@@ -4095,6 +4212,8 @@ def _bounded_persisted_model_facts(
         projected.append(
             {
                 "model_id": model_id,
+                **({"evidence_ref": {"run_id": run_root.name, "model_id": model_id,
+                                     "result_ref": f"model_results:{model_id}"}} if run_root is not None else {}),
                 # What n counts: rows, or units for estimators that aggregate
                 # over units (v1.8.10: CS reported 12 units beside 120 rows).
                 "nobs": result.get("nobs") if isinstance(result.get("nobs"), int) else None,
@@ -4195,11 +4314,20 @@ def _bounded_multiple_imputation(result: Mapping[str, Any]) -> dict[str, Any] | 
 def _executed_covariance(run_root: Path | None, model_id: Any) -> str | None:
     if run_root is None or not isinstance(model_id, str):
         return None
-    from ..contracts.model.inference_kernel import kernel_relative_path
+    from ..contracts.model.inference_kernel import kernel_relative_path, validate_inference_kernel
 
     path = run_root / kernel_relative_path(model_id)
     try:
-        return read_json(path).get("covariance_estimator") if path.is_file() else None
+        if not path.is_file():
+            return None
+        kernel = read_json(path)
+        validate_inference_kernel(kernel)
+        if kernel.get("model_id") != model_id:
+            return None
+        from ..postestimation.comparison_data import assert_completed_kernel
+
+        assert_completed_kernel(run_root, kernel)
+        return kernel.get("covariance_estimator")
     except (OSError, ValueError):
         return None
 
@@ -4224,7 +4352,7 @@ def _bounded_checks(run_root: Path, model_results: list[dict[str, Any]]) -> list
 
 _INFERENCE_FIELDS = (
     "covariance", "covariance_estimator", "inference_distribution", "effective_df", "df_method",
-    "cluster_count", "inference_version", "hac",
+    "cluster_count", "cluster_variable", "inference_version", "hac",
 )
 
 
@@ -4252,8 +4380,7 @@ def _bounded_inference(result: Mapping[str, Any]) -> dict[str, Any] | None:
     """
     design = result.get("survey_design")
     if isinstance(design, Mapping):
-        # The design replaced the fitted object's variance and df; the covariance
-        # evidence still describes the pre-design fit (e.g. HC1, t(N - K)).
+        # Derive design inference independently of legacy pre-design evidence.
         from ..survey.design import recorded_df_convention
 
         convention, df = recorded_df_convention(design)
@@ -4272,6 +4399,18 @@ def _bounded_inference(result: Mapping[str, Any]) -> dict[str, Any] | None:
         and evidence.get("inference_distribution") == "normal"
         and evidence.get("covariance") in {"robust", "clustered"}
     )
+    # A panel or DID fit (it names its entity) with robust errors did not
+    # cluster by entity; since v1.8.11 the default clusters, so an older result
+    # is marked and the Agent can offer the rerun.
+    if evidence.get("covariance") == "robust" and isinstance(result.get("entity_col"), str) \
+            and evidence.get("cluster_entity") is not True:
+        out["not_clustered_by_entity"] = True
+        out["inference_note"] = (
+            "Heteroskedasticity-robust standard errors not clustered by entity: inconsistent with a "
+            "fixed number of periods. "
+            + ("This result predates v1.8.11; rerunning clusters by entity." if "inference_version" not in evidence
+               else "Chosen explicitly; the default clusters by entity.")
+        )
     return out
 
 
@@ -5250,7 +5389,7 @@ def _bounded_survey_design(model_results: list[dict[str, Any]]) -> dict[str, Any
         design = result.get("survey_design")
         if not isinstance(design, dict):
             continue
-        return _bounded_numeric_fields(
+        projected = _bounded_numeric_fields(
             design,
             fields=(
                 "n_obs", "n_strata", "n_psu", "degf", "residual_degf", "inference_degf",
@@ -5262,6 +5401,18 @@ def _bounded_survey_design(model_results: list[dict[str, Any]]) -> dict[str, Any
                 "subpopulation",
             ),
         )
+        fpc = design.get("fpc")
+        if isinstance(fpc, dict):
+            projected["fpc"] = _bounded_numeric_fields(fpc, fields=(), string_fields=("column", "units"))
+            strata = fpc.get("strata")
+            projected["fpc"]["strata"] = [
+                _bounded_numeric_fields(row, fields=("sampled_psus", "population_psus",
+                    "sampling_fraction", "variance_factor"), string_fields=("stratum",))
+                for row in (strata if isinstance(strata, list) else [])[:16]
+                if isinstance(row, dict)]
+            if isinstance(strata, list) and len(strata) > 16:
+                projected["fpc"]["strata_truncated"] = True
+        return projected
     return None
 
 

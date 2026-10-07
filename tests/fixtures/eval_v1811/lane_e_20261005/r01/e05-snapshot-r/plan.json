@@ -1,0 +1,139 @@
+{
+  "schema_version": 1,
+  "project_id": "snapshot",
+  "run_id": "20261005_091814_542545_c0b3eebc",
+  "workbench_version": "1.8.11",
+  "lineage_hash": "f7f9bba0dce2c1d99252e3b4b8bb19f639bb62ea8d99ef16d7ca32fb003c185e",
+  "sources": [
+    {
+      "source_id": "source_462a6947c68c9e6cd1a5b9c6",
+      "format": "csv",
+      "filename": "source_c2e8eadde188587d9f35b7a9.csv",
+      "sha256": "c2e8eadde188587d9f35b7a9b05600ec8998a525e03774138b88e4553091909f",
+      "read_options": {}
+    }
+  ],
+  "steps": [
+    {
+      "step_id": "step_6485f17b68a0f4bdeb945eed",
+      "kind": "data_operation",
+      "operation": "data.cleaning",
+      "label": "Recorded cleaning and source normalization",
+      "parameters": {
+        "actions": [
+          {
+            "action": "normalize_column_names",
+            "details": {
+              "y": "y",
+              "x1": "x1",
+              "x2": "x2"
+            }
+          }
+        ],
+        "identity": true
+      },
+      "inputs": [
+        "source_462a6947c68c9e6cd1a5b9c6"
+      ],
+      "output_dataset": "step_6485f17b68a0f4bdeb945eed",
+      "expected": {
+        "nrows": 1000,
+        "columns": [
+          "y",
+          "x1",
+          "x2"
+        ]
+      },
+      "tolerances": {},
+      "seed": null,
+      "snapshot": {
+        "filename": "step_6485f17b68a0f4bdeb945eed.csv",
+        "format": "csv",
+        "sha256": "150a72b0bfecc03f769f08980be7f04400bfc24a208b704d5f2b0bb30c2391ee",
+        "nrows": 1000,
+        "columns": [
+          "y",
+          "x1",
+          "x2"
+        ]
+      }
+    },
+    {
+      "step_id": "step_ba8d0be27e6993bae63a245d",
+      "kind": "model",
+      "operation": "model.negative_binomial",
+      "label": "negative_binomial (primary)",
+      "parameters": {
+        "model_type": "negative_binomial",
+        "y": "y",
+        "x": [
+          "x1",
+          "x2"
+        ],
+        "categorical_x": [],
+        "covariance": "unadjusted",
+        "cluster": null,
+        "entity": null,
+        "time": null,
+        "hac_lags": null,
+        "weights": null,
+        "model_options": {
+          "dispersion": "constant"
+        }
+      },
+      "inputs": [
+        "step_6485f17b68a0f4bdeb945eed"
+      ],
+      "output_dataset": null,
+      "expected": {
+        "nobs": 1000,
+        "coefficients": {
+          "Intercept": 0.41794987220602414,
+          "x1": 0.2972288232352733,
+          "x2": -0.2544118335916357
+        },
+        "std_errors": {
+          "Intercept": 0.033988692547635736,
+          "x1": 0.031235162030611035,
+          "x2": 0.03237676639037322
+        },
+        "statistics": {
+          "Intercept": {
+            "value": 12.296732850793251,
+            "df": null,
+            "df_denominator": null,
+            "p_value": 9.431229712147405e-35,
+            "distribution": "z"
+          },
+          "x1": {
+            "value": 9.515840607581403,
+            "df": null,
+            "df_denominator": null,
+            "p_value": 1.8024962829839534e-21,
+            "distribution": "z"
+          },
+          "x2": {
+            "value": -7.857851847344506,
+            "df": null,
+            "df_denominator": null,
+            "p_value": 3.907771102641985e-15,
+            "distribution": "z"
+          }
+        }
+      },
+      "tolerances": {},
+      "seed": null,
+      "snapshot": {
+        "filename": "step_ba8d0be27e6993bae63a245d.csv",
+        "format": "csv",
+        "sha256": "150a72b0bfecc03f769f08980be7f04400bfc24a208b704d5f2b0bb30c2391ee",
+        "nrows": 1000,
+        "columns": [
+          "y",
+          "x1",
+          "x2"
+        ]
+      }
+    }
+  ]
+}

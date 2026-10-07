@@ -87,6 +87,15 @@ class RecordingStage:
                 str(value) for value in metadata.get("covariates", [])
                 if isinstance(value, str)
             }
+        primary_payload = _model_result_payload(model_results[0][1]) if model_results else {}
+        if primary_payload.get("primary_target_id"):
+            # A result that publishes one target estimand (the LMM recipe) does
+            # not list its other fixed effects; its inference kernel names every
+            # term the fit estimated, so absence from the table is not a drop.
+            from ..inference_kernels import recorded_inference_kernel
+
+            kernel = recorded_inference_kernel(ctx, model_results[0][0]) or {}
+            declared_model_variables |= {str(name) for name in kernel.get("param_names") or []}
         dropped_vars = _check_dropped_variables(
             drop_check_x,
             model_results,

@@ -216,3 +216,24 @@ describe("ArmaGarchControls", () => {
     ]));
   });
 });
+
+it("classical mode is explicit and enforces a refit at every origin", () => {
+  const onChange = vi.fn();
+  const value = { ...createDefaultArmaGarchValue(), evaluationMode: "classical_replication" as const, refitEvery: 1 };
+  render(<ArmaGarchControls columns={["date", "vix"]} preview={preview} value={value} onChange={onChange} />);
+  expect(screen.getByLabelText("evaluation mode")).toHaveValue("classical_replication");
+  expect(screen.getByLabelText("refit every")).toBeDisabled();
+  expect(screen.getByText(/retrospective.*independent/i)).toBeInTheDocument();
+  expect(armaGarchValidationErrors({ ...value, timeColumn: "date", valueColumn: "vix", transformConfirmed: true, validationN: 509 })).toEqual([]);
+  expect(armaGarchValidationErrors({ ...value, refitEvery: 2 })).toContain("Classical replication requires a refit at every origin");
+});
+
+it.each(["joint", "auto"] as const)("accepts normal manual MA orders with %s estimation", (estimationStrategy) => {
+  const value = {...createDefaultArmaGarchValue(),timeColumn:"date",valueColumn:"vix",
+    transformConfirmed:true,selectionMode:"manual" as const,armaQ:1,estimationStrategy};
+  expect(armaGarchValidationErrors(value)).toEqual([]);
+  expect(armaGarchValidationErrors({...value,innovationDistribution:"student_t"})).toContain(
+    "Joint estimation with MA terms requires normal innovations",
+  );
+  expect(armaGarchValidationErrors({...value,innovationDistribution:"student_t",estimationStrategy:"sequential"})).toEqual([]);
+});

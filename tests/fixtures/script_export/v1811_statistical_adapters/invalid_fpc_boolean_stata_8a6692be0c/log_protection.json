@@ -1,0 +1,7 @@
+{
+  "raw_sha256": "withheld-raw-sha256-b0ef58faf215338f2937cf73",
+  "redacted_sha256": "88f46ae8a564c06ab8f658d619ee085472907f82031e38c33398896cd221c251",
+  "ignored_raw": "local/v1811-script-statistical-adapters/invalid_fpc_boolean_stata_8a6692be0c/analysis.log",
+  "outside_header_values_byte_identical": true,
+  "raw_mode": "0600"
+}

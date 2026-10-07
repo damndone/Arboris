@@ -1,0 +1,48 @@
+
+Fontconfig error: No writable cache directories
+	/opt/homebrew/var/cache/fontconfig
+	/Users/jiayuanren/.cache/fontconfig
+	/Users/jiayuanren/.fontconfig
+..F.
+=================================== FAILURES ===================================
+________ test_full_and_first_origin_match_stata_and_ignore_future_tail _________
+
+tmp_path = PosixPath('/private/tmp/v1811-evaluation-df8776f74956480ba74501dbc3c2e1b3-r02/test_full_and_first_origin_mat0')
+
+    def test_full_and_first_origin_match_stata_and_ignore_future_tail(tmp_path):
+        spec=importlib.util.spec_from_file_location('e06_existing_runner',REPO/'tests/models/arma_garch/test_classical_replication.py')
+        module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+        rng=np.random.default_rng(18112101);source=pd.DataFrame({'when':pd.bdate_range('2025-01-01',periods=144),'value':rng.normal(size=144)})
+        result,actual=module._run(tmp_path/'full',source)
+        changed=source.copy();changed.loc[140:,'value']+=12
+        _,mutant=module._run(tmp_path/'changed',changed)
+        first=actual['ts.rolling_forecasts']['rows'][0];other=mutant['ts.rolling_forecasts']['rows'][0]
+        for key in ['conditional_mean','conditional_variance','lower_bound','upper_bound']:assert first[key]==other[key]
+        data=OUT/'e06-values.csv';source.assign(t=np.arange(1,145))[['t','value']].to_csv(data,index=False,float_format='%.17g')
+        body=f'import delimited "{data}", asdouble clear case(preserve)\ntsset t\nquietly arima value, arima(0,0,0) noconstant tolerance(1e-12) ltolerance(1e-12) nrtolerance(1e-12) iterate(1000)\n'
+        body+=emit('ll','e(ll)')+'\n'+emit('variance','_b[/sigma]^2')+'\n'
+        body+='quietly arima value if t<=140, arima(0,0,0) noconstant tolerance(1e-12) ltolerance(1e-12) nrtolerance(1e-12) iterate(1000)\n'+emit('prefix_variance','_b[/sigma]^2')+'\n'
+        native=native_stata(body,'e06-classic',tmp_path)
+        full=actual['ts.final_model']['in_sample_fit'];save('e06-classic',{'full':full,'first':first,'native':native,'sample':actual['ts.report']['sample']})
+>       assert full['variance_stage']['parameters']['sigma2']==pytest.approx(native['variance'],abs=1e-8,rel=0)
+E       assert 1.0841774164273454 == 1.0841775206953714 ± 1.0e-08
+E         
+E         comparison failed
+E         Obtained: 1.0841774164273454
+E         Expected: 1.0841775206953714 ± 1.0e-08
+
+tests/eval_v1811/lane_e_20261005/test_e06_classical.py:49: AssertionError
+=============================== warnings summary ===============================
+../../.venv/lib/python3.14/site-packages/fastapi/testclient.py:1
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+tests/eval_v1811/lane_e_20261005/test_e06_classical.py: 18 warnings
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/tsa/statespace/mlemodel.py:174: DeprecationWarning: Setting the shape on a NumPy array has been deprecated in NumPy 2.5.
+  As an alternative, you can create a new view using np.reshape (with copy=False if needed).
+    endog.shape = (endog.shape[0], 1)  # this will be C-contiguous
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/eval_v1811/lane_e_20261005/test_e06_classical.py::test_full_and_first_origin_match_stata_and_ignore_future_tail
+1 failed, 3 passed, 19 warnings in 14.53s

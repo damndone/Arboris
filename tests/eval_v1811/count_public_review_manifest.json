@@ -1,0 +1,243 @@
+{
+  "baseline": "511616d55dc92acbc0ef891ca9c5a7eca55cdc93",
+  "public_integration_commit": "5d744792",
+  "migration_commit": "05cfc53f",
+  "reviewed_tip_at_clean_start": "699e378749e8d629aa8230ff6ef7ea7269a4f6bb",
+  "worktree": "/Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11",
+  "public_source_paths_unchanged_05_to_initial_head": true,
+  "committed_sources_at_review_tip": [
+    {
+      "path": "backend/workbench/admission.py",
+      "sha256": "283aef04ab56e6faca94e43303c5c58c45e08a9ac7dd2a40237fd95ec5172df8"
+    },
+    {
+      "path": "backend/workbench/agent/bounds.py",
+      "sha256": "372ded229921cfb6be618e39335f303f48e6aab3e7ee65a8c78a9e5d2fff2076"
+    },
+    {
+      "path": "backend/workbench/agent/family_evidence.py",
+      "sha256": "55d038e98988bb251999a711a8a31e7675b2a51bc6e63ceccfd63c3b5c6fcd94"
+    },
+    {
+      "path": "backend/workbench/agent/postestimation_steps.py",
+      "sha256": "bf54caa8e92353a3bec92e5386e5140d4fa20db1e6a1bdd45e494aa75eec31d8"
+    },
+    {
+      "path": "backend/workbench/agent/recipes/count_models_vocabulary.py",
+      "sha256": "2b111c900171e0f163bf6fba8c6040c33bc60cf7532ecff0336c721adaea19e6"
+    },
+    {
+      "path": "backend/workbench/agent/recipes/registry.py",
+      "sha256": "b33d04fcf74361ab1dc6a2f9182972fad4c893735893c532f2ae4589c6be8565"
+    },
+    {
+      "path": "backend/workbench/agent/workflow_contracts.py",
+      "sha256": "49c4e4589f10722a2fffcfb7c9498cb84bbab75b052d850dfda58b29bcf9f2df"
+    },
+    {
+      "path": "backend/workbench/agent/workflow_runtime.py",
+      "sha256": "0ad5dea7c7d0d1ed6701fdbaeabb6a0acae56f6528f77e716e3b470c2ee6a400"
+    },
+    {
+      "path": "backend/workbench/contracts/model/count_models.py",
+      "sha256": "55718295d0435c2e7ae0d100471b61cbe19a38086ef450c2923a0828502ff571"
+    },
+    {
+      "path": "backend/workbench/contracts/model/inference_kernel.py",
+      "sha256": "be94249889597607e00c62e330f14ea311b1434b23d43dfcb584fac32cf2b431"
+    },
+    {
+      "path": "backend/workbench/contracts/model/result_envelope_registry.py",
+      "sha256": "eeb0d02358c5a99018f8b01c3a8fb3ee8add91eadfa8700e137f877f6a7d3523"
+    },
+    {
+      "path": "backend/workbench/econometrics/count_models.py",
+      "sha256": "143b75513c18d4a5aa0a20ea08b61169f65d1a358a533ee0d497c768cff7dd50"
+    },
+    {
+      "path": "backend/workbench/engine/capabilities.py",
+      "sha256": "3757519f139db386a2e32f080d9e550250503ccf39678f90066505f3e0c8599f"
+    },
+    {
+      "path": "backend/workbench/engine/stages/diagnostics.py",
+      "sha256": "a6cbbdbadd6aa52595cbbd2901a46bded932b772ec8eccb789cae58028b21fa2"
+    },
+    {
+      "path": "backend/workbench/engine/stages/estimation.py",
+      "sha256": "1fc6b77ad499f0f14db12abea034d5993ff2c272d7c83ee12e688df7202cf577"
+    },
+    {
+      "path": "backend/workbench/postestimation/core.py",
+      "sha256": "c83b5759142abc3443e1c8f14b29f9bb4334d96d4070990ebb8c2f4c1af80f9e"
+    },
+    {
+      "path": "backend/workbench/postestimation/estimation_data.py",
+      "sha256": "73812db691123d4fb6bb749395bc3b6afc066f6ff03e2289a522ef8fba731d53"
+    },
+    {
+      "path": "backend/workbench/postestimation/registry.py",
+      "sha256": "d885ad8e01f1b0df09e4418c83e1c7cf0689c74507efa4e4062b6bdfcfd1e4cb"
+    },
+    {
+      "path": "backend/workbench/services/family_evidence.py",
+      "sha256": "cc441d6729a31056b02a78dedb2ba5ded7182fa81aa0634d596fa02088ca88d4"
+    },
+    {
+      "path": "frontend/src/api.ts",
+      "sha256": "326a92e67899842dc69705db7528ddec3911271cc4c4003b5ee233ad0a1cf2c1"
+    },
+    {
+      "path": "frontend/src/lineage/drafts/GenesisWizard.tsx",
+      "sha256": "fb998c89629686849785f98cd19e5bfd6d6049d04aefb773849ce4724e3706e7"
+    },
+    {
+      "path": "frontend/src/runForm/CountModelControls.test.tsx",
+      "sha256": "1b629d57eca15f41439f9a94cfaa073553c7dc54ec69d04e1c157a077bbed98f"
+    },
+    {
+      "path": "frontend/src/runForm/CountModelControls.tsx",
+      "sha256": "a94655808b5bfe855a4546a95f9b75d6990584291b09e9440713599ce9bbc744"
+    },
+    {
+      "path": "frontend/src/runForm/RunForm.test.tsx",
+      "sha256": "9f6eb4b9d5f72b07f337421ee0417b5e7601759ee1a8d98c3c92d8262ecb7f79"
+    },
+    {
+      "path": "frontend/src/runForm/RunForm.tsx",
+      "sha256": "b925fe84c1319795d1adb76a7ac455130a199f9de868d2df80c54c2b95363df9"
+    },
+    {
+      "path": "frontend/src/runResult.tsx",
+      "sha256": "67c629fd49984c3d3a614a322ba2ad8817f6a6e675e3f54763f159c5a7fb3dff"
+    },
+    {
+      "path": "frontend/src/runResult/CountModelResultCard.test.tsx",
+      "sha256": "2868b3f0a3e8d5e0eea76adcc9fa975d1644c1549d74d453aaae93bb28916450"
+    },
+    {
+      "path": "frontend/src/runResult/CountModelResultCard.tsx",
+      "sha256": "c83a7a8958d3b98304e28af5927769521092e268a4a6956699d0201776227c8b"
+    }
+  ],
+  "read_only_fixtures": [
+    {
+      "path": "tests/fixtures/postestimation/data.csv",
+      "sha256": "2e1b92f07632a8c88d047074f77cd6e5f9552b4f932f7d6ed2499161a0bf3084",
+      "unchanged_from_baseline": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/oracle.json",
+      "sha256": "d80dbc69f91648cbd17443f89deaf21df63296f1296a6d674c3ef9e135b9302c",
+      "unchanged_from_baseline": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/generate_oracle.R",
+      "sha256": "82b35d95a30650daf85de157c93eed380ddcb151557e64cf3ac5b9f0d4d459ef",
+      "unchanged_from_baseline": true
+    },
+    {
+      "path": "tests/fixtures/admission/glm_negative_binomial/data.csv",
+      "sha256": "33bf1067bdf7f7ca7f1bf7fb34c16fc167d9318b482f60aae8febd402b084711",
+      "unchanged_from_baseline": true
+    },
+    {
+      "path": "tests/fixtures/admission/glm_negative_binomial/oracle.json",
+      "sha256": "67620f2e795f1ee49827436288c1b7c7bcd9894951bac53c495ef7c04773582d",
+      "unchanged_from_baseline": true
+    },
+    {
+      "path": "tests/fixtures/admission/glm_negative_binomial/oracle_high_precision.json",
+      "sha256": "0e52e10663056eb28a96ed5095742a651d5ba24ef58e941e79a87e0f963aa777",
+      "unchanged_from_baseline": true
+    },
+    {
+      "path": "tests/fixtures/count_models/p1-remediation-20261004/fractional-oracle/data.csv",
+      "sha256": "79ce76f3d07c60446a57b40b53f276345cca98423a20c8f193f3f475db34e1a9",
+      "unchanged_from_baseline": true
+    },
+    {
+      "path": "tests/fixtures/count_models/p1-remediation-20261004/fractional-oracle/stata.json",
+      "sha256": "5c14236ff68dd25159c96f1d03ee6cd911bc27095abaa4fb1ecfa3c1107a5245",
+      "unchanged_from_baseline": true
+    },
+    {
+      "path": "tests/fixtures/count_models/integration-strict-v1811/native-reference/nb2-postestimation-reference.json",
+      "sha256": "ea67d3316222edf8a36b99c93bd8f1e5f00c0bef3677712f537d4369941d80d9",
+      "source_tip": "699e378749e8d629aa8230ff6ef7ea7269a4f6bb"
+    },
+    {
+      "path": "tests/fixtures/count_models/integration-strict-v1811/native-reference/glm-fixed-alpha-reference.json",
+      "sha256": "411f23c8d760ba106e7024a2401f4dd544bd9bc23cb46f625a667b9fbe80a9c3",
+      "source_tip": "699e378749e8d629aa8230ff6ef7ea7269a4f6bb"
+    },
+    {
+      "path": "tests/fixtures/count_models/integration-strict-v1811/glm-negative-binomial-v1811-oracle.json",
+      "sha256": "8edac87c50fe78ed186f75297abae9de4f11c0d0f848d120620c1b3705cb0c6c",
+      "source_tip": "699e378749e8d629aa8230ff6ef7ea7269a4f6bb"
+    }
+  ],
+  "commands": [
+    "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py .venv/bin/python -m pytest -q -s tests/eval_v1811/count_public_review_adversarial.py > tests/eval_v1811/count_public_review_first.txt 2>&1",
+    "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py .venv/bin/python tests/eval_v1811/count_public_review_stata_probe.py > tests/eval_v1811/count_public_review_stata_output.txt 2>&1",
+    "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py .venv/bin/python -m pytest -q tests/eval_v1811/count_public_review_bounds.py > tests/eval_v1811/count_public_review_bounds_output.txt 2>&1"
+  ],
+  "independent_results": {
+    "first": "3 failed, 17 passed, 8 warnings in 33.21s",
+    "bounds": "2 passed in 1.29s",
+    "native_stata_incompatible_outcome_rc": 498
+  },
+  "evidence": [
+    {
+      "path": "tests/eval_v1811/count_public_review_adversarial.py",
+      "sha256": "15b43c5ddfd1f562913d3d76565b523285f2d99069abd5d5dd6187cdef9f05bb"
+    },
+    {
+      "path": "tests/eval_v1811/count_public_review_bounds.py",
+      "sha256": "88d04ae7b70e805f182cfe34bfd8e7f75c2f811c914b37573b5f6fc50a7cabf3"
+    },
+    {
+      "path": "tests/eval_v1811/count_public_review_bounds_output.txt",
+      "sha256": "ec7adf3e0637795acc788538b14d59301a7fda99307b9f5ab4e1a8b054528598"
+    },
+    {
+      "path": "tests/eval_v1811/count_public_review_first.txt",
+      "sha256": "f8cb56256a029916c9843da49864f2310a2e737179e791721fa406ef98b5159a"
+    },
+    {
+      "path": "tests/eval_v1811/count_public_review_stata/oracle.do",
+      "sha256": "33fc6f7986de6eb93ccff424b29bc832c4f6ee54cd5c5366fb3e7669fcaa4831"
+    },
+    {
+      "path": "tests/eval_v1811/count_public_review_stata/oracle.log",
+      "sha256": "withheld-raw-sha256-b2b05aed03edc7573c5f9059"
+    },
+    {
+      "path": "tests/eval_v1811/count_public_review_stata/wb_results.tsv",
+      "sha256": "01e4d1f97d35bd3a2295e02c09f5f435c3d457c83b1a2d19994326bd9f38e2d0"
+    },
+    {
+      "path": "tests/eval_v1811/count_public_review_stata.json",
+      "sha256": "13ec5b105f43806f8e8f84f0608229dac0df6607f852db180f0a993b6dcd08c4"
+    },
+    {
+      "path": "tests/eval_v1811/count_public_review_stata_output.txt",
+      "sha256": "13ec5b105f43806f8e8f84f0608229dac0df6607f852db180f0a993b6dcd08c4"
+    },
+    {
+      "path": "tests/eval_v1811/count_public_review_stata_probe.py",
+      "sha256": "090bfebcb8c269ccdeda856bd5712783308d6a026d9d77ebab06da9e3c9fbf31"
+    },
+    {
+      "path": "docs/superpowers/handoffs/2026-10-04-v1.8.11-count-public-independent-review.md",
+      "sha256": "b31c9e52e991bac98ee003703a374049d7fbaf60ac23642829272623bdc8ac5f"
+    }
+  ],
+  "new_findings": [
+    "P1 GLM LR missing response binding",
+    "P2 count warning public transport",
+    "P2 inherited kernel reader owner identity"
+  ],
+  "root_identified_wizard_fix_pending": true,
+  "browser_verified_by_this_reviewer": false,
+  "llm_used": false
+}

@@ -1,0 +1,33 @@
+
+Fontconfig error: No writable cache directories
+	/opt/homebrew/var/cache/fontconfig
+	/Users/jiayuanren/.cache/fontconfig
+	/Users/jiayuanren/.fontconfig
+{"run_root": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-772/test_report_retains_each_full_0/review/runs/20261004_201918_431400_e02b7003", "options": {"survey_fpc_col": "population_fpc"}, "status": "completed"}
+F{"run_root": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-772/test_census_owner_warning_is_a0/projects/review/runs/20261004_201928_759941_5ee0d9e7", "options": {"survey_fpc_col": "review_census"}, "status": "completed"}
+.
+=================================== FAILURES ===================================
+_ test_report_retains_each_full_design_stratum_instead_of_only_generic_fpc_label _
+
+tmp_path = PosixPath('/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-772/test_report_retains_each_full_0')
+
+    def test_report_retains_each_full_design_stratum_instead_of_only_generic_fpc_label(tmp_path):
+        outcome, root = public_run(tmp_path, survey_fpc_col='population_fpc')
+        assert outcome['status'] == 'completed'
+        packet, _ = result(root)
+        facts = '\n'.join(_survey_design_facts(root))
+        missing = [row['stratum'] for row in packet['survey_design']['fpc']['strata']
+            if row['stratum'] not in facts]
+>       assert not missing, {'missing_full_design_strata': missing, 'actual_report_facts': facts}
+E       AssertionError: {'missing_full_design_strata': ['h01', 'h02', 'h03', 'h04', 'h05', 'h06', ...], 'actual_report_facts': 'Standard error...ch stratum uses its full-design sampling fraction.
+E         Design effect 1.63; effective sample size 75.6 of 80 observations'}
+E       assert not ['h01', 'h02', 'h03', 'h04', 'h05', 'h06', ...]
+
+tests/eval_v1811/fpc_public_review_consumers.py:15: AssertionError
+------------------------------ Captured log call -------------------------------
+WARNING  matplotlib:__init__.py:577 /Users/jiayuanren/.matplotlib is not a writable directory
+WARNING  matplotlib:__init__.py:593 Matplotlib created a temporary cache directory at /var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/matplotlib-y2n9u0co because there was an issue with the default path ({configdir}); it is highly recommended to set the MPLCONFIGDIR environment variable to a writable directory, in particular to speed up the import of Matplotlib and to better support multiprocessing.
+WARNING  matplotlib.font_manager:font_manager.py:1249 Matplotlib is building the font cache; this may take a moment.
+=========================== short test summary info ============================
+FAILED tests/eval_v1811/fpc_public_review_consumers.py::test_report_retains_each_full_design_stratum_instead_of_only_generic_fpc_label
+1 failed, 1 passed in 12.25s

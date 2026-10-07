@@ -125,7 +125,8 @@ def test_panel_ols_forwards_requested_covariance(tmp_path, monkeypatch):
     assert captured["covariance"] == "clustered"
 
 
-def test_panel_ols_defaults_covariance_to_robust(tmp_path, monkeypatch):
+def test_panel_ols_defaults_covariance_to_clustered(tmp_path, monkeypatch):
+    """v1.8.11: clustered by entity unless chosen otherwise, as Stata's xtreg, fe vce(robust)."""
     import workbench.orchestrator as orch
     captured = {}
     real = orch.run_panel_ols
@@ -135,4 +136,4 @@ def test_panel_ols_defaults_covariance_to_robust(tmp_path, monkeypatch):
     monkeypatch.setattr(orch, "run_panel_ols", spy)
     _run(tmp_path, mode="auto", y="profit", x=["rnd"],
          model_type="panel_ols", entity_col="firm", time_col="yr")
-    assert captured["covariance"] == "robust"
+    assert captured["covariance"] == "clustered"

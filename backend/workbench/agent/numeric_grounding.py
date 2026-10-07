@@ -503,7 +503,10 @@ def calculate(calculations: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         results.append({
             "label": label,
             "expression": expression,
-            "value": repr(value),
+            # A double holds 15 reliable significant digits; the rest of its
+            # repr is binary noise (33.76 - 32.295 prints 1.4649999999999963),
+            # which would make a correct reading such as 1.47 look unsupported.
+            "value": repr(float(f"{value:.15g}")),
             "operands": list(operands),
         })
     return {

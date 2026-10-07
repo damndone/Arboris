@@ -1,0 +1,41 @@
+{
+  "owner": "/private/tmp/v1811-evaluation-8d8a2fd4c7d44af693b267e6d893d16f-r01/e04-native0/public-post/runs/20261005_091808_144503_aa5b7bac",
+  "expected": {
+    "statistic": 35.479440557724956,
+    "df": 1,
+    "p_value": 2.5775687816437946e-09,
+    "loglik_full": -1289.011894728295,
+    "loglik_restricted": -1306.7516150071574
+  },
+  "actual": {
+    "schema_version": "workbench.postestimation.result/v1",
+    "model_run_id": "20261005_091808_144503_aa5b7bac",
+    "operation": "lr",
+    "full": {
+      "model_id": "glm_1",
+      "model_type": "glm:negative_binomial",
+      "covariance_estimator": "nonrobust",
+      "nobs": 850,
+      "df_method": "asymptotic",
+      "n_clusters": null
+    },
+    "restricted": {
+      "model_id": "glm_1",
+      "model_type": "glm:negative_binomial",
+      "covariance_estimator": "nonrobust",
+      "nobs": 850,
+      "df_method": "asymptotic",
+      "n_clusters": null
+    },
+    "dropped_parameters": [
+      "x2"
+    ],
+    "distribution": "chi2",
+    "statistic": 35.47944055772223,
+    "df": 1,
+    "p_value": 2.5775687816474036e-09,
+    "loglik_full": -1289.011894728295,
+    "loglik_restricted": -1306.751615007156,
+    "restricted_model_run_id": "20261005_091809_182075_03eebc4e"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "pre_remediation_head": "87f964311115117f08b790a6247645ad23e1ff80",
+  "raw_copies_match_pre_remediation_git_bytes": true,
+  "all_raw_copies_git_ignored": true,
+  "only_license_header_values_changed": true,
+  "changed_header_lines_total": 8,
+  "added_tracked_and_owned_assets_scanned": 49,
+  "sensitive_header_values_found": 0,
+  "raw_field_values_found": 0,
+  "numeric_or_command_or_error_changes": 0
+}

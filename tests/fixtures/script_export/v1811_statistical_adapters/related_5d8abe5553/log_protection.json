@@ -1,0 +1,50 @@
+[
+  {
+    "log": "oracle-hps07lka/analysis.log",
+    "ignored_raw": "local/v1811-script-statistical-adapters/related_5d8abe5553/oracle-hps07lka/analysis.log",
+    "raw_sha256": "withheld-raw-sha256-e559716ea4dde23d1836277b",
+    "redacted_sha256": "577ff41381e2a47d70ce3e514ea15c0905a5bf7473aa9bfb48829e397a63bcc5",
+    "outside_header_values_byte_identical": true,
+    "raw_mode": "0600"
+  },
+  {
+    "log": "oracle-evg6hyp1/analysis.log",
+    "ignored_raw": "local/v1811-script-statistical-adapters/related_5d8abe5553/oracle-evg6hyp1/analysis.log",
+    "raw_sha256": "withheld-raw-sha256-33fbdfc8f3be610cab173772",
+    "redacted_sha256": "e8c52f91a623e18d076c58d911852ace783018f88c28f28e425dc406bdd06a16",
+    "outside_header_values_byte_identical": true,
+    "raw_mode": "0600"
+  },
+  {
+    "log": "oracle-538rfjt0/analysis.log",
+    "ignored_raw": "local/v1811-script-statistical-adapters/related_5d8abe5553/oracle-538rfjt0/analysis.log",
+    "raw_sha256": "withheld-raw-sha256-5781b672a332cf7ba154fd29",
+    "redacted_sha256": "0e617202458563ea533f7e6a14acec4c0d2dff082110a7339f2e61f271326956",
+    "outside_header_values_byte_identical": true,
+    "raw_mode": "0600"
+  },
+  {
+    "log": "oracle-2rh6s9u0/analysis.log",
+    "ignored_raw": "local/v1811-script-statistical-adapters/related_5d8abe5553/oracle-2rh6s9u0/analysis.log",
+    "raw_sha256": "withheld-raw-sha256-1cc0dd4571e0f8c4b43b9dbb",
+    "redacted_sha256": "2a631e11d8d3dacc96ce034200f4f9980f5112f3a83b6b95f97d71e70615cb92",
+    "outside_header_values_byte_identical": true,
+    "raw_mode": "0600"
+  },
+  {
+    "log": "oracle-dhxqwcb_/analysis.log",
+    "ignored_raw": "local/v1811-script-statistical-adapters/related_5d8abe5553/oracle-dhxqwcb_/analysis.log",
+    "raw_sha256": "withheld-raw-sha256-d252b5a4697a2a78fa6e984a",
+    "redacted_sha256": "77dae57134ef40708460860b940b5df43a98569e831f47caf007241f962c94d9",
+    "outside_header_values_byte_identical": true,
+    "raw_mode": "0600"
+  },
+  {
+    "log": "oracle-f_5bquyq/analysis.log",
+    "ignored_raw": "local/v1811-script-statistical-adapters/related_5d8abe5553/oracle-f_5bquyq/analysis.log",
+    "raw_sha256": "withheld-raw-sha256-927488534eb127ff6cf23708",
+    "redacted_sha256": "68fc12e07d31b6536834facce92e9883f5dedf1f19848ad893fd1038a4492379",
+    "outside_header_values_byte_identical": true,
+    "raw_mode": "0600"
+  }
+]

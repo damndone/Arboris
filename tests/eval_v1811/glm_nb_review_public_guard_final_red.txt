@@ -1,0 +1,22 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+__________ test_public_oracle_assets_exclude_license_serial_and_owner __________
+
+    def test_public_oracle_assets_exclude_license_serial_and_owner():
+        violations = []
+        manifest = json.loads((ASSET / "manifest.json").read_text())
+        for relative in sorted(manifest["asset_sha256"]):
+            path = ROOT / relative
+            for line_number,line in enumerate(path.read_text(errors="replace").splitlines(),1):
+                if re.search(r"(?:Serial number|Licensed to)\s*:",line,re.I):
+                    violations.append({"path":str(path.relative_to(ROOT)),"line":line_number,
+                                       "field":"license_header","value":"withheld"})
+        # Only safe locations are emitted on failure; never include header values.
+>       assert not violations, violations
+E       AssertionError: [{'path': 'tests/fixtures/postestimation/glm_negative_binomial_v1811/native-output.txt', 'line': 185, 'field': 'licens..._negative_binomial_v1811/native-stata-v3/oracle.log', 'line': 15, 'field': 'license_header', 'value': 'withheld'}, ...]
+E       assert not [{'path': 'tests/fixtures/postestimation/glm_negative_binomial_v1811/native-output.txt', 'line': 185, 'field': 'licens..._negative_binomial_v1811/native-stata-v3/oracle.log', 'line': 15, 'field': 'license_header', 'value': 'withheld'}, ...]
+
+tests/eval_v1811/glm_nb_review_public_guard_test.py:19: AssertionError
+=========================== short test summary info ============================
+FAILED tests/eval_v1811/glm_nb_review_public_guard_test.py::test_public_oracle_assets_exclude_license_serial_and_owner
+1 failed in 1.50s

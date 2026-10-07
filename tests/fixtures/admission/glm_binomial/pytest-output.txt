@@ -1,0 +1,16 @@
+
+Fontconfig error: No writable cache directories
+	/opt/homebrew/var/cache/fontconfig
+	/Users/jiayuanren/.cache/fontconfig
+	/Users/jiayuanren/.fontconfig
+first three coefficients and SE (Workbench / R): [('Intercept', -0.43231444353779813, -0.432314443537798, 0.10342666158071165, 0.103426661580712), ('x1', 0.6946500026337908, 0.694650002633791, 0.11810398511951091, 0.118103985119511), ('x2', -0.4236990319395296, -0.42369903193953, 0.10659864633792678, 0.106598646337927)]
+kernel settings: {'covariance_estimator': 'nonrobust', 'df_method': 'asymptotic', 'reference_distribution': 'z', 'df_resid': 447.0}
+max absolute differences: 3.885780586188048e-16 3.469446951953614e-16
+..
+=============================== warnings summary ===============================
+tests/test_admission_oracle_glm_binomial.py::test_coefficients_and_standard_errors_match_r
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/genmod/generalized_linear_model.py:1923: FutureWarning: The bic value is computed using the deviance formula. After 0.13 this will change to the log-likelihood based formula. This change has no impact on the relative rank of models compared using BIC. You can directly access the log-likelihood version using the `bic_llf` attribute. You can suppress this message by calling statsmodels.genmod.generalized_linear_model.SET_USE_BIC_LLF with True to get the LLF-based version now or False to retainthe deviance version.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+2 passed, 1 warning in 10.63s

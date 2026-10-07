@@ -1,0 +1,57 @@
+{
+  "reviewed_functional_tip": "768948b1c83fca666df665ece0104127eaa48ab2",
+  "baseline": "edeba374247bd9e4d608a68e87def84883315cdc",
+  "new_test_result": "13 passed, 1 warning in 1.12s",
+  "evidence": [
+    {
+      "path": "docs/superpowers/handoffs/2026-10-04-v1.8.11-m2-reference-supplement-review.md",
+      "sha256": "ac6b3da50cf0d46f4883a2ade2578d3cd5bf37b290b5e6e37aef920abb1af221"
+    },
+    {
+      "path": "tests/eval_v1811/m2_review_reference_supplement.R",
+      "sha256": "2192f1fcad82754b0e2e4cb10c7d0535fd83371aaf12b2af1394453dd7a5655a"
+    },
+    {
+      "path": "tests/eval_v1811/m2_review_reference_supplement_manifest.json",
+      "sha256": "c7800111bd19edede23da5d8963d835e9ad7bf179b024d01285fc4506d77c357"
+    },
+    {
+      "path": "tests/eval_v1811/m2_review_reference_supplement_r.txt",
+      "sha256": "c78c993527f2d0c9ce6cd672a06871ff91e846c7f35145f8c5c3174d0b2c481e"
+    },
+    {
+      "path": "tests/eval_v1811/m2_review_reference_supplement_scope.py",
+      "sha256": "06e3afbe260ebf1582c20ec0a02ab7ceda851e632d8eac358259b94923269449"
+    },
+    {
+      "path": "tests/eval_v1811/m2_review_reference_supplement_scope.txt",
+      "sha256": "d6908e30d2388c4ec95ea8f991fe29bde08b750b109a66b1cda7bf54f996d7ef"
+    },
+    {
+      "path": "tests/eval_v1811/m2_review_reference_supplement_tests.txt",
+      "sha256": "d8dc18409e02ec401f40c0b92ea8c60d7830989bf35987af14c3b1a71137161f"
+    }
+  ],
+  "runtime_sources": [
+    {
+      "path": "/Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/backend/workbench/econometrics/count_models.py",
+      "sha256": "143b75513c18d4a5aa0a20ea08b61169f65d1a358a533ee0d497c768cff7dd50",
+      "unchanged_from_integration_821ccda5": true
+    },
+    {
+      "path": "/Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/backend/workbench/contracts/model/inference_kernel.py",
+      "sha256": "be94249889597607e00c62e330f14ea311b1434b23d43dfcb584fac32cf2b431",
+      "unchanged_from_integration_821ccda5": true
+    },
+    {
+      "path": "/Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/backend/workbench/postestimation/core.py",
+      "sha256": "c83b5759142abc3443e1c8f14b29f9bb4334d96d4070990ebb8c2f4c1af80f9e",
+      "unchanged_from_integration_821ccda5": true
+    },
+    {
+      "path": "/Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/backend/workbench/postestimation/margins.py",
+      "sha256": "9cf29e9fd1fe4198f300ed346b462a4e718a0447cab80c2d45f17827a29b0bb7",
+      "unchanged_from_integration_821ccda5": true
+    }
+  ]
+}

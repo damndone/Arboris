@@ -1,0 +1,3424 @@
+{
+  "schema_version": "1.0",
+  "run_id": "20261005_091814_542545_c0b3eebc",
+  "run_status": {
+    "model_fit_status": "success",
+    "report_render_status": "complete",
+    "has_blockers": false,
+    "has_warnings": false,
+    "model_results_available": true,
+    "report_available": true,
+    "safe_to_generate_report": true
+  },
+  "model_identity": {
+    "model_family": "negative_binomial",
+    "model_label": "negative_binomial",
+    "y_variable": "y",
+    "x_variables": [
+      "x1",
+      "x2"
+    ],
+    "n_observations": 1000,
+    "n_predictors_original": 2,
+    "n_predictors_after_encoding": 2,
+    "dataset_kind": "cross_section",
+    "interpretation_mode": "associational"
+  },
+  "preprocessing": {
+    "variable_roles": {
+      "x1": {
+        "roles": [
+          {
+            "role": "treatment",
+            "status": "rejected",
+            "confidence": 0.0,
+            "evidence": {
+              "name_hints": [],
+              "data_hints": [
+                "continuous",
+                "no_missing",
+                "highly_unique"
+              ],
+              "unique_count": 1000
+            },
+            "needs_user_confirmation": false
+          },
+          {
+            "role": "categorical",
+            "status": "rejected",
+            "confidence": 0.0,
+            "evidence": {
+              "name_hints": [],
+              "data_hints": [
+                "continuous",
+                "no_missing",
+                "highly_unique"
+              ],
+              "unique_count": 1000
+            },
+            "needs_user_confirmation": false
+          },
+          {
+            "role": "proxy",
+            "status": "rejected",
+            "confidence": 0.0,
+            "evidence": {
+              "name_hints": [],
+              "data_hints": [
+                "continuous",
+                "no_missing",
+                "highly_unique"
+              ],
+              "unique_count": 1000
+            },
+            "needs_user_confirmation": false
+          },
+          {
+            "role": "exposure",
+            "status": "rejected",
+            "confidence": 0.0,
+            "evidence": {
+              "name_hints": [],
+              "data_hints": [
+                "continuous",
+                "no_missing",
+                "highly_unique"
+              ],
+              "unique_count": 1000
+            },
+            "needs_user_confirmation": false
+          },
+          {
+            "role": "id",
+            "status": "rejected",
+            "confidence": 0.0,
+            "evidence": {
+              "name_hints": [],
+              "data_hints": [
+                "continuous",
+                "no_missing",
+                "highly_unique"
+              ],
+              "unique_count": 1000
+            },
+            "needs_user_confirmation": false
+          },
+          {
+            "role": "time",
+            "status": "rejected",
+            "confidence": 0.0,
+            "evidence": {
+              "name_hints": [],
+              "data_hints": [
+                "continuous",
+                "no_missing",
+                "highly_unique"
+              ],
+              "unique_count": 1000
+            },
+            "needs_user_confirmation": false
+          }
+        ]
+      },
+      "x2": {
+        "roles": [
+          {
+            "role": "treatment",
+            "status": "rejected",
+            "confidence": 0.0,
+            "evidence": {
+              "name_hints": [],
+              "data_hints": [
+                "continuous",
+                "no_missing",
+                "highly_unique"
+              ],
+              "unique_count": 1000
+            },
+            "needs_user_confirmation": false
+          },
+          {
+            "role": "categorical",
+            "status": "rejected",
+            "confidence": 0.0,
+            "evidence": {
+              "name_hints": [],
+              "data_hints": [
+                "continuous",
+                "no_missing",
+                "highly_unique"
+              ],
+              "unique_count": 1000
+            },
+            "needs_user_confirmation": false
+          },
+          {
+            "role": "proxy",
+            "status": "rejected",
+            "confidence": 0.0,
+            "evidence": {
+              "name_hints": [],
+              "data_hints": [
+                "continuous",
+                "no_missing",
+                "highly_unique"
+              ],
+              "unique_count": 1000
+            },
+            "needs_user_confirmation": false
+          },
+          {
+            "role": "exposure",
+            "status": "rejected",
+            "confidence": 0.0,
+            "evidence": {
+              "name_hints": [],
+              "data_hints": [
+                "continuous",
+                "no_missing",
+                "highly_unique"
+              ],
+              "unique_count": 1000
+            },
+            "needs_user_confirmation": false
+          },
+          {
+            "role": "id",
+            "status": "rejected",
+            "confidence": 0.0,
+            "evidence": {
+              "name_hints": [],
+              "data_hints": [
+                "continuous",
+                "no_missing",
+                "highly_unique"
+              ],
+              "unique_count": 1000
+            },
+            "needs_user_confirmation": false
+          },
+          {
+            "role": "time",
+            "status": "rejected",
+            "confidence": 0.0,
+            "evidence": {
+              "name_hints": [],
+              "data_hints": [
+                "continuous",
+                "no_missing",
+                "highly_unique"
+              ],
+              "unique_count": 1000
+            },
+            "needs_user_confirmation": false
+          }
+        ]
+      }
+    },
+    "categorical_encoded": [],
+    "exposure_variable": null,
+    "variables_dropped": [],
+    "coercions_applied": [],
+    "imputation": {},
+    "column_count_after_encoding": 3
+  },
+  "diagnostics": {
+    "blockers": [],
+    "warnings": [],
+    "cautions": [],
+    "info": []
+  },
+  "coefficients_summary": {
+    "interpretation_mode": "associational",
+    "rows": [
+      {
+        "variable": "x1",
+        "display_name": "x1",
+        "level": "",
+        "estimate": 0.2972,
+        "std_error": 0.0312,
+        "p_value": 0.0,
+        "significance_label": "significant at the 1% level",
+        "interpretation_guide": "standard",
+        "linked_issues": [],
+        "template_key": "coef_continuous_association"
+      },
+      {
+        "variable": "x2",
+        "display_name": "x2",
+        "level": "",
+        "estimate": -0.2544,
+        "std_error": 0.0324,
+        "p_value": 0.0,
+        "significance_label": "significant at the 1% level",
+        "interpretation_guide": "standard",
+        "linked_issues": [],
+        "template_key": "coef_continuous_association"
+      }
+    ],
+    "full_table_ref": "model_results/negative_binomial_1.json"
+  },
+  "model_quality": {
+    "metrics": {
+      "aic": 3305.035556783655,
+      "bic": 3324.6665778995834,
+      "pseudo_r2": 0.03958584601583803,
+      "llf": -1648.5177783918275
+    },
+    "primary_metric_keys": [
+      "aic",
+      "bic"
+    ],
+    "metric_notes": []
+  },
+  "narrative_contract": {
+    "summary": "negative_binomial with no major diagnostic concerns.",
+    "constraints": {
+      "causal_language_allowed": false,
+      "allowed_effect_language": "association_only",
+      "must_not_claim_policy_effect": true,
+      "must_not_interpret_treatment_independently": false,
+      "must_acknowledge_treatment_proxy_correlation": false,
+      "must_note_categorical_encoded": false,
+      "must_not_hide_blockers": true,
+      "must_not_change_severity": true,
+      "must_not_add_uncomputed_statistics": true
+    },
+    "required_mentions": [],
+    "forbidden_claims": [
+      "causal effect of treatment",
+      "one-hot encoding required",
+      "X causes Y",
+      "treatment improves Y"
+    ]
+  },
+  "model_family_evidence": {
+    "contract": null,
+    "dispersion": "constant",
+    "alpha_estimated": true,
+    "alpha_fixed_value": null,
+    "ancillary_parameters": [
+      {
+        "name": "lndelta",
+        "estimate": -0.3844400624620714,
+        "std_error": 0.1268786773412605,
+        "conf_low": -0.6331177004570202,
+        "conf_high": -0.13576242446712264,
+        "scale": "log"
+      },
+      {
+        "name": "delta",
+        "estimate": 0.6808317527492782,
+        "std_error": 0.08638303228076051,
+        "conf_low": 0.5309339250287273,
+        "conf_high": 0.8730500231767521,
+        "scale": "natural"
+      }
+    ],
+    "overdispersion_test": {
+      "statistic": 148.8016637361652,
+      "df": 1,
+      "p_value": 1.58439810077981e-34,
+      "distribution": "chibar2(01)",
+      "restricted_model": "poisson",
+      "log_likelihood_restricted": -1722.91861025991
+    },
+    "information_matrix": "observed",
+    "warnings": null
+  },
+  "table_1": [
+    {
+      "column": "y",
+      "label": "y",
+      "label_source": "column_name_fallback",
+      "value_labels": {},
+      "dtype": "int64",
+      "count": 1000,
+      "missing": 0,
+      "missing_rate": 0.0,
+      "unique_count": 12,
+      "mean": 1.6,
+      "std": 1.7791,
+      "min": 0.0,
+      "max": 13.0
+    },
+    {
+      "column": "x1",
+      "label": "x1",
+      "label_source": "column_name_fallback",
+      "value_labels": {},
+      "dtype": "float64",
+      "count": 1000,
+      "missing": 0,
+      "missing_rate": 0.0,
+      "unique_count": 1000,
+      "mean": -0.0443,
+      "std": 0.9831,
+      "min": -2.9601,
+      "max": 2.7572
+    },
+    {
+      "column": "x2",
+      "label": "x2",
+      "label_source": "column_name_fallback",
+      "value_labels": {},
+      "dtype": "float64",
+      "count": 1000,
+      "missing": 0,
+      "missing_rate": 0.0,
+      "unique_count": 1000,
+      "mean": 0.0248,
+      "std": 0.9929,
+      "min": -3.3239,
+      "max": 3.182
+    }
+  ],
+  "statistical_evidence": {
+    "payload_schema": "workbench.statistics.evidence-packet",
+    "schema_version": 1,
+    "producer": {
+      "component": "workbench.statistical_tests",
+      "code_version": "workbench-v1.8.6"
+    },
+    "dataset_ref": {
+      "dataset_sha256": "c2e8eadde188587d9f35b7a9b05600ec8998a525e03774138b88e4553091909f"
+    },
+    "lineage_parent": "cleaned_dataset",
+    "results": [
+      {
+        "test_id": "cohens_d:x1:y:0:1",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 601,
+        "statistic": -3.0903248031727726,
+        "p_value": 0.0020931193885847348,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": -0.2524269290471136,
+          "pooled_sd": 0.9220630027413872,
+          "nobs": 601
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 0 and 1"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.010674908881782148,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x1:y:0:2",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 486,
+        "statistic": -5.147704179261116,
+        "p_value": 4.6206731603607245e-07,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": -0.5037680818772305,
+          "pooled_sd": 0.9558974866692834,
+          "nobs": 486
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 0 and 2"
+        ],
+        "warnings": [],
+        "p_value_corrected": 5.891358279459924e-06,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x1:y:0:3",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 413,
+        "statistic": -5.184139476463597,
+        "p_value": 7.495155547798395e-07,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": -0.6637892224336601,
+          "pooled_sd": 0.970204430943243,
+          "nobs": 413
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 0 and 3"
+        ],
+        "warnings": [],
+        "p_value_corrected": 8.49450962083818e-06,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x1:y:0:4",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 384,
+        "statistic": -4.6686137930869345,
+        "p_value": 9.129667674932168e-06,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": -0.5937476424579482,
+          "pooled_sd": 0.9111982787918063,
+          "nobs": 384
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 0 and 4"
+        ],
+        "warnings": [],
+        "p_value_corrected": 9.312261028430811e-05,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x1:y:0:5",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 335,
+        "statistic": -3.6042023085543615,
+        "p_value": 0.0016882260397575418,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": -0.7730185315467645,
+          "pooled_sd": 0.9179510370812217,
+          "nobs": 335
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 0 and 5"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.009063108213435225,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x1:y:0:6",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 338,
+        "statistic": -4.980313988504755,
+        "p_value": 4.460616624566532e-05,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": -1.1310156972776637,
+          "pooled_sd": 0.9248513052511378,
+          "nobs": 338
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 0 and 6"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.0004136208142779875,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x1:y:0:7",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 325,
+        "statistic": -3.76981203791253,
+        "p_value": 0.004683673117174152,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": -1.0420967717831382,
+          "pooled_sd": 0.918866039735114,
+          "nobs": 325
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 0 and 7"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.021715211725080157,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x1:y:0:8",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 325,
+        "statistic": -5.270905843593629,
+        "p_value": 0.00038200035490660813,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": -0.9532798913147015,
+          "pooled_sd": 0.9143460732827431,
+          "nobs": 325
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 0 and 8"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.002827382861927197,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x1:y:0:9",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 319,
+        "statistic": -2.278236157726104,
+        "p_value": 0.1457090139926944,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": -0.9412841827907594,
+          "pooled_sd": 0.9213824553120277,
+          "nobs": 319
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 0 and 9"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.3377799869830643,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x1:y:1:2",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 455,
+        "statistic": -2.617674841405893,
+        "p_value": 0.009262502859323368,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": -0.25993986254066764,
+          "pooled_sd": 0.9571333489558853,
+          "nobs": 455
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 1 and 2"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.03779101166603934,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x1:y:1:3",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 382,
+        "statistic": -3.2806283140498094,
+        "p_value": 0.001300300739212993,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": -0.42275149826552766,
+          "pooled_sd": 0.9728119576982074,
+          "nobs": 382
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 1 and 3"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.007368370855540293,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x1:y:1:4",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 353,
+        "statistic": -2.6325712148738334,
+        "p_value": 0.009723192794508896,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": -0.33919438243123046,
+          "pooled_sd": 0.9088248910988551,
+          "nobs": 353
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 1 and 4"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.03814483327076568,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x1:y:1:5",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 304,
+        "statistic": -2.4132079186757234,
+        "p_value": 0.024993934001579128,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": -0.5206214159629667,
+          "pooled_sd": 0.9159047552133464,
+          "nobs": 304
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 1 and 5"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.08223810542455069,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x1:y:1:6",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 307,
+        "statistic": -3.8597854847306516,
+        "p_value": 0.0007452876760879067,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": -0.8805980740978231,
+          "pooled_sd": 0.9235403024813572,
+          "nobs": 307
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 1 and 6"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.005067956197397765,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x1:y:1:7",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 294,
+        "statistic": -2.8472454018406643,
+        "p_value": 0.0196284128913123,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": -0.7905268849657631,
+          "pooled_sd": 0.9168490222448796,
+          "nobs": 294
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 1 and 7"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.06903786603151223,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x1:y:1:8",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 294,
+        "statistic": -3.843590723639856,
+        "p_value": 0.003219232529591224,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": -0.7006453111573211,
+          "pooled_sd": 0.9118368210268055,
+          "nobs": 294
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 1 and 8"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.015636272286585946,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x1:y:1:9",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 288,
+        "statistic": -1.665200899477788,
+        "p_value": 0.23273920294360964,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": -0.6900044037596113,
+          "pooled_sd": 0.9196016661035956,
+          "nobs": 288
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 1 and 9"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.44862237453249565,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x1:y:2:3",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 267,
+        "statistic": -1.185075590404625,
+        "p_value": 0.2375059629877918,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": -0.15460913256334483,
+          "pooled_sd": 1.0507826982361144,
+          "nobs": 267
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 2 and 3"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.44862237453249565,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x1:y:2:4",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 238,
+        "statistic": -0.4589633881419229,
+        "p_value": 0.6469450835308131,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": -0.06119476034486298,
+          "pooled_sd": 0.9718346175158613,
+          "nobs": 238
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 2 and 4"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.7763341002369757,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x1:y:2:5",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 189,
+        "statistic": -1.1111152271963307,
+        "p_value": 0.27731362776272056,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": -0.2284567601049198,
+          "pooled_sd": 0.9981867872107419,
+          "nobs": 189
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 2 and 5"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.4817870260125427,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x1:y:2:6",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 192,
+        "statistic": -2.59067707928351,
+        "p_value": 0.01514381638343333,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": -0.5598882119031209,
+          "pooled_sd": 1.008184649284587,
+          "nobs": 192
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 2 and 6"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.05516675968250712,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x1:y:2:7",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 179,
+        "statistic": -1.8269905856793203,
+        "p_value": 0.09877316224886079,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": -0.4740735014922474,
+          "pooled_sd": 1.0040567314565516,
+          "nobs": 179
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 2 and 7"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.24572835486301953,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x1:y:2:8",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 179,
+        "statistic": -2.226041086490366,
+        "p_value": 0.04529459878663535,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": -0.39144778056081664,
+          "pooled_sd": 0.9964983872778485,
+          "nobs": 179
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 2 and 8"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.12833469656213348,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x1:y:2:9",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 173,
+        "statistic": -1.0017174939669284,
+        "p_value": 0.41468371905889406,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": -0.38147148772940104,
+          "pooled_sd": 1.011168856816623,
+          "nobs": 173
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 2 and 9"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.6686547742992163,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x1:y:3:4",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 165,
+        "statistic": 0.6722341967898686,
+        "p_value": 0.5023947897269011,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": 0.10159173122080187,
+          "pooled_sd": 1.01375784953691,
+          "nobs": 165
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 3 and 4"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.6902805919563201,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x1:y:3:5",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 116,
+        "statistic": -0.2968636667993805,
+        "p_value": 0.7684768395572981,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": -0.061191584526690275,
+          "pooled_sd": 1.0717473392153019,
+          "nobs": 116
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 3 and 5"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.8495501432330482,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x1:y:3:6",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 119,
+        "statistic": -1.7274910736497382,
+        "p_value": 0.09285193097444866,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": -0.37050233334606814,
+          "pooled_sd": 1.085040667459894,
+          "nobs": 119
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 3 and 6"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.24284351177932728,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x1:y:3:7",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 106,
+        "statistic": -1.1482420480955915,
+        "p_value": 0.27400652608045,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": -0.28823230853258985,
+          "pooled_sd": 1.0877895350727524,
+          "nobs": 106
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 3 and 7"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.4817870260125427,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x1:y:3:8",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 106,
+        "statistic": -1.1771622335501968,
+        "p_value": 0.25446018427226413,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": -0.2115599932835932,
+          "pooled_sd": 1.075895669179634,
+          "nobs": 106
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 3 and 8"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.47190797810492624,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x1:y:3:9",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 100,
+        "statistic": -0.5671817054511515,
+        "p_value": 0.6196892066334178,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": -0.20222184774864543,
+          "pooled_sd": 1.1040918137892641,
+          "nobs": 100
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 3 and 9"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.7524797509120074,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x1:y:4:5",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 87,
+        "statistic": -0.7792149171194089,
+        "p_value": 0.44203790131895165,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": -0.19859808589911968,
+          "pooled_sd": 0.8488064328958752,
+          "nobs": 87
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 4 and 5"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.6686547742992163,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x1:y:4:6",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 90,
+        "statistic": -2.2113318503423502,
+        "p_value": 0.034137415455477105,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": -0.5743125655264463,
+          "pooled_sd": 0.8793112746531806,
+          "nobs": 90
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 4 and 6"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.09948618218453327,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x1:y:4:7",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 77,
+        "statistic": -1.5463259589796174,
+        "p_value": 0.15034660734283378,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": -0.49383044180817226,
+          "pooled_sd": 0.8434585408295722,
+          "nobs": 77
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 4 and 7"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.34078564331042327,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x1:y:4:8",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 77,
+        "statistic": -1.7575198053722938,
+        "p_value": 0.0978016116469429,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": -0.40218117313889346,
+          "pooled_sd": 0.8220322521274445,
+          "nobs": 77
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 4 and 8"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.24572835486301953,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x1:y:4:9",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 71,
+        "statistic": -0.8342173603217702,
+        "p_value": 0.48146725979681004,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": -0.3841977467639558,
+          "pooled_sd": 0.8492004557283337,
+          "nobs": 71
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 4 and 9"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.6902805919563201,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x1:y:5:6",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 41,
+        "statistic": -1.2086061050437873,
+        "p_value": 0.23409173034591182,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": -0.3745217652740591,
+          "pooled_sd": 0.8982873957251417,
+          "nobs": 41
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 5 and 6"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.44862237453249565,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x1:y:5:7",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 28,
+        "statistic": -0.7925075310396287,
+        "p_value": 0.43872422796768445,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": -0.30859195585219734,
+          "pooled_sd": 0.8035017319489793,
+          "nobs": 28
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 5 and 7"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.6686547742992163,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x1:y:5:8",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 28,
+        "statistic": -0.6575842414871402,
+        "p_value": 0.5168454842228701,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": -0.21995663696018075,
+          "pooled_sd": 0.7366659396414363,
+          "nobs": 28
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 5 and 8"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.6902805919563201,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x1:y:5:9",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 22,
+        "statistic": -0.373456046142281,
+        "p_value": 0.732744292107785,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": -0.19419017644517575,
+          "pooled_sd": 0.8120367963839258,
+          "nobs": 22
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 5 and 9"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.8304435310554897,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x1:y:6:7",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 31,
+        "statistic": 0.2753527449055876,
+        "p_value": 0.7860093803565961,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": 0.0981033346155738,
+          "pooled_sd": 0.9018450853311639,
+          "nobs": 31
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 6 and 7"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.8529037957060936,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x1:y:6:8",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 31,
+        "statistic": 0.6784720762808635,
+        "p_value": 0.5031038793110986,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": 0.20537728512871614,
+          "pooled_sd": 0.8491378119760313,
+          "nobs": 31
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 6 and 8"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.6902805919563201,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x1:y:6:9",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 25,
+        "statistic": 0.4170929565334281,
+        "p_value": 0.702221252468391,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": 0.19173095521195624,
+          "pooled_sd": 0.9322365926934137,
+          "nobs": 25
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 6 and 9"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.813938269906544,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x1:y:7:8",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 18,
+        "statistic": 0.2921796056734876,
+        "p_value": 0.774589836477191,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": 0.137734786997423,
+          "pooled_sd": 0.623804706270241,
+          "nobs": 18
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 7 and 8"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.8495501432330482,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x1:y:7:9",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 12,
+        "statistic": 0.1998264064548296,
+        "p_value": 0.8515266349035894,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": 0.12393422141962605,
+          "pooled_sd": 0.7283266977356387,
+          "nobs": 12
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 7 and 9"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.9047470495850637,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x1:y:8:9",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 12,
+        "statistic": 0.0106363931605389,
+        "p_value": 0.9922415636584418,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": 0.00847539321407838,
+          "pooled_sd": 0.5126598574393715,
+          "nobs": 12
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 8 and 9"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.9972093289812537,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "anova_posthoc:x1:y",
+        "test_version": 1,
+        "test_type": "anova_posthoc",
+        "nobs": 998,
+        "statistic": 9.131793802804431,
+        "p_value": 2.3045106433089123e-13,
+        "effect_size": {
+          "effect_size_name": "eta_squared",
+          "value": 0.07679612062697605,
+          "nobs": 998
+        },
+        "assumptions": [
+          "independent observations",
+          "approximately normal residuals",
+          "homogeneous variance"
+        ],
+        "warnings": [],
+        "correction": "tukey",
+        "family": "all_group_pairs",
+        "comparisons": [
+          {
+            "group1": "0",
+            "group2": "1",
+            "mean_difference": 0.2328,
+            "p_value": 0.081,
+            "ci_low": -0.013,
+            "ci_high": 0.4785,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "0",
+            "group2": "2",
+            "mean_difference": 0.4816,
+            "p_value": 0.0,
+            "ci_low": 0.1954,
+            "ci_high": 0.7677,
+            "reject": true,
+            "correction": "tukey"
+          },
+          {
+            "group1": "0",
+            "group2": "3",
+            "mean_difference": 0.644,
+            "p_value": 0.0,
+            "ci_low": 0.2948,
+            "ci_high": 0.9932,
+            "reject": true,
+            "correction": "tukey"
+          },
+          {
+            "group1": "0",
+            "group2": "4",
+            "mean_difference": 0.541,
+            "p_value": 0.0009,
+            "ci_low": 0.1389,
+            "ci_high": 0.9432,
+            "reject": true,
+            "correction": "tukey"
+          },
+          {
+            "group1": "0",
+            "group2": "5",
+            "mean_difference": 0.7096,
+            "p_value": 0.0507,
+            "ci_low": -0.001,
+            "ci_high": 1.4202,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "0",
+            "group2": "6",
+            "mean_difference": 1.046,
+            "p_value": 0.0,
+            "ci_low": 0.3827,
+            "ci_high": 1.7094,
+            "reject": true,
+            "correction": "tukey"
+          },
+          {
+            "group1": "0",
+            "group2": "7",
+            "mean_difference": 0.9575,
+            "p_value": 0.085,
+            "ci_low": -0.0595,
+            "ci_high": 1.9745,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "0",
+            "group2": "8",
+            "mean_difference": 0.8716,
+            "p_value": 0.1679,
+            "ci_low": -0.1454,
+            "ci_high": 1.8886,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "0",
+            "group2": "9",
+            "mean_difference": 0.8673,
+            "p_value": 0.8597,
+            "ci_low": -0.8779,
+            "ci_high": 2.6124,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "1",
+            "group2": "2",
+            "mean_difference": 0.2488,
+            "p_value": 0.1725,
+            "ci_low": -0.0427,
+            "ci_high": 0.5403,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "1",
+            "group2": "3",
+            "mean_difference": 0.4113,
+            "p_value": 0.009,
+            "ci_low": 0.0576,
+            "ci_high": 0.7649,
+            "reject": true,
+            "correction": "tukey"
+          },
+          {
+            "group1": "1",
+            "group2": "4",
+            "mean_difference": 0.3083,
+            "p_value": 0.3223,
+            "ci_low": -0.0978,
+            "ci_high": 0.7143,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "1",
+            "group2": "5",
+            "mean_difference": 0.4768,
+            "p_value": 0.5128,
+            "ci_low": -0.236,
+            "ci_high": 1.1897,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "1",
+            "group2": "6",
+            "mean_difference": 0.8133,
+            "p_value": 0.0045,
+            "ci_low": 0.1476,
+            "ci_high": 1.479,
+            "reject": true,
+            "correction": "tukey"
+          },
+          {
+            "group1": "1",
+            "group2": "7",
+            "mean_difference": 0.7248,
+            "p_value": 0.4187,
+            "ci_low": -0.2937,
+            "ci_high": 1.7433,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "1",
+            "group2": "8",
+            "mean_difference": 0.6389,
+            "p_value": 0.607,
+            "ci_low": -0.3797,
+            "ci_high": 1.6574,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "1",
+            "group2": "9",
+            "mean_difference": 0.6345,
+            "p_value": 0.979,
+            "ci_low": -1.1115,
+            "ci_high": 2.3806,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "2",
+            "group2": "3",
+            "mean_difference": 0.1625,
+            "p_value": 0.9427,
+            "ci_low": -0.2204,
+            "ci_high": 0.5453,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "2",
+            "group2": "4",
+            "mean_difference": 0.0595,
+            "p_value": 1.0,
+            "ci_low": -0.3722,
+            "ci_high": 0.4911,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "2",
+            "group2": "5",
+            "mean_difference": 0.228,
+            "p_value": 0.9926,
+            "ci_low": -0.4997,
+            "ci_high": 0.9558,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "2",
+            "group2": "6",
+            "mean_difference": 0.5645,
+            "p_value": 0.2068,
+            "ci_low": -0.1172,
+            "ci_high": 1.2461,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "2",
+            "group2": "7",
+            "mean_difference": 0.476,
+            "p_value": 0.9049,
+            "ci_low": -0.553,
+            "ci_high": 1.505,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "2",
+            "group2": "8",
+            "mean_difference": 0.3901,
+            "p_value": 0.9721,
+            "ci_low": -0.6389,
+            "ci_high": 1.4191,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "2",
+            "group2": "9",
+            "mean_difference": 0.3857,
+            "p_value": 0.9995,
+            "ci_low": -1.3665,
+            "ci_high": 2.1379,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "3",
+            "group2": "4",
+            "mean_difference": -0.103,
+            "p_value": 0.9996,
+            "ci_low": -0.5788,
+            "ci_high": 0.3728,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "3",
+            "group2": "5",
+            "mean_difference": 0.0656,
+            "p_value": 1.0,
+            "ci_low": -0.6892,
+            "ci_high": 0.8203,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "3",
+            "group2": "6",
+            "mean_difference": 0.402,
+            "p_value": 0.7389,
+            "ci_low": -0.3084,
+            "ci_high": 1.1124,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "3",
+            "group2": "7",
+            "mean_difference": 0.3135,
+            "p_value": 0.9948,
+            "ci_low": -0.7348,
+            "ci_high": 1.3618,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "3",
+            "group2": "8",
+            "mean_difference": 0.2276,
+            "p_value": 0.9996,
+            "ci_low": -0.8207,
+            "ci_high": 1.2759,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "3",
+            "group2": "9",
+            "mean_difference": 0.2233,
+            "p_value": 1.0,
+            "ci_low": -1.5403,
+            "ci_high": 1.9869,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "4",
+            "group2": "5",
+            "mean_difference": 0.1686,
+            "p_value": 0.9996,
+            "ci_low": -0.6121,
+            "ci_high": 0.9492,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "4",
+            "group2": "6",
+            "mean_difference": 0.505,
+            "p_value": 0.4782,
+            "ci_low": -0.2329,
+            "ci_high": 1.2429,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "4",
+            "group2": "7",
+            "mean_difference": 0.4165,
+            "p_value": 0.9662,
+            "ci_low": -0.6506,
+            "ci_high": 1.4836,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "4",
+            "group2": "8",
+            "mean_difference": 0.3306,
+            "p_value": 0.9932,
+            "ci_low": -0.7365,
+            "ci_high": 1.3977,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "4",
+            "group2": "9",
+            "mean_difference": 0.3263,
+            "p_value": 0.9999,
+            "ci_low": -1.4486,
+            "ci_high": 2.1011,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "5",
+            "group2": "6",
+            "mean_difference": 0.3364,
+            "p_value": 0.9813,
+            "ci_low": -0.6058,
+            "ci_high": 1.2786,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "5",
+            "group2": "7",
+            "mean_difference": 0.248,
+            "p_value": 0.9997,
+            "ci_low": -0.9694,
+            "ci_high": 1.4653,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "5",
+            "group2": "8",
+            "mean_difference": 0.162,
+            "p_value": 1.0,
+            "ci_low": -1.0553,
+            "ci_high": 1.3794,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "5",
+            "group2": "9",
+            "mean_difference": 0.1577,
+            "p_value": 1.0,
+            "ci_low": -1.7113,
+            "ci_high": 2.0267,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "6",
+            "group2": "7",
+            "mean_difference": -0.0885,
+            "p_value": 1.0,
+            "ci_low": -1.2789,
+            "ci_high": 1.1019,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "6",
+            "group2": "8",
+            "mean_difference": -0.1744,
+            "p_value": 1.0,
+            "ci_low": -1.3648,
+            "ci_high": 1.016,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "6",
+            "group2": "9",
+            "mean_difference": -0.1787,
+            "p_value": 1.0,
+            "ci_low": -2.0303,
+            "ci_high": 1.6728,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "7",
+            "group2": "8",
+            "mean_difference": -0.0859,
+            "p_value": 1.0,
+            "ci_low": -1.5041,
+            "ci_high": 1.3323,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "7",
+            "group2": "9",
+            "mean_difference": -0.0903,
+            "p_value": 1.0,
+            "ci_low": -2.0959,
+            "ci_high": 1.9154,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "8",
+            "group2": "9",
+            "mean_difference": -0.0043,
+            "p_value": 1.0,
+            "ci_low": -2.01,
+            "ci_high": 2.0013,
+            "reject": false,
+            "correction": "tukey"
+          }
+        ],
+        "source_id": "statistical_tests.evidence.anova_posthoc.x1.y",
+        "p_value_corrected": 7.835336187250302e-12,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "eta_squared:x1:y",
+        "test_version": 1,
+        "test_type": "eta_squared",
+        "nobs": 998,
+        "statistic": 9.131793802804431,
+        "p_value": 2.3045106433089123e-13,
+        "effect_size": {
+          "effect_size_name": "eta_squared",
+          "value": 0.07679612062697605,
+          "nobs": 998
+        },
+        "assumptions": [
+          "independent observations",
+          "group membership is declared"
+        ],
+        "warnings": [],
+        "p_value_corrected": 7.835336187250302e-12,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "omega_squared:x1:y",
+        "test_version": 1,
+        "test_type": "omega_squared",
+        "nobs": 998,
+        "statistic": 9.131793802804431,
+        "p_value": 2.3045106433089123e-13,
+        "effect_size": {
+          "effect_size_name": "omega_squared",
+          "value": 0.06832252696675188,
+          "nobs": 998
+        },
+        "assumptions": [
+          "independent observations",
+          "group membership is declared"
+        ],
+        "warnings": [],
+        "p_value_corrected": 7.835336187250302e-12,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "levene:x1:y",
+        "test_version": 1,
+        "test_type": "levene",
+        "nobs": 998,
+        "statistic": 2.0879230558075244,
+        "p_value": 0.02804969866031264,
+        "effect_size": null,
+        "assumptions": [
+          "independent observations",
+          "groups contain at least two finite values"
+        ],
+        "warnings": [],
+        "source_id": "statistical_tests.evidence.levene.x1.y",
+        "p_value_corrected": 0.08669906858642087,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "bartlett:x1:y",
+        "test_version": 1,
+        "test_type": "bartlett",
+        "nobs": 998,
+        "statistic": 15.796309271266635,
+        "p_value": 0.07125896042635055,
+        "effect_size": null,
+        "assumptions": [
+          "independent observations",
+          "approximately normal groups"
+        ],
+        "warnings": [],
+        "source_id": "statistical_tests.evidence.bartlett.x1.y",
+        "p_value_corrected": 0.19644362063480422,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "shapiro_wilk:x1:y",
+        "test_version": 1,
+        "test_type": "shapiro_wilk",
+        "nobs": 998,
+        "statistic": 0.9983062049093882,
+        "p_value": 0.43683856352143247,
+        "effect_size": null,
+        "assumptions": [
+          "independent observations",
+          "sample size is within Shapiro-Wilk operating range"
+        ],
+        "warnings": [],
+        "source_id": "statistical_tests.evidence.shapiro_wilk.x1.y",
+        "p_value_corrected": 0.6686547742992163,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x2:y:0:1",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 601,
+        "statistic": 2.3048065505128195,
+        "p_value": 0.021520864331209064,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": 0.1880912142293797,
+          "pooled_sd": 0.9699762534506821,
+          "nobs": 601
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 0 and 1"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.07317093872611082,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x2:y:0:2",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 486,
+        "statistic": 3.252415549583989,
+        "p_value": 0.0012531535623395847,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": 0.3057787481987626,
+          "pooled_sd": 0.9660951801374609,
+          "nobs": 486
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 0 and 2"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.007368370855540293,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x2:y:0:3",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 413,
+        "statistic": 5.2628570921902345,
+        "p_value": 4.499654859317043e-07,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": 0.6093498081601674,
+          "pooled_sd": 0.9778021676498647,
+          "nobs": 413
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 0 and 3"
+        ],
+        "warnings": [],
+        "p_value_corrected": 5.891358279459924e-06,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x2:y:0:4",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 384,
+        "statistic": 4.179906799751813,
+        "p_value": 6.260794773255589e-05,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": 0.5485790047660034,
+          "pooled_sd": 0.9741300997815312,
+          "nobs": 384
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 0 and 4"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.0005321675557267251,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x2:y:0:5",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 335,
+        "statistic": 2.3141119484290558,
+        "p_value": 0.030712902383145817,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": 0.46030184021042814,
+          "pooled_sd": 0.9703460786487651,
+          "nobs": 335
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 0 and 5"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.09213870714943746,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x2:y:0:6",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 338,
+        "statistic": 3.6798954701036783,
+        "p_value": 0.0012005567545972362,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": 0.8602003932896215,
+          "pooled_sd": 0.9832605869876494,
+          "nobs": 338
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 0 and 6"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.007368370855540293,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x2:y:0:7",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 325,
+        "statistic": 0.9554254391998025,
+        "p_value": 0.36654105094008926,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": 0.4366424573086577,
+          "pooled_sd": 0.9896518255958068,
+          "nobs": 325
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 0 and 7"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.6129047081293296,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x2:y:0:8",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 325,
+        "statistic": 1.7865211305348405,
+        "p_value": 0.1108290662692934,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": 0.8545297768334424,
+          "pooled_sd": 0.9919654672635917,
+          "nobs": 325
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 0 and 8"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.2691563037968554,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x2:y:0:9",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 319,
+        "statistic": 2.3405973726157594,
+        "p_value": 0.13771847658638242,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": 0.8248112716384138,
+          "pooled_sd": 0.9769140894855024,
+          "nobs": 319
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 0 and 9"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.3266810374839769,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x2:y:1:2",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 455,
+        "statistic": 1.228843736176978,
+        "p_value": 0.21993104165519406,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": 0.11850841833284756,
+          "pooled_sd": 0.9532433655540216,
+          "nobs": 455
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 1 and 2"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.4477109737523335,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x2:y:1:3",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 382,
+        "statistic": 3.623004273396137,
+        "p_value": 0.0003880721575194192,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": 0.4289896590747717,
+          "pooled_sd": 0.9636119268758102,
+          "nobs": 382
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 1 and 3"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.002827382861927197,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x2:y:1:4",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 353,
+        "statistic": 2.7360563114903895,
+        "p_value": 0.007334573698941597,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": 0.3672315249588292,
+          "pooled_sd": 0.9583690000606933,
+          "nobs": 353
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 1 and 4"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.032527239882262735,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x2:y:1:5",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 304,
+        "statistic": 1.3651829031695444,
+        "p_value": 0.18627898901964926,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": 0.2776655513364363,
+          "pooled_sd": 0.951533501675423,
+          "nobs": 304
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 1 and 5"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.4042650400000899,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x2:y:1:6",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 307,
+        "statistic": 2.8806382397980395,
+        "p_value": 0.00826568185518744,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": 0.686554352365272,
+          "pooled_sd": 0.9662121142519923,
+          "nobs": 307
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 1 and 6"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.03512914788454662,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x2:y:1:7",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 294,
+        "statistic": 0.5517706088013558,
+        "p_value": 0.5957164273990493,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": 0.25670263428618595,
+          "pooled_sd": 0.9726428963895718,
+          "nobs": 294
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 1 and 7"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.7501614270950991,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x2:y:1:8",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 294,
+        "statistic": 1.4013790731709743,
+        "p_value": 0.19764577029342192,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": 0.6821045067191944,
+          "pooled_sd": 0.975246478404943,
+          "nobs": 294
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 1 and 8"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.4199972618735216,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x2:y:1:9",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 288,
+        "statistic": 1.809098771753448,
+        "p_value": 0.20532967787354128,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": 0.6507222259324398,
+          "pooled_sd": 0.9578983417258181,
+          "nobs": 288
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 1 and 9"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.42742096210410635,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x2:y:2:3",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 267,
+        "statistic": 2.4526703153909484,
+        "p_value": 0.015062378468383581,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": 0.31500688768407376,
+          "pooled_sd": 0.9536686345539184,
+          "nobs": 267
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 2 and 3"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.05516675968250712,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x2:y:2:4",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 238,
+        "statistic": 1.7555693470091156,
+        "p_value": 0.08166447498073966,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": 0.253007994223293,
+          "pooled_sd": 0.9445391105569582,
+          "nobs": 238
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 2 and 4"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.2192046433693538,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x2:y:2:5",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 189,
+        "statistic": 0.7615644038921195,
+        "p_value": 0.45378591410382746,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": 0.16269266653296766,
+          "pooled_sd": 0.9296098837316772,
+          "nobs": 189
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 2 and 5"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.6708139599795709,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x2:y:2:6",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 192,
+        "statistic": 2.3465869812581364,
+        "p_value": 0.02697298894790231,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": 0.5769609293588593,
+          "pooled_sd": 0.9539463433360784,
+          "nobs": 192
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 2 and 6"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.08597640227143862,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x2:y:2:7",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 179,
+        "statistic": 0.30066980402957183,
+        "p_value": 0.7709578502822351,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": 0.14185189100850526,
+          "pooled_sd": 0.9637702339594774,
+          "nobs": 179
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 2 and 7"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.8495501432330482,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x2:y:2:8",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 179,
+        "statistic": 1.1583098683596684,
+        "p_value": 0.2786807307327453,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": 0.570449407489637,
+          "pooled_sd": 0.9681010222698497,
+          "nobs": 179
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 2 and 8"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.4817870260125427,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x2:y:2:9",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 173,
+        "statistic": 1.4690068452341896,
+        "p_value": 0.26948844788312953,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": 0.5438454723726291,
+          "pooled_sd": 0.9384253497233218,
+          "nobs": 173
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 2 and 9"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.4817870260125427,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x2:y:3:4",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 165,
+        "statistic": -0.40424475255854064,
+        "p_value": 0.6866224254724886,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": -0.06366909558155293,
+          "pooled_sd": 0.964930349082595,
+          "nobs": 165
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 3 and 4"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.8089020282999425,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x2:y:3:5",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 116,
+        "statistic": -0.711096754393538,
+        "p_value": 0.482644275278121,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": -0.15707221187495232,
+          "pooled_sd": 0.9496999873650427,
+          "nobs": 116
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 3 and 5"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.6902805919563201,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x2:y:3:6",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 119,
+        "statistic": 1.024114304243059,
+        "p_value": 0.3140200196998245,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": 0.25311002413777783,
+          "pooled_sd": 0.9876241812566319,
+          "nobs": 119
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 3 and 6"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.5338340334897017,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x2:y:3:7",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 106,
+        "statistic": -0.35610964542768075,
+        "p_value": 0.7301519233574807,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": -0.16243438775326444,
+          "pooled_sd": 1.0077888095748917,
+          "nobs": 106
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 3 and 7"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.8304435310554897,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x2:y:3:8",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 106,
+        "statistic": 0.5229890563727495,
+        "p_value": 0.6140102211498374,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": 0.24816054614655886,
+          "pooled_sd": 1.014828787258009,
+          "nobs": 106
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 3 and 8"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.7524797509120074,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x2:y:3:9",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 100,
+        "statistic": 0.5931862902344335,
+        "p_value": 0.6051307822373486,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": 0.21690918606410503,
+          "pooled_sd": 0.9678990224597142,
+          "nobs": 100
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 3 and 9"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.7524797509120074,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x2:y:4:5",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 87,
+        "statistic": -0.4024135407600046,
+        "p_value": 0.689945847667598,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": -0.09509303249436868,
+          "pooled_sd": 0.9226252723926558,
+          "nobs": 87
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 4 and 5"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.8089020282999425,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x2:y:4:6",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 90,
+        "statistic": 1.2396377048838854,
+        "p_value": 0.22385548687616674,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": 0.31939472829893145,
+          "pooled_sd": 0.9750124075020369,
+          "nobs": 90
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 4 and 6"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.4477109737523335,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x2:y:4:7",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 77,
+        "statistic": -0.22062820431474622,
+        "p_value": 0.8302593172193075,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": -0.10215336754426906,
+          "pooled_sd": 1.0010763041981074,
+          "nobs": 77
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 4 and 7"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.8914363195407301,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x2:y:4:8",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 77,
+        "statistic": 0.6456789245253328,
+        "p_value": 0.5346290859269538,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": 0.3099018507683579,
+          "pooled_sd": 1.0108900864572221,
+          "nobs": 77
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 4 and 8"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.6902805919563201,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x2:y:4:9",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 71,
+        "statistic": 0.7561958592068341,
+        "p_value": 0.5146717905936372,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": 0.2878186991751423,
+          "pooled_sd": 0.9428936777110506,
+          "nobs": 71
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 4 and 9"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.6902805919563201,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x2:y:5:6",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 41,
+        "statistic": 1.3770538527772802,
+        "p_value": 0.17644116475325392,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": 0.4231008587570495,
+          "pooled_sd": 0.9433898554650718,
+          "nobs": 41
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 5 and 6"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.39123910445286736,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x2:y:5:7",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 28,
+        "statistic": -0.029921418917404623,
+        "p_value": 0.9766750356260161,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": -0.014468714935583358,
+          "pooled_sd": 1.0041030388343504,
+          "nobs": 28
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 5 and 7"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.9962085363385365,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x2:y:5:8",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 28,
+        "statistic": 0.7920777470007447,
+        "p_value": 0.44576984953281085,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": 0.3885490744299762,
+          "pooled_sd": 1.0320754059510928,
+          "nobs": 28
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 5 and 8"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.6686547742992163,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x2:y:5:9",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 22,
+        "statistic": 0.9281579524907563,
+        "p_value": 0.41559562063484834,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": 0.45614227000824165,
+          "pooled_sd": 0.7872931109421902,
+          "nobs": 22
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 5 and 9"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.6686547742992163,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x2:y:6:7",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 31,
+        "statistic": -0.825171049706103,
+        "p_value": 0.42516805252328266,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": -0.3637087286173571,
+          "pooled_sd": 1.1373857872408129,
+          "nobs": 31
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 6 and 7"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.6686547742992163,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x2:y:6:8",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 31,
+        "statistic": 0.003572627368386843,
+        "p_value": 0.9972093289812537,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": 0.0016064666887591166,
+          "pooled_sd": 1.159616783412637,
+          "nobs": 31
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 6 and 8"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.9972093289812537,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x2:y:6:9",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 25,
+        "statistic": -0.09846780504251436,
+        "p_value": 0.9262695004699375,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": -0.039436977845207936,
+          "pooled_sd": 1.015072487553808,
+          "nobs": 25
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 6 and 9"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.9640764188564656,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x2:y:7:8",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 18,
+        "statistic": 0.6384426525401077,
+        "p_value": 0.532239498661131,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": 0.3009647526732246,
+          "pooled_sd": 1.380693322617293,
+          "nobs": 18
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 7 and 8"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.6902805919563201,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x2:y:7:9",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 12,
+        "statistic": 0.6636260959613445,
+        "p_value": 0.5244040882844819,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": 0.30303718665237117,
+          "pooled_sd": 1.2330029576551462,
+          "nobs": 12
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 7 and 9"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.6902805919563201,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "cohens_d:x2:y:8:9",
+        "test_version": 1,
+        "test_type": "cohens_d",
+        "nobs": 12,
+        "statistic": -0.07210538802274566,
+        "p_value": 0.944116009154696,
+        "effect_size": {
+          "effect_size_name": "cohens_d",
+          "value": -0.03243446344491816,
+          "pooled_sd": 1.2916593181313143,
+          "nobs": 12
+        },
+        "assumptions": [
+          "independent observations",
+          "comparison is between declared groups 8 and 9"
+        ],
+        "warnings": [],
+        "p_value_corrected": 0.9727255851896868,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "anova_posthoc:x2:y",
+        "test_version": 1,
+        "test_type": "anova_posthoc",
+        "nobs": 998,
+        "statistic": 6.052615799381593,
+        "p_value": 2.6648197413862205e-08,
+        "effect_size": {
+          "effect_size_name": "eta_squared",
+          "value": 0.05225412443539438,
+          "nobs": 998
+        },
+        "assumptions": [
+          "independent observations",
+          "approximately normal residuals",
+          "homogeneous variance"
+        ],
+        "warnings": [],
+        "correction": "tukey",
+        "family": "all_group_pairs",
+        "comparisons": [
+          {
+            "group1": "0",
+            "group2": "1",
+            "mean_difference": -0.1824,
+            "p_value": 0.3895,
+            "ci_low": -0.4339,
+            "ci_high": 0.069,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "0",
+            "group2": "2",
+            "mean_difference": -0.2954,
+            "p_value": 0.0459,
+            "ci_low": -0.5882,
+            "ci_high": -0.0026,
+            "reject": true,
+            "correction": "tukey"
+          },
+          {
+            "group1": "0",
+            "group2": "3",
+            "mean_difference": -0.5958,
+            "p_value": 0.0,
+            "ci_low": -0.9532,
+            "ci_high": -0.2385,
+            "reject": true,
+            "correction": "tukey"
+          },
+          {
+            "group1": "0",
+            "group2": "4",
+            "mean_difference": -0.5344,
+            "p_value": 0.0017,
+            "ci_low": -0.9459,
+            "ci_high": -0.1229,
+            "reject": true,
+            "correction": "tukey"
+          },
+          {
+            "group1": "0",
+            "group2": "5",
+            "mean_difference": -0.4467,
+            "p_value": 0.6361,
+            "ci_low": -1.1738,
+            "ci_high": 0.2805,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "0",
+            "group2": "6",
+            "mean_difference": -0.8458,
+            "p_value": 0.0033,
+            "ci_low": -1.5246,
+            "ci_high": -0.167,
+            "reject": true,
+            "correction": "tukey"
+          },
+          {
+            "group1": "0",
+            "group2": "7",
+            "mean_difference": -0.4321,
+            "p_value": 0.9498,
+            "ci_low": -1.4728,
+            "ci_high": 0.6085,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "0",
+            "group2": "8",
+            "mean_difference": -0.8477,
+            "p_value": 0.227,
+            "ci_low": -1.8883,
+            "ci_high": 0.193,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "0",
+            "group2": "9",
+            "mean_difference": -0.8058,
+            "p_value": 0.9175,
+            "ci_low": -2.5915,
+            "ci_high": 0.9799,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "1",
+            "group2": "2",
+            "mean_difference": -0.113,
+            "p_value": 0.9723,
+            "ci_low": -0.4113,
+            "ci_high": 0.1854,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "1",
+            "group2": "3",
+            "mean_difference": -0.4134,
+            "p_value": 0.0114,
+            "ci_low": -0.7752,
+            "ci_high": -0.0515,
+            "reject": true,
+            "correction": "tukey"
+          },
+          {
+            "group1": "1",
+            "group2": "4",
+            "mean_difference": -0.3519,
+            "p_value": 0.1806,
+            "ci_low": -0.7674,
+            "ci_high": 0.0635,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "1",
+            "group2": "5",
+            "mean_difference": -0.2642,
+            "p_value": 0.9794,
+            "ci_low": -0.9936,
+            "ci_high": 0.4652,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "1",
+            "group2": "6",
+            "mean_difference": -0.6634,
+            "p_value": 0.0638,
+            "ci_low": -1.3445,
+            "ci_high": 0.0178,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "1",
+            "group2": "7",
+            "mean_difference": -0.2497,
+            "p_value": 0.9991,
+            "ci_low": -1.2919,
+            "ci_high": 0.7925,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "1",
+            "group2": "8",
+            "mean_difference": -0.6652,
+            "p_value": 0.5822,
+            "ci_low": -1.7074,
+            "ci_high": 0.377,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "1",
+            "group2": "9",
+            "mean_difference": -0.6233,
+            "p_value": 0.9841,
+            "ci_low": -2.41,
+            "ci_high": 1.1633,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "2",
+            "group2": "3",
+            "mean_difference": -0.3004,
+            "p_value": 0.3079,
+            "ci_low": -0.6921,
+            "ci_high": 0.0913,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "2",
+            "group2": "4",
+            "mean_difference": -0.239,
+            "p_value": 0.7866,
+            "ci_low": -0.6807,
+            "ci_high": 0.2027,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "2",
+            "group2": "5",
+            "mean_difference": -0.1512,
+            "p_value": 0.9998,
+            "ci_low": -0.8959,
+            "ci_high": 0.5934,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "2",
+            "group2": "6",
+            "mean_difference": -0.5504,
+            "p_value": 0.2684,
+            "ci_low": -1.2479,
+            "ci_high": 0.1471,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "2",
+            "group2": "7",
+            "mean_difference": -0.1367,
+            "p_value": 1.0,
+            "ci_low": -1.1896,
+            "ci_high": 0.9162,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "2",
+            "group2": "8",
+            "mean_difference": -0.5523,
+            "p_value": 0.8159,
+            "ci_low": -1.6052,
+            "ci_high": 0.5007,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "2",
+            "group2": "9",
+            "mean_difference": -0.5104,
+            "p_value": 0.9964,
+            "ci_low": -2.3033,
+            "ci_high": 1.2826,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "3",
+            "group2": "4",
+            "mean_difference": 0.0614,
+            "p_value": 1.0,
+            "ci_low": -0.4254,
+            "ci_high": 0.5483,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "3",
+            "group2": "5",
+            "mean_difference": 0.1492,
+            "p_value": 0.9998,
+            "ci_low": -0.6231,
+            "ci_high": 0.9215,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "3",
+            "group2": "6",
+            "mean_difference": -0.25,
+            "p_value": 0.9856,
+            "ci_low": -0.9769,
+            "ci_high": 0.477,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "3",
+            "group2": "7",
+            "mean_difference": 0.1637,
+            "p_value": 1.0,
+            "ci_low": -0.909,
+            "ci_high": 1.2364,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "3",
+            "group2": "8",
+            "mean_difference": -0.2518,
+            "p_value": 0.9992,
+            "ci_low": -1.3245,
+            "ci_high": 0.8208,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "3",
+            "group2": "9",
+            "mean_difference": -0.2099,
+            "p_value": 1.0,
+            "ci_low": -2.0145,
+            "ci_high": 1.5946,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "4",
+            "group2": "5",
+            "mean_difference": 0.0877,
+            "p_value": 1.0,
+            "ci_low": -0.7111,
+            "ci_high": 0.8866,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "4",
+            "group2": "6",
+            "mean_difference": -0.3114,
+            "p_value": 0.9519,
+            "ci_low": -1.0665,
+            "ci_high": 0.4436,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "4",
+            "group2": "7",
+            "mean_difference": 0.1023,
+            "p_value": 1.0,
+            "ci_low": -0.9897,
+            "ci_high": 1.1942,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "4",
+            "group2": "8",
+            "mean_difference": -0.3133,
+            "p_value": 0.9962,
+            "ci_low": -1.4052,
+            "ci_high": 0.7786,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "4",
+            "group2": "9",
+            "mean_difference": -0.2714,
+            "p_value": 1.0,
+            "ci_low": -2.0875,
+            "ci_high": 1.5447,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "5",
+            "group2": "6",
+            "mean_difference": -0.3991,
+            "p_value": 0.9508,
+            "ci_low": -1.3633,
+            "ci_high": 0.565,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "5",
+            "group2": "7",
+            "mean_difference": 0.0145,
+            "p_value": 1.0,
+            "ci_low": -1.2311,
+            "ci_high": 1.2602,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "5",
+            "group2": "8",
+            "mean_difference": -0.401,
+            "p_value": 0.991,
+            "ci_low": -1.6467,
+            "ci_high": 0.8447,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "5",
+            "group2": "9",
+            "mean_difference": -0.3591,
+            "p_value": 0.9999,
+            "ci_low": -2.2716,
+            "ci_high": 1.5534,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "6",
+            "group2": "7",
+            "mean_difference": 0.4137,
+            "p_value": 0.9868,
+            "ci_low": -0.8044,
+            "ci_high": 1.6317,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "6",
+            "group2": "8",
+            "mean_difference": -0.0019,
+            "p_value": 1.0,
+            "ci_low": -1.2199,
+            "ci_high": 1.2162,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "6",
+            "group2": "9",
+            "mean_difference": 0.04,
+            "p_value": 1.0,
+            "ci_low": -1.8546,
+            "ci_high": 1.9346,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "7",
+            "group2": "8",
+            "mean_difference": -0.4155,
+            "p_value": 0.9962,
+            "ci_low": -1.8667,
+            "ci_high": 1.0356,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "7",
+            "group2": "9",
+            "mean_difference": -0.3736,
+            "p_value": 0.9999,
+            "ci_low": -2.4259,
+            "ci_high": 1.6786,
+            "reject": false,
+            "correction": "tukey"
+          },
+          {
+            "group1": "8",
+            "group2": "9",
+            "mean_difference": 0.0419,
+            "p_value": 1.0,
+            "ci_low": -2.0104,
+            "ci_high": 2.0941,
+            "reject": false,
+            "correction": "tukey"
+          }
+        ],
+        "source_id": "statistical_tests.evidence.anova_posthoc.x2.y",
+        "p_value_corrected": 4.530193560356575e-07,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "eta_squared:x2:y",
+        "test_version": 1,
+        "test_type": "eta_squared",
+        "nobs": 998,
+        "statistic": 6.052615799381593,
+        "p_value": 2.6648197413862205e-08,
+        "effect_size": {
+          "effect_size_name": "eta_squared",
+          "value": 0.05225412443539438,
+          "nobs": 998
+        },
+        "assumptions": [
+          "independent observations",
+          "group membership is declared"
+        ],
+        "warnings": [],
+        "p_value_corrected": 4.530193560356575e-07,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "omega_squared:x2:y",
+        "test_version": 1,
+        "test_type": "omega_squared",
+        "nobs": 998,
+        "statistic": 6.052615799381593,
+        "p_value": 2.6648197413862205e-08,
+        "effect_size": {
+          "effect_size_name": "omega_squared",
+          "value": 0.04357900833671647,
+          "nobs": 998
+        },
+        "assumptions": [
+          "independent observations",
+          "group membership is declared"
+        ],
+        "warnings": [],
+        "p_value_corrected": 4.530193560356575e-07,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "levene:x2:y",
+        "test_version": 1,
+        "test_type": "levene",
+        "nobs": 998,
+        "statistic": 0.9035191874778807,
+        "p_value": 0.5213967551924251,
+        "effect_size": null,
+        "assumptions": [
+          "independent observations",
+          "groups contain at least two finite values"
+        ],
+        "warnings": [],
+        "source_id": "statistical_tests.evidence.levene.x2.y",
+        "p_value_corrected": 0.6902805919563201,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "bartlett:x2:y",
+        "test_version": 1,
+        "test_type": "bartlett",
+        "nobs": 998,
+        "statistic": 7.428367976031314,
+        "p_value": 0.5926122077088143,
+        "effect_size": null,
+        "assumptions": [
+          "independent observations",
+          "approximately normal groups"
+        ],
+        "warnings": [],
+        "source_id": "statistical_tests.evidence.bartlett.x2.y",
+        "p_value_corrected": 0.7501614270950991,
+        "correction_method": "fdr_bh"
+      },
+      {
+        "test_id": "shapiro_wilk:x2:y",
+        "test_version": 1,
+        "test_type": "shapiro_wilk",
+        "nobs": 998,
+        "statistic": 0.9990857137387392,
+        "p_value": 0.9143132156818392,
+        "effect_size": null,
+        "assumptions": [
+          "independent observations",
+          "sample size is within Shapiro-Wilk operating range"
+        ],
+        "warnings": [],
+        "source_id": "statistical_tests.evidence.shapiro_wilk.x2.y",
+        "p_value_corrected": 0.9614427628819341,
+        "correction_method": "fdr_bh"
+      }
+    ],
+    "limits": [
+      "independent statistical evidence; not a model-selection decision"
+    ],
+    "correction_scope": "advanced_evidence_family",
+    "execution_mode": "automatic_pipeline",
+    "multiple_comparison_policy": "Benjamini-Hochberg within the independent advanced evidence family."
+  },
+  "labels": {
+    "variable_labels": {},
+    "value_labels": {}
+  }
+}

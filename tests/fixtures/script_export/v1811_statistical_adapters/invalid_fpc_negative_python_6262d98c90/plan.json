@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "project_id": "invalid_fpc",
+  "run_id": "negative",
+  "workbench_version": "1.8.11",
+  "lineage_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "sources": [
+    {
+      "source_id": "source",
+      "format": "csv",
+      "filename": "data.csv",
+      "sha256": "eb6f090ecb52d6217185214e757e95f9bb0a15afa824b2913c8baa45b2058db5",
+      "read_options": {}
+    }
+  ],
+  "steps": [
+    {
+      "step_id": "model",
+      "kind": "model",
+      "operation": "model.ols",
+      "label": "",
+      "parameters": {
+        "model_type": "ols",
+        "y": "y",
+        "x": [
+          "x1",
+          "x2"
+        ],
+        "covariance": "survey_design",
+        "weights": {
+          "kind": "sampling",
+          "column": "weight"
+        },
+        "model_options": {
+          "survey_design": {
+            "sampling_weight": "weight",
+            "survey_psu_col": "psu",
+            "survey_strata_col": "stratum",
+            "survey_fpc_col": "population"
+          }
+        }
+      },
+      "inputs": [
+        "source"
+      ],
+      "output_dataset": null,
+      "expected": {
+        "nobs": 80
+      },
+      "tolerances": {},
+      "seed": null,
+      "snapshot": null
+    }
+  ]
+}

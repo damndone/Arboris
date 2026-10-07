@@ -1,0 +1,65 @@
+[
+  {
+    "expected": 0.41984161711405155,
+    "abs": 1e-08,
+    "rel": 0.0,
+    "label": "model:coefficients",
+    "actual": -1.0171957731642591,
+    "difference": 1.4370373902783107,
+    "allowed": 1e-08
+  },
+  {
+    "expected": 0.5438671026124017,
+    "abs": 1e-08,
+    "rel": 0.0,
+    "label": "model:coefficients",
+    "actual": 0.3619630602062819,
+    "difference": 0.1819040424061198,
+    "allowed": 1e-08
+  },
+  {
+    "expected": -0.3225180098449096,
+    "abs": 1e-08,
+    "rel": 0.0,
+    "label": "model:coefficients",
+    "actual": -0.2517579114151741,
+    "difference": 0.07076009842973546,
+    "allowed": 1e-08
+  },
+  {
+    "expected": 649372365.6740237,
+    "abs": 1e-06,
+    "rel": 0.0,
+    "label": "model:std_errors",
+    "actual": 649372365.6740237,
+    "difference": 0.0,
+    "allowed": 1e-06
+  },
+  {
+    "expected": 672946964.1387976,
+    "abs": 1e-06,
+    "rel": 0.0,
+    "label": "model:std_errors",
+    "actual": 672946964.1387976,
+    "difference": 0.0,
+    "allowed": 1e-06
+  },
+  {
+    "expected": 610975975.1537546,
+    "abs": 1e-06,
+    "rel": 0.0,
+    "label": "model:std_errors",
+    "actual": 610975975.1537546,
+    "difference": 0.0,
+    "allowed": 1e-06
+  },
+  {
+    "expected": 240.0,
+    "abs": 0.0,
+    "rel": 0.0,
+    "label": "model:nobs",
+    "actual": 240.0,
+    "difference": 0.0,
+    "allowed": 0.0
+  }
+]

@@ -1,0 +1,16 @@
+............F...............................                             [100%]
+=================================== FAILURES ===================================
+_ test_single_stage_covariance_and_inference_match_independent_r[without_fpc] __
+tests/test_survey_fpc_v1811.py:50: in test_single_stage_covariance_and_inference_match_independent_r
+    design, result = _fit(reference)
+                     ^^^^^^^^^^^^^^^
+tests/test_survey_fpc_v1811.py:36: in _fit
+    design = SurveyDesign(frame=frame, weight="weight",
+<string>:13: in __init__
+    ???
+backend/workbench/survey/design.py:76: in __post_init__
+    raise SurveyEngineError(
+E   workbench.survey.errors.SurveyEngineError: SURVEY_FPC_COLUMN_INVALID: FPC requires one nonempty column name
+=========================== short test summary info ============================
+FAILED tests/test_survey_fpc_v1811.py::test_single_stage_covariance_and_inference_match_independent_r[without_fpc]
+1 failed, 43 passed in 1.36s

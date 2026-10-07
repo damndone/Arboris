@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+from typing import get_args, get_type_hints
+
 from workbench.contracts.model.arma_garch import (
     ARMA_GARCH_CONTRACT_VERSION,
     ARMA_GARCH_PACK_ID,
     ArmaGarchAnalysisContract,
+    ValidationOptions,
+    normalize_arma_garch_model_options,
 )
 from workbench.engine.capabilities import (
     CapabilityDeclaration,
@@ -34,6 +38,7 @@ def declare_pack() -> None:
                     model_options_contract=ModelOptionsContract(
                         producer_version="time_series.arma_garch@1.0",
                         input_contract_version=ARMA_GARCH_CONTRACT_VERSION,
+                        normalize_payload=normalize_arma_garch_model_options,
                     ),
                 )
             ],
@@ -46,7 +51,7 @@ def declare_pack() -> None:
             group="Time Series",
             description=(
                 "One-series ARMA mean and ARCH/GARCH volatility analysis with "
-                "a confirmed transform and frozen rolling validation."
+                "a confirmed transform, train/validation or classical full-sample replication, and prefix-only rolling forecasts."
             ),
             requires=("time", "value"),
             params=(
@@ -62,6 +67,7 @@ def declare_pack() -> None:
                     "label": "ARMA-GARCH analysis contract",
                     "required": True,
                     "role": "model_options",
+                    "evaluation_modes": list(get_args(get_type_hints(ValidationOptions)["evaluation_mode"])),
                 },
             ),
         )

@@ -32,6 +32,8 @@ vi.mock("../../capabilities/useCapabilities", () => ({
         { key: "survival_cox", label: "Survival / Cox", group: "Survival" },
         { key: "quantile_regression", label: "Quantile regression", group: "Robust / distributional" },
         { key: "anova", label: "ANOVA / ANCOVA", group: "ANOVA" },
+        { key: "negative_binomial", label: "Negative Binomial", group: "Count" },
+        { key: "glm:negative_binomial", label: "GLM - negative binomial", group: "GLM" },
       ],
       survey_design: {
         variance_methods: ["linearization", "replicate"],
@@ -1114,6 +1116,28 @@ describe("GenesisWizard exposes the v1.8.7 declarations", () => {
     fireEvent.click(await screen.findByTestId("genesis-save-table"));
     await waitFor(() => expect(patch).toHaveBeenCalled());
   }
+
+  it("persists NB1 options from the current genesis path", async () => {
+    await reachModelStep();
+    fireEvent.change(screen.getByLabelText("model type"), {target:{value:"negative_binomial"}});
+    fireEvent.change(screen.getByLabelText("Dispersion"), {target:{value:"constant"}});
+    fireEvent.click(screen.getByTestId("genesis-save-model"));
+    await waitFor(()=>expect(api.patchDraftNode).toHaveBeenLastCalledWith(
+      "/proj","draft_g1","model_1",{params:expect.objectContaining({
+        model_type:"negative_binomial",model_options:{dispersion:"constant"}})}));
+  });
+
+  it("blocks missing GLM alpha then saves the explicit value", async () => {
+    await reachModelStep();
+    fireEvent.change(screen.getByLabelText("model type"), {target:{value:"glm:negative_binomial"}});
+    expect(screen.getByTestId("genesis-save-model")).toBeDisabled();
+    expect(screen.getByRole("alert")).toHaveTextContent("explicit finite positive alpha");
+    fireEvent.change(screen.getByLabelText("Fixed alpha"), {target:{value:"1"}});
+    fireEvent.click(screen.getByTestId("genesis-save-model"));
+    await waitFor(()=>expect(api.patchDraftNode).toHaveBeenLastCalledWith(
+      "/proj","draft_g1","model_1",{params:expect.objectContaining({
+        model_type:"glm:negative_binomial",model_options:{alpha:1}})}));
+  });
 
   it("renders the survey design controls with options taken from capabilities", async () => {
     await reachModelStep();

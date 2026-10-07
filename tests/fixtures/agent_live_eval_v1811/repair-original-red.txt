@@ -1,0 +1,238 @@
+FFFF                                                                     [100%]
+=================================== FAILURES ===================================
+____ test_completed_public_owner_rejects_bad_answer_or_binding[wrong_field] ____
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x12ea07e10>
+tmp_path = PosixPath('/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-883/test_completed_public_owner_re0')
+attack = 'wrong_field'
+
+    @pytest.mark.parametrize("attack", ["wrong_field", "wrong_sign", "cross_owner_substrings", "wrong_operation_owner"])
+    def test_completed_public_owner_rejects_bad_answer_or_binding(monkeypatch, tmp_path, attack):
+        fixture = json.loads(FIXTURE.read_text())
+        root = Path(fixture["root"])
+        operation = copy.deepcopy(fixture["result"]["operation"])
+        source = fixture["source"]
+        run = fixture["evidence"]["run_id"]
+        packet = json.loads((ROOT / "scripts/agent_live_eval_fixtures_v1811.json").read_text())["families"]["poisson"]
+        case = next(c for c in json.loads((ROOT / "scripts/agent_live_eval_cases.json").read_text()) if c.get("fixture") == "poisson")
+        proposal = {"proposal_id": operation["proposal_id"], "revision": operation["proposal_revision"], "fingerprint": operation["proposal_fingerprint"], "status": "pending", "operation_id": operation["operation_id"], "target": operation["target"], "changes": operation["changes"]}
+        actual = h._read_verified_run(root, run, packet)
+        coefficients = actual["model"]["coefficients"]
+        values = {term: coefficients[term]["estimate"] for term in ("x1", "x2", "x3")}
+        answer = "实际估计值：" + "；".join(f"{term} 的系数为 {value:.8f}" for term, value in values.items())
+        if attack == "wrong_field":
+            answer = answer.replace("x1 的系数", "x1 的标准误")
+        if attack == "wrong_sign":
+            assert values["x1"] > 0
+            answer = answer.replace(f"{values['x1']:.8f}", f"{-values['x1']:.8f}")
+        tool = {"run_id": run, "model_id": packet["model_id"], "coefficients": coefficients}
+        if attack == "cross_owner_substrings":
+            tool.update(run_id=run + "_unrelated", model_id=packet["model_id"] + "0")
+        if attack == "wrong_operation_owner":
+            operation.update(agent_session_id="different_session", proposal_id="different_proposal", target={"run_id": "different_source"})
+        session = "independent-offline-answer-" + attack + "-" + uuid.uuid4().hex
+        entries = [{"payload": {"role": "tool", "name": "inspect_project_model_coefficients", "content": json.dumps(tool)}}]
+        with (root / "workbench/agent-sessions" / (session + ".jsonl")).open("x") as handle:
+            handle.write(json.dumps(entries[0]) + "\n")
+        def turn(client, r, run_id, case, **kwargs):
+            if run_id == source:
+                return {"proposals": {"proposals": [proposal]}, "session_id": "planning-review", "assistant": "待确认方案"}
+            assert run_id == run
+            return {"id": case["id"], "session_id": session, "assistant": answer, "tool_calls": [{"name": "inspect_project_model_coefficients"}], "proposals": {"proposals": []}, "empty_reply": False, "http_status": 200, "final_stop_reason": "stop", "reply_language": "zh", "fabricated_numbers": h._fabricated_numbers(answer, entries)}
+        monkeypatch.setattr(h, "_run_case", turn)
+        monkeypatch.setattr(h, "_confirm_and_wait", lambda *a: {**fixture["result"], "operation": operation})
+        directory = tmp_path / "stages"
+        directory.mkdir()
+        with h.TestClient(h.app) as client:
+            record = h._run_family_case(client, root, source, case, packet, directory, confirm=True)
+        record["checks"] = h._score(record, case["checks"], root, run) + record["family_checks"]
+        record["passed"] = all(check["passed"] for check in record["checks"])
+        record["scope"] = "OFFLINE_ADVERSARIAL_ANSWER_REAL_PUBLIC_OWNER_NOT_PROVIDER_LIVE"
+        OUT.mkdir(parents=True, exist_ok=True)
+        with (OUT / (attack + ".json")).open("x") as handle:
+            json.dump(record, handle, indent=2)
+>       assert record["passed"] is False, record["checks"]
+E       AssertionError: [{'check': 'reply', 'passed': True, 'detail': 'stop'}, {'check': 'language', 'passed': True, 'detail': 'zh'}, {'check'...}, {'check': 'no_fabricated_numbers', 'passed': True, 'detail': '[]'}, {'check': 'native_oracle', 'passed': True}, ...]
+E       assert True is False
+
+../codex-v1811-live-harness-review/tests/eval_v1811/live_harness_review_actual_red.py:72: AssertionError
+____ test_completed_public_owner_rejects_bad_answer_or_binding[wrong_sign] _____
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x12eceb100>
+tmp_path = PosixPath('/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-883/test_completed_public_owner_re1')
+attack = 'wrong_sign'
+
+    @pytest.mark.parametrize("attack", ["wrong_field", "wrong_sign", "cross_owner_substrings", "wrong_operation_owner"])
+    def test_completed_public_owner_rejects_bad_answer_or_binding(monkeypatch, tmp_path, attack):
+        fixture = json.loads(FIXTURE.read_text())
+        root = Path(fixture["root"])
+        operation = copy.deepcopy(fixture["result"]["operation"])
+        source = fixture["source"]
+        run = fixture["evidence"]["run_id"]
+        packet = json.loads((ROOT / "scripts/agent_live_eval_fixtures_v1811.json").read_text())["families"]["poisson"]
+        case = next(c for c in json.loads((ROOT / "scripts/agent_live_eval_cases.json").read_text()) if c.get("fixture") == "poisson")
+        proposal = {"proposal_id": operation["proposal_id"], "revision": operation["proposal_revision"], "fingerprint": operation["proposal_fingerprint"], "status": "pending", "operation_id": operation["operation_id"], "target": operation["target"], "changes": operation["changes"]}
+        actual = h._read_verified_run(root, run, packet)
+        coefficients = actual["model"]["coefficients"]
+        values = {term: coefficients[term]["estimate"] for term in ("x1", "x2", "x3")}
+        answer = "实际估计值：" + "；".join(f"{term} 的系数为 {value:.8f}" for term, value in values.items())
+        if attack == "wrong_field":
+            answer = answer.replace("x1 的系数", "x1 的标准误")
+        if attack == "wrong_sign":
+            assert values["x1"] > 0
+            answer = answer.replace(f"{values['x1']:.8f}", f"{-values['x1']:.8f}")
+        tool = {"run_id": run, "model_id": packet["model_id"], "coefficients": coefficients}
+        if attack == "cross_owner_substrings":
+            tool.update(run_id=run + "_unrelated", model_id=packet["model_id"] + "0")
+        if attack == "wrong_operation_owner":
+            operation.update(agent_session_id="different_session", proposal_id="different_proposal", target={"run_id": "different_source"})
+        session = "independent-offline-answer-" + attack + "-" + uuid.uuid4().hex
+        entries = [{"payload": {"role": "tool", "name": "inspect_project_model_coefficients", "content": json.dumps(tool)}}]
+        with (root / "workbench/agent-sessions" / (session + ".jsonl")).open("x") as handle:
+            handle.write(json.dumps(entries[0]) + "\n")
+        def turn(client, r, run_id, case, **kwargs):
+            if run_id == source:
+                return {"proposals": {"proposals": [proposal]}, "session_id": "planning-review", "assistant": "待确认方案"}
+            assert run_id == run
+            return {"id": case["id"], "session_id": session, "assistant": answer, "tool_calls": [{"name": "inspect_project_model_coefficients"}], "proposals": {"proposals": []}, "empty_reply": False, "http_status": 200, "final_stop_reason": "stop", "reply_language": "zh", "fabricated_numbers": h._fabricated_numbers(answer, entries)}
+        monkeypatch.setattr(h, "_run_case", turn)
+        monkeypatch.setattr(h, "_confirm_and_wait", lambda *a: {**fixture["result"], "operation": operation})
+        directory = tmp_path / "stages"
+        directory.mkdir()
+        with h.TestClient(h.app) as client:
+            record = h._run_family_case(client, root, source, case, packet, directory, confirm=True)
+        record["checks"] = h._score(record, case["checks"], root, run) + record["family_checks"]
+        record["passed"] = all(check["passed"] for check in record["checks"])
+        record["scope"] = "OFFLINE_ADVERSARIAL_ANSWER_REAL_PUBLIC_OWNER_NOT_PROVIDER_LIVE"
+        OUT.mkdir(parents=True, exist_ok=True)
+        with (OUT / (attack + ".json")).open("x") as handle:
+            json.dump(record, handle, indent=2)
+>       assert record["passed"] is False, record["checks"]
+E       AssertionError: [{'check': 'reply', 'passed': True, 'detail': 'stop'}, {'check': 'language', 'passed': True, 'detail': 'zh'}, {'check'...}, {'check': 'no_fabricated_numbers', 'passed': True, 'detail': '[]'}, {'check': 'native_oracle', 'passed': True}, ...]
+E       assert True is False
+
+../codex-v1811-live-harness-review/tests/eval_v1811/live_harness_review_actual_red.py:72: AssertionError
+_ test_completed_public_owner_rejects_bad_answer_or_binding[cross_owner_substrings] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x12eea32f0>
+tmp_path = PosixPath('/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-883/test_completed_public_owner_re2')
+attack = 'cross_owner_substrings'
+
+    @pytest.mark.parametrize("attack", ["wrong_field", "wrong_sign", "cross_owner_substrings", "wrong_operation_owner"])
+    def test_completed_public_owner_rejects_bad_answer_or_binding(monkeypatch, tmp_path, attack):
+        fixture = json.loads(FIXTURE.read_text())
+        root = Path(fixture["root"])
+        operation = copy.deepcopy(fixture["result"]["operation"])
+        source = fixture["source"]
+        run = fixture["evidence"]["run_id"]
+        packet = json.loads((ROOT / "scripts/agent_live_eval_fixtures_v1811.json").read_text())["families"]["poisson"]
+        case = next(c for c in json.loads((ROOT / "scripts/agent_live_eval_cases.json").read_text()) if c.get("fixture") == "poisson")
+        proposal = {"proposal_id": operation["proposal_id"], "revision": operation["proposal_revision"], "fingerprint": operation["proposal_fingerprint"], "status": "pending", "operation_id": operation["operation_id"], "target": operation["target"], "changes": operation["changes"]}
+        actual = h._read_verified_run(root, run, packet)
+        coefficients = actual["model"]["coefficients"]
+        values = {term: coefficients[term]["estimate"] for term in ("x1", "x2", "x3")}
+        answer = "实际估计值：" + "；".join(f"{term} 的系数为 {value:.8f}" for term, value in values.items())
+        if attack == "wrong_field":
+            answer = answer.replace("x1 的系数", "x1 的标准误")
+        if attack == "wrong_sign":
+            assert values["x1"] > 0
+            answer = answer.replace(f"{values['x1']:.8f}", f"{-values['x1']:.8f}")
+        tool = {"run_id": run, "model_id": packet["model_id"], "coefficients": coefficients}
+        if attack == "cross_owner_substrings":
+            tool.update(run_id=run + "_unrelated", model_id=packet["model_id"] + "0")
+        if attack == "wrong_operation_owner":
+            operation.update(agent_session_id="different_session", proposal_id="different_proposal", target={"run_id": "different_source"})
+        session = "independent-offline-answer-" + attack + "-" + uuid.uuid4().hex
+        entries = [{"payload": {"role": "tool", "name": "inspect_project_model_coefficients", "content": json.dumps(tool)}}]
+        with (root / "workbench/agent-sessions" / (session + ".jsonl")).open("x") as handle:
+            handle.write(json.dumps(entries[0]) + "\n")
+        def turn(client, r, run_id, case, **kwargs):
+            if run_id == source:
+                return {"proposals": {"proposals": [proposal]}, "session_id": "planning-review", "assistant": "待确认方案"}
+            assert run_id == run
+            return {"id": case["id"], "session_id": session, "assistant": answer, "tool_calls": [{"name": "inspect_project_model_coefficients"}], "proposals": {"proposals": []}, "empty_reply": False, "http_status": 200, "final_stop_reason": "stop", "reply_language": "zh", "fabricated_numbers": h._fabricated_numbers(answer, entries)}
+        monkeypatch.setattr(h, "_run_case", turn)
+        monkeypatch.setattr(h, "_confirm_and_wait", lambda *a: {**fixture["result"], "operation": operation})
+        directory = tmp_path / "stages"
+        directory.mkdir()
+        with h.TestClient(h.app) as client:
+            record = h._run_family_case(client, root, source, case, packet, directory, confirm=True)
+        record["checks"] = h._score(record, case["checks"], root, run) + record["family_checks"]
+        record["passed"] = all(check["passed"] for check in record["checks"])
+        record["scope"] = "OFFLINE_ADVERSARIAL_ANSWER_REAL_PUBLIC_OWNER_NOT_PROVIDER_LIVE"
+        OUT.mkdir(parents=True, exist_ok=True)
+        with (OUT / (attack + ".json")).open("x") as handle:
+            json.dump(record, handle, indent=2)
+>       assert record["passed"] is False, record["checks"]
+E       AssertionError: [{'check': 'reply', 'passed': True, 'detail': 'stop'}, {'check': 'language', 'passed': True, 'detail': 'zh'}, {'check'...}, {'check': 'no_fabricated_numbers', 'passed': True, 'detail': '[]'}, {'check': 'native_oracle', 'passed': True}, ...]
+E       assert True is False
+
+../codex-v1811-live-harness-review/tests/eval_v1811/live_harness_review_actual_red.py:72: AssertionError
+_ test_completed_public_owner_rejects_bad_answer_or_binding[wrong_operation_owner] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x12eea4c00>
+tmp_path = PosixPath('/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-883/test_completed_public_owner_re3')
+attack = 'wrong_operation_owner'
+
+    @pytest.mark.parametrize("attack", ["wrong_field", "wrong_sign", "cross_owner_substrings", "wrong_operation_owner"])
+    def test_completed_public_owner_rejects_bad_answer_or_binding(monkeypatch, tmp_path, attack):
+        fixture = json.loads(FIXTURE.read_text())
+        root = Path(fixture["root"])
+        operation = copy.deepcopy(fixture["result"]["operation"])
+        source = fixture["source"]
+        run = fixture["evidence"]["run_id"]
+        packet = json.loads((ROOT / "scripts/agent_live_eval_fixtures_v1811.json").read_text())["families"]["poisson"]
+        case = next(c for c in json.loads((ROOT / "scripts/agent_live_eval_cases.json").read_text()) if c.get("fixture") == "poisson")
+        proposal = {"proposal_id": operation["proposal_id"], "revision": operation["proposal_revision"], "fingerprint": operation["proposal_fingerprint"], "status": "pending", "operation_id": operation["operation_id"], "target": operation["target"], "changes": operation["changes"]}
+        actual = h._read_verified_run(root, run, packet)
+        coefficients = actual["model"]["coefficients"]
+        values = {term: coefficients[term]["estimate"] for term in ("x1", "x2", "x3")}
+        answer = "实际估计值：" + "；".join(f"{term} 的系数为 {value:.8f}" for term, value in values.items())
+        if attack == "wrong_field":
+            answer = answer.replace("x1 的系数", "x1 的标准误")
+        if attack == "wrong_sign":
+            assert values["x1"] > 0
+            answer = answer.replace(f"{values['x1']:.8f}", f"{-values['x1']:.8f}")
+        tool = {"run_id": run, "model_id": packet["model_id"], "coefficients": coefficients}
+        if attack == "cross_owner_substrings":
+            tool.update(run_id=run + "_unrelated", model_id=packet["model_id"] + "0")
+        if attack == "wrong_operation_owner":
+            operation.update(agent_session_id="different_session", proposal_id="different_proposal", target={"run_id": "different_source"})
+        session = "independent-offline-answer-" + attack + "-" + uuid.uuid4().hex
+        entries = [{"payload": {"role": "tool", "name": "inspect_project_model_coefficients", "content": json.dumps(tool)}}]
+        with (root / "workbench/agent-sessions" / (session + ".jsonl")).open("x") as handle:
+            handle.write(json.dumps(entries[0]) + "\n")
+        def turn(client, r, run_id, case, **kwargs):
+            if run_id == source:
+                return {"proposals": {"proposals": [proposal]}, "session_id": "planning-review", "assistant": "待确认方案"}
+            assert run_id == run
+            return {"id": case["id"], "session_id": session, "assistant": answer, "tool_calls": [{"name": "inspect_project_model_coefficients"}], "proposals": {"proposals": []}, "empty_reply": False, "http_status": 200, "final_stop_reason": "stop", "reply_language": "zh", "fabricated_numbers": h._fabricated_numbers(answer, entries)}
+        monkeypatch.setattr(h, "_run_case", turn)
+        monkeypatch.setattr(h, "_confirm_and_wait", lambda *a: {**fixture["result"], "operation": operation})
+        directory = tmp_path / "stages"
+        directory.mkdir()
+        with h.TestClient(h.app) as client:
+            record = h._run_family_case(client, root, source, case, packet, directory, confirm=True)
+        record["checks"] = h._score(record, case["checks"], root, run) + record["family_checks"]
+        record["passed"] = all(check["passed"] for check in record["checks"])
+        record["scope"] = "OFFLINE_ADVERSARIAL_ANSWER_REAL_PUBLIC_OWNER_NOT_PROVIDER_LIVE"
+        OUT.mkdir(parents=True, exist_ok=True)
+        with (OUT / (attack + ".json")).open("x") as handle:
+            json.dump(record, handle, indent=2)
+>       assert record["passed"] is False, record["checks"]
+E       AssertionError: [{'check': 'reply', 'passed': True, 'detail': 'stop'}, {'check': 'language', 'passed': True, 'detail': 'zh'}, {'check'...}, {'check': 'no_fabricated_numbers', 'passed': True, 'detail': '[]'}, {'check': 'native_oracle', 'passed': True}, ...]
+E       assert True is False
+
+../codex-v1811-live-harness-review/tests/eval_v1811/live_harness_review_actual_red.py:72: AssertionError
+=============================== warnings summary ===============================
+../../.venv/lib/python3.14/site-packages/fastapi/testclient.py:1
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED ../codex-v1811-live-harness-review/tests/eval_v1811/live_harness_review_actual_red.py::test_completed_public_owner_rejects_bad_answer_or_binding[wrong_field]
+FAILED ../codex-v1811-live-harness-review/tests/eval_v1811/live_harness_review_actual_red.py::test_completed_public_owner_rejects_bad_answer_or_binding[wrong_sign]
+FAILED ../codex-v1811-live-harness-review/tests/eval_v1811/live_harness_review_actual_red.py::test_completed_public_owner_rejects_bad_answer_or_binding[cross_owner_substrings]
+FAILED ../codex-v1811-live-harness-review/tests/eval_v1811/live_harness_review_actual_red.py::test_completed_public_owner_rejects_bad_answer_or_binding[wrong_operation_owner]
+4 failed, 1 warning in 1.62s

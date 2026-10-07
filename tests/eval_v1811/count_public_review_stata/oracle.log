@@ -1,0 +1,174 @@
+
+  ___  ____  ____  ____  ____ ®
+ /__    /   ____/   /   ____/      18.0
+___/   /   /___/   /   /___/       MP—Parallel Edition
+
+ Statistics and Data Science       Copyright 1985-2023 StataCorp LLC
+                                   StataCorp
+                                   4905 Lakeway Drive
+                                   College Station, Texas 77845 USA
+                                   800-STATA-PC        https://www.stata.com
+                                   979-696-4600        stata@stata.com
+
+Stata license: Single-user 2-core  perpetual
+Serial number: [REDACTED]
+  Licensed to: [REDACTED]
+               
+
+Notes:
+      1. Stata is running in batch mode.
+      2. Unicode is supported; see help unicode_advice.
+      3. More than 2 billion observations are allowed; see help obs_advice.
+      4. Maximum number of variables is set to 5,000 but can be increased;
+          see help set_maxvar.
+
+
+Running /Applications/Stata/profile.do ...
+command window is unrecognized
+r(199);
+
+. do oracle.do 
+
+. version 18
+
+. set more off
+
+. import delimited "/Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/tes
+> ts/fixtures/postestimation/data.csv", clear varnames(1)
+(encoding automatically selected: ISO-8859-1)
+(10 vars, 300 obs)
+
+. glm yb x1 x2 x3, family(poisson) link(log) ml iterate(1000) tolerance(1e-12) 
+> ltolerance(1e-12)
+
+Iteration 0:  Log likelihood = -268.97306  
+Iteration 1:  Log likelihood = -268.35889  
+Iteration 2:  Log likelihood = -268.35776  
+Iteration 3:  Log likelihood = -268.35776  
+Iteration 4:  Log likelihood = -268.35776  
+
+Generalized linear models                         Number of obs   =        300
+Optimization     : ML                             Residual df     =        296
+                                                  Scale parameter =          1
+Deviance         =  154.7155262                   (1/df) Deviance =   .5226876
+Pearson          =  107.1279395                   (1/df) Pearson  =   .3619187
+
+Variance function: V(u) = u                       [Poisson]
+Link function    : g(u) = ln(u)                   [Log]
+
+                                                  AIC             =   1.815718
+Log likelihood   = -268.3577631                   BIC             =  -1533.604
+
+------------------------------------------------------------------------------
+             |                 OIM
+          yb | Coefficient  std. err.      z    P>|z|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+          x1 |   .2377866   .0716128     3.32   0.001     .0974281     .378145
+          x2 |  -.1459075   .0633554    -2.30   0.021    -.2700817   -.0217333
+          x3 |   .1037019   .1415438     0.73   0.464    -.1737189    .3811226
+       _cons |  -.6037134   .1685429    -3.58   0.000    -.9340515   -.2733753
+------------------------------------------------------------------------------
+
+. estimates store full_different_response
+
+. scalar ll_other = e(ll)
+
+. glm yc x1, family(poisson) link(log) ml iterate(1000) tolerance(1e-12) ltoler
+> ance(1e-12)
+
+Iteration 0:  Log likelihood = -459.83916  
+Iteration 1:  Log likelihood = -457.35934  
+Iteration 2:  Log likelihood = -457.35311  
+Iteration 3:  Log likelihood = -457.35311  
+Iteration 4:  Log likelihood = -457.35311  
+
+Generalized linear models                         Number of obs   =        300
+Optimization     : ML                             Residual df     =        298
+                                                  Scale parameter =          1
+Deviance         =  364.6763225                   (1/df) Deviance =   1.223746
+Pearson          =  313.2359492                   (1/df) Pearson  =   1.051127
+
+Variance function: V(u) = u                       [Poisson]
+Link function    : g(u) = ln(u)                   [Log]
+
+                                                  AIC             =   3.062354
+Log likelihood   = -457.3531115                   BIC             =  -1335.051
+
+------------------------------------------------------------------------------
+             |                 OIM
+          yc | Coefficient  std. err.      z    P>|z|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+          x1 |   .4204876   .0466445     9.01   0.000     .3290661    .5119091
+       _cons |   .3243023   .0511543     6.34   0.000     .2240418    .4245628
+------------------------------------------------------------------------------
+
+. estimates store restricted
+
+. scalar ll_restricted = e(ll)
+
+. capture noisily lrtest full_different_response restricted
+dependent variables differ: yb vs. yc
+
+. scalar incompatible_rc = _rc
+
+. glm yc x1 x2 x3, family(poisson) link(log) ml iterate(1000) tolerance(1e-12) 
+> ltolerance(1e-12)
+
+Iteration 0:  Log likelihood = -446.89921  
+Iteration 1:  Log likelihood = -444.47094  
+Iteration 2:  Log likelihood = -444.46457  
+Iteration 3:  Log likelihood = -444.46457  
+Iteration 4:  Log likelihood = -444.46457  
+
+Generalized linear models                         Number of obs   =        300
+Optimization     : ML                             Residual df     =        296
+                                                  Scale parameter =          1
+Deviance         =  338.8992338                   (1/df) Deviance =    1.14493
+Pearson          =  286.6726628                   (1/df) Pearson  =   .9684887
+
+Variance function: V(u) = u                       [Poisson]
+Link function    : g(u) = ln(u)                   [Log]
+
+                                                  AIC             =   2.989764
+Log likelihood   = -444.4645671                   BIC             =   -1349.42
+
+------------------------------------------------------------------------------
+             |                 OIM
+          yc | Coefficient  std. err.      z    P>|z|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+          x1 |   .4053654   .0460298     8.81   0.000     .3151486    .4955822
+          x2 |  -.2030551   .0410678    -4.94   0.000    -.2835466   -.1225637
+          x3 |   .0660966   .0902587     0.73   0.464    -.1108072    .2430004
+       _cons |   .2404849   .1079945     2.23   0.026     .0288196    .4521502
+------------------------------------------------------------------------------
+
+. estimates store full_same_response
+
+. lrtest full_same_response restricted
+
+Likelihood-ratio test
+Assumption: restricted nested within full_same_re~e
+
+ LR chi2(2) =  25.78
+Prob > chi2 = 0.0000
+
+. scalar valid_lr = r(chi2)
+
+. scalar valid_p = r(p)
+
+. file open wbout using "wb_results.tsv", write
+
+. file write wbout "incompatible_response_lr_rc" _tab %21.15g (incompatible_rc)
+>  _n
+
+. file write wbout "invalid_numeric_lr_if_not_rejected" _tab %21.15g (2*(ll_oth
+> er-ll_restricted)) _n
+
+. file write wbout "same_response_lr" _tab %21.15g (valid_lr) _n
+
+. file write wbout "same_response_p" _tab %21.15g (valid_p) _n
+
+. file close wbout
+
+. 
+end of do-file

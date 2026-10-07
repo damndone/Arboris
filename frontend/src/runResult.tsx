@@ -43,6 +43,7 @@ import { ArmaGarchDashboard } from "./runResult/ArmaGarchDashboard";
 import { useArmaGarchArtifacts } from "./runResult/useArmaGarchArtifacts";
 import { useArmaGarchCharts } from "./runResult/useArmaGarchCharts";
 import { PredictionResearchEvidenceCard } from "./runResult/PredictionResearchEvidenceCard";
+import {CountModelResultCard} from "./runResult/CountModelResultCard";
 import { formatEstimate, formatPValue as formatPValueRule } from "./format/numbers";
 
 /** Stable identity so the loader effects do not re-run on every render. */
@@ -719,6 +720,7 @@ export function RunResultView({ projectRoot, runId, onError, onFailureAction }: 
           </div>
         </section>
       )}
+      {detail.model_results?.map(model=><CountModelResultCard key={`dispersion:${model.model_id}`} model={model}/>)}
       {problemIssues.length > 0 && (
         <section className="panel panel-error" role="alert">
           <strong>Issues</strong>

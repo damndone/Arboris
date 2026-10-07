@@ -961,7 +961,9 @@ def test_dataset_materialization_builds_a_native_did_draft_with_its_treatment_mo
         "entity_col": "unit",
         "time_col": "period",
         "did_mode": "cohort",
-        "covariance": "unadjusted",
+        # v1.8.11: DID clusters by unit unless another covariance is chosen.
+        "covariance": "clustered",
+        "model_options": {"covariance": "clustered"},
         "did_cohort_col": "first_treat",
     }
 

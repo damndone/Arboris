@@ -1,0 +1,15 @@
+..
+Fontconfig error: No writable cache directories
+	/opt/homebrew/var/cache/fontconfig
+	/Users/jiayuanren/.cache/fontconfig
+	/Users/jiayuanren/.fontconfig
+Retained public IV run: /private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-764/iv-two-endogenous-v18110/oracle/runs/20261004_201457_036027_bb50b6cd
+r max coefficient/covariance error: 5.551115123125783e-16 8.239936510889834e-18
+.stata max coefficient/covariance error: 8.881784197001252e-16 8.673617379884035e-18
+.r joint endogenous Wald Workbench/native: {'operation': 'wald', 'model_id': 'iv_2sls_1', 'model_type': 'iv_2sls', 'covariance_estimator': 'robust', 'nobs': 650, 'df_method': 'asymptotic', 'n_clusters': None, 'constraints': [{'terms': {'xe1': 1.0}, 'value': 0.0}, {'terms': {'xe2': 1.0}, 'value': 0.0}], 'distribution': 'chi2', 'statistic': 52.966469476497096, 'df_num': 2, 'df_den': None, 'p_value': 3.1512095954357576e-12} {'distribution': 'chi2', 'statistic': 52.966469476497025, 'df_num': 2, 'df_den': None, 'p_value': 3.151209595435867e-12, 'constraints': ['xe1=0', 'xe2=0']}
+.stata joint endogenous Wald Workbench/native: {'operation': 'wald', 'model_id': 'iv_2sls_1', 'model_type': 'iv_2sls', 'covariance_estimator': 'robust', 'nobs': 650, 'df_method': 'asymptotic', 'n_clusters': None, 'constraints': [{'terms': {'xe1': 1.0}, 'value': 0.0}, {'terms': {'xe2': 1.0}, 'value': 0.0}], 'distribution': 'chi2', 'statistic': 52.966469476497096, 'df_num': 2, 'df_den': None, 'p_value': 3.1512095954357576e-12} {'distribution': 'chi2', 'statistic': 52.9664694764971, 'df_num': 2, 'df_den': None, 'p_value': 3.15120959543578e-12, 'constraints': ['xe1=0', 'xe2=0']}
+...first three coefficients and SE (Workbench / R): [('Intercept', 1.0693412648674825, 1.06934126486748, 0.049217870431445286, 0.0492178704314452), ('x1', 0.5552201253208324, 0.555220125320833, 0.052079051756544974, 0.0520790517565449), ('xe', 0.8041549151923951, 0.804154915192396, 0.05155227948506298, 0.051552279485063)]
+kernel settings: {'covariance_estimator': 'robust', 'df_method': 'asymptotic', 'reference_distribution': 'z', 'df_resid': 447.0}
+max absolute differences: 2.4424906541753444e-15 8.326672684688674e-17
+.......
+15 passed, 67 deselected in 11.64s

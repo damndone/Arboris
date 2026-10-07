@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "project_id": "review",
+  "run_id": "string-mode",
+  "workbench_version": "1.8.11",
+  "lineage_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+  "sources": [
+    {
+      "source_id": "source",
+      "format": "csv",
+      "filename": "data.csv",
+      "sha256": "63e535a65fadff855bb41ade0b8986f125a13d6d593613819b184f60b13e12da",
+      "read_options": {}
+    }
+  ],
+  "steps": [
+    {
+      "step_id": "result",
+      "kind": "data_operation",
+      "operation": "data.fill_missing",
+      "label": "",
+      "parameters": {
+        "strategies": [
+          {
+            "column": "x",
+            "strategy": "mode"
+          }
+        ]
+      },
+      "inputs": [
+        "source"
+      ],
+      "output_dataset": null,
+      "expected": {
+        "nrows": 4,
+        "columns": [
+          "x"
+        ]
+      },
+      "tolerances": {},
+      "seed": null,
+      "snapshot": null
+    }
+  ]
+}

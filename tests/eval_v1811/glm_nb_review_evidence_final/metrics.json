@@ -1,0 +1,50 @@
+{
+  "max_owner_R_beta_error": 5.46229728115577e-14,
+  "max_owner_Stata_beta_error": 5.484501741648273e-14,
+  "max_owner_R_SE_error": 4.718447854656915e-16,
+  "max_native_R_Stata_covariance_error": 1.214306433183765e-16,
+  "max_owner_R_covariance_error": 1.5612511283791264e-16,
+  "full_R_score_max": 3.80330328485002e-14,
+  "restricted_R_score_max": 7.39408534400354e-14,
+  "direct_likelihood_score_max": 1.06874165347262e-13,
+  "native_summary_dispersion_not_used_for_covariance": 0.748143288211742,
+  "LR": {
+    "operation": "lr",
+    "full": {
+      "model_id": "glm_1",
+      "model_type": "glm:negative_binomial",
+      "covariance_estimator": "nonrobust",
+      "nobs": 300,
+      "df_method": "asymptotic",
+      "n_clusters": null
+    },
+    "restricted": {
+      "model_id": "glm_1",
+      "model_type": "glm:negative_binomial",
+      "covariance_estimator": "nonrobust",
+      "nobs": 300,
+      "df_method": "asymptotic",
+      "n_clusters": null
+    },
+    "dropped_parameters": [
+      "x2",
+      "x3"
+    ],
+    "distribution": "chi2",
+    "statistic": 20.9225036111211,
+    "df": 2,
+    "p_value": 2.8624378573147222e-05,
+    "loglik_full": -513.2564335673467,
+    "loglik_restricted": -523.7176853729072
+  },
+  "native_environment": {
+    "R": "R version 4.6.0 (2026-04-24)",
+    "packages": {
+      "MASS": "7.3.65",
+      "car": "3.1.5",
+      "lmtest": "0.9.40",
+      "marginaleffects": "1.0.0",
+      "jsonlite": "2.0.0"
+    }
+  }
+}

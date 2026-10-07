@@ -1,0 +1,2 @@
+Error: all(is.finite(wb_fpc)) is not TRUE
+Execution halted

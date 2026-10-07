@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "model_id": "iv_2sls_1",
+  "model_type": "iv_2sls",
+  "engine": "linearmodels",
+  "y_column": null,
+  "nobs": 650,
+  "r_squared": 0.48401678168071727,
+  "r_squared_adj": 0.4816205747844977,
+  "df_model": 4.0,
+  "df_resid": 646.0,
+  "coefficients": {
+    "Intercept": {
+      "estimate": 0.7251293659544988,
+      "std_error": 0.046876893338210934,
+      "p_value": 0.0,
+      "ci_lower": 0.6332523433044799,
+      "ci_upper": 0.8170063886045178,
+      "source_id": "model_results.iv_2sls_1.coefficients.Intercept"
+    },
+    "x1": {
+      "estimate": 0.3405203891325043,
+      "std_error": 0.05946345326036987,
+      "p_value": 0.0,
+      "ci_lower": 0.22397416234579853,
+      "ci_upper": 0.4570666159192101,
+      "source_id": "model_results.iv_2sls_1.coefficients.x1"
+    },
+    "xe1": {
+      "estimate": 0.3280277230792002,
+      "std_error": 0.05968117172181684,
+      "p_value": 0.0,
+      "ci_lower": 0.21105477594928884,
+      "ci_upper": 0.44500067020911155,
+      "source_id": "model_results.iv_2sls_1.coefficients.xe1"
+    },
+    "xe2": {
+      "estimate": -0.24035447189290546,
+      "std_error": 0.04847825922911405,
+      "p_value": 1e-06,
+      "ci_lower": -0.3353701140151655,
+      "ci_upper": -0.14533882977064544,
+      "source_id": "model_results.iv_2sls_1.coefficients.xe2"
+    }
+  },
+  "warnings": []
+}

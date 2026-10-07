@@ -1,0 +1,87 @@
+. do analysis.do 
+
+. * Workbench 1.8.11
+. * project: review
+. * run: aggregate-empty-group
+. * lineage_hash: 4444444444444444444444444444444444444444444444444444444444444
+> 444
+. * Coverage
+. * result | data.aggregate | native | 
+. version 18
+
+. set more off
+
+. set type double
+
+. capture program drop wb_repost
+
+. program define wb_repost, eclass
+  1.     args beta covariance
+  2.     ereturn repost b=`beta' V=`covariance', rename
+  3. end
+
+. capture program drop wb_sha
+
+. program define wb_sha
+  1.     args filename expected
+  2.     tempfile digestfile
+  3.     shell shasum -a 256 "`filename'" > "`digestfile'"
+  4.     tempname fh
+  5.     file open `fh' using "`digestfile'", read text
+  6.     file read `fh' line
+  7.     file close `fh'
+  8.     if substr("`line'",1,64) != "`expected'" {
+  9.         display as error "SHA256 mismatch"
+ 10.         exit 9
+ 11.     }
+ 12. end
+
+. 
+. wb_sha "data.csv" "1609211b4fec4d01adf93da8d4bfbdaae21706bb8256859bb6c6da400f
+> cc5c14"
+
+
+. frame create wb_src0
+
+. frame change wb_src0
+
+. import delimited using "data.csv", asdouble clear case(preserve)
+(encoding automatically selected: ISO-8859-2)
+(2 vars, 4 obs)
+
+. frame copy wb_src0 wb1
+
+. frame change wb1
+
+. tempvar wb_order wb_group_order
+
+. generate long `wb_order' = _n
+
+. bysort group: egen long `wb_group_order' = min(`wb_order')
+
+. collapse (min) minimum=x (max) maximum=x (min) `wb_group_order', by(group)
+
+. sort `wb_group_order'
+
+. drop `wb_group_order'
+
+. order group minimum maximum
+
+. scalar wb_number_0 = _N
+
+. unab wb_columns: _all
+
+. scalar wb_check_1 = (`"`wb_columns'"' == "group minimum maximum")
+
+. * Closing self-checks
+. assert !missing(wb_number_0) & abs(wb_number_0-(2)) <= 0.0+0.0*abs(2)
+
+. assert wb_check_1 == 1
+
+. 
+. frame wb1: export delimited using "actual.csv", replace
+(file actual.csv not found)
+file actual.csv saved
+
+. 
+end of do-file

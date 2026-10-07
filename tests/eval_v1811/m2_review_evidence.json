@@ -1,0 +1,841 @@
+{
+  "baseline": "6f0f87c6d8241a93d81e2c34f8ef8e9408a907b3",
+  "functional_tip": "cda5c2f14a82928826bae526d780201add0f30f2",
+  "hashes": {
+    "backend/workbench/econometrics/count_models.py": "ebe3530bab91a342f7ee1830dc0416e05c80f6b069b8ef483b319b0a0a0f7229",
+    "backend/workbench/econometrics/runner.py": "9948cf3319691f2b193365b451c78209622efb35c4fa0618967dcddbf06f2f60",
+    "tests/fixtures/count_models/reference-v3/poisson.csv": "a40ba1945dca20fce973b9ea82970710def5de86237d0f83b496d192d8bf728a",
+    "tests/fixtures/admission/glm_negative_binomial/data.csv": "33bf1067bdf7f7ca7f1bf7fb34c16fc167d9318b482f60aae8febd402b084711"
+  },
+  "probes": {
+    "boundary_mean": {
+      "returned": true,
+      "result": {
+        "model_id": "review",
+        "model_type": "negative_binomial",
+        "nobs": 2000,
+        "llf": -3049.434253313748,
+        "aic": 6106.868506627496,
+        "bic": 6129.272116465664,
+        "coefficients": {
+          "Intercept": {
+            "estimate": 0.3931736677939775,
+            "std_error": 0.019028447666465248,
+            "p_value": 0.0,
+            "ci_lower": 0.3558785956860004,
+            "ci_upper": 0.4304687399019546,
+            "source_id": "model_results.review.coefficients.Intercept",
+            "p_value_display": "< 0.001",
+            "irr": 1.4817,
+            "irr_ci_lower": 1.4274,
+            "irr_ci_upper": 1.538
+          },
+          "x1": {
+            "estimate": 0.35583721487398545,
+            "std_error": 0.017908166987120736,
+            "p_value": 0.0,
+            "ci_lower": 0.3207378525500996,
+            "ci_upper": 0.3909365771978713,
+            "source_id": "model_results.review.coefficients.x1",
+            "p_value_display": "< 0.001",
+            "irr": 1.4274,
+            "irr_ci_lower": 1.3781,
+            "irr_ci_upper": 1.4784
+          },
+          "x2": {
+            "estimate": -0.2082653556452532,
+            "std_error": 0.018221371969385485,
+            "p_value": 0.0,
+            "ci_lower": -0.24397858845415643,
+            "ci_upper": -0.17255212283634996,
+            "source_id": "model_results.review.coefficients.x2",
+            "p_value_display": "< 0.001",
+            "irr": 0.812,
+            "irr_ci_lower": 0.7835,
+            "irr_ci_upper": 0.8415
+          }
+        },
+        "ancillary_parameters": [
+          {
+            "name": "lnalpha",
+            "estimate": -14.450422601803213,
+            "std_error": 33428.24103129459,
+            "conf_low": -65532.59891046327,
+            "conf_high": 65503.69806525966,
+            "scale": "log"
+          },
+          {
+            "name": "alpha",
+            "estimate": 5.299821014586573e-07,
+            "std_error": 0.01771636942983202,
+            "conf_low": null,
+            "conf_high": null,
+            "scale": "natural"
+          }
+        ],
+        "information_matrix": "observed",
+        "convergence": {
+          "converged": true,
+          "iterations": 26,
+          "tolerance": 1e-08,
+          "criterion": "mean log-likelihood gradient in beta and log ancillary"
+        },
+        "warnings": [
+          {
+            "code": "NB_ANCILLARY_CI_NUMERIC_RANGE",
+            "message": "Natural-scale ancillary confidence limit is unavailable: exponent exceeds the finite numeric range. The log-scale interval is retained."
+          }
+        ],
+        "alpha_estimated": true,
+        "alpha_fixed_value": null,
+        "dispersion": "mean",
+        "overdispersion_test": {
+          "statistic": -2.1726831619162112e-05,
+          "df": 1,
+          "p_value": 1.0,
+          "distribution": "chibar2(01)",
+          "restricted_model": "poisson",
+          "log_likelihood_restricted": -3049.434242450332
+        }
+      },
+      "strict_json": true,
+      "params": [
+        0.3931736677939775,
+        0.35583721487398545,
+        -0.2082653556452532,
+        5.299821014586573e-07
+      ],
+      "natural_score": [
+        -2.300187308179602e-06,
+        -1.0359155309558332e-05,
+        -1.573004494659358e-06,
+        -20.49854803880733
+      ],
+      "covariance_eigenvalues": [
+        0.00021190042717105293,
+        0.00031368256232221133,
+        0.0003311145012732112,
+        0.0004719749168885257
+      ],
+      "runtime_warnings": []
+    },
+    "boundary_constant": {
+      "returned": true,
+      "result": {
+        "model_id": "review",
+        "model_type": "negative_binomial",
+        "nobs": 2000,
+        "llf": -3049.434245833991,
+        "aic": 6106.868491667982,
+        "bic": 6129.272101506151,
+        "coefficients": {
+          "Intercept": {
+            "estimate": 0.3931736656431621,
+            "std_error": 0.01903308418835651,
+            "p_value": 0.0,
+            "ci_lower": 0.35586950611926454,
+            "ci_upper": 0.4304778251670596,
+            "source_id": "model_results.review.coefficients.Intercept",
+            "p_value_display": "< 0.001",
+            "irr": 1.4817,
+            "irr_ci_lower": 1.4274,
+            "irr_ci_upper": 1.538
+          },
+          "x1": {
+            "estimate": 0.3558372152927356,
+            "std_error": 0.01791021186009366,
+            "p_value": 0.0,
+            "ci_lower": 0.3207338450914699,
+            "ci_upper": 0.3909405854940013,
+            "source_id": "model_results.review.coefficients.x1",
+            "p_value_display": "< 0.001",
+            "irr": 1.4274,
+            "irr_ci_lower": 1.3781,
+            "irr_ci_upper": 1.4784
+          },
+          "x2": {
+            "estimate": -0.2082653540611142,
+            "std_error": 0.01822307098791607,
+            "p_value": 0.0,
+            "ci_lower": -0.24398191688514645,
+            "ci_upper": -0.17254879123708197,
+            "source_id": "model_results.review.coefficients.x2",
+            "p_value_display": "< 0.001",
+            "irr": 0.812,
+            "irr_ci_lower": 0.7835,
+            "irr_ci_upper": 0.8415
+          }
+        },
+        "ancillary_parameters": [
+          {
+            "name": "lndelta",
+            "estimate": -15.858294492899645,
+            "std_error": 252941.66241281133,
+            "conf_low": -495772.4068132918,
+            "conf_high": 495740.690224306,
+            "scale": "log"
+          },
+          {
+            "name": "delta",
+            "estimate": 1.2966722282069634e-07,
+            "std_error": 0.03279824290071936,
+            "conf_low": null,
+            "conf_high": null,
+            "scale": "natural"
+          }
+        ],
+        "information_matrix": "observed",
+        "convergence": {
+          "converged": true,
+          "iterations": 29,
+          "tolerance": 1e-08,
+          "criterion": "mean log-likelihood gradient in beta and log ancillary"
+        },
+        "warnings": [
+          {
+            "code": "NB_ANCILLARY_CI_NUMERIC_RANGE",
+            "message": "Natural-scale ancillary confidence limit is unavailable: exponent exceeds the finite numeric range. The log-scale interval is retained."
+          }
+        ],
+        "alpha_estimated": true,
+        "alpha_fixed_value": null,
+        "dispersion": "constant",
+        "overdispersion_test": {
+          "statistic": -6.767318154743407e-06,
+          "df": 1,
+          "p_value": 1.0,
+          "distribution": "chibar2(01)",
+          "restricted_model": "poisson",
+          "log_likelihood_restricted": -3049.434242450332
+        }
+      },
+      "strict_json": true,
+      "params": [
+        0.3931736656431621,
+        0.3558372152927356,
+        -0.2082653540611142,
+        1.2966722282069634e-07
+      ],
+      "natural_score": [
+        1.0016984920646621e-05,
+        1.4298215234020972e-06,
+        -2.441013968734751e-06,
+        -26.095006617823344
+      ],
+      "covariance_eigenvalues": [
+        0.00021190768311814712,
+        0.0003309167145382947,
+        0.000471698635053796,
+        0.0010763160034894849
+      ],
+      "runtime_warnings": [
+        "Inverting hessian failed, no bse or cov_params available",
+        "Maximum Likelihood optimization failed to converge. Check mle_retvals"
+      ]
+    },
+    "invalid_glm_poisson_-1.0": {
+      "returned": true,
+      "result": {
+        "model_id": "review",
+        "model_type": "glm",
+        "nobs": 1200,
+        "llf": -Infinity,
+        "aic": Infinity,
+        "bic": -6009.79373609991,
+        "coefficients": {
+          "Intercept": {
+            "estimate": 0.3848423093633256,
+            "std_error": 0.024684104993793934,
+            "p_value": 0.0,
+            "ci_lower": 0.33646235258488416,
+            "ci_upper": 0.433222266141767,
+            "source_id": "model_results.review.coefficients.Intercept",
+            "p_value_display": "< 0.001",
+            "irr": 1.4694,
+            "irr_ci_lower": 1.4,
+            "irr_ci_upper": 1.5422
+          },
+          "x1": {
+            "estimate": 0.3734164163289396,
+            "std_error": 0.022747528199686354,
+            "p_value": 0.0,
+            "ci_lower": 0.32883208032024513,
+            "ci_upper": 0.4180007523376341,
+            "source_id": "model_results.review.coefficients.x1",
+            "p_value_display": "< 0.001",
+            "irr": 1.4527,
+            "irr_ci_lower": 1.3893,
+            "irr_ci_upper": 1.5189
+          },
+          "x2": {
+            "estimate": -0.1958125091418789,
+            "std_error": 0.023012067661535456,
+            "p_value": 0.0,
+            "ci_lower": -0.24091533296828727,
+            "ci_upper": -0.15070968531547052,
+            "source_id": "model_results.review.coefficients.x2",
+            "p_value_display": "< 0.001",
+            "irr": 0.8222,
+            "irr_ci_lower": 0.7859,
+            "irr_ci_upper": 0.8601
+          }
+        },
+        "ancillary_parameters": [],
+        "information_matrix": "expected",
+        "convergence": {
+          "converged": true,
+          "iterations": 6,
+          "tolerance": 1e-12,
+          "criterion": "absolute parameter change"
+        },
+        "alpha_estimated": false,
+        "alpha_fixed_value": null,
+        "dispersion": null,
+        "overdispersion_test": null
+      },
+      "strict_json": "Out of range float values are not JSON compliant: -inf",
+      "params": [
+        0.3848423093633256,
+        0.3734164163289396,
+        -0.1958125091418789
+      ],
+      "natural_score": [
+        2.2026824808563106e-13,
+        -4.440892098500626e-14,
+        -1.3500311979441904e-13
+      ],
+      "covariance_eigenvalues": [
+        0.0003405301120864879,
+        0.0005370483145298053,
+        0.000778731909982961
+      ],
+      "runtime_warnings": [
+        "The bic value is computed using the deviance formula. After 0.13 this will change to the log-likelihood based formula. This change has no impact on the relative rank of models compared using BIC. You can directly access the log-likelihood version using the `bic_llf` attribute. You can suppress this message by calling statsmodels.genmod.generalized_linear_model.SET_USE_BIC_LLF with True to get the LLF-based version now or False to retainthe deviance version."
+      ]
+    },
+    "invalid_glm_negative_binomial_-1.0": {
+      "returned": true,
+      "result": {
+        "model_id": "review",
+        "model_type": "glm",
+        "nobs": 1200,
+        "llf": -Infinity,
+        "aic": Infinity,
+        "bic": -6977.326726388617,
+        "coefficients": {
+          "Intercept": {
+            "estimate": 0.38308013481819564,
+            "std_error": 0.032128410513036484,
+            "p_value": 0.0,
+            "ci_lower": 0.3201096073321261,
+            "ci_upper": 0.44605066230426516,
+            "source_id": "model_results.review.coefficients.Intercept",
+            "p_value_display": "< 0.001",
+            "irr": 1.4668,
+            "irr_ci_lower": 1.3773,
+            "irr_ci_upper": 1.5621
+          },
+          "x1": {
+            "estimate": 0.3816960803405507,
+            "std_error": 0.031755735319590465,
+            "p_value": 0.0,
+            "ci_lower": 0.31945598281156684,
+            "ci_upper": 0.44393617786953454,
+            "source_id": "model_results.review.coefficients.x1",
+            "p_value_display": "< 0.001",
+            "irr": 1.4648,
+            "irr_ci_lower": 1.3764,
+            "irr_ci_upper": 1.5588
+          },
+          "x2": {
+            "estimate": -0.19552438643285144,
+            "std_error": 0.031977407947266764,
+            "p_value": 0.0,
+            "ci_lower": -0.2581989543284392,
+            "ci_upper": -0.1328498185372637,
+            "source_id": "model_results.review.coefficients.x2",
+            "p_value_display": "< 0.001",
+            "irr": 0.8224,
+            "irr_ci_lower": 0.7724,
+            "irr_ci_upper": 0.8756
+          }
+        },
+        "ancillary_parameters": [],
+        "information_matrix": "expected",
+        "convergence": {
+          "converged": true,
+          "iterations": 10,
+          "tolerance": 1e-12,
+          "criterion": "absolute parameter change"
+        },
+        "alpha_estimated": false,
+        "alpha_fixed_value": 0.5,
+        "dispersion": "mean",
+        "overdispersion_test": null
+      },
+      "strict_json": "Out of range float values are not JSON compliant: -inf",
+      "params": [
+        0.38308013481819564,
+        0.3816960803405507,
+        -0.19552438643285144
+      ],
+      "natural_score": [
+        -6.181721801112872e-13,
+        -1.0881073819746234e-11,
+        -1.0574652264949691e-11
+      ],
+      "covariance_eigenvalues": [
+        0.0007910219688521904,
+        0.0010145707108042145,
+        0.0012576234271515932
+      ],
+      "runtime_warnings": [
+        "The bic value is computed using the deviance formula. After 0.13 this will change to the log-likelihood based formula. This change has no impact on the relative rank of models compared using BIC. You can directly access the log-likelihood version using the `bic_llf` attribute. You can suppress this message by calling statsmodels.genmod.generalized_linear_model.SET_USE_BIC_LLF with True to get the LLF-based version now or False to retainthe deviance version."
+      ]
+    },
+    "baseline_negative_glm": {
+      "returned": false,
+      "exception": "ValueError",
+      "message": "GLM model baseline failed to fit. Root cause: The first guess on the deviance function returned a nan. This could be a boundary problem and should be reported.",
+      "runtime_warnings": [
+        "Negative binomial dispersion parameter alpha not set. Using default value alpha=1.0.",
+        "divide by zero encountered in log",
+        "invalid value encountered in multiply"
+      ]
+    },
+    "baseline_negative_poisson": {
+      "returned": true,
+      "result": {
+        "model_id": "baseline",
+        "model_type": "glm",
+        "nobs": 1200,
+        "llf": -Infinity,
+        "aic": Infinity,
+        "bic": -6009.79373609991,
+        "coefficients": {
+          "Intercept": {
+            "estimate": 0.3848423093633254,
+            "std_error": 0.024684104961106113,
+            "p_value": 0.0,
+            "ci_lower": 0.33646235264895097,
+            "ci_upper": 0.43322226607769987,
+            "source_id": "model_results.baseline.coefficients.Intercept",
+            "p_value_display": "< 0.001",
+            "irr": 1.4694,
+            "irr_ci_lower": 1.4,
+            "irr_ci_upper": 1.5422
+          },
+          "x1": {
+            "estimate": 0.37341641632893996,
+            "std_error": 0.022747528121870666,
+            "p_value": 0.0,
+            "ci_lower": 0.3288320804727614,
+            "ci_upper": 0.4180007521851185,
+            "source_id": "model_results.baseline.coefficients.x1",
+            "p_value_display": "< 0.001",
+            "irr": 1.4527,
+            "irr_ci_lower": 1.3893,
+            "irr_ci_upper": 1.5189
+          },
+          "x2": {
+            "estimate": -0.1958125091418791,
+            "std_error": 0.0230120675766833,
+            "p_value": 0.0,
+            "ci_lower": -0.24091533280198027,
+            "ci_upper": -0.1507096854817779,
+            "source_id": "model_results.baseline.coefficients.x2",
+            "p_value_display": "< 0.001",
+            "irr": 0.8222,
+            "irr_ci_lower": 0.7859,
+            "irr_ci_upper": 0.8601
+          }
+        }
+      },
+      "strict_json": "Out of range float values are not JSON compliant: -inf",
+      "params": [
+        0.3848423093633254,
+        0.37341641632893996,
+        -0.1958125091418791
+      ],
+      "natural_score": [
+        2.2737367544323206e-13,
+        -7.034373084024992e-13,
+        1.9895196601282805e-13
+      ],
+      "covariance_eigenvalues": [
+        0.0003405301076777745,
+        0.0005370483107930586,
+        0.0007787319090692058
+      ],
+      "runtime_warnings": [
+        "The bic value is computed using the deviance formula. After 0.13 this will change to the log-likelihood based formula. This change has no impact on the relative rank of models compared using BIC. You can directly access the log-likelihood version using the `bic_llf` attribute. You can suppress this message by calling statsmodels.genmod.generalized_linear_model.SET_USE_BIC_LLF with True to get the LLF-based version now or False to retainthe deviance version."
+      ]
+    },
+    "invalid_glm_poisson_0.5": {
+      "returned": true,
+      "result": {
+        "model_id": "review",
+        "model_type": "glm",
+        "nobs": 1200,
+        "llf": -2195.6073463072753,
+        "aic": 4397.214692614551,
+        "bic": -6085.810737054629,
+        "coefficients": {
+          "Intercept": {
+            "estimate": 0.38588036683343785,
+            "std_error": 0.024668976015960065,
+            "p_value": 0.0,
+            "ci_lower": 0.3375300623066737,
+            "ci_upper": 0.434230671360202,
+            "source_id": "model_results.review.coefficients.Intercept",
+            "p_value_display": "< 0.001",
+            "irr": 1.4709,
+            "irr_ci_lower": 1.4015,
+            "irr_ci_upper": 1.5438
+          },
+          "x1": {
+            "estimate": 0.37236211028942856,
+            "std_error": 0.022738077892723304,
+            "p_value": 0.0,
+            "ci_lower": 0.32779629654202447,
+            "ci_upper": 0.41692792403683265,
+            "source_id": "model_results.review.coefficients.x1",
+            "p_value_display": "< 0.001",
+            "irr": 1.4512,
+            "irr_ci_lower": 1.3879,
+            "irr_ci_upper": 1.5173
+          },
+          "x2": {
+            "estimate": -0.1965301144487547,
+            "std_error": 0.023003230917647513,
+            "p_value": 0.0,
+            "ci_lower": -0.2416156185754021,
+            "ci_upper": -0.15144461032210732,
+            "source_id": "model_results.review.coefficients.x2",
+            "p_value_display": "< 0.001",
+            "irr": 0.8216,
+            "irr_ci_lower": 0.7854,
+            "irr_ci_upper": 0.8595
+          }
+        },
+        "ancillary_parameters": [],
+        "information_matrix": "expected",
+        "convergence": {
+          "converged": true,
+          "iterations": 6,
+          "tolerance": 1e-12,
+          "criterion": "absolute parameter change"
+        },
+        "alpha_estimated": false,
+        "alpha_fixed_value": null,
+        "dispersion": null,
+        "overdispersion_test": null
+      },
+      "strict_json": true,
+      "params": [
+        0.38588036683343785,
+        0.37236211028942856,
+        -0.1965301144487547
+      ],
+      "natural_score": [
+        -3.197442310920451e-14,
+        2.6911806116913795e-13,
+        -1.2434497875801753e-13
+      ],
+      "covariance_eigenvalues": [
+        0.00034046373894133677,
+        0.0005366418892139007,
+        0.0007776215684269423
+      ],
+      "runtime_warnings": [
+        "The bic value is computed using the deviance formula. After 0.13 this will change to the log-likelihood based formula. This change has no impact on the relative rank of models compared using BIC. You can directly access the log-likelihood version using the `bic_llf` attribute. You can suppress this message by calling statsmodels.genmod.generalized_linear_model.SET_USE_BIC_LLF with True to get the LLF-based version now or False to retainthe deviance version."
+      ]
+    },
+    "invalid_glm_negative_binomial_0.5": {
+      "returned": true,
+      "result": {
+        "model_id": "review",
+        "model_type": "glm",
+        "nobs": 1200,
+        "llf": -2010.5783741636901,
+        "aic": 4027.1567483273802,
+        "bic": -7051.378843948931,
+        "coefficients": {
+          "Intercept": {
+            "estimate": 0.3841208791166871,
+            "std_error": 0.032116433009252654,
+            "p_value": 0.0,
+            "ci_lower": 0.32117382710665854,
+            "ci_upper": 0.4470679311267156,
+            "source_id": "model_results.review.coefficients.Intercept",
+            "p_value_display": "< 0.001",
+            "irr": 1.4683,
+            "irr_ci_lower": 1.3787,
+            "irr_ci_upper": 1.5637
+          },
+          "x1": {
+            "estimate": 0.3805657520413216,
+            "std_error": 0.031743734244460343,
+            "p_value": 0.0,
+            "ci_lower": 0.3183491761873685,
+            "ci_upper": 0.44278232789527466,
+            "source_id": "model_results.review.coefficients.x1",
+            "p_value_display": "< 0.001",
+            "irr": 1.4631,
+            "irr_ci_lower": 1.3749,
+            "irr_ci_upper": 1.557
+          },
+          "x2": {
+            "estimate": -0.19647208858558213,
+            "std_error": 0.03197016532860727,
+            "p_value": 0.0,
+            "ci_lower": -0.2591324612094435,
+            "ci_upper": -0.13381171596172076,
+            "source_id": "model_results.review.coefficients.x2",
+            "p_value_display": "< 0.001",
+            "irr": 0.8216,
+            "irr_ci_lower": 0.7717,
+            "irr_ci_upper": 0.8748
+          }
+        },
+        "ancillary_parameters": [],
+        "information_matrix": "expected",
+        "convergence": {
+          "converged": true,
+          "iterations": 10,
+          "tolerance": 1e-12,
+          "criterion": "absolute parameter change"
+        },
+        "alpha_estimated": false,
+        "alpha_fixed_value": 0.5,
+        "dispersion": "mean",
+        "overdispersion_test": null
+      },
+      "strict_json": true,
+      "params": [
+        0.3841208791166871,
+        0.3805657520413216,
+        -0.19647208858558213
+      ],
+      "natural_score": [
+        -1.1972645097557688e-12,
+        -1.0063949673622119e-11,
+        -9.563905223330949e-12
+      ],
+      "covariance_eigenvalues": [
+        0.0007908987598825809,
+        0.0010139523734034276,
+        0.0012563702708732118
+      ],
+      "runtime_warnings": [
+        "The bic value is computed using the deviance formula. After 0.13 this will change to the log-likelihood based formula. This change has no impact on the relative rank of models compared using BIC. You can directly access the log-likelihood version using the `bic_llf` attribute. You can suppress this message by calling statsmodels.genmod.generalized_linear_model.SET_USE_BIC_LLF with True to get the LLF-based version now or False to retainthe deviance version."
+      ]
+    },
+    "invalid_glm_poisson_inf": {
+      "returned": false,
+      "exception": "ValueError",
+      "message": "The first guess on the deviance function returned a nan.  This could be a boundary  problem and should be reported.",
+      "runtime_warnings": [
+        "invalid value encountered in divide",
+        "invalid value encountered in subtract"
+      ]
+    },
+    "invalid_glm_negative_binomial_inf": {
+      "returned": false,
+      "exception": "ValueError",
+      "message": "The first guess on the deviance function returned a nan.  This could be a boundary  problem and should be reported.",
+      "runtime_warnings": [
+        "invalid value encountered in divide",
+        "invalid value encountered in divide",
+        "divide by zero encountered in log"
+      ]
+    },
+    "current_consumer_x1": {
+      "contract": "workbench.inference_kernel.v1",
+      "model_id": "review",
+      "model_type": "negative_binomial",
+      "param_names": [
+        "Intercept",
+        "x1",
+        "x2",
+        "alpha"
+      ],
+      "params": [
+        0.38636443172056784,
+        0.37879429805878007,
+        -0.19864200777322277,
+        0.6810091359881993
+      ],
+      "vcov": [
+        [
+          0.0011810545317060528,
+          -0.00021137319642358809,
+          0.00010280581383411862,
+          -3.0283450586246263e-06
+        ],
+        [
+          -0.00021137319642358806,
+          0.0012076681266092787,
+          1.3871391859568651e-05,
+          1.4838602233665739e-05
+        ],
+        [
+          0.00010280581383411862,
+          1.3871391859568651e-05,
+          0.0012323342034342663,
+          3.3904485477706456e-07
+        ],
+        [
+          -3.0283450586246267e-06,
+          1.483860223366574e-05,
+          3.3904485477706456e-07,
+          0.0038666102386016622
+        ]
+      ],
+      "vcov_param_names": [
+        "Intercept",
+        "x1",
+        "x2",
+        "alpha"
+      ],
+      "vcov_scope": "full",
+      "reference_distribution": "z",
+      "df_resid": 1197.0,
+      "df_method": "asymptotic",
+      "n_clusters": null,
+      "loglik": -2007.5082891629145,
+      "nobs": 1200,
+      "covariance_estimator": "nonrobust",
+      "estimation_sample_fingerprint": "rows-sha256:c335446a985f1947365ea4c746c73c78d379511138fb8026eabb82ffa35b6899",
+      "weights": "none",
+      "interfaces": [
+        "coef_vcov",
+        "loglik"
+      ],
+      "unavailable": {}
+    },
+    "current_consumer_alpha": {
+      "contract": "workbench.inference_kernel.v1",
+      "model_id": "review",
+      "model_type": "negative_binomial",
+      "param_names": [],
+      "params": [],
+      "vcov": null,
+      "vcov_param_names": null,
+      "vcov_scope": "unavailable",
+      "reference_distribution": null,
+      "df_resid": null,
+      "df_method": null,
+      "n_clusters": null,
+      "loglik": null,
+      "nobs": 1200,
+      "covariance_estimator": null,
+      "estimation_sample_fingerprint": null,
+      "weights": "none",
+      "interfaces": [],
+      "unavailable": {
+        "coef_vcov": "The fitted covariance matrix could not be used: param_names must be unique.",
+        "loglik": "The fitted covariance matrix could not be used: param_names must be unique."
+      }
+    },
+    "glm_precision": {
+      "returned": true,
+      "result": {
+        "model_id": "review",
+        "model_type": "glm",
+        "nobs": 450,
+        "llf": -773.6297882089934,
+        "aic": 1553.2595764179869,
+        "bic": -2243.0354282226367,
+        "coefficients": {
+          "Intercept": {
+            "estimate": 0.4210052615447283,
+            "std_error": 0.061923915270531565,
+            "p_value": 0.0,
+            "ci_lower": 0.2996366178327765,
+            "ci_upper": 0.5423739052566801,
+            "source_id": "model_results.review.coefficients.Intercept",
+            "p_value_display": "< 0.001",
+            "irr": 1.5235,
+            "irr_ci_lower": 1.3494,
+            "irr_ci_upper": 1.7201
+          },
+          "x1": {
+            "estimate": 0.3789844117869672,
+            "std_error": 0.06423158311977491,
+            "p_value": 0.0,
+            "ci_lower": 0.2530928222022175,
+            "ci_upper": 0.5048760013717168,
+            "source_id": "model_results.review.coefficients.x1",
+            "p_value_display": "< 0.001",
+            "irr": 1.4608,
+            "irr_ci_lower": 1.288,
+            "irr_ci_upper": 1.6568
+          },
+          "x2": {
+            "estimate": -0.2293064553582496,
+            "std_error": 0.061345338701274954,
+            "p_value": 0.000186,
+            "ci_lower": -0.34954110983215964,
+            "ci_upper": -0.10907180088433954,
+            "source_id": "model_results.review.coefficients.x2",
+            "p_value_display": "< 0.001",
+            "irr": 0.7951,
+            "irr_ci_lower": 0.705,
+            "irr_ci_upper": 0.8967
+          }
+        },
+        "ancillary_parameters": [],
+        "information_matrix": "expected",
+        "convergence": {
+          "converged": true,
+          "iterations": 16,
+          "tolerance": 1e-12,
+          "criterion": "absolute parameter change"
+        },
+        "alpha_estimated": false,
+        "alpha_fixed_value": 1.0,
+        "dispersion": "mean",
+        "overdispersion_test": null
+      },
+      "strict_json": true,
+      "params": [
+        0.4210052615447283,
+        0.3789844117869672,
+        -0.2293064553582496
+      ],
+      "natural_score": [
+        -2.948752353404416e-13,
+        -5.5848659030743875e-12,
+        -7.096545573404001e-13
+      ],
+      "covariance_eigenvalues": [
+        0.0031394684068885522,
+        0.003872987455232903,
+        0.004711062270757212
+      ],
+      "runtime_warnings": [
+        "The bic value is computed using the deviance formula. After 0.13 this will change to the log-likelihood based formula. This change has no impact on the relative rank of models compared using BIC. You can directly access the log-likelihood version using the `bic_llf` attribute. You can suppress this message by calling statsmodels.genmod.generalized_linear_model.SET_USE_BIC_LLF with True to get the LLF-based version now or False to retainthe deviance version."
+      ]
+    },
+    "stata_boundary_mean": {
+      "converged": 1.0,
+      "ll": -3049.43423761799,
+      "b_log": -15.1780470507263,
+      "se_log": 432.47494576974,
+      "lr": 9.66468633123441e-06
+    },
+    "stata_boundary_constant": {
+      "converged": 1.0,
+      "ll": -3049.43424269238,
+      "b_log": -20.1757488110656,
+      "se_log": 0.0,
+      "lr": 0.0
+    },
+    "stata_invalid": {
+      "glm_fractional_rc": 0.0,
+      "nb_fractional_rc": 0.0,
+      "glm_negative_rc": 499.0
+    }
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "owner": "/private/tmp/v1811-evaluation-8d8a2fd4c7d44af693b267e6d893d16f-r01/e04-native0/public-post/runs/20261005_091807_115397_a5e99ccc",
+  "expected": {
+    "statistic": 192.18127956705794,
+    "df_num": 2,
+    "p_value": 1.855091687795543e-42
+  },
+  "actual": {
+    "schema_version": "workbench.postestimation.result/v1",
+    "model_run_id": "20261005_091807_115397_a5e99ccc",
+    "operation": "wald",
+    "model_id": "glm_1",
+    "model_type": "glm:poisson",
+    "covariance_estimator": "nonrobust",
+    "nobs": 850,
+    "df_method": "asymptotic",
+    "n_clusters": null,
+    "constraints": [
+      {
+        "terms": {
+          "x1": 1.0
+        },
+        "value": 0.0
+      },
+      {
+        "terms": {
+          "x2": 1.0
+        },
+        "value": 0.0
+      }
+    ],
+    "distribution": "chi2",
+    "statistic": 192.18127956705786,
+    "df_num": 2,
+    "df_den": null,
+    "p_value": 1.8550916877956313e-42
+  }
+}

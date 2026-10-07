@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "project_id": "model-oracle",
+  "run_id": "glm_binomial",
+  "workbench_version": "1.8.11",
+  "lineage_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+  "sources": [
+    {
+      "source_id": "source",
+      "format": "csv",
+      "filename": "data.csv",
+      "sha256": "0f643fba418a92bc7a08befa218425056e866314340e1148775107241af4e143",
+      "read_options": {}
+    }
+  ],
+  "steps": [
+    {
+      "step_id": "model",
+      "kind": "model",
+      "operation": "model.glm",
+      "label": "",
+      "parameters": {
+        "model_type": "glm",
+        "y": "binary",
+        "x": [
+          "x",
+          "z"
+        ],
+        "categorical_x": [],
+        "covariance": "unadjusted",
+        "cluster": null,
+        "hac_lags": null,
+        "weights": null,
+        "entity": null,
+        "time": null,
+        "model_options": {
+          "family": "binomial"
+        }
+      },
+      "inputs": [
+        "source"
+      ],
+      "output_dataset": null,
+      "expected": {
+        "nobs": 350,
+        "coefficients": {
+          "Intercept": 0.21223972211737696,
+          "x": 0.5621638375809234,
+          "z": -0.2332565315867904
+        },
+        "std_errors": {
+          "Intercept": 0.1120064519941844,
+          "x": 0.11722060171045612,
+          "z": 0.1200130109187133
+        },
+        "statistics": {
+          "Intercept": {
+            "value": 1.8948883598990967,
+            "df": null,
+            "p_value": 0.0581071936076671,
+            "distribution": "z"
+          },
+          "x": {
+            "value": 4.795776760893202,
+            "df": null,
+            "p_value": 1.6204566658066975e-06,
+            "distribution": "z"
+          },
+          "z": {
+            "value": -1.9435936970598857,
+            "df": null,
+            "p_value": 0.051944466503299425,
+            "distribution": "z"
+          }
+        }
+      },
+      "tolerances": {},
+      "seed": null,
+      "snapshot": null
+    }
+  ]
+}

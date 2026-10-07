@@ -58,7 +58,9 @@
     ],
     "time_trend": []
   },
-  "error_codes": [],
+  "error_codes": [
+    "CHECK_VCE_CLUSTER_COUNT"
+  ],
   "models": {
     "did_1": {
       "coef_keys": [

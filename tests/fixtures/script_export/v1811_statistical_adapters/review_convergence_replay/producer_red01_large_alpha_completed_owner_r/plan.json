@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "project_id": "independent",
+  "run_id": "large_alpha_completed_owner",
+  "workbench_version": "1.8.11",
+  "lineage_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "sources": [
+    {
+      "source_id": "source",
+      "format": "csv",
+      "filename": "data.csv",
+      "sha256": "9707e4d6dc11d72fc6240b79a8ba79c8fd884b4edfa237905c086cddded60101",
+      "read_options": {}
+    }
+  ],
+  "steps": [
+    {
+      "step_id": "model",
+      "kind": "model",
+      "operation": "model.glm:negative_binomial",
+      "label": "",
+      "parameters": {
+        "model_type": "glm",
+        "y": "y",
+        "x": [
+          "x1",
+          "x2"
+        ],
+        "covariance": "unadjusted",
+        "model_options": {
+          "family": "negative_binomial",
+          "alpha": 1e+20
+        }
+      },
+      "inputs": [
+        "source"
+      ],
+      "output_dataset": null,
+      "expected": {
+        "nobs": 240,
+        "coefficients": {
+          "Intercept": 0.41984161711405155,
+          "x1": 0.5438671026124017,
+          "x2": -0.3225180098449096
+        },
+        "std_errors": {
+          "Intercept": 649372365.6740237,
+          "x1": 672946964.1387976,
+          "x2": 610975975.1537546
+        }
+      },
+      "tolerances": {
+        "coefficients": {
+          "abs": 1e-08,
+          "rel": 0
+        },
+        "std_errors": {
+          "abs": 1e-06,
+          "rel": 0
+        }
+      },
+      "seed": null,
+      "snapshot": null
+    }
+  ]
+}

@@ -1,0 +1,1607 @@
+{
+  "functional_tip": "67088c983e0ed80c20b5ecb29a1a9f5d73140962",
+  "baseline": "824b2e0c40eeb962b739fe467821a22de91523e8",
+  "approved_asset_merge": "8a05bbe22a9e12ba582e22d0e21e022a5edf0323",
+  "clean_start_tip": "67088c983e0ed80c20b5ecb29a1a9f5d73140962",
+  "observed_head_after_verification": "eb9b34270f6a3ac93ba33608acb10bcf91d430fe",
+  "worktree": "/Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11",
+  "production": [
+    {
+      "path": "backend/workbench/admission.py",
+      "tip_sha256": "dc400ea15c739760d0b090abcd96819d7ac70dbdf2bc1f8a35e10501af5e7ad7",
+      "current_sha256": "dc400ea15c739760d0b090abcd96819d7ac70dbdf2bc1f8a35e10501af5e7ad7",
+      "unchanged_since_tip": true
+    },
+    {
+      "path": "backend/workbench/postestimation/registry.py",
+      "tip_sha256": "de7882d170038899b3af8ef0966438acdbf429435d8f33e439bcf5f583da7340",
+      "current_sha256": "de7882d170038899b3af8ef0966438acdbf429435d8f33e439bcf5f583da7340",
+      "unchanged_since_tip": true
+    },
+    {
+      "path": "backend/workbench/agent/postestimation_steps.py",
+      "tip_sha256": "9f92edf126e016b5297aa3dfd04319c2497c352f4acc5fbc02d19b9bdfeaed9e",
+      "current_sha256": "9f92edf126e016b5297aa3dfd04319c2497c352f4acc5fbc02d19b9bdfeaed9e",
+      "unchanged_since_tip": true
+    },
+    {
+      "path": "backend/workbench/agent/workflow_runtime.py",
+      "tip_sha256": "e328cdc1a838a00d93b733a8a521e9c73ed835a37b8d38c6096f07a3acbd13dc",
+      "current_sha256": "e328cdc1a838a00d93b733a8a521e9c73ed835a37b8d38c6096f07a3acbd13dc",
+      "unchanged_since_tip": true
+    },
+    {
+      "path": "backend/workbench/postestimation/comparison_data.py",
+      "tip_sha256": "6d37234112f679b9248ebf06b62b4fa15faf0cf9b6a4272e780c46ac4e962e50",
+      "current_sha256": "6d37234112f679b9248ebf06b62b4fa15faf0cf9b6a4272e780c46ac4e962e50",
+      "unchanged_since_tip": true
+    },
+    {
+      "path": "backend/workbench/postestimation/estimation_data.py",
+      "tip_sha256": "a423864531f9b68993565f010c712c23712c053f5b1b9a23fca00d13e9a4efd3",
+      "current_sha256": "a423864531f9b68993565f010c712c23712c053f5b1b9a23fca00d13e9a4efd3",
+      "unchanged_since_tip": true
+    },
+    {
+      "path": "backend/workbench/contracts/model/result_envelope_registry.py",
+      "tip_sha256": "a8fdc0f7773a2ec54b2e0aa192dcd19681f69fc5357047b027eab356f4c86b95",
+      "current_sha256": "a8fdc0f7773a2ec54b2e0aa192dcd19681f69fc5357047b027eab356f4c86b95",
+      "unchanged_since_tip": true
+    },
+    {
+      "path": "backend/workbench/http/runs_routes.py",
+      "tip_sha256": "8fa89b8daff8edf1ac9dea2e809ab6a6cc7cb4aa49ccf3fca979510d60a79fc3",
+      "current_sha256": "8fa89b8daff8edf1ac9dea2e809ab6a6cc7cb4aa49ccf3fca979510d60a79fc3",
+      "unchanged_since_tip": true
+    }
+  ],
+  "protected_statistical_implementation": [
+    {
+      "path": "backend/workbench/econometrics/count_models.py",
+      "sha256": "143b75513c18d4a5aa0a20ea08b61169f65d1a358a533ee0d497c768cff7dd50",
+      "unchanged_since_parent": true
+    },
+    {
+      "path": "backend/workbench/econometrics/runner.py",
+      "sha256": "ebcb7948da81fcf9af203017f58c88c962c55844d4800a79b07c1782d7f36b41",
+      "unchanged_since_parent": true
+    },
+    {
+      "path": "backend/workbench/contracts/model/inference_kernel.py",
+      "sha256": "ef801afd8879005c45fbe22e4feab28dc780d017c47114d9b1f52d4b1ce51199",
+      "unchanged_since_parent": true
+    },
+    {
+      "path": "backend/workbench/postestimation/core.py",
+      "sha256": "c83b5759142abc3443e1c8f14b29f9bb4334d96d4070990ebb8c2f4c1af80f9e",
+      "unchanged_since_parent": true
+    },
+    {
+      "path": "backend/workbench/postestimation/margins.py",
+      "sha256": "9cf29e9fd1fe4198f300ed346b462a4e718a0447cab80c2d45f17827a29b0bb7",
+      "unchanged_since_parent": true
+    }
+  ],
+  "approved_original_assets": [
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/log-redaction-final-green.txt",
+      "sha256": "3e778805a4cabd750321f5606420a4e7b8fcd2669fe767b373bc27a66e7e681d",
+      "unchanged_since_asset_merge": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/native-stata-v2-output.txt",
+      "sha256": "1cfbe7b40e7984526f108a15fcce7a7590644b23da683e06822a7feda2844ee9",
+      "unchanged_since_asset_merge": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/generate_native.py",
+      "sha256": "013931970936372e7775f97dd89e7ec9dc6f182920a85a07528ff374ddeaba57",
+      "unchanged_since_asset_merge": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/log-redaction-validation.txt",
+      "sha256": "c09b28bf79abe35649437c1924fb31b914bf041f6994d0bf82bd7cdb58a5449c",
+      "unchanged_since_asset_merge": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/generate_oracle.R",
+      "sha256": "8db6edb91543d73c23e56c5a48e00745a39e8f05c7b55a67cad3477562986eb7",
+      "unchanged_since_asset_merge": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/owner-final-green.txt",
+      "sha256": "7b01f5910a03c7844417db83651ae30fa85bd3e4b6ea1c2e9f8cd51ff6b6156c",
+      "unchanged_since_asset_merge": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/numeric-diff.md",
+      "sha256": "d857108dadc19357625f3a7c2d2349af4764f2850ddd74dc32df02446665d7dd",
+      "unchanged_since_asset_merge": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/log-redaction-audit.json",
+      "sha256": "f5db534ff03b17ec0425f053ea4ec2bbf7c91fbc3b4e6dd261a8fb2d6f89beb8",
+      "unchanged_since_asset_merge": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/tdd-red.txt",
+      "sha256": "e27f8f86c0d7a6e50b6129a431cbd98ff0c3138a121b49c9d9888bd34110ee03",
+      "unchanged_since_asset_merge": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/native-output.txt",
+      "sha256": "7b38d87f9d6b0e75849e93974a4dd7e9bbabdc5f4fec3c027bdc2942f1f66a97",
+      "unchanged_since_asset_merge": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/log-redaction-red.txt",
+      "sha256": "603dba99644b6bbe7249aa513e6906b702db888516a3fb4480450c74db3aea07",
+      "unchanged_since_asset_merge": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/capture_owner.py",
+      "sha256": "6269a48e154e68e8dfddf2ea712aca16e286feb1de9c73a948866ea96d55b54b",
+      "unchanged_since_asset_merge": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/owner-evidence.json",
+      "sha256": "2ea78c44ff6d4b582b37ab15b37bc9e2bd4f8c1a5ea150e780b887f597446a02",
+      "unchanged_since_asset_merge": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/native-stata-v3-output.txt",
+      "sha256": "69cd37dc946dbdfb83e6d95b85395aba22d0d82221fab82edb0c77f8948b9692",
+      "unchanged_since_asset_merge": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/manifest.json",
+      "sha256": "94388aa5afacfeffeb09af07b4a4dba7a2d232926a41fa84f921c8bb511ce486",
+      "unchanged_since_asset_merge": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/owner-capture-output.txt",
+      "sha256": "14cff95c260f1982781913cf3f943c477d134d583ab15e38274e8904faeaee76",
+      "unchanged_since_asset_merge": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/redact_native_logs.py",
+      "sha256": "51998a6d369532ed433ea47198d946a8585cf8d77a842266f0687a972b0d18a7",
+      "unchanged_since_asset_merge": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/owner-first-green.txt",
+      "sha256": "541bd3c5759c8879695bff1bc285085edb8161f79390de287d5310f9a4def722",
+      "unchanged_since_asset_merge": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/native-r/oracle.json",
+      "sha256": "4229ad41f85d5ca0e232a825a8b4fe90057eb8f9ecdc3edb802bc3b71b57b4ca",
+      "unchanged_since_asset_merge": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/native-stata/wb_results.tsv",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "unchanged_since_asset_merge": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/native-stata/oracle.log",
+      "sha256": "fa9d08bb2449a3a231ab61183b69a1d994359015b7721b5b5c1fd70cc9dc9517",
+      "unchanged_since_asset_merge": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/native-stata/oracle.do",
+      "sha256": "c5292deba31fe7306b8e2a75c0448e1b17c518b69d00d8078ca1e483e0f586ef",
+      "unchanged_since_asset_merge": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/native-stata-v2/wb_results.tsv",
+      "sha256": "9740e7e65545bf1d950c45e071691773ef32961ed74d60f0919c1b5144c69db2",
+      "unchanged_since_asset_merge": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/native-stata-v2/oracle.log",
+      "sha256": "7e08b2cd6fe46459265036b2ee5306bd013994a99c554a8755e2e869385ea6a5",
+      "unchanged_since_asset_merge": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/native-stata-v2/oracle.do",
+      "sha256": "8dff5228660495a55edbfd669e79ecb67177dc1033fc2b39f843a8275cf8d8ab",
+      "unchanged_since_asset_merge": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/native-stata-v3/wb_results.tsv",
+      "sha256": "af57161d7d9ce29cf714d6de3e02b62ed6d89e317d3de4ccfb0afbdb8afaac4f",
+      "unchanged_since_asset_merge": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/native-stata-v3/reference.json",
+      "sha256": "69cd37dc946dbdfb83e6d95b85395aba22d0d82221fab82edb0c77f8948b9692",
+      "unchanged_since_asset_merge": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/native-stata-v3/oracle.log",
+      "sha256": "b7b4381206172c51ee64dbadc3984a423c6e1e1880c16d5c1c25b34fe6b813bb",
+      "unchanged_since_asset_merge": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/native-stata-v3/oracle.do",
+      "sha256": "dcbb7e2ff2f3f4119b23c20c988633927a228935f3be3ef92ce5229611bb8ac7",
+      "unchanged_since_asset_merge": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/data.csv",
+      "sha256": "2e1b92f07632a8c88d047074f77cd6e5f9552b4f932f7d6ed2499161a0bf3084",
+      "unchanged_since_asset_merge": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/oracle.json",
+      "sha256": "d80dbc69f91648cbd17443f89deaf21df63296f1296a6d674c3ef9e135b9302c",
+      "unchanged_since_asset_merge": true
+    }
+  ],
+  "new_evidence": [
+    {
+      "path": "tests/eval_v1811/glm_nb_public_review_named_first_source.py",
+      "sha256": "ff61644faf9c154e25ec484d6884e322ccf17c958b3a2cac598a4658e96b4c19"
+    },
+    {
+      "path": "tests/eval_v1811/glm_nb_public_review_native.R",
+      "sha256": "016eadf269e7c76e815eaaa850e07cd58bf373101a550a00f125ed4897a7ded6"
+    },
+    {
+      "path": "tests/eval_v1811/glm_nb_public_review_kernel_output.txt",
+      "sha256": "885f6df82e39ecad72e1fde1c9bb4c0df6bd125afe4143145e1a5085ffc8fa05"
+    },
+    {
+      "path": "tests/eval_v1811/glm_nb_public_review_first_source.py",
+      "sha256": "01797ad18023e4bb7d407eb1a0ebbd1d622215c0cc3628849b4c020216c9a46d"
+    },
+    {
+      "path": "tests/eval_v1811/glm_nb_public_review_native_output.txt",
+      "sha256": "6bbaad1e7143b94980ce093e75b931dc6cac3504b5e521122a90f3d97d715d5b"
+    },
+    {
+      "path": "tests/eval_v1811/glm_nb_public_review_native.json",
+      "sha256": "ccca75d9f62207be1d939cd6e71d79ca048d686a20eaf18fb49fb01d2e8df8e7"
+    },
+    {
+      "path": "tests/eval_v1811/glm_nb_public_review_first.txt",
+      "sha256": "e82f1d8ea658a4e1f6edccb5de64c07173b2bb7557fc0eec41684d2ced393fbb"
+    },
+    {
+      "path": "tests/eval_v1811/glm_nb_public_review_kernel_audit.py",
+      "sha256": "85be57f521df2f73bd9942fcfc3a4250a47afa5b75826dc54a0a3dbed43fc7d2"
+    },
+    {
+      "path": "tests/eval_v1811/glm_nb_public_review_named_output.txt",
+      "sha256": "9a07287746be7d76872f17e3c607324807c6a747d215042ce018eb3c3530d879"
+    },
+    {
+      "path": "tests/eval_v1811/glm_nb_public_review_kernel_metrics.json",
+      "sha256": "db1b4b1603d933ca096a774d7b308d7812b3d878954be9e8b0204ed4dd078714"
+    },
+    {
+      "path": "tests/eval_v1811/glm_nb_public_review_named_green.txt",
+      "sha256": "258a63da306ccad9c604c63661db3385e548c455e9a3ce68b26668d2bba60aa6"
+    },
+    {
+      "path": "tests/eval_v1811/glm_nb_public_review_green.txt",
+      "sha256": "e421f6ef2f07fef8fb2a27619fe53d679d29565979c50958e2923a8668c33900"
+    },
+    {
+      "path": "tests/eval_v1811/glm_nb_public_review_adversarial.py",
+      "sha256": "5da0831995a53cf789e6885cccd4c76c8fbfab833ec299cc035df9632b3cb4ad"
+    },
+    {
+      "path": "tests/eval_v1811/glm_nb_public_review_named_regressors.py",
+      "sha256": "ee227f16c8c88509931000cfd98e1d2e8c44b78eab4e6208c8c41b4f01968b28"
+    },
+    {
+      "path": "docs/superpowers/handoffs/2026-10-04-v1811-glm-nb-public-independent-review.md",
+      "sha256": "959ed1aa6a21d529718625875d5ec545c6eb15d74ea1335ee7a2e44e6fd30044"
+    }
+  ],
+  "commands": [
+    {
+      "command": "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py Rscript tests/eval_v1811/glm_nb_public_review_native.R tests/fixtures/postestimation/data.csv tests/eval_v1811/glm_nb_public_review_native.json",
+      "output": "tests/eval_v1811/glm_nb_public_review_native_output.txt",
+      "exit_code": 0,
+      "result": "six native fits with score/n and EIM positivity verified; alternate five-operation references"
+    },
+    {
+      "command": "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py .venv/bin/python -m pytest tests/eval_v1811/glm_nb_public_review_adversarial.py -q -s",
+      "source": "tests/eval_v1811/glm_nb_public_review_first_source.py",
+      "output": "tests/eval_v1811/glm_nb_public_review_first.txt",
+      "exit_code": 1,
+      "result": "1 own exception-type expectation failed,33passed in18.20s; source refused earlier"
+    },
+    {
+      "command": "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py .venv/bin/python -m pytest tests/eval_v1811/glm_nb_public_review_adversarial.py -q -s",
+      "source": "tests/eval_v1811/glm_nb_public_review_adversarial.py",
+      "output": "tests/eval_v1811/glm_nb_public_review_green.txt",
+      "exit_code": 0,
+      "result": "34passed,7warnings in17.67s"
+    },
+    {
+      "command": "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py .venv/bin/python -m pytest tests/eval_v1811/glm_nb_public_review_named_regressors.py -q -s",
+      "source": "tests/eval_v1811/glm_nb_public_review_named_first_source.py",
+      "output": "tests/eval_v1811/glm_nb_public_review_named_output.txt",
+      "exit_code": 1,
+      "result": "2 own CSV header helper failed before production in1.25s"
+    },
+    {
+      "command": "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py .venv/bin/python -m pytest tests/eval_v1811/glm_nb_public_review_named_regressors.py -q -s",
+      "source": "tests/eval_v1811/glm_nb_public_review_named_regressors.py",
+      "output": "tests/eval_v1811/glm_nb_public_review_named_green.txt",
+      "exit_code": 0,
+      "result": "2passed,3warnings in13.54s"
+    },
+    {
+      "command": "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py .venv/bin/python tests/eval_v1811/glm_nb_public_review_kernel_audit.py",
+      "output": "tests/eval_v1811/glm_nb_public_review_kernel_output.txt",
+      "exit_code": 0,
+      "result": "6actual HTTP kernels pass original beta/SE tolerances and immutable SHA"
+    }
+  ],
+  "retained_run_assets": [
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204144_847937_8dcfee75/run_manifest.json",
+      "sha256": "2f03b6c85dcdf13def8cb54228669efa56cf086db8085aff588cb35b27e6b97e",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204144_847937_8dcfee75/artifacts_index.json",
+      "sha256": "877630e86c196c644daa82170898d97a62ffeb417578c862e1cfd3d3ea1480bd",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204144_847937_8dcfee75/run_inputs.json",
+      "sha256": "04d5e113b2852fa4d6a6c713534fe10f786c97b039d890bc351cc9b92012d04e",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204144_847937_8dcfee75/diagnostic_summary.json",
+      "sha256": "0262233e00b31d6bfc6d8efe531c851523c8e68e77caa9102ea2a3dfe490715c",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204144_847937_8dcfee75/processed/cleaned_dataset.parquet",
+      "sha256": "c71adb6eb5e1c3c68886f7c3aa51b89814337a59d84dfc3fa101fec73cb3fc83",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204144_847937_8dcfee75/model_results/glm_1.json",
+      "sha256": "38789cb8d1dfe7ed6445324e785a82949e8b6cca0f5fd721afa44518d593e495",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204144_847937_8dcfee75/model_results/inference_kernels/glm_1.json",
+      "sha256": "028d67d1567656b60c7f1da79fe2c9c2bdba6fbcb0b41959ce864de77211277d",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204144_847937_8dcfee75/artifacts/post_estimation/workflow_postestimation_margins_db460e9c50db4c56_8145e2db0aa1a52b69ded50b.json",
+      "sha256": "410350a6c87f9c81f361bb7b1a99140a44992a51de96b85e3f7bf574d47f64fa",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204144_847937_8dcfee75/artifacts/post_estimation/workflow_postestimation_nlcom_58c0b7d23b4e1eec_804a3822fc1d8ad48611f746.json",
+      "sha256": "0d09980a18148dc4e1a29461d9ff4089b0691157c55ff5c55b028636603d62fe",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204144_847937_8dcfee75/artifacts/post_estimation/workflow_postestimation_margins_bdea7b96b57783b0_2bf4d773deebd0ddf771185f.json",
+      "sha256": "45a49178262085693c93bdf4c25e50787a36120256c2a84be9d2a3ad5065fdec",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204144_847937_8dcfee75/artifacts/post_estimation/workflow_postestimation_lincom_20ed9fb52b4320ab_6a58b9f00a6b3dd0954998ac.json",
+      "sha256": "329af209a1a5992cef0f861ccceaf5e59b29977004dd2f4ad98f12e59dadd690",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204144_847937_8dcfee75/artifacts/post_estimation/workflow_postestimation_wald_21b335f5f847bf60_0f41c351047041b88579d871.json",
+      "sha256": "f45c4505acc729ed08d60380a679238f86a0712ee88f6b8812f86c17b7ad3202",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204144_847937_8dcfee75/artifacts/post_estimation/workflow_postestimation_lr_1b77477841a61b72_26027595e5373ed5efb42e7d.json",
+      "sha256": "d68affecb1cec9e2c4dfbfad6c64295ecda8abc2fe1d3d62a9bc7e31b2e932bd",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204146_378355_2acba0c5/run_manifest.json",
+      "sha256": "f6369b780b445408a8657bf183cb918c5e9de1df69eeb3392b7da7122dedf0c4",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204146_378355_2acba0c5/artifacts_index.json",
+      "sha256": "b0a70f0e9cc96e1cdfcfe1516aa9624eecb50794b72c22741aaa4b185b70e423",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204146_378355_2acba0c5/run_inputs.json",
+      "sha256": "5b1f09cb9771e4891f5b3ab1dfca9fec11756fa337ea221249914abba3b1497a",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204146_378355_2acba0c5/diagnostic_summary.json",
+      "sha256": "232c4b7cc3bae579cb7daf43aa55c8fec741b2a344789193ba50c3559a5909fc",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204146_378355_2acba0c5/processed/cleaned_dataset.parquet",
+      "sha256": "c71adb6eb5e1c3c68886f7c3aa51b89814337a59d84dfc3fa101fec73cb3fc83",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204146_378355_2acba0c5/model_results/glm_1.json",
+      "sha256": "8d8d96d16ae03dd19490bab3bd4b7087e62f1d094eaf2600b726b49878b91a01",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204146_378355_2acba0c5/model_results/inference_kernels/glm_1.json",
+      "sha256": "2c2bab1c4939b27ad67c5d0d2467ae59b4da64742b58001a14358316915d2d26",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204147_104442_c78a0002/run_manifest.json",
+      "sha256": "565c06b0cf6c0c49b31474b31fd2d6bf745d767db488f3ec52c086f63286f7da",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204147_104442_c78a0002/artifacts_index.json",
+      "sha256": "a6e7148d0c49b4975ce940067f9f199a8f16ad574ba12e84a04ee19e46d1b8aa",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204147_104442_c78a0002/run_inputs.json",
+      "sha256": "4c82cddecaf163c10145287236e78733370c77301fcd94d6eda1265bb9ab30aa",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204147_104442_c78a0002/diagnostic_summary.json",
+      "sha256": "89fff79e3beb088d591b907813dc560546159111e82825f03cc719ad4ed2dd69",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204147_104442_c78a0002/processed/cleaned_dataset.parquet",
+      "sha256": "c71adb6eb5e1c3c68886f7c3aa51b89814337a59d84dfc3fa101fec73cb3fc83",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204147_104442_c78a0002/model_results/glm_1.json",
+      "sha256": "28c9c3ab5a131f9c772cd0b3192197e3983e0b1c694b763332698d0f55aafb40",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204147_104442_c78a0002/model_results/inference_kernels/glm_1.json",
+      "sha256": "721fe0d143077f39f497703a50e4f75070d7931304c85654dc02481258bcfc37",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204147_104442_c78a0002/artifacts/post_estimation/workflow_postestimation_lincom_4393da4619316868_788be7a408576450cbc23cde.json",
+      "sha256": "47ef76d3b02c9aacd6303e763b33461fd8a3ff51de9b44afdd1645c1121d5f13",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204147_104442_c78a0002/artifacts/post_estimation/workflow_postestimation_nlcom_61ded69fee6c6bf9_b1fe639f40d810ac8cf3e16f.json",
+      "sha256": "cfa98fb876c9932272712c877747ee4de51abc20e8224cc025aea09aefc80edd",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204147_104442_c78a0002/artifacts/post_estimation/workflow_postestimation_margins_96337bc2a61b04cc_c497a92c4d54ef575bdadfb8.json",
+      "sha256": "3cb5074b7123e2dfc55ff8cddc16c4136bb1944b79e713d43679f2697777598a",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204147_104442_c78a0002/artifacts/post_estimation/workflow_postestimation_wald_904d8b6efc6e2f9e_7b7e346a0a26a3ecd09549c5.json",
+      "sha256": "3bef03406fd0e65fcbce4e50539b0e108a45d95d52116dcd5970f8456e04efa6",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204147_104442_c78a0002/artifacts/post_estimation/workflow_postestimation_lr_d5f0e93c2d65e677_778f275b1fc26198197a61b2.json",
+      "sha256": "31d570967d9cb1f8067e67a324fb9641b5ec7d6fa40be4a8616caad7c189c1d4",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204147_104442_c78a0002/artifacts/post_estimation/workflow_postestimation_margins_b6c12a40eeb6fb28_52411023347b0df0b3ebdbdd.json",
+      "sha256": "aff3c699c12fa73af9227d3be120eb8f29fd40a3f3f3c02958d03a5ef7d35984",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204148_515720_f81cce4d/run_manifest.json",
+      "sha256": "ce770dbe4e617cebd68fbb64d06ed593179acce04360a71e14e66b742a7ce425",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204148_515720_f81cce4d/artifacts_index.json",
+      "sha256": "f4bfbb2f017b9e4dc31a0942f663d5a0e34a046f2d5548e6c777aedb7a7052bb",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204148_515720_f81cce4d/run_inputs.json",
+      "sha256": "9acf5d5b34f2c33e341c76c151fa8d338dd3bf91bcdac783a44844c3a076a7b1",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204148_515720_f81cce4d/diagnostic_summary.json",
+      "sha256": "f86e9773438d9e6d35d8f378563fc6b6a19011ff2b52d951649daad3fa136b38",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204148_515720_f81cce4d/processed/cleaned_dataset.parquet",
+      "sha256": "c71adb6eb5e1c3c68886f7c3aa51b89814337a59d84dfc3fa101fec73cb3fc83",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204148_515720_f81cce4d/model_results/glm_1.json",
+      "sha256": "5800c3a520c7d1c0690268b3d665a14dbc61c07f238e34c1533594050b50deac",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204148_515720_f81cce4d/model_results/inference_kernels/glm_1.json",
+      "sha256": "e9d41e3f74f6acea2a70ff2010b3350ec6feae121256e2caeaf85232590d3b21",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204149_305215_648807e7/run_manifest.json",
+      "sha256": "ba464c57f82429cc58cb99f9b110a36dc7536098b6e44b11651627ee52194a60",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204149_305215_648807e7/artifacts_index.json",
+      "sha256": "c907c251876a67ef1848e7451d6d4bc29c1019eb073dc90b7909b79288d1685f",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204149_305215_648807e7/run_inputs.json",
+      "sha256": "c07ddbbe53961ff8d44c7a4c9ec11e46f4477aed6c6aa970bba4591f8bbe9bfa",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204149_305215_648807e7/diagnostic_summary.json",
+      "sha256": "7cd39fdfb142759f4270af5679e564a897e795044366308c2c744df9952858f9",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204149_305215_648807e7/processed/cleaned_dataset.parquet",
+      "sha256": "c71adb6eb5e1c3c68886f7c3aa51b89814337a59d84dfc3fa101fec73cb3fc83",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204149_305215_648807e7/model_results/glm_1.json",
+      "sha256": "326a1c2e2a6389ae13ae123f275c15c83cae39ecc6c1dac1571aeab6cd31dda3",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204149_305215_648807e7/model_results/inference_kernels/glm_1.json",
+      "sha256": "c24621938269d4ecd3a19253a2c719f2124a5a6c8a25d601369547cc8db7f657",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204149_305215_648807e7/artifacts/post_estimation/workflow_postestimation_nlcom_b20059c90c38c899_099ced935244895b42be2143.json",
+      "sha256": "3a7876f55b834f571687958df19e707e77691eb7e51b87c762824a4671b98e70",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204149_305215_648807e7/artifacts/post_estimation/workflow_postestimation_lincom_368497b84b823b15_1132d9d4a0b9a1cac7c5cf94.json",
+      "sha256": "10351d0a7c287c8af2c56f6eea143e7e5c8e35f2053034d4d47011fccf1f3cf7",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204149_305215_648807e7/artifacts/post_estimation/workflow_postestimation_margins_432112fe921f5420_138aff894fc8ece525cd1be7.json",
+      "sha256": "10ec943313415a1329d9cc5eeeb9dbdf78cb966f45bd4aac436285f78d9b18fc",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204149_305215_648807e7/artifacts/post_estimation/workflow_postestimation_lr_f01d99d4b949c36d_a03ea2fed7a0737740e50cc0.json",
+      "sha256": "e170e13e435b945d5eed2154d183004a33e27d331049fbaf749ea73f1e9cc3e3",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204149_305215_648807e7/artifacts/post_estimation/workflow_postestimation_margins_e99d830907c28081_185eda3a28a353682ab46ddf.json",
+      "sha256": "2da6b28e12b231f74d5e4fe4c43d9e047a51ee892f29a9b81eadffaa32609353",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204149_305215_648807e7/artifacts/post_estimation/workflow_postestimation_wald_76075c87ea933869_70c7abd261b2e43d7ac644f1.json",
+      "sha256": "daad7a07dfc9bb9b78e25aca5af3137729d82a21d646f0380cb8a7deddfdb9c5",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204150_707344_f1a55605/run_manifest.json",
+      "sha256": "40539cbdb11a09a5d5ec4edc145e0dd24f257d5f5c54573ff03e514e7feda1be",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204150_707344_f1a55605/artifacts_index.json",
+      "sha256": "9fd8087e3e2d3182ac2ec9872cd5e9d823e9eb34ed003b4fa87911a10ba6a733",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204150_707344_f1a55605/run_inputs.json",
+      "sha256": "01d1ec15992cca791ae3182b7cfe2c7c7155dd26b88b0a0c3d11cb59e5ecdfc3",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204150_707344_f1a55605/diagnostic_summary.json",
+      "sha256": "72754e00116a5f34428368d13c70e9c29048cdbce390f2737ff11fb61be9f4f4",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204150_707344_f1a55605/processed/cleaned_dataset.parquet",
+      "sha256": "c71adb6eb5e1c3c68886f7c3aa51b89814337a59d84dfc3fa101fec73cb3fc83",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204150_707344_f1a55605/model_results/glm_1.json",
+      "sha256": "65278d542f4c23c57b10b39186ef1b18c554c487a8f4ff9d8807cae7aae8d680",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/glm-nb-public-independent0/native-owner/runs/20261004_204150_707344_f1a55605/model_results/inference_kernels/glm_1.json",
+      "sha256": "534cf4f7c140459364de8e85b18d61c19be88e6a4b3f0a955d4272da96fb23a9",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch0/mutant/runs/20261004_204149_305215_648807e7/run_manifest.json",
+      "sha256": "ba464c57f82429cc58cb99f9b110a36dc7536098b6e44b11651627ee52194a60",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch0/mutant/runs/20261004_204149_305215_648807e7/artifacts_index.json",
+      "sha256": "c907c251876a67ef1848e7451d6d4bc29c1019eb073dc90b7909b79288d1685f",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch0/mutant/runs/20261004_204149_305215_648807e7/run_inputs.json",
+      "sha256": "c07ddbbe53961ff8d44c7a4c9ec11e46f4477aed6c6aa970bba4591f8bbe9bfa",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch0/mutant/runs/20261004_204149_305215_648807e7/diagnostic_summary.json",
+      "sha256": "7cd39fdfb142759f4270af5679e564a897e795044366308c2c744df9952858f9",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch0/mutant/runs/20261004_204149_305215_648807e7/processed/cleaned_dataset.parquet",
+      "sha256": "c71adb6eb5e1c3c68886f7c3aa51b89814337a59d84dfc3fa101fec73cb3fc83",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch0/mutant/runs/20261004_204149_305215_648807e7/model_results/glm_1.json",
+      "sha256": "326a1c2e2a6389ae13ae123f275c15c83cae39ecc6c1dac1571aeab6cd31dda3",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch0/mutant/runs/20261004_204149_305215_648807e7/model_results/inference_kernels/glm_1.json",
+      "sha256": "be8122c2c55912fa385140bd7634da2e009a17c5badfb1e51ce96a5d0c358eb9",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch0/mutant/runs/20261004_204149_305215_648807e7/artifacts/post_estimation/workflow_postestimation_nlcom_b20059c90c38c899_099ced935244895b42be2143.json",
+      "sha256": "3a7876f55b834f571687958df19e707e77691eb7e51b87c762824a4671b98e70",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch0/mutant/runs/20261004_204149_305215_648807e7/artifacts/post_estimation/workflow_postestimation_lincom_368497b84b823b15_1132d9d4a0b9a1cac7c5cf94.json",
+      "sha256": "10351d0a7c287c8af2c56f6eea143e7e5c8e35f2053034d4d47011fccf1f3cf7",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch0/mutant/runs/20261004_204149_305215_648807e7/artifacts/post_estimation/workflow_postestimation_margins_432112fe921f5420_138aff894fc8ece525cd1be7.json",
+      "sha256": "10ec943313415a1329d9cc5eeeb9dbdf78cb966f45bd4aac436285f78d9b18fc",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch0/mutant/runs/20261004_204149_305215_648807e7/artifacts/post_estimation/workflow_postestimation_lr_f01d99d4b949c36d_a03ea2fed7a0737740e50cc0.json",
+      "sha256": "e170e13e435b945d5eed2154d183004a33e27d331049fbaf749ea73f1e9cc3e3",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch0/mutant/runs/20261004_204149_305215_648807e7/artifacts/post_estimation/workflow_postestimation_margins_e99d830907c28081_185eda3a28a353682ab46ddf.json",
+      "sha256": "2da6b28e12b231f74d5e4fe4c43d9e047a51ee892f29a9b81eadffaa32609353",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch0/mutant/runs/20261004_204149_305215_648807e7/artifacts/post_estimation/workflow_postestimation_wald_76075c87ea933869_70c7abd261b2e43d7ac644f1.json",
+      "sha256": "daad7a07dfc9bb9b78e25aca5af3137729d82a21d646f0380cb8a7deddfdb9c5",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch1/mutant/runs/20261004_204149_305215_648807e7/run_manifest.json",
+      "sha256": "ba464c57f82429cc58cb99f9b110a36dc7536098b6e44b11651627ee52194a60",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch1/mutant/runs/20261004_204149_305215_648807e7/artifacts_index.json",
+      "sha256": "c907c251876a67ef1848e7451d6d4bc29c1019eb073dc90b7909b79288d1685f",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch1/mutant/runs/20261004_204149_305215_648807e7/run_inputs.json",
+      "sha256": "c07ddbbe53961ff8d44c7a4c9ec11e46f4477aed6c6aa970bba4591f8bbe9bfa",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch1/mutant/runs/20261004_204149_305215_648807e7/diagnostic_summary.json",
+      "sha256": "7cd39fdfb142759f4270af5679e564a897e795044366308c2c744df9952858f9",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch1/mutant/runs/20261004_204149_305215_648807e7/processed/cleaned_dataset.parquet",
+      "sha256": "87402b59af84a7c71c08f61503d061bc01ac9021ee03a37ec050d186e00fbc0d",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch1/mutant/runs/20261004_204149_305215_648807e7/model_results/glm_1.json",
+      "sha256": "326a1c2e2a6389ae13ae123f275c15c83cae39ecc6c1dac1571aeab6cd31dda3",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch1/mutant/runs/20261004_204149_305215_648807e7/model_results/inference_kernels/glm_1.json",
+      "sha256": "c24621938269d4ecd3a19253a2c719f2124a5a6c8a25d601369547cc8db7f657",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch1/mutant/runs/20261004_204149_305215_648807e7/artifacts/post_estimation/workflow_postestimation_nlcom_b20059c90c38c899_099ced935244895b42be2143.json",
+      "sha256": "3a7876f55b834f571687958df19e707e77691eb7e51b87c762824a4671b98e70",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch1/mutant/runs/20261004_204149_305215_648807e7/artifacts/post_estimation/workflow_postestimation_lincom_368497b84b823b15_1132d9d4a0b9a1cac7c5cf94.json",
+      "sha256": "10351d0a7c287c8af2c56f6eea143e7e5c8e35f2053034d4d47011fccf1f3cf7",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch1/mutant/runs/20261004_204149_305215_648807e7/artifacts/post_estimation/workflow_postestimation_margins_432112fe921f5420_138aff894fc8ece525cd1be7.json",
+      "sha256": "10ec943313415a1329d9cc5eeeb9dbdf78cb966f45bd4aac436285f78d9b18fc",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch1/mutant/runs/20261004_204149_305215_648807e7/artifacts/post_estimation/workflow_postestimation_lr_f01d99d4b949c36d_a03ea2fed7a0737740e50cc0.json",
+      "sha256": "e170e13e435b945d5eed2154d183004a33e27d331049fbaf749ea73f1e9cc3e3",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch1/mutant/runs/20261004_204149_305215_648807e7/artifacts/post_estimation/workflow_postestimation_margins_e99d830907c28081_185eda3a28a353682ab46ddf.json",
+      "sha256": "2da6b28e12b231f74d5e4fe4c43d9e047a51ee892f29a9b81eadffaa32609353",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch1/mutant/runs/20261004_204149_305215_648807e7/artifacts/post_estimation/workflow_postestimation_wald_76075c87ea933869_70c7abd261b2e43d7ac644f1.json",
+      "sha256": "daad7a07dfc9bb9b78e25aca5af3137729d82a21d646f0380cb8a7deddfdb9c5",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch2/mutant/runs/20261004_204149_305215_648807e7/run_manifest.json",
+      "sha256": "ba464c57f82429cc58cb99f9b110a36dc7536098b6e44b11651627ee52194a60",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch2/mutant/runs/20261004_204149_305215_648807e7/artifacts_index.json",
+      "sha256": "c907c251876a67ef1848e7451d6d4bc29c1019eb073dc90b7909b79288d1685f",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch2/mutant/runs/20261004_204149_305215_648807e7/run_inputs.json",
+      "sha256": "c07ddbbe53961ff8d44c7a4c9ec11e46f4477aed6c6aa970bba4591f8bbe9bfa",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch2/mutant/runs/20261004_204149_305215_648807e7/diagnostic_summary.json",
+      "sha256": "62d667445d3c85b5fa1a16fb80796c0cfdf58aaa44d40ac66f0e7ed0f75c1daf",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch2/mutant/runs/20261004_204149_305215_648807e7/processed/cleaned_dataset.parquet",
+      "sha256": "c71adb6eb5e1c3c68886f7c3aa51b89814337a59d84dfc3fa101fec73cb3fc83",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch2/mutant/runs/20261004_204149_305215_648807e7/model_results/glm_1.json",
+      "sha256": "326a1c2e2a6389ae13ae123f275c15c83cae39ecc6c1dac1571aeab6cd31dda3",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch2/mutant/runs/20261004_204149_305215_648807e7/model_results/inference_kernels/glm_1.json",
+      "sha256": "c24621938269d4ecd3a19253a2c719f2124a5a6c8a25d601369547cc8db7f657",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch2/mutant/runs/20261004_204149_305215_648807e7/artifacts/post_estimation/workflow_postestimation_nlcom_b20059c90c38c899_099ced935244895b42be2143.json",
+      "sha256": "3a7876f55b834f571687958df19e707e77691eb7e51b87c762824a4671b98e70",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch2/mutant/runs/20261004_204149_305215_648807e7/artifacts/post_estimation/workflow_postestimation_lincom_368497b84b823b15_1132d9d4a0b9a1cac7c5cf94.json",
+      "sha256": "10351d0a7c287c8af2c56f6eea143e7e5c8e35f2053034d4d47011fccf1f3cf7",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch2/mutant/runs/20261004_204149_305215_648807e7/artifacts/post_estimation/workflow_postestimation_margins_432112fe921f5420_138aff894fc8ece525cd1be7.json",
+      "sha256": "10ec943313415a1329d9cc5eeeb9dbdf78cb966f45bd4aac436285f78d9b18fc",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch2/mutant/runs/20261004_204149_305215_648807e7/artifacts/post_estimation/workflow_postestimation_lr_f01d99d4b949c36d_a03ea2fed7a0737740e50cc0.json",
+      "sha256": "e170e13e435b945d5eed2154d183004a33e27d331049fbaf749ea73f1e9cc3e3",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch2/mutant/runs/20261004_204149_305215_648807e7/artifacts/post_estimation/workflow_postestimation_margins_e99d830907c28081_185eda3a28a353682ab46ddf.json",
+      "sha256": "2da6b28e12b231f74d5e4fe4c43d9e047a51ee892f29a9b81eadffaa32609353",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch2/mutant/runs/20261004_204149_305215_648807e7/artifacts/post_estimation/workflow_postestimation_wald_76075c87ea933869_70c7abd261b2e43d7ac644f1.json",
+      "sha256": "daad7a07dfc9bb9b78e25aca5af3137729d82a21d646f0380cb8a7deddfdb9c5",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch3/mutant/runs/20261004_204149_305215_648807e7/run_manifest.json",
+      "sha256": "c207de9a98a7328f655cc36b198a2d03bc0069e119ee97c23a52c84c9212b153",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch3/mutant/runs/20261004_204149_305215_648807e7/artifacts_index.json",
+      "sha256": "c907c251876a67ef1848e7451d6d4bc29c1019eb073dc90b7909b79288d1685f",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch3/mutant/runs/20261004_204149_305215_648807e7/run_inputs.json",
+      "sha256": "c07ddbbe53961ff8d44c7a4c9ec11e46f4477aed6c6aa970bba4591f8bbe9bfa",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch3/mutant/runs/20261004_204149_305215_648807e7/diagnostic_summary.json",
+      "sha256": "7cd39fdfb142759f4270af5679e564a897e795044366308c2c744df9952858f9",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch3/mutant/runs/20261004_204149_305215_648807e7/processed/cleaned_dataset.parquet",
+      "sha256": "c71adb6eb5e1c3c68886f7c3aa51b89814337a59d84dfc3fa101fec73cb3fc83",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch3/mutant/runs/20261004_204149_305215_648807e7/model_results/glm_1.json",
+      "sha256": "326a1c2e2a6389ae13ae123f275c15c83cae39ecc6c1dac1571aeab6cd31dda3",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch3/mutant/runs/20261004_204149_305215_648807e7/model_results/inference_kernels/glm_1.json",
+      "sha256": "c24621938269d4ecd3a19253a2c719f2124a5a6c8a25d601369547cc8db7f657",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch3/mutant/runs/20261004_204149_305215_648807e7/artifacts/post_estimation/workflow_postestimation_nlcom_b20059c90c38c899_099ced935244895b42be2143.json",
+      "sha256": "3a7876f55b834f571687958df19e707e77691eb7e51b87c762824a4671b98e70",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch3/mutant/runs/20261004_204149_305215_648807e7/artifacts/post_estimation/workflow_postestimation_lincom_368497b84b823b15_1132d9d4a0b9a1cac7c5cf94.json",
+      "sha256": "10351d0a7c287c8af2c56f6eea143e7e5c8e35f2053034d4d47011fccf1f3cf7",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch3/mutant/runs/20261004_204149_305215_648807e7/artifacts/post_estimation/workflow_postestimation_margins_432112fe921f5420_138aff894fc8ece525cd1be7.json",
+      "sha256": "10ec943313415a1329d9cc5eeeb9dbdf78cb966f45bd4aac436285f78d9b18fc",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch3/mutant/runs/20261004_204149_305215_648807e7/artifacts/post_estimation/workflow_postestimation_lr_f01d99d4b949c36d_a03ea2fed7a0737740e50cc0.json",
+      "sha256": "e170e13e435b945d5eed2154d183004a33e27d331049fbaf749ea73f1e9cc3e3",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch3/mutant/runs/20261004_204149_305215_648807e7/artifacts/post_estimation/workflow_postestimation_margins_e99d830907c28081_185eda3a28a353682ab46ddf.json",
+      "sha256": "2da6b28e12b231f74d5e4fe4c43d9e047a51ee892f29a9b81eadffaa32609353",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch3/mutant/runs/20261004_204149_305215_648807e7/artifacts/post_estimation/workflow_postestimation_wald_76075c87ea933869_70c7abd261b2e43d7ac644f1.json",
+      "sha256": "daad7a07dfc9bb9b78e25aca5af3137729d82a21d646f0380cb8a7deddfdb9c5",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204234_977370_4928da50/run_manifest.json",
+      "sha256": "50fd78926426fd3f95292d20625b67b5dbf41c06be9eced065cb528e08c05513",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204234_977370_4928da50/artifacts_index.json",
+      "sha256": "0fccabffaa8d2dc17be706965e1573a22356f6fe5a4312353a8f94a6a4bb9c2a",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204234_977370_4928da50/run_inputs.json",
+      "sha256": "04d5e113b2852fa4d6a6c713534fe10f786c97b039d890bc351cc9b92012d04e",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204234_977370_4928da50/diagnostic_summary.json",
+      "sha256": "7c3625dd2a5fee7d07d58771d2d7395b071a5dd6929661eaa87d585cf2e5d17c",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204234_977370_4928da50/processed/cleaned_dataset.parquet",
+      "sha256": "c71adb6eb5e1c3c68886f7c3aa51b89814337a59d84dfc3fa101fec73cb3fc83",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204234_977370_4928da50/model_results/glm_1.json",
+      "sha256": "38789cb8d1dfe7ed6445324e785a82949e8b6cca0f5fd721afa44518d593e495",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204234_977370_4928da50/model_results/inference_kernels/glm_1.json",
+      "sha256": "028d67d1567656b60c7f1da79fe2c9c2bdba6fbcb0b41959ce864de77211277d",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204234_977370_4928da50/artifacts/post_estimation/workflow_postestimation_margins_db460e9c50db4c56_8145e2db0aa1a52b69ded50b.json",
+      "sha256": "1c6edae7e6434ba4c5ee76a62931b29d2825f9d6babbbfdb9bed6528b18e8f1d",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204234_977370_4928da50/artifacts/post_estimation/workflow_postestimation_lr_1b77477841a61b72_f1859feb9c3eea3645cc08a4.json",
+      "sha256": "1d7628257892617d16664422287ec905166feec73ab03ecbfb6181cd7933eba8",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204234_977370_4928da50/artifacts/post_estimation/workflow_postestimation_nlcom_58c0b7d23b4e1eec_804a3822fc1d8ad48611f746.json",
+      "sha256": "0df566e0f092144116f0938c6eeb010dd7c3e12313268509ec0f6da8b0c3fe3d",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204234_977370_4928da50/artifacts/post_estimation/workflow_postestimation_margins_bdea7b96b57783b0_2bf4d773deebd0ddf771185f.json",
+      "sha256": "db24891b6ed9eb8ffb7b9eecaff9c54235dc95698753c96bbd796365ee7d4ebb",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204234_977370_4928da50/artifacts/post_estimation/workflow_postestimation_lincom_20ed9fb52b4320ab_6a58b9f00a6b3dd0954998ac.json",
+      "sha256": "633e60b37b2de60dc87fcc1f1a178bd01e42989fda543b2fc6c389485ade3937",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204234_977370_4928da50/artifacts/post_estimation/workflow_postestimation_wald_21b335f5f847bf60_0f41c351047041b88579d871.json",
+      "sha256": "dd1dd3abb192c01e36c08fa8195924efdc7f9db5c6b3722d45623e2612c8804d",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204236_505642_755b294b/run_manifest.json",
+      "sha256": "af5a92da1898c05da0813968ef345a899409e615eb34ff52f705d62d9dd56cf8",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204236_505642_755b294b/artifacts_index.json",
+      "sha256": "5d2a4d59436de2829fe8a96de29f90e9fb4bb199f16c6e6e8412605ffeb57fdd",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204236_505642_755b294b/run_inputs.json",
+      "sha256": "5b1f09cb9771e4891f5b3ab1dfca9fec11756fa337ea221249914abba3b1497a",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204236_505642_755b294b/diagnostic_summary.json",
+      "sha256": "d1fa6e5bb8b81762989fac3df36a3bbf83d1e1689befb2ec82580a37b8149404",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204236_505642_755b294b/processed/cleaned_dataset.parquet",
+      "sha256": "c71adb6eb5e1c3c68886f7c3aa51b89814337a59d84dfc3fa101fec73cb3fc83",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204236_505642_755b294b/model_results/glm_1.json",
+      "sha256": "8d8d96d16ae03dd19490bab3bd4b7087e62f1d094eaf2600b726b49878b91a01",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204236_505642_755b294b/model_results/inference_kernels/glm_1.json",
+      "sha256": "2c2bab1c4939b27ad67c5d0d2467ae59b4da64742b58001a14358316915d2d26",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204237_190068_d209c695/run_manifest.json",
+      "sha256": "e8edf1eb994246bf16ffb8af101d09921b80a3842428f7d22f380df8313d1c2e",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204237_190068_d209c695/artifacts_index.json",
+      "sha256": "c92010f50fefeb06461d15e1890c9adbfda5f393a2d16e1455bf70b26ddbad3b",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204237_190068_d209c695/run_inputs.json",
+      "sha256": "4c82cddecaf163c10145287236e78733370c77301fcd94d6eda1265bb9ab30aa",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204237_190068_d209c695/diagnostic_summary.json",
+      "sha256": "b77620c9e012777b976c0b0b03ef43383edec0c4a9d75d5d9345fdd6cb9f7de4",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204237_190068_d209c695/processed/cleaned_dataset.parquet",
+      "sha256": "c71adb6eb5e1c3c68886f7c3aa51b89814337a59d84dfc3fa101fec73cb3fc83",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204237_190068_d209c695/model_results/glm_1.json",
+      "sha256": "28c9c3ab5a131f9c772cd0b3192197e3983e0b1c694b763332698d0f55aafb40",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204237_190068_d209c695/model_results/inference_kernels/glm_1.json",
+      "sha256": "721fe0d143077f39f497703a50e4f75070d7931304c85654dc02481258bcfc37",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204237_190068_d209c695/artifacts/post_estimation/workflow_postestimation_lincom_4393da4619316868_788be7a408576450cbc23cde.json",
+      "sha256": "2e19b2bf4629c40d823605a12e72d4ec90ca0d8c5b0341820db32ad63f6e98ae",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204237_190068_d209c695/artifacts/post_estimation/workflow_postestimation_nlcom_61ded69fee6c6bf9_b1fe639f40d810ac8cf3e16f.json",
+      "sha256": "01ef30001c3ca18a17ddc1cba29d8282f6a6e6a79e670f6bffdeea8240db2dc9",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204237_190068_d209c695/artifacts/post_estimation/workflow_postestimation_margins_96337bc2a61b04cc_c497a92c4d54ef575bdadfb8.json",
+      "sha256": "ae78053ee55b10e967129f721e347af6a50d7ad097f906b7b6d81bd0e77a7f86",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204237_190068_d209c695/artifacts/post_estimation/workflow_postestimation_wald_904d8b6efc6e2f9e_7b7e346a0a26a3ecd09549c5.json",
+      "sha256": "97ae078e1076e1a8ad7df3cfa9adfb958b3e29b483722504a4bf44c243ec28c9",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204237_190068_d209c695/artifacts/post_estimation/workflow_postestimation_lr_d5f0e93c2d65e677_b257306aa21333a95dbbdd80.json",
+      "sha256": "84c624744f245c12645994e74597ea0e3796b1a4b23b55e696d143a632eb5954",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204237_190068_d209c695/artifacts/post_estimation/workflow_postestimation_margins_b6c12a40eeb6fb28_52411023347b0df0b3ebdbdd.json",
+      "sha256": "6855dbdc046d1f6ef8c2ee70d0bd9609c306673e86d63429bf7f05fdd4678f27",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204238_589179_4c5e749f/run_manifest.json",
+      "sha256": "9a1579bde7ee93a9953f3f34052cfdd99f4f5e8e46da2c2bcb0283912a90ec01",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204238_589179_4c5e749f/artifacts_index.json",
+      "sha256": "4d39e049c699bb4f6a49e3c87bf1d8f49e607800d6824da84b0595ea0a8252e0",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204238_589179_4c5e749f/run_inputs.json",
+      "sha256": "9acf5d5b34f2c33e341c76c151fa8d338dd3bf91bcdac783a44844c3a076a7b1",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204238_589179_4c5e749f/diagnostic_summary.json",
+      "sha256": "fcb8c5c5102ae6039fcfec8d4b45f22b29054adc46fb434972726c6b64daa817",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204238_589179_4c5e749f/processed/cleaned_dataset.parquet",
+      "sha256": "c71adb6eb5e1c3c68886f7c3aa51b89814337a59d84dfc3fa101fec73cb3fc83",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204238_589179_4c5e749f/model_results/glm_1.json",
+      "sha256": "5800c3a520c7d1c0690268b3d665a14dbc61c07f238e34c1533594050b50deac",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204238_589179_4c5e749f/model_results/inference_kernels/glm_1.json",
+      "sha256": "e9d41e3f74f6acea2a70ff2010b3350ec6feae121256e2caeaf85232590d3b21",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204239_373535_e5ab00dc/run_manifest.json",
+      "sha256": "bae92fcb04bdc3f607dbad9bfa9383461bd8153f5a7d46afd96d6215d47404f2",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204239_373535_e5ab00dc/artifacts_index.json",
+      "sha256": "faeb62e3487c8fb4400676c3872d6a14eb143dfbf0078a6a4cf57ff356889ba7",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204239_373535_e5ab00dc/run_inputs.json",
+      "sha256": "c07ddbbe53961ff8d44c7a4c9ec11e46f4477aed6c6aa970bba4591f8bbe9bfa",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204239_373535_e5ab00dc/diagnostic_summary.json",
+      "sha256": "29a272cc356dc287ec6d75c6af812761aa2bc0dc100eb2059ae45e61b0cd415b",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204239_373535_e5ab00dc/processed/cleaned_dataset.parquet",
+      "sha256": "c71adb6eb5e1c3c68886f7c3aa51b89814337a59d84dfc3fa101fec73cb3fc83",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204239_373535_e5ab00dc/model_results/glm_1.json",
+      "sha256": "326a1c2e2a6389ae13ae123f275c15c83cae39ecc6c1dac1571aeab6cd31dda3",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204239_373535_e5ab00dc/model_results/inference_kernels/glm_1.json",
+      "sha256": "c24621938269d4ecd3a19253a2c719f2124a5a6c8a25d601369547cc8db7f657",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204239_373535_e5ab00dc/artifacts/post_estimation/workflow_postestimation_nlcom_b20059c90c38c899_099ced935244895b42be2143.json",
+      "sha256": "1a718aceb6bbaab4546eb69050eb3398ae0525eedfce8a9e1aab8c13866ca990",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204239_373535_e5ab00dc/artifacts/post_estimation/workflow_postestimation_lincom_368497b84b823b15_1132d9d4a0b9a1cac7c5cf94.json",
+      "sha256": "fe59cad9573edb56f6e4dd8abadeab82fe86061028e7ff067d5e4c79605632c4",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204239_373535_e5ab00dc/artifacts/post_estimation/workflow_postestimation_margins_432112fe921f5420_138aff894fc8ece525cd1be7.json",
+      "sha256": "02d5eb71dee2e44f1f589f8e9b8589eff6b5c00c65e86424b1c8f3a785a52445",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204239_373535_e5ab00dc/artifacts/post_estimation/workflow_postestimation_lr_f01d99d4b949c36d_e93b372866c32a095eade963.json",
+      "sha256": "d2017838c26ab1296076978d254ed807843f714e99ef445d9e19ad7d3c33a171",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204239_373535_e5ab00dc/artifacts/post_estimation/workflow_postestimation_margins_e99d830907c28081_185eda3a28a353682ab46ddf.json",
+      "sha256": "8076575fd123c2c2282f5664e5170bc0b971adea2812877c4c5d007d6fabe353",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204239_373535_e5ab00dc/artifacts/post_estimation/workflow_postestimation_wald_76075c87ea933869_70c7abd261b2e43d7ac644f1.json",
+      "sha256": "6f9976be214a8de0813f1e45559367ee2e9ba4f5fd1b192033e4ec8e5b817617",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204240_791683_27109594/run_manifest.json",
+      "sha256": "1991e0f896db2cdb52d384d16da5239ea2d9471b62d4e61e9bcbb41f0762c538",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204240_791683_27109594/artifacts_index.json",
+      "sha256": "3d7f97f91bb77b41f41c5d4a23c1642e14dd257cf3d2017c4af051302c7a2327",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204240_791683_27109594/run_inputs.json",
+      "sha256": "01d1ec15992cca791ae3182b7cfe2c7c7155dd26b88b0a0c3d11cb59e5ecdfc3",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204240_791683_27109594/diagnostic_summary.json",
+      "sha256": "ed753508b7d4c6bfed6e03db332d37231df7c48ca10f22dc563571a6b5c2b8fb",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204240_791683_27109594/processed/cleaned_dataset.parquet",
+      "sha256": "c71adb6eb5e1c3c68886f7c3aa51b89814337a59d84dfc3fa101fec73cb3fc83",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204240_791683_27109594/model_results/glm_1.json",
+      "sha256": "65278d542f4c23c57b10b39186ef1b18c554c487a8f4ff9d8807cae7aae8d680",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204240_791683_27109594/model_results/inference_kernels/glm_1.json",
+      "sha256": "534cf4f7c140459364de8e85b18d61c19be88e6a4b3f0a955d4272da96fb23a9",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch0/mutant/runs/20261004_204239_373535_e5ab00dc/run_manifest.json",
+      "sha256": "bae92fcb04bdc3f607dbad9bfa9383461bd8153f5a7d46afd96d6215d47404f2",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch0/mutant/runs/20261004_204239_373535_e5ab00dc/artifacts_index.json",
+      "sha256": "faeb62e3487c8fb4400676c3872d6a14eb143dfbf0078a6a4cf57ff356889ba7",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch0/mutant/runs/20261004_204239_373535_e5ab00dc/run_inputs.json",
+      "sha256": "c07ddbbe53961ff8d44c7a4c9ec11e46f4477aed6c6aa970bba4591f8bbe9bfa",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch0/mutant/runs/20261004_204239_373535_e5ab00dc/diagnostic_summary.json",
+      "sha256": "29a272cc356dc287ec6d75c6af812761aa2bc0dc100eb2059ae45e61b0cd415b",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch0/mutant/runs/20261004_204239_373535_e5ab00dc/processed/cleaned_dataset.parquet",
+      "sha256": "c71adb6eb5e1c3c68886f7c3aa51b89814337a59d84dfc3fa101fec73cb3fc83",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch0/mutant/runs/20261004_204239_373535_e5ab00dc/model_results/glm_1.json",
+      "sha256": "326a1c2e2a6389ae13ae123f275c15c83cae39ecc6c1dac1571aeab6cd31dda3",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch0/mutant/runs/20261004_204239_373535_e5ab00dc/model_results/inference_kernels/glm_1.json",
+      "sha256": "be8122c2c55912fa385140bd7634da2e009a17c5badfb1e51ce96a5d0c358eb9",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch0/mutant/runs/20261004_204239_373535_e5ab00dc/artifacts/post_estimation/workflow_postestimation_nlcom_b20059c90c38c899_099ced935244895b42be2143.json",
+      "sha256": "1a718aceb6bbaab4546eb69050eb3398ae0525eedfce8a9e1aab8c13866ca990",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch0/mutant/runs/20261004_204239_373535_e5ab00dc/artifacts/post_estimation/workflow_postestimation_lincom_368497b84b823b15_1132d9d4a0b9a1cac7c5cf94.json",
+      "sha256": "fe59cad9573edb56f6e4dd8abadeab82fe86061028e7ff067d5e4c79605632c4",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch0/mutant/runs/20261004_204239_373535_e5ab00dc/artifacts/post_estimation/workflow_postestimation_margins_432112fe921f5420_138aff894fc8ece525cd1be7.json",
+      "sha256": "02d5eb71dee2e44f1f589f8e9b8589eff6b5c00c65e86424b1c8f3a785a52445",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch0/mutant/runs/20261004_204239_373535_e5ab00dc/artifacts/post_estimation/workflow_postestimation_lr_f01d99d4b949c36d_e93b372866c32a095eade963.json",
+      "sha256": "d2017838c26ab1296076978d254ed807843f714e99ef445d9e19ad7d3c33a171",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch0/mutant/runs/20261004_204239_373535_e5ab00dc/artifacts/post_estimation/workflow_postestimation_margins_e99d830907c28081_185eda3a28a353682ab46ddf.json",
+      "sha256": "8076575fd123c2c2282f5664e5170bc0b971adea2812877c4c5d007d6fabe353",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch0/mutant/runs/20261004_204239_373535_e5ab00dc/artifacts/post_estimation/workflow_postestimation_wald_76075c87ea933869_70c7abd261b2e43d7ac644f1.json",
+      "sha256": "6f9976be214a8de0813f1e45559367ee2e9ba4f5fd1b192033e4ec8e5b817617",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch1/mutant/runs/20261004_204239_373535_e5ab00dc/run_manifest.json",
+      "sha256": "bae92fcb04bdc3f607dbad9bfa9383461bd8153f5a7d46afd96d6215d47404f2",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch1/mutant/runs/20261004_204239_373535_e5ab00dc/artifacts_index.json",
+      "sha256": "faeb62e3487c8fb4400676c3872d6a14eb143dfbf0078a6a4cf57ff356889ba7",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch1/mutant/runs/20261004_204239_373535_e5ab00dc/run_inputs.json",
+      "sha256": "c07ddbbe53961ff8d44c7a4c9ec11e46f4477aed6c6aa970bba4591f8bbe9bfa",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch1/mutant/runs/20261004_204239_373535_e5ab00dc/diagnostic_summary.json",
+      "sha256": "29a272cc356dc287ec6d75c6af812761aa2bc0dc100eb2059ae45e61b0cd415b",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch1/mutant/runs/20261004_204239_373535_e5ab00dc/processed/cleaned_dataset.parquet",
+      "sha256": "87402b59af84a7c71c08f61503d061bc01ac9021ee03a37ec050d186e00fbc0d",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch1/mutant/runs/20261004_204239_373535_e5ab00dc/model_results/glm_1.json",
+      "sha256": "326a1c2e2a6389ae13ae123f275c15c83cae39ecc6c1dac1571aeab6cd31dda3",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch1/mutant/runs/20261004_204239_373535_e5ab00dc/model_results/inference_kernels/glm_1.json",
+      "sha256": "c24621938269d4ecd3a19253a2c719f2124a5a6c8a25d601369547cc8db7f657",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch1/mutant/runs/20261004_204239_373535_e5ab00dc/artifacts/post_estimation/workflow_postestimation_nlcom_b20059c90c38c899_099ced935244895b42be2143.json",
+      "sha256": "1a718aceb6bbaab4546eb69050eb3398ae0525eedfce8a9e1aab8c13866ca990",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch1/mutant/runs/20261004_204239_373535_e5ab00dc/artifacts/post_estimation/workflow_postestimation_lincom_368497b84b823b15_1132d9d4a0b9a1cac7c5cf94.json",
+      "sha256": "fe59cad9573edb56f6e4dd8abadeab82fe86061028e7ff067d5e4c79605632c4",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch1/mutant/runs/20261004_204239_373535_e5ab00dc/artifacts/post_estimation/workflow_postestimation_margins_432112fe921f5420_138aff894fc8ece525cd1be7.json",
+      "sha256": "02d5eb71dee2e44f1f589f8e9b8589eff6b5c00c65e86424b1c8f3a785a52445",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch1/mutant/runs/20261004_204239_373535_e5ab00dc/artifacts/post_estimation/workflow_postestimation_lr_f01d99d4b949c36d_e93b372866c32a095eade963.json",
+      "sha256": "d2017838c26ab1296076978d254ed807843f714e99ef445d9e19ad7d3c33a171",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch1/mutant/runs/20261004_204239_373535_e5ab00dc/artifacts/post_estimation/workflow_postestimation_margins_e99d830907c28081_185eda3a28a353682ab46ddf.json",
+      "sha256": "8076575fd123c2c2282f5664e5170bc0b971adea2812877c4c5d007d6fabe353",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch1/mutant/runs/20261004_204239_373535_e5ab00dc/artifacts/post_estimation/workflow_postestimation_wald_76075c87ea933869_70c7abd261b2e43d7ac644f1.json",
+      "sha256": "6f9976be214a8de0813f1e45559367ee2e9ba4f5fd1b192033e4ec8e5b817617",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch2/mutant/runs/20261004_204239_373535_e5ab00dc/run_manifest.json",
+      "sha256": "bae92fcb04bdc3f607dbad9bfa9383461bd8153f5a7d46afd96d6215d47404f2",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch2/mutant/runs/20261004_204239_373535_e5ab00dc/artifacts_index.json",
+      "sha256": "faeb62e3487c8fb4400676c3872d6a14eb143dfbf0078a6a4cf57ff356889ba7",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch2/mutant/runs/20261004_204239_373535_e5ab00dc/run_inputs.json",
+      "sha256": "c07ddbbe53961ff8d44c7a4c9ec11e46f4477aed6c6aa970bba4591f8bbe9bfa",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch2/mutant/runs/20261004_204239_373535_e5ab00dc/diagnostic_summary.json",
+      "sha256": "10c226165ed72f1aa596d961a865a8337230d3041ace0e68b0c07b5423cec5a7",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch2/mutant/runs/20261004_204239_373535_e5ab00dc/processed/cleaned_dataset.parquet",
+      "sha256": "c71adb6eb5e1c3c68886f7c3aa51b89814337a59d84dfc3fa101fec73cb3fc83",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch2/mutant/runs/20261004_204239_373535_e5ab00dc/model_results/glm_1.json",
+      "sha256": "326a1c2e2a6389ae13ae123f275c15c83cae39ecc6c1dac1571aeab6cd31dda3",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch2/mutant/runs/20261004_204239_373535_e5ab00dc/model_results/inference_kernels/glm_1.json",
+      "sha256": "c24621938269d4ecd3a19253a2c719f2124a5a6c8a25d601369547cc8db7f657",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch2/mutant/runs/20261004_204239_373535_e5ab00dc/artifacts/post_estimation/workflow_postestimation_nlcom_b20059c90c38c899_099ced935244895b42be2143.json",
+      "sha256": "1a718aceb6bbaab4546eb69050eb3398ae0525eedfce8a9e1aab8c13866ca990",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch2/mutant/runs/20261004_204239_373535_e5ab00dc/artifacts/post_estimation/workflow_postestimation_lincom_368497b84b823b15_1132d9d4a0b9a1cac7c5cf94.json",
+      "sha256": "fe59cad9573edb56f6e4dd8abadeab82fe86061028e7ff067d5e4c79605632c4",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch2/mutant/runs/20261004_204239_373535_e5ab00dc/artifacts/post_estimation/workflow_postestimation_margins_432112fe921f5420_138aff894fc8ece525cd1be7.json",
+      "sha256": "02d5eb71dee2e44f1f589f8e9b8589eff6b5c00c65e86424b1c8f3a785a52445",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch2/mutant/runs/20261004_204239_373535_e5ab00dc/artifacts/post_estimation/workflow_postestimation_lr_f01d99d4b949c36d_e93b372866c32a095eade963.json",
+      "sha256": "d2017838c26ab1296076978d254ed807843f714e99ef445d9e19ad7d3c33a171",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch2/mutant/runs/20261004_204239_373535_e5ab00dc/artifacts/post_estimation/workflow_postestimation_margins_e99d830907c28081_185eda3a28a353682ab46ddf.json",
+      "sha256": "8076575fd123c2c2282f5664e5170bc0b971adea2812877c4c5d007d6fabe353",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch2/mutant/runs/20261004_204239_373535_e5ab00dc/artifacts/post_estimation/workflow_postestimation_wald_76075c87ea933869_70c7abd261b2e43d7ac644f1.json",
+      "sha256": "6f9976be214a8de0813f1e45559367ee2e9ba4f5fd1b192033e4ec8e5b817617",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch3/mutant/runs/20261004_204239_373535_e5ab00dc/run_manifest.json",
+      "sha256": "88d395c38617635654fa8cc6050c1d5ac3ba128df1a89784375da7b65dfa65a2",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch3/mutant/runs/20261004_204239_373535_e5ab00dc/artifacts_index.json",
+      "sha256": "faeb62e3487c8fb4400676c3872d6a14eb143dfbf0078a6a4cf57ff356889ba7",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch3/mutant/runs/20261004_204239_373535_e5ab00dc/run_inputs.json",
+      "sha256": "c07ddbbe53961ff8d44c7a4c9ec11e46f4477aed6c6aa970bba4591f8bbe9bfa",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch3/mutant/runs/20261004_204239_373535_e5ab00dc/diagnostic_summary.json",
+      "sha256": "29a272cc356dc287ec6d75c6af812761aa2bc0dc100eb2059ae45e61b0cd415b",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch3/mutant/runs/20261004_204239_373535_e5ab00dc/processed/cleaned_dataset.parquet",
+      "sha256": "c71adb6eb5e1c3c68886f7c3aa51b89814337a59d84dfc3fa101fec73cb3fc83",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch3/mutant/runs/20261004_204239_373535_e5ab00dc/model_results/glm_1.json",
+      "sha256": "326a1c2e2a6389ae13ae123f275c15c83cae39ecc6c1dac1571aeab6cd31dda3",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch3/mutant/runs/20261004_204239_373535_e5ab00dc/model_results/inference_kernels/glm_1.json",
+      "sha256": "c24621938269d4ecd3a19253a2c719f2124a5a6c8a25d601369547cc8db7f657",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch3/mutant/runs/20261004_204239_373535_e5ab00dc/artifacts/post_estimation/workflow_postestimation_nlcom_b20059c90c38c899_099ced935244895b42be2143.json",
+      "sha256": "1a718aceb6bbaab4546eb69050eb3398ae0525eedfce8a9e1aab8c13866ca990",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch3/mutant/runs/20261004_204239_373535_e5ab00dc/artifacts/post_estimation/workflow_postestimation_lincom_368497b84b823b15_1132d9d4a0b9a1cac7c5cf94.json",
+      "sha256": "fe59cad9573edb56f6e4dd8abadeab82fe86061028e7ff067d5e4c79605632c4",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch3/mutant/runs/20261004_204239_373535_e5ab00dc/artifacts/post_estimation/workflow_postestimation_margins_432112fe921f5420_138aff894fc8ece525cd1be7.json",
+      "sha256": "02d5eb71dee2e44f1f589f8e9b8589eff6b5c00c65e86424b1c8f3a785a52445",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch3/mutant/runs/20261004_204239_373535_e5ab00dc/artifacts/post_estimation/workflow_postestimation_lr_f01d99d4b949c36d_e93b372866c32a095eade963.json",
+      "sha256": "d2017838c26ab1296076978d254ed807843f714e99ef445d9e19ad7d3c33a171",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch3/mutant/runs/20261004_204239_373535_e5ab00dc/artifacts/post_estimation/workflow_postestimation_margins_e99d830907c28081_185eda3a28a353682ab46ddf.json",
+      "sha256": "8076575fd123c2c2282f5664e5170bc0b971adea2812877c4c5d007d6fabe353",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch3/mutant/runs/20261004_204239_373535_e5ab00dc/artifacts/post_estimation/workflow_postestimation_wald_76075c87ea933869_70c7abd261b2e43d7ac644f1.json",
+      "sha256": "6f9976be214a8de0813f1e45559367ee2e9ba4f5fd1b192033e4ec8e5b817617",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-804/test_real_ancillary_named_cova0/projects/named-glm/runs/20261004_204437_053644_feedefc8/run_manifest.json",
+      "sha256": "dd41600dff7d5d2ffcc002a1f04b54c180adce6fff7d5ac954b1657db1c60b3b",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-804/test_real_ancillary_named_cova0/projects/named-glm/runs/20261004_204437_053644_feedefc8/artifacts_index.json",
+      "sha256": "99cf7b97acec24d5f50d5271273d0d77307bfb92ad36151e440687b85740b79e",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-804/test_real_ancillary_named_cova0/projects/named-glm/runs/20261004_204437_053644_feedefc8/run_inputs.json",
+      "sha256": "2c1dac44740fd1fea345fceecfcaf0d526359c91c34a7dc9517f0352814d18ac",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-804/test_real_ancillary_named_cova0/projects/named-glm/runs/20261004_204437_053644_feedefc8/diagnostic_summary.json",
+      "sha256": "e22b6d7b366d610f88492933da37a0d3d66043650d519e2bb78ca6e7a33510f8",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-804/test_real_ancillary_named_cova0/projects/named-glm/runs/20261004_204437_053644_feedefc8/processed/cleaned_dataset.parquet",
+      "sha256": "30dd3d054df0cd4c6b24e320b546a3dd2a4743f19a82f5ace9f5496cdfdd6a73",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-804/test_real_ancillary_named_cova0/projects/named-glm/runs/20261004_204437_053644_feedefc8/model_results/glm_1.json",
+      "sha256": "1442233cc05449efc88c07368a4e38dc97de00e9119ea27ec94aa4cf7a1d5565",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-804/test_real_ancillary_named_cova0/projects/named-glm/runs/20261004_204437_053644_feedefc8/model_results/inference_kernels/glm_1.json",
+      "sha256": "f5b0a35cffdaa2a3d1919a0f22a6337737ebbebba47179e54c4d30d86ac93dda",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-804/test_real_ancillary_named_cova1/projects/named-glm/runs/20261004_204438_531364_57c6063b/run_manifest.json",
+      "sha256": "f7dc1e938a888c867447f3a314bcdc46065cfe905bb32f5f0267a5a74d08255d",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-804/test_real_ancillary_named_cova1/projects/named-glm/runs/20261004_204438_531364_57c6063b/artifacts_index.json",
+      "sha256": "b2c49a1845b94e7ce0cd86cfd4a04efec710e4ca4a19ede7b84810b651a709aa",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-804/test_real_ancillary_named_cova1/projects/named-glm/runs/20261004_204438_531364_57c6063b/run_inputs.json",
+      "sha256": "60b5f081ee1b2186ee2f64f2ea3ca9b43c30d1b055d44035365f25f2c149ec98",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-804/test_real_ancillary_named_cova1/projects/named-glm/runs/20261004_204438_531364_57c6063b/diagnostic_summary.json",
+      "sha256": "92184510cade0b832a1a96e66c0bc1a05922bd7ff71d5dabc1a3b899aed3d9bb",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-804/test_real_ancillary_named_cova1/projects/named-glm/runs/20261004_204438_531364_57c6063b/processed/cleaned_dataset.parquet",
+      "sha256": "b4ba3f20989d9180932f0337bb09feee00e2061bc25ae3a099c0294e78e40c1c",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-804/test_real_ancillary_named_cova1/projects/named-glm/runs/20261004_204438_531364_57c6063b/model_results/glm_1.json",
+      "sha256": "4c909d9471381673716653685c53e07ab02d19747a09272c645b093f7dd8c3e9",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-804/test_real_ancillary_named_cova1/projects/named-glm/runs/20261004_204438_531364_57c6063b/model_results/inference_kernels/glm_1.json",
+      "sha256": "6cac507312f2978b667fc5354b185af0fadce00bb60319739e4c47365f62a993",
+      "retained_local_only": true
+    }
+  ],
+  "retained_mutations": [
+    {
+      "mutant_owner": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch0/mutant/runs/20261004_204149_305215_648807e7",
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch0/mutant/runs/20261004_204149_305215_648807e7/model_results/inference_kernels/glm_1.json",
+      "mutation": "kernel",
+      "sha256": "be8122c2c55912fa385140bd7634da2e009a17c5badfb1e51ce96a5d0c358eb9"
+    },
+    {
+      "mutant_owner": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch1/mutant/runs/20261004_204149_305215_648807e7",
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch1/mutant/runs/20261004_204149_305215_648807e7/processed/cleaned_dataset.parquet",
+      "mutation": "processed",
+      "sha256": "87402b59af84a7c71c08f61503d061bc01ac9021ee03a37ec050d186e00fbc0d"
+    },
+    {
+      "mutant_owner": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch2/mutant/runs/20261004_204149_305215_648807e7",
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch2/mutant/runs/20261004_204149_305215_648807e7/diagnostic_summary.json",
+      "mutation": "diagnostic",
+      "sha256": "62d667445d3c85b5fa1a16fb80796c0cfdf58aaa44d40ac66f0e7ed0f75c1daf"
+    },
+    {
+      "mutant_owner": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch3/mutant/runs/20261004_204149_305215_648807e7",
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-796/test_glm_nb_margins_refuses_ch3/mutant/runs/20261004_204149_305215_648807e7/run_manifest.json",
+      "mutation": "completion",
+      "sha256": "c207de9a98a7328f655cc36b198a2d03bc0069e119ee97c23a52c84c9212b153"
+    },
+    {
+      "mutant_owner": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch0/mutant/runs/20261004_204239_373535_e5ab00dc",
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch0/mutant/runs/20261004_204239_373535_e5ab00dc/model_results/inference_kernels/glm_1.json",
+      "mutation": "kernel",
+      "sha256": "be8122c2c55912fa385140bd7634da2e009a17c5badfb1e51ce96a5d0c358eb9"
+    },
+    {
+      "mutant_owner": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch1/mutant/runs/20261004_204239_373535_e5ab00dc",
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch1/mutant/runs/20261004_204239_373535_e5ab00dc/processed/cleaned_dataset.parquet",
+      "mutation": "processed",
+      "sha256": "87402b59af84a7c71c08f61503d061bc01ac9021ee03a37ec050d186e00fbc0d"
+    },
+    {
+      "mutant_owner": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch2/mutant/runs/20261004_204239_373535_e5ab00dc",
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch2/mutant/runs/20261004_204239_373535_e5ab00dc/diagnostic_summary.json",
+      "mutation": "diagnostic",
+      "sha256": "10c226165ed72f1aa596d961a865a8337230d3041ace0e68b0c07b5423cec5a7"
+    },
+    {
+      "mutant_owner": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch3/mutant/runs/20261004_204239_373535_e5ab00dc",
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/test_glm_nb_margins_refuses_ch3/mutant/runs/20261004_204239_373535_e5ab00dc/run_manifest.json",
+      "mutation": "completion",
+      "sha256": "88d395c38617635654fa8cc6050c1d5ac3ba128df1a89784375da7b65dfa65a2"
+    }
+  ],
+  "native_tolerances": {
+    "beta_absolute": 1e-08,
+    "standard_error_absolute": 1e-06,
+    "post_numeric_relative": 1e-06,
+    "post_pvalue_and_margins_se_relative": 1e-05,
+    "modified_old_tolerances": false
+  },
+  "conclusion": "PASS targeted public GLM-NB integration,36independent nodes plus6kernel audits,no confirmed P finding",
+  "not_certified": [
+    "browser",
+    "real Agent/LLM live",
+    "full gate",
+    "release"
+  ],
+  "live_eval": {
+    "planned_version": "v1.8.11",
+    "admitted_live_evidence": []
+  },
+  "excluded_concurrent_work": "Root scriptbuilder and later OLS diagnostic registration-order fix are not part of functional670 review certification"
+}

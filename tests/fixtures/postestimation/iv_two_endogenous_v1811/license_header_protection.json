@@ -1,0 +1,25 @@
+{
+  "purpose": "License header protection only; original native evidence retained locally",
+  "tracked_log": "tests/fixtures/postestimation/iv_two_endogenous_v1811/stata_batch_a64072b627/iv_two_endogenous.log",
+  "raw_ignored_log": "local/iv-two-endogenous-license-raw/b8390db1/iv_two_endogenous.log",
+  "raw_sha256": "withheld-raw-sha256-6bfba508e8667183beecf282",
+  "redacted_sha256": "f0e8b1506dff4bf6cb987d73a85a6abca2bfb387a5a0106599ec9ef9129393e4",
+  "raw_size_bytes": 5769,
+  "redacted_size_bytes": 5766,
+  "changed_header_lines": [
+    14,
+    15
+  ],
+  "changed_fields": [
+    "Serial number",
+    "Licensed to"
+  ],
+  "redaction_marker": "[REDACTED]",
+  "raw_copy_byte_identical": true,
+  "raw_copy_git_ignored": true,
+  "outside_header_values_byte_identical": true,
+  "outside_header_values_sha256": "b16f52a79f52656a68f874db9b50e2e2ac76ef5bfee465a0ee4d9cb0b2366949",
+  "numerical_commands_and_results_unchanged": true,
+  "owned_new_text_scan": "license_header_scan.json",
+  "owned_new_text_scan_findings": 0
+}

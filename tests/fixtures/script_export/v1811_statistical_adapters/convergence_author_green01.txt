@@ -1,0 +1,26 @@
+Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_convergence_1e+20_r_9640b9e8c6 r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_convergence_1e+308_r_2c2b330ffc r
+.
+=============================== warnings summary ===============================
+tests/test_script_export_v1811_statistical_adapters.py::test_r_fixed_alpha_convergence_is_certified_before_publishing[1e+20]
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/genmod/generalized_linear_model.py:1923: FutureWarning: The bic value is computed using the deviance formula. After 0.13 this will change to the log-likelihood based formula. This change has no impact on the relative rank of models compared using BIC. You can directly access the log-likelihood version using the `bic_llf` attribute. You can suppress this message by calling statsmodels.genmod.generalized_linear_model.SET_USE_BIC_LLF with True to get the LLF-based version now or False to retainthe deviance version.
+    warnings.warn(
+
+tests/test_script_export_v1811_statistical_adapters.py::test_r_fixed_alpha_convergence_is_certified_before_publishing[1e+308]
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/genmod/families/varfuncs.py:265: RuntimeWarning: overflow encountered in multiply
+    return p + self.alpha*p**2
+
+tests/test_script_export_v1811_statistical_adapters.py::test_r_fixed_alpha_convergence_is_certified_before_publishing[1e+308]
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/genmod/families/family.py:1406: RuntimeWarning: divide by zero encountered in log
+    resid_dev -= endog_alpha * np.log(endog_alpha / mu_alpha)
+
+tests/test_script_export_v1811_statistical_adapters.py::test_r_fixed_alpha_convergence_is_certified_before_publishing[1e+308]
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/genmod/families/varfuncs.py:265: RuntimeWarning: overflow encountered in square
+    return p + self.alpha*p**2
+
+tests/test_script_export_v1811_statistical_adapters.py::test_r_fixed_alpha_convergence_is_certified_before_publishing[1e+308]
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/genmod/families/family.py:143: RuntimeWarning: invalid value encountered in multiply
+    return 1. / (self.link.deriv(mu)**2 * self.variance(mu))
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+2 passed, 111 deselected, 5 warnings in 1.32s

@@ -1,0 +1,34 @@
+{
+  "values": {
+    "b_mu": 1.2483437984325296,
+    "se_mu": 0.050280050552042,
+    "b_ar1": 0.7251382179295458,
+    "se_ar1": 0.11102606342035042,
+    "b_ar2": -0.24911046933134728,
+    "se_ar2": 0.06090381826115498,
+    "b_ma1": 0.3149430333526279,
+    "se_ma1": 0.11181996183026953,
+    "b_ma2": 0.09340986721841298,
+    "se_ma2": 0.06070969043882364,
+    "b_arch1": 0.2293990805741965,
+    "se_arch1": 0.027868094777216766,
+    "b_garch1": 0.551315587949618,
+    "se_garch1": 0.05111918726388252,
+    "b_omega": 0.2539689854668099,
+    "se_omega": 0.041106512575389074,
+    "ll": -3601.7150631644918,
+    "n": 2500.0,
+    "converged": 1.0,
+    "aic": 7219.4301263289835,
+    "bic": 7266.0224944158335
+  },
+  "raw_log": "/private/tmp/v1811-evaluation-8d8a2fd4c7d44af693b267e6d893d16f-r01/test_new_orders_report_final_p0/native-e01-arma22/lane_e.log",
+  "error_type": null,
+  "public_log": "/Users/jiayuanren/\u9879\u76ee\u89c4\u5212/.worktrees/codex-v1811-evaluation/tests/fixtures/eval_v1811/lane_e_20261005/r01/e01-arma22-stata-output.txt",
+  "command": [
+    "/Applications/Stata/StataMP.app/Contents/MacOS/stata-mp",
+    "-b",
+    "do",
+    "lane_e.do"
+  ]
+}

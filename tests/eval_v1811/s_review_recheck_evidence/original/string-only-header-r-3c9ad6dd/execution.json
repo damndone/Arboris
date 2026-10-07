@@ -1,0 +1,9 @@
+{
+  "command": [
+    "Rscript",
+    "analysis.R"
+  ],
+  "os_exit": 0,
+  "normalized_exit": 0,
+  "script_sha256": "a60c196038db5ce8db2616675f2bdeab29023a778d1902b85fc7ead8054bf5c2"
+}

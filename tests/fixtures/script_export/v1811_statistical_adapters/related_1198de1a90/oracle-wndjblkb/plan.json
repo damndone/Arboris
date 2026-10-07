@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "project_id": "weighted",
+  "run_id": "analysis_clustered",
+  "workbench_version": "1.8.11",
+  "lineage_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "sources": [
+    {
+      "source_id": "source",
+      "format": "csv",
+      "filename": "data.csv",
+      "sha256": "0f643fba418a92bc7a08befa218425056e866314340e1148775107241af4e143",
+      "read_options": {}
+    }
+  ],
+  "steps": [
+    {
+      "step_id": "weighted",
+      "kind": "model",
+      "operation": "model.ols",
+      "label": "",
+      "parameters": {
+        "model_type": "ols",
+        "y": "y",
+        "x": [
+          "x",
+          "z"
+        ],
+        "categorical_x": [],
+        "covariance": "clustered",
+        "cluster": "group",
+        "hac_lags": null,
+        "weights": {
+          "kind": "analysis",
+          "column": "aw"
+        },
+        "entity": null,
+        "time": null,
+        "model_options": {}
+      },
+      "inputs": [
+        "source"
+      ],
+      "output_dataset": null,
+      "expected": {
+        "nobs": 350,
+        "coefficients": {
+          "Intercept": 1.085282749557345,
+          "x": 0.6071313851092202,
+          "z": -0.2043614817840667
+        },
+        "std_errors": {
+          "Intercept": 0.05125740325389353,
+          "x": 0.053246702664154856,
+          "z": 0.0558248494212885
+        },
+        "statistics": {
+          "Intercept": {
+            "value": 21.17319022545112,
+            "p_value": 3.6868760298923884e-21,
+            "df": 34.0,
+            "distribution": "t"
+          },
+          "x": {
+            "value": 11.40223440573598,
+            "p_value": 3.6530415561264087e-13,
+            "df": 34.0,
+            "distribution": "t"
+          },
+          "z": {
+            "value": -3.6607618990931767,
+            "p_value": 0.0008460299836023631,
+            "df": 34.0,
+            "distribution": "t"
+          }
+        }
+      },
+      "tolerances": {},
+      "seed": null,
+      "snapshot": null
+    }
+  ]
+}

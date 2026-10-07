@@ -1,0 +1,26 @@
+{
+  "source": "Deterministic public synthetic DGP generated in base R; no user data",
+  "seed": 18111004,
+  "nobs": 650,
+  "endogenous": ["xe1", "xe2"],
+  "excluded_instruments": ["z1", "z2"],
+  "exogenous": ["x1"],
+  "dgp": {
+    "v1": "0.7*e+a",
+    "v2": "-0.5*e+0.3*a+b",
+    "xe1": "0.8*z1+0.25*z2+0.3*x1+v1",
+    "xe2": "-0.2*z1+0.9*z2-0.2*x1+v2",
+    "structural_error": "(1+0.3*abs(x1))*e",
+    "y": "0.7+0.4*x1+0.25*xe1-0.18*xe2+structural_error",
+    "innovations": "x1,z1,z2,e,a,b independent standard normal draws"
+  },
+  "sample_correlations": {
+    "xe1_structural_error": 0.44177504289699415,
+    "xe2_structural_error": -0.3521313121139707,
+    "z1_structural_error": 0.056109133825794022,
+    "z2_structural_error": -0.032371424006860543
+  },
+  "regressor_rank": 4,
+  "instrument_rank": 4,
+  "data_sha256": "d3b46c7cf6c42c4dc1db66b3ae63a0ef02ffe10ff3b24983687355daa238c497"
+}

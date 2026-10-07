@@ -1,0 +1,24 @@
+{
+  "meta": {
+    "generator": "tests/fixtures/admission/did/generate_oracle.R",
+    "r_version": "R version 4.6.0 (2026-04-24)",
+    "fixest": "0.14.1",
+    "seed": 20261003,
+    "n": 400,
+    "verification_level": "clustered by g as Stata xtreg, fe vce(cluster g); intercept estimate only"
+  },
+  "inference": {
+    "covariance_estimator": "cluster",
+    "df_method": "clusters_minus_one",
+    "reference_distribution": "t",
+    "df_resid": 199,
+    "n_clusters": 200
+  },
+  "coefficients": {
+    "Intercept": 1.24871379020845,
+    "_did_D": 0.667849681493598
+  },
+  "std_error": {
+    "_did_D": 0.198991640628701
+  }
+}

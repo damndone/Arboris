@@ -40,6 +40,7 @@ import { OperationSection } from "../../lineage/detail/sections/OperationSection
 import { RoleGroupsSection } from "../../lineage/detail/sections/RoleGroupsSection";
 import { EstimatedEquationSection } from "../../lineage/detail/sections/EstimatedEquationSection";
 import { CodeSection } from "../../lineage/detail/sections/CodeSection";
+import { ScriptExportSection } from "../../lineage/detail/sections/ScriptExportSection";
 import { DraftEditorSlot } from "../../lineage/detail/sections/DraftEditorSlot";
 import { CodeExecuteSection } from "../../lineage/detail/sections/CodeExecuteSection";
 import { StatisticalExplorationSection } from "../../lineage/detail/sections/StatisticalExplorationSection";
@@ -189,6 +190,7 @@ export const sectionRegistry: SectionEntry[] = [
     shouldRender: (n) => Boolean(n.code?.body),
     Component: CodeSection,
   },
+  { id: "scriptExport", order: 45, shouldRender: (n) => n.kind === "model" && !n.isDraft, Component: ScriptExportSection },
   {
     id: "lineage",
     order: 50,

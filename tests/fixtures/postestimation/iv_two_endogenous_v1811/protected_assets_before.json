@@ -1,0 +1,11 @@
+{
+  "tests/fixtures/postestimation/data.csv": "2e1b92f07632a8c88d047074f77cd6e5f9552b4f932f7d6ed2499161a0bf3084",
+  "tests/fixtures/postestimation/oracle.json": "d80dbc69f91648cbd17443f89deaf21df63296f1296a6d674c3ef9e135b9302c",
+  "tests/fixtures/postestimation/generate_oracle.R": "82b35d95a30650daf85de157c93eed380ddcb151557e64cf3ac5b9f0d4d459ef",
+  "tests/fixtures/postestimation/iv_2sls/oracle.json": "220f276435b2dceac140d576acea9aedd32959c0a4e7cacf5cc48a47f79c75e7",
+  "tests/fixtures/postestimation/iv_2sls/generate_oracle.py": "b19446b4fb0acee5598d8f0ec4a5102fe21defbda0cd293fd0f13025e2c9bada",
+  "tests/fixtures/admission/iv_2sls/data.csv": "880c3b4ff039e86d358f9d1c804dd729bcaeafe2bd33075f3649902c629c7a2f",
+  "tests/fixtures/admission/iv_2sls/oracle.json": "0691f282ded15fcf2e6fa0e03b7911d4032bd036ecc4686d1dcedaf10799af75",
+  "tests/test_admission_oracle_iv_2sls.py": "9140605e9b76f181c3bd6002f8f9aff4ea4970676097fde378af61822c39ef4c",
+  "tests/test_postestimation_registry.py": "3df22c102dc9070b2f774e8b7b34beca4908a17b73f8c4c62f423d320ac90782"
+}

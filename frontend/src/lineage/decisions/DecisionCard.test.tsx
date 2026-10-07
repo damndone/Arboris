@@ -25,6 +25,13 @@ const baseDP: DecisionPoint = {
 };
 
 describe("DecisionCard", () => {
+  it("shows the recorded explicit decision without default alternatives", () => {
+    const dp: DecisionPoint = {...baseDP, decision_id: "ols_default_robust_se", selected: "Design-based (linearization)", candidates: [], source: "user_explicit"};
+    render(<DecisionCard dp={dp} expanded={false} onToggle={() => {}} />);
+    expect(screen.getByText("User selected")).toBeInTheDocument();
+    expect(screen.queryByText("System default")).toBeNull();
+    expect(screen.queryByText(/Alternatives:/)).toBeNull();
+  });
   it("renders user-friendly title from registry", () => {
     render(<DecisionCard dp={baseDP} expanded={false} onToggle={() => {}} />);
     expect(screen.getByText("Model type")).toBeInTheDocument();

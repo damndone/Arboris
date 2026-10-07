@@ -1,0 +1,163 @@
+
+Fontconfig error: No writable cache directories
+	/opt/homebrew/var/cache/fontconfig
+	/Users/jiayuanren/.cache/fontconfig
+	/Users/jiayuanren/.fontconfig
+..F.......F............/Users/runner/work/crossbow/crossbow/arrow/cpp/src/arrow/util/cpu_info.cc:242: IOError: sysctlbyname failed for 'hw.l1dcachesize'. Detail: [errno 1] Operation not permitted
+/Users/runner/work/crossbow/crossbow/arrow/cpp/src/arrow/util/cpu_info.cc:242: IOError: sysctlbyname failed for 'hw.l2cachesize'. Detail: [errno 1] Operation not permitted
+/Users/runner/work/crossbow/crossbow/arrow/cpp/src/arrow/util/cpu_info.cc:242: IOError: sysctlbyname failed for 'hw.l3cachesize'. Detail: [errno 1] Operation not permitted
+/Users/runner/work/crossbow/crossbow/arrow/cpp/src/arrow/util/cpu_info.cc:242: IOError: sysctlbyname failed for 'hw.optional.neon'. Detail: [errno 1] Operation not permitted
+.......................FF
+=================================== FAILURES ===================================
+_ test_new_orders_report_final_parameters_se_ll_ic[small_beta-ar2-ma2-0.025-18112053] _
+
+name = 'small_beta', ar = [0.55], ma = [0.4], beta = 0.025, seed = 18112053
+tmp_path = PosixPath('/private/tmp/v1811-evaluation-8d8a2fd4c7d44af693b267e6d893d16f-r01/test_new_orders_report_final_p2')
+
+    @pytest.mark.parametrize('name,ar,ma,beta,seed', [
+        ('arma22', [.6,-.2], [.45,.15], .55, 18112051),
+        ('near_unit', [.98], [.25], .55, 18112052),
+        ('small_beta', [.55], [.4], .025, 18112053),
+    ])
+    def test_new_orders_report_final_parameters_se_ll_ic(name,ar,ma,beta,seed,tmp_path):
+        y=series(ar,ma,beta,seed)
+        data=OUT/(name+'.csv'); pd.DataFrame({'t':np.arange(1,len(y)+1),'y':y}).to_csv(data,index=False,float_format='%.17g')
+        options=f'ar(1/{len(ar)}) ma(1/{len(ma)}) arch(1) garch(1)'
+        body=f'import delimited "{data}", asdouble clear case(preserve)\ntsset t\nquietly arch y, {options} vce(opg) tolerance(1e-12) ltolerance(1e-12) nrtolerance(1e-8) iterate(500)\n'
+        names=['mu']+[f'ar{i}' for i in range(1,len(ar)+1)]+[f'ma{i}' for i in range(1,len(ma)+1)]+['arch1','garch1','omega']
+        body+='matrix b=e(b)\nmatrix V=e(V)\n'
+        for i,key in enumerate(names,1):
+            body+=emit('b_'+key,f'b[1,{i}]')+'\n'+emit('se_'+key,f'sqrt(V[{i},{i}])')+'\n'
+        for key,expression in [('ll','e(ll)'),('n','e(N)'),('converged','e(converged)')]:body+=emit(key,expression)+'\n'
+        body+='quietly estat ic\nmatrix IC=r(S)\n'+emit('aic','IC[1,5]')+'\n'+emit('bic','IC[1,6]')+'\n'
+        oracle=native_stata(body,'e01-'+name,tmp_path)
+        actual=fit_joint_arma_garch(y,mean_p=len(ar),mean_q=len(ma),include_constant=True,
+            variance_spec=VarianceCandidateSpec.create(model='garch',p=1,q=1,distribution='normal'),time_index_semantics='observation_order')
+        save('e01-'+name,{'oracle':oracle,'actual':actual.to_dict()})
+        assert oracle['converged']==1 and actual.converged and oracle['n']==actual.nobs==len(y)
+        for key in actual.parameter_names:
+>           assert actual.parameters[key]==pytest.approx(oracle['b_'+key],abs=1e-4,rel=0),(name,key)
+E           AssertionError: ('small_beta', 'mu')
+E           assert 1.2033724332708327 == 1.2034859648402048 ± 1.0e-04
+E             
+E             comparison failed
+E             Obtained: 1.2033724332708327
+E             Expected: 1.2034859648402048 ± 1.0e-04
+
+tests/eval_v1811/lane_e_20261005/test_e01_joint.py:43: AssertionError
+__ test_actual_default_cluster_kernel_and_final_lincom_match_stata[panel_ols] __
+
+family = 'panel_ols'
+tmp_path = PosixPath('/private/tmp/v1811-evaluation-8d8a2fd4c7d44af693b267e6d893d16f-r01/test_actual_default_cluster_ke0')
+
+    @pytest.mark.parametrize('family',['panel_ols','did'])
+    def test_actual_default_cluster_kernel_and_final_lincom_match_stata(family,tmp_path):
+        data=OUT/(family+'.csv');frame().to_csv(data,index=False,float_format='%.17g')
+        extra={'did_mode':'cohort','did_cohort_col':'first_treat'} if family=='did' else {}
+        root,packet,kernel=fit(create_project(tmp_path,'public').root,data,family,'y',['x1','x2'],entity_col='g',time_col='time',**extra)
+        term='_did_D' if family=='did' else 'x1'
+        body=f'import delimited "{data}", asdouble clear case(preserve)\nxtset g time\n'
+        if family=='did':body+='generate double D=(first_treat>0 & time>=first_treat)\n'
+        body+='quietly xtreg y '+('D ' if family=='did' else '')+'x1 x2 '+('i.time ' if family=='did' else '')+', fe vce(robust)\n'
+        native_term='D' if family=='did' else 'x1'
+        body+=emit('b',f'_b[{native_term}]')+'\n'+emit('se',f'_se[{native_term}]')+'\n'+emit('t',f'_b[{native_term}]/_se[{native_term}]')+'\n'+emit('df','e(df_r)')+'\n'
+        body+=emit('p',f'2*ttail(e(df_r),abs(_b[{native_term}]/_se[{native_term}]))')+'\n'
+        body+='quietly lincom x1-x2\n'+emit('lc','r(estimate)')+'\n'+emit('lc_se','r(se)')+'\n'+emit('lc_p','r(p)')+'\n'
+        body+='quietly test x1 x2\n'+emit('wald','r(F)')+'\n'+emit('wald_df','r(df)')+'\n'+emit('wald_den','r(df_r)')+'\n'+emit('wald_p','r(p)')+'\n'
+        native=native_stata(body,'e03-'+family,tmp_path)
+        lc=run_operation('lincom',[kernel],{'terms':{'x1':1,'x2':-1}})
+        wald=run_operation('wald',[kernel],{'constraints':[{'terms':{'x1':1},'value':0},{'terms':{'x2':1},'value':0}]})
+        save('e03-'+family,{'run':root,'packet':packet,'kernel':kernel,'native':native,'lincom':lc,'wald':wald})
+        row=packet['coefficients'][term]
+>       for key,ref,tol in [('estimate','b',1e-9),('std_error','se',1e-8),('p_value','p',1e-6)]:assert row[key]==pytest.approx(native[ref],abs=tol,rel=0)
+                                                                                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       assert 0.48385401548639123 == 0.4907132918351812 ± 1.0e-09
+E         
+E         comparison failed
+E         Obtained: 0.48385401548639123
+E         Expected: 0.4907132918351812 ± 1.0e-09
+
+tests/eval_v1811/lane_e_20261005/test_e03_panel_did.py:39: AssertionError
+________ test_full_and_first_origin_match_stata_and_ignore_future_tail _________
+
+tmp_path = PosixPath('/private/tmp/v1811-evaluation-8d8a2fd4c7d44af693b267e6d893d16f-r01/test_full_and_first_origin_mat0')
+
+    def test_full_and_first_origin_match_stata_and_ignore_future_tail(tmp_path):
+        spec=importlib.util.spec_from_file_location('e06_existing_runner',REPO/'tests/models/arma_garch/test_classical_replication.py')
+        module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+        rng=np.random.default_rng(18112101);source=pd.DataFrame({'when':pd.bdate_range('2025-01-01',periods=144),'value':rng.normal(size=144)})
+        result,actual=module._run(tmp_path/'full',source)
+        changed=source.copy();changed.loc[140:,'value']+=12
+        _,mutant=module._run(tmp_path/'changed',changed)
+        first=actual['ts.rolling_forecasts']['rows'][0];other=mutant['ts.rolling_forecasts']['rows'][0]
+        for key in ['conditional_mean','conditional_variance','lower_bound','upper_bound']:assert first[key]==other[key]
+        data=OUT/'e06-values.csv';source.assign(t=np.arange(1,145))[['t','value']].to_csv(data,index=False,float_format='%.17g')
+        body=f'import delimited "{data}", asdouble clear case(preserve)\ntsset t\nquietly arima value, arima(0,0,0) noconstant\n'
+        body+=emit('ll','e(ll)')+'\n'+emit('variance','_b[/sigma]^2')+'\n'
+        body+='quietly arima value if t<=140, arima(0,0,0) noconstant\n'+emit('prefix_variance','_b[/sigma]^2')+'\n'
+        native=native_stata(body,'e06-classic',tmp_path)
+        full=actual['ts.final_model']['in_sample_fit'];save('e06-classic',{'full':full,'first':first,'native':native,'sample':actual['ts.report']['sample']})
+>       assert full['variance_stage']['parameters']['sigma2']==pytest.approx(native['variance'],abs=1e-8,rel=0)
+E       assert 1.0841774164273454 == 1.0839934372675566 ± 1.0e-08
+E         
+E         comparison failed
+E         Obtained: 1.0841774164273454
+E         Expected: 1.0839934372675566 ± 1.0e-08
+
+tests/eval_v1811/lane_e_20261005/test_e06_classical.py:49: AssertionError
+_____________ test_missing_glm_nb_alpha_rejects_all_public_entries _____________
+
+tmp_path = PosixPath('/private/tmp/v1811-evaluation-8d8a2fd4c7d44af693b267e6d893d16f-r01/test_missing_glm_nb_alpha_reje0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x1734b3950>
+
+    def test_missing_glm_nb_alpha_rejects_all_public_entries(tmp_path,monkeypatch):
+        source=REPO/'tests/fixtures/count_models/reference-v3/nb2.csv';project=create_project(tmp_path,'missing').root
+        with TestClient(app) as client:
+            reply=client.post('/runs',data={'project_root':str(project),'mode':'auto','model_type':'glm:negative_binomial','y':'y','x':'x1,x2'},files={'file':(source.name,source.read_bytes(),'text/csv')})
+        monkeypatch.setenv('WORKBENCH_UI_ORIGIN','http://127.0.0.1:8000')
+        cli=CliRunner().invoke(cli_app,['run',str(project),str(source),'y','--x','x1','--x','x2','--model-type','glm:negative_binomial'])
+        agent_error=None
+        try:
+            compile_workflow(workflow_id='e07-missing-alpha',target={'run_id':'e07-source','node_ref':'stage:cleaned','artifact_id':'cleaned_dataset'},preconditions={'context_version':'node-operation-context/v1','context_fingerprint':'sha256:e07','active_head_run_id':'e07-source','owner_resolution':'single_candidate'},available_columns=['y','x1','x2'],steps=[{'step_id':'fit','operation_id':'model.genesis','spec':{'model_family':'glm:negative_binomial','branches':[{'branch_id':'a','outcome':'y','predictors':['x1','x2']}]}}])
+        except Exception as error:agent_error=str(error)
+        evidence={'http_status':reply.status_code,'http':reply.json(),'cli_exit':cli.exit_code,'cli_exception':str(cli.exception),'agent_error':agent_error}
+        save('e07-rejection',evidence)
+>       assert reply.status_code>=400,reply.text
+E       AssertionError: {"run_id":"20261005_091818_097439_36618812","status":"running"}
+E       assert 200 >= 400
+E        +  where 200 = <Response [200 OK]>.status_code
+
+tests/eval_v1811/lane_e_20261005/test_e07_entries.py:26: AssertionError
+=============================== warnings summary ===============================
+../../.venv/lib/python3.14/site-packages/fastapi/testclient.py:1
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+tests/eval_v1811/lane_e_20261005/test_e02_count.py::test_new_count_data_final_outputs_match_native_stata[fixed-mean-None]
+tests/eval_v1811/lane_e_20261005/test_e02_count.py::test_fixed_glm_expected_information_matches_fresh_r
+tests/eval_v1811/lane_e_20261005/test_e04_post.py::test_final_registered_public_post_values_match_real_r[wald-binomial]
+tests/eval_v1811/lane_e_20261005/test_e04_post.py::test_final_registered_public_post_values_match_real_r[wald-binomial]
+tests/eval_v1811/lane_e_20261005/test_e04_post.py::test_final_registered_public_post_values_match_real_r[wald-binomial]
+tests/eval_v1811/lane_e_20261005/test_e04_post.py::test_final_registered_public_post_values_match_real_r[wald-binomial]
+tests/eval_v1811/lane_e_20261005/test_e04_post.py::test_final_registered_public_post_values_match_real_r[wald-binomial]
+tests/eval_v1811/lane_e_20261005/test_e04_post.py::test_final_registered_public_post_values_match_real_r[wald-binomial]
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/genmod/generalized_linear_model.py:1923: FutureWarning: The bic value is computed using the deviance formula. After 0.13 this will change to the log-likelihood based formula. This change has no impact on the relative rank of models compared using BIC. You can directly access the log-likelihood version using the `bic_llf` attribute. You can suppress this message by calling statsmodels.genmod.generalized_linear_model.SET_USE_BIC_LLF with True to get the LLF-based version now or False to retainthe deviance version.
+    warnings.warn(
+
+tests/eval_v1811/lane_e_20261005/test_e02_count.py::test_alpha_zero_boundary_is_explicit_not_uncertified_numbers
+tests/eval_v1811/lane_e_20261005/test_e02_count.py::test_alpha_zero_boundary_is_explicit_not_uncertified_numbers
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/discrete/discrete_model.py:227: PerfectSeparationWarning: Perfect separation or prediction detected, parameter may not be identified
+    warnings.warn(msg, category=PerfectSeparationWarning)
+
+tests/eval_v1811/lane_e_20261005/test_e06_classical.py: 18 warnings
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/tsa/statespace/mlemodel.py:174: DeprecationWarning: Setting the shape on a NumPy array has been deprecated in NumPy 2.5.
+  As an alternative, you can create a new view using np.reshape (with copy=False if needed).
+    endog.shape = (endog.shape[0], 1)  # this will be C-contiguous
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/eval_v1811/lane_e_20261005/test_e01_joint.py::test_new_orders_report_final_parameters_se_ll_ic[small_beta-ar2-ma2-0.025-18112053]
+FAILED tests/eval_v1811/lane_e_20261005/test_e03_panel_did.py::test_actual_default_cluster_kernel_and_final_lincom_match_stata[panel_ols]
+FAILED tests/eval_v1811/lane_e_20261005/test_e06_classical.py::test_full_and_first_origin_match_stata_and_ignore_future_tail
+FAILED tests/eval_v1811/lane_e_20261005/test_e07_entries.py::test_missing_glm_nb_alpha_rejects_all_public_entries
+4 failed, 44 passed, 29 warnings in 33.41s

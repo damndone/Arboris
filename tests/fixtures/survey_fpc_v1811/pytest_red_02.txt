@@ -1,0 +1,435 @@
+FFFFFFFFFFFF....F.FFFFFFFFFFFFFFFFFFFFFFFFFF                             [100%]
+=================================== FAILURES ===================================
+__ test_single_stage_covariance_and_inference_match_independent_r[certainty] ___
+tests/test_survey_fpc_v1811.py:53: in test_single_stage_covariance_and_inference_match_independent_r
+    np.testing.assert_allclose(result.covariance, reference["covariance"], rtol=1e-9, atol=1e-11)
+E   AssertionError: 
+E   Not equal to tolerance rtol=1e-09, atol=1e-11
+E   
+E   Mismatched elements: 9 / 9 (100%)
+E   First 5 mismatches are at indices:
+E    [0, 0]: 2.5456972989458198 (ACTUAL), 2.0169689236183017 (DESIRED)
+E    [0, 1]: -0.2577806398144288 (ACTUAL), -0.205163931700237 (DESIRED)
+E    [0, 2]: -0.11340658480956914 (ACTUAL), -0.09123309624896439 (DESIRED)
+E    [1, 0]: -0.2577806398144288 (ACTUAL), -0.205163931700237 (DESIRED)
+E    [1, 1]: 0.03144381555448204 (ACTUAL), 0.025434399320858125 (DESIRED)
+E   Max absolute difference among violations: 0.52872838
+E   Max relative difference among violations: 0.26214007
+E    ACTUAL: array([[ 2.545697, -0.257781, -0.113407],
+E          [-0.257781,  0.031444,  0.010345],
+E          [-0.113407,  0.010345,  0.0079  ]])
+E    DESIRED: array([[ 2.016969, -0.205164, -0.091233],
+E          [-0.205164,  0.025434,  0.008378],
+E          [-0.091233,  0.008378,  0.006474]])
+___ test_single_stage_covariance_and_inference_match_independent_r[fraction] ___
+tests/test_survey_fpc_v1811.py:53: in test_single_stage_covariance_and_inference_match_independent_r
+    np.testing.assert_allclose(result.covariance, reference["covariance"], rtol=1e-9, atol=1e-11)
+E   AssertionError: 
+E   Not equal to tolerance rtol=1e-09, atol=1e-11
+E   
+E   Mismatched elements: 9 / 9 (100%)
+E   First 5 mismatches are at indices:
+E    [0, 0]: 2.5456972989458198 (ACTUAL), 2.027706274433024 (DESIRED)
+E    [0, 1]: -0.2577806398144288 (ACTUAL), -0.20592551369603543 (DESIRED)
+E    [0, 2]: -0.11340658480956914 (ACTUAL), -0.09221667312783836 (DESIRED)
+E    [1, 0]: -0.2577806398144288 (ACTUAL), -0.20592551369603543 (DESIRED)
+E    [1, 1]: 0.03144381555448204 (ACTUAL), 0.025488417034010332 (DESIRED)
+E   Max absolute difference among violations: 0.51799102
+E   Max relative difference among violations: 0.25545664
+E    ACTUAL: array([[ 2.545697, -0.257781, -0.113407],
+E          [-0.257781,  0.031444,  0.010345],
+E          [-0.113407,  0.010345,  0.0079  ]])
+E    DESIRED: array([[ 2.027706, -0.205926, -0.092217],
+E          [-0.205926,  0.025488,  0.008448],
+E          [-0.092217,  0.008448,  0.006564]])
+_ test_single_stage_covariance_and_inference_match_independent_r[lonely_adjust] _
+tests/test_survey_fpc_v1811.py:53: in test_single_stage_covariance_and_inference_match_independent_r
+    np.testing.assert_allclose(result.covariance, reference["covariance"], rtol=1e-9, atol=1e-11)
+E   AssertionError: 
+E   Not equal to tolerance rtol=1e-09, atol=1e-11
+E   
+E   Mismatched elements: 9 / 9 (100%)
+E   First 5 mismatches are at indices:
+E    [0, 0]: 3.30861474126472 (ACTUAL), 2.634421873528657 (DESIRED)
+E    [0, 1]: -0.3694198334714563 (ACTUAL), -0.2942538580028013 (DESIRED)
+E    [0, 2]: -0.10991946745145628 (ACTUAL), -0.09020658048358 (DESIRED)
+E    [1, 0]: -0.3694198334714563 (ACTUAL), -0.2942538580028013 (DESIRED)
+E    [1, 1]: 0.04673995244694859 (ACTUAL), 0.03755945681510941 (DESIRED)
+E   Max absolute difference among violations: 0.67419287
+E   Max relative difference among violations: 0.25591682
+E    ACTUAL: array([[ 3.308615, -0.36942 , -0.109919],
+E          [-0.36942 ,  0.04674 ,  0.010815],
+E          [-0.109919,  0.010815,  0.007093]])
+E    DESIRED: array([[ 2.634422, -0.294254, -0.090207],
+E          [-0.294254,  0.037559,  0.008888],
+E          [-0.090207,  0.008888,  0.005982]])
+_ test_single_stage_covariance_and_inference_match_independent_r[lonely_average] _
+tests/test_survey_fpc_v1811.py:53: in test_single_stage_covariance_and_inference_match_independent_r
+    np.testing.assert_allclose(result.covariance, reference["covariance"], rtol=1e-9, atol=1e-11)
+E   AssertionError: 
+E   Not equal to tolerance rtol=1e-09, atol=1e-11
+E   
+E   Mismatched elements: 9 / 9 (100%)
+E   First 5 mismatches are at indices:
+E    [0, 0]: 3.679375982605721 (ACTUAL), 2.934344349902997 (DESIRED)
+E    [0, 1]: -0.4079373576018032 (ACTUAL), -0.3255975700861629 (DESIRED)
+E    [0, 2]: -0.12461004963731845 (ACTUAL), -0.10233408567940343 (DESIRED)
+E    [1, 0]: -0.4079373576018032 (ACTUAL), -0.3255975700861629 (DESIRED)
+E    [1, 1]: 0.051422402081739614 (ACTUAL), 0.04142907868118812 (DESIRED)
+E   Max absolute difference among violations: 0.74503163
+E   Max relative difference among violations: 0.25390055
+E    ACTUAL: array([[ 3.679376, -0.407937, -0.12461 ],
+E          [-0.407937,  0.051422,  0.012218],
+E          [-0.12461 ,  0.012218,  0.008096]])
+E    DESIRED: array([[ 2.934344, -0.325598, -0.102334],
+E          [-0.325598,  0.041429,  0.010052],
+E          [-0.102334,  0.010052,  0.006829]])
+_ test_single_stage_covariance_and_inference_match_independent_r[lonely_census] _
+tests/test_survey_fpc_v1811.py:50: in test_single_stage_covariance_and_inference_match_independent_r
+    design, result = _fit(reference)
+                     ^^^^^^^^^^^^^^^
+tests/test_survey_fpc_v1811.py:41: in _fit
+    result = estimate_with_design(design, glm_estimator_spec(
+backend/workbench/survey/engine.py:149: in estimate_with_design
+    cov = design._design_variance(contributions, mask=mask)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/survey/design.py:244: in _design_variance
+    raise SurveyEngineError(
+E   workbench.survey.errors.SurveyEngineError: SURVEY_LONELY_PSU: single-PSU stratum: h01
+_ test_single_stage_covariance_and_inference_match_independent_r[lonely_certainty] _
+tests/test_survey_fpc_v1811.py:53: in test_single_stage_covariance_and_inference_match_independent_r
+    np.testing.assert_allclose(result.covariance, reference["covariance"], rtol=1e-9, atol=1e-11)
+E   AssertionError: 
+E   Not equal to tolerance rtol=1e-09, atol=1e-11
+E   
+E   Mismatched elements: 9 / 9 (100%)
+E   First 5 mismatches are at indices:
+E    [0, 0]: 3.219453984780006 (ACTUAL), 2.5675513061651225 (DESIRED)
+E    [0, 1]: -0.3569451879015778 (ACTUAL), -0.28489787382539256 (DESIRED)
+E    [0, 2]: -0.10903379343265364 (ACTUAL), -0.089542324969478 (DESIRED)
+E    [1, 0]: -0.3569451879015778 (ACTUAL), -0.28489787382539256 (DESIRED)
+E    [1, 1]: 0.044994601821522165 (ACTUAL), 0.03625044384603961 (DESIRED)
+E   Max absolute difference among violations: 0.65190268
+E   Max relative difference among violations: 0.25390055
+E    ACTUAL: array([[ 3.219454, -0.356945, -0.109034],
+E          [-0.356945,  0.044995,  0.010691],
+E          [-0.109034,  0.010691,  0.007084]])
+E    DESIRED: array([[ 2.567551, -0.284898, -0.089542],
+E          [-0.284898,  0.03625 ,  0.008795],
+E          [-0.089542,  0.008795,  0.005975]])
+_ test_single_stage_covariance_and_inference_match_independent_r[lonely_remove] _
+tests/test_survey_fpc_v1811.py:53: in test_single_stage_covariance_and_inference_match_independent_r
+    np.testing.assert_allclose(result.covariance, reference["covariance"], rtol=1e-9, atol=1e-11)
+E   AssertionError: 
+E   Not equal to tolerance rtol=1e-09, atol=1e-11
+E   
+E   Mismatched elements: 9 / 9 (100%)
+E   First 5 mismatches are at indices:
+E    [0, 0]: 3.219453984780006 (ACTUAL), 2.5675513061651225 (DESIRED)
+E    [0, 1]: -0.3569451879015778 (ACTUAL), -0.28489787382539256 (DESIRED)
+E    [0, 2]: -0.10903379343265364 (ACTUAL), -0.089542324969478 (DESIRED)
+E    [1, 0]: -0.3569451879015778 (ACTUAL), -0.28489787382539256 (DESIRED)
+E    [1, 1]: 0.044994601821522165 (ACTUAL), 0.03625044384603961 (DESIRED)
+E   Max absolute difference among violations: 0.65190268
+E   Max relative difference among violations: 0.25390055
+E    ACTUAL: array([[ 3.219454, -0.356945, -0.109034],
+E          [-0.356945,  0.044995,  0.010691],
+E          [-0.109034,  0.010691,  0.007084]])
+E    DESIRED: array([[ 2.567551, -0.284898, -0.089542],
+E          [-0.284898,  0.03625 ,  0.008795],
+E          [-0.089542,  0.008795,  0.005975]])
+____ test_single_stage_covariance_and_inference_match_independent_r[no_psu] ____
+tests/test_survey_fpc_v1811.py:53: in test_single_stage_covariance_and_inference_match_independent_r
+    np.testing.assert_allclose(result.covariance, reference["covariance"], rtol=1e-9, atol=1e-11)
+E   AssertionError: 
+E   Not equal to tolerance rtol=1e-09, atol=1e-11
+E   
+E   Mismatched elements: 9 / 9 (100%)
+E   First 5 mismatches are at indices:
+E    [0, 0]: 0.5517762025316968 (ACTUAL), 0.27588810126585 (DESIRED)
+E    [0, 1]: -0.04347331900870448 (ACTUAL), -0.021736659504352412 (DESIRED)
+E    [0, 2]: -0.04791131560784571 (ACTUAL), -0.02395565780392296 (DESIRED)
+E    [1, 0]: -0.04347331900870448 (ACTUAL), -0.021736659504352412 (DESIRED)
+E    [1, 1]: 0.006121316753341629 (ACTUAL), 0.0030606583766708334 (DESIRED)
+E   Max absolute difference among violations: 0.2758881
+E   Max relative difference among violations: 1.
+E    ACTUAL: array([[ 0.551776, -0.043473, -0.047911],
+E          [-0.043473,  0.006121,  0.001595],
+E          [-0.047911,  0.001595,  0.007108]])
+E    DESIRED: array([[ 0.275888, -0.021737, -0.023956],
+E          [-0.021737,  0.003061,  0.000797],
+E          [-0.023956,  0.000797,  0.003554]])
+__ test_single_stage_covariance_and_inference_match_independent_r[no_strata] ___
+tests/test_survey_fpc_v1811.py:53: in test_single_stage_covariance_and_inference_match_independent_r
+    np.testing.assert_allclose(result.covariance, reference["covariance"], rtol=1e-9, atol=1e-11)
+E   AssertionError: 
+E   Not equal to tolerance rtol=1e-09, atol=1e-11
+E   
+E   Mismatched elements: 9 / 9 (100%)
+E   First 5 mismatches are at indices:
+E    [0, 0]: 1.8358932808716977 (ACTUAL), 0.9179466404358566 (DESIRED)
+E    [0, 1]: -0.18400637442583942 (ACTUAL), -0.09200318721292065 (DESIRED)
+E    [0, 2]: -0.09227487551501826 (ACTUAL), -0.046137437757509676 (DESIRED)
+E    [1, 0]: -0.18400637442583942 (ACTUAL), -0.09200318721292065 (DESIRED)
+E    [1, 1]: 0.02444555089988016 (ACTUAL), 0.012222775449940167 (DESIRED)
+E   Max absolute difference among violations: 0.91794664
+E   Max relative difference among violations: 1.
+E    ACTUAL: array([[ 1.835893, -0.184006, -0.092275],
+E          [-0.184006,  0.024446,  0.006417],
+E          [-0.092275,  0.006417,  0.008524]])
+E    DESIRED: array([[ 0.917947, -0.092003, -0.046137],
+E          [-0.092003,  0.012223,  0.003209],
+E          [-0.046137,  0.003209,  0.004262]])
+__ test_single_stage_covariance_and_inference_match_independent_r[population] __
+tests/test_survey_fpc_v1811.py:53: in test_single_stage_covariance_and_inference_match_independent_r
+    np.testing.assert_allclose(result.covariance, reference["covariance"], rtol=1e-9, atol=1e-11)
+E   AssertionError: 
+E   Not equal to tolerance rtol=1e-09, atol=1e-11
+E   
+E   Mismatched elements: 9 / 9 (100%)
+E   First 5 mismatches are at indices:
+E    [0, 0]: 2.5456972989458198 (ACTUAL), 2.027706274433024 (DESIRED)
+E    [0, 1]: -0.2577806398144288 (ACTUAL), -0.20592551369603543 (DESIRED)
+E    [0, 2]: -0.11340658480956914 (ACTUAL), -0.09221667312783836 (DESIRED)
+E    [1, 0]: -0.2577806398144288 (ACTUAL), -0.20592551369603543 (DESIRED)
+E    [1, 1]: 0.03144381555448204 (ACTUAL), 0.025488417034010332 (DESIRED)
+E   Max absolute difference among violations: 0.51799102
+E   Max relative difference among violations: 0.25545664
+E    ACTUAL: array([[ 2.545697, -0.257781, -0.113407],
+E          [-0.257781,  0.031444,  0.010345],
+E          [-0.113407,  0.010345,  0.0079  ]])
+E    DESIRED: array([[ 2.027706, -0.205926, -0.092217],
+E          [-0.205926,  0.025488,  0.008448],
+E          [-0.092217,  0.008448,  0.006564]])
+_ test_single_stage_covariance_and_inference_match_independent_r[population_certainty] _
+tests/test_survey_fpc_v1811.py:53: in test_single_stage_covariance_and_inference_match_independent_r
+    np.testing.assert_allclose(result.covariance, reference["covariance"], rtol=1e-9, atol=1e-11)
+E   AssertionError: 
+E   Not equal to tolerance rtol=1e-09, atol=1e-11
+E   
+E   Mismatched elements: 9 / 9 (100%)
+E   First 5 mismatches are at indices:
+E    [0, 0]: 2.5456972989458198 (ACTUAL), 2.0169689236183017 (DESIRED)
+E    [0, 1]: -0.2577806398144288 (ACTUAL), -0.205163931700237 (DESIRED)
+E    [0, 2]: -0.11340658480956914 (ACTUAL), -0.09123309624896439 (DESIRED)
+E    [1, 0]: -0.2577806398144288 (ACTUAL), -0.205163931700237 (DESIRED)
+E    [1, 1]: 0.03144381555448204 (ACTUAL), 0.025434399320858125 (DESIRED)
+E   Max absolute difference among violations: 0.52872838
+E   Max relative difference among violations: 0.26214007
+E    ACTUAL: array([[ 2.545697, -0.257781, -0.113407],
+E          [-0.257781,  0.031444,  0.010345],
+E          [-0.113407,  0.010345,  0.0079  ]])
+E    DESIRED: array([[ 2.016969, -0.205164, -0.091233],
+E          [-0.205164,  0.025434,  0.008378],
+E          [-0.091233,  0.008378,  0.006474]])
+_ test_single_stage_covariance_and_inference_match_independent_r[subpopulation] _
+tests/test_survey_fpc_v1811.py:53: in test_single_stage_covariance_and_inference_match_independent_r
+    np.testing.assert_allclose(result.covariance, reference["covariance"], rtol=1e-9, atol=1e-11)
+E   AssertionError: 
+E   Not equal to tolerance rtol=1e-09, atol=1e-11
+E   
+E   Mismatched elements: 9 / 9 (100%)
+E   First 5 mismatches are at indices:
+E    [0, 0]: 0.4642972029037946 (ACTUAL), 0.36021821220690925 (DESIRED)
+E    [0, 1]: -0.06141353745587011 (ACTUAL), -0.04801861707509311 (DESIRED)
+E    [0, 2]: -0.034671564793694334 (ACTUAL), -0.027956015909127885 (DESIRED)
+E    [1, 0]: -0.06141353745587011 (ACTUAL), -0.04801861707509311 (DESIRED)
+E    [1, 1]: 0.020344595759092206 (ACTUAL), 0.016579848173753853 (DESIRED)
+E   Max absolute difference among violations: 0.10407899
+E   Max relative difference among violations: 0.28893317
+E    ACTUAL: array([[ 4.642972e-01, -6.141354e-02, -3.467156e-02],
+E          [-6.141354e-02,  2.034460e-02, -3.826141e-05],
+E          [-3.467156e-02, -3.826141e-05,  6.648787e-03]])
+E    DESIRED: array([[ 3.602182e-01, -4.801862e-02, -2.795602e-02],
+E          [-4.801862e-02,  1.657985e-02, -3.317349e-05],
+E          [-2.795602e-02, -3.317349e-05,  5.403752e-03]])
+_________ test_census_has_zero_variance_even_for_a_single_psu_stratum __________
+tests/test_survey_fpc_v1811.py:97: in test_census_has_zero_variance_even_for_a_single_psu_stratum
+    actual = _design(frame, fpc="all_certainty_fpc")._design_variance(frame[["x1", "x2"]].to_numpy())
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/survey/design.py:244: in _design_variance
+    raise SurveyEngineError(
+E   workbench.survey.errors.SurveyEngineError: SURVEY_LONELY_PSU: single-PSU stratum: h01
+_________ test_invalid_fpc_values_are_rejected_without_coercion[-0.1] __________
+tests/test_survey_fpc_v1811.py:111: in test_invalid_fpc_values_are_rejected_without_coercion
+    with pytest.raises(SurveyEngineError, match="FPC"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE SurveyEngineError
+__________ test_invalid_fpc_values_are_rejected_without_coercion[nan] __________
+tests/test_survey_fpc_v1811.py:111: in test_invalid_fpc_values_are_rejected_without_coercion
+    with pytest.raises(SurveyEngineError, match="FPC"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE SurveyEngineError
+__________ test_invalid_fpc_values_are_rejected_without_coercion[inf] __________
+tests/test_survey_fpc_v1811.py:111: in test_invalid_fpc_values_are_rejected_without_coercion
+    with pytest.raises(SurveyEngineError, match="FPC"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE SurveyEngineError
+_________ test_invalid_fpc_values_are_rejected_without_coercion[-inf] __________
+tests/test_survey_fpc_v1811.py:111: in test_invalid_fpc_values_are_rejected_without_coercion
+    with pytest.raises(SurveyEngineError, match="FPC"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE SurveyEngineError
+________ test_invalid_fpc_values_are_rejected_without_coercion[value4] _________
+tests/test_survey_fpc_v1811.py:111: in test_invalid_fpc_values_are_rejected_without_coercion
+    with pytest.raises(SurveyEngineError, match="FPC"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE SurveyEngineError
+__________ test_invalid_fpc_values_are_rejected_without_coercion[10] ___________
+tests/test_survey_fpc_v1811.py:111: in test_invalid_fpc_values_are_rejected_without_coercion
+    with pytest.raises(SurveyEngineError, match="FPC"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE SurveyEngineError
+_________ test_invalid_fpc_values_are_rejected_without_coercion[True] __________
+tests/test_survey_fpc_v1811.py:111: in test_invalid_fpc_values_are_rejected_without_coercion
+    with pytest.raises(SurveyEngineError, match="FPC"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE SurveyEngineError
+_________ test_invalid_fpc_values_are_rejected_without_coercion[10.5] __________
+tests/test_survey_fpc_v1811.py:111: in test_invalid_fpc_values_are_rejected_without_coercion
+    with pytest.raises(SurveyEngineError, match="FPC"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE SurveyEngineError
+________ test_invalid_fpc_values_are_rejected_without_coercion[(10+1j)] ________
+tests/test_survey_fpc_v1811.py:111: in test_invalid_fpc_values_are_rejected_without_coercion
+    with pytest.raises(SurveyEngineError, match="FPC"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE SurveyEngineError
+_______ test_mixed_count_fraction_units_are_rejected_even_across_strata ________
+tests/test_survey_fpc_v1811.py:118: in test_mixed_count_fraction_units_are_rejected_even_across_strata
+    with pytest.raises(SurveyEngineError, match="FPC"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE SurveyEngineError
+____________ test_boolean_inside_numeric_object_column_is_not_cast _____________
+tests/test_survey_fpc_v1811.py:127: in test_boolean_inside_numeric_object_column_is_not_cast
+    with pytest.raises(SurveyEngineError, match="FPC"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE SurveyEngineError
+________________ test_fpc_must_be_constant_within_each_stratum _________________
+tests/test_survey_fpc_v1811.py:134: in test_fpc_must_be_constant_within_each_stratum
+    with pytest.raises(SurveyEngineError, match="FPC"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE SurveyEngineError
+_________ test_population_cannot_be_smaller_than_full_design_psu_count _________
+tests/test_survey_fpc_v1811.py:141: in test_population_cannot_be_smaller_than_full_design_psu_count
+    with pytest.raises(SurveyEngineError, match="FPC"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE SurveyEngineError
+__________ test_fpc_column_parameter_is_a_single_nonempty_name[True] ___________
+tests/test_survey_fpc_v1811.py:147: in test_fpc_column_parameter_is_a_single_nonempty_name
+    with pytest.raises(SurveyEngineError, match="FPC"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AssertionError: Regex pattern did not match.
+E     Expected regex: 'FPC'
+E     Actual message: 'SURVEY_DESIGN_COLUMN_MISSING: column True is not in the frame'
+__________ test_fpc_column_parameter_is_a_single_nonempty_name[False] __________
+tests/test_survey_fpc_v1811.py:147: in test_fpc_column_parameter_is_a_single_nonempty_name
+    with pytest.raises(SurveyEngineError, match="FPC"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE SurveyEngineError
+____________ test_fpc_column_parameter_is_a_single_nonempty_name[0] ____________
+tests/test_survey_fpc_v1811.py:147: in test_fpc_column_parameter_is_a_single_nonempty_name
+    with pytest.raises(SurveyEngineError, match="FPC"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE SurveyEngineError
+____________ test_fpc_column_parameter_is_a_single_nonempty_name[1] ____________
+tests/test_survey_fpc_v1811.py:147: in test_fpc_column_parameter_is_a_single_nonempty_name
+    with pytest.raises(SurveyEngineError, match="FPC"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AssertionError: Regex pattern did not match.
+E     Expected regex: 'FPC'
+E     Actual message: 'SURVEY_DESIGN_COLUMN_MISSING: column 1 is not in the frame'
+_________ test_fpc_column_parameter_is_a_single_nonempty_name[column4] _________
+tests/test_survey_fpc_v1811.py:147: in test_fpc_column_parameter_is_a_single_nonempty_name
+    with pytest.raises(SurveyEngineError, match="FPC"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE SurveyEngineError
+_________ test_fpc_column_parameter_is_a_single_nonempty_name[column5] _________
+tests/test_survey_fpc_v1811.py:148: in test_fpc_column_parameter_is_a_single_nonempty_name
+    _design(fpc=column)
+tests/test_survey_fpc_v1811.py:26: in _design
+    return SurveyDesign(frame=_data() if frame is None else frame,
+<string>:13: in __init__
+    ???
+backend/workbench/survey/design.py:87: in __post_init__
+    if column not in self.frame.columns:
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../.venv/lib/python3.14/site-packages/pandas/core/indexes/base.py:5369: in __contains__
+    hash(key)
+E   TypeError: unhashable type: 'list'
+____________ test_fpc_column_parameter_is_a_single_nonempty_name[] _____________
+tests/test_survey_fpc_v1811.py:147: in test_fpc_column_parameter_is_a_single_nonempty_name
+    with pytest.raises(SurveyEngineError, match="FPC"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE SurveyEngineError
+___________ test_fpc_with_declared_replicate_design_is_rejected[brr] ___________
+tests/test_survey_fpc_v1811.py:153: in test_fpc_with_declared_replicate_design_is_rejected
+    with pytest.raises(SurveyEngineError, match="FPC"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE SurveyEngineError
+________ test_fpc_with_declared_replicate_design_is_rejected[jackknife] ________
+tests/test_survey_fpc_v1811.py:153: in test_fpc_with_declared_replicate_design_is_rejected
+    with pytest.raises(SurveyEngineError, match="FPC"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE SurveyEngineError
+________ test_fpc_with_declared_replicate_design_is_rejected[bootstrap] ________
+tests/test_survey_fpc_v1811.py:153: in test_fpc_with_declared_replicate_design_is_rejected
+    with pytest.raises(SurveyEngineError, match="FPC"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE SurveyEngineError
+________ test_fpc_with_declared_replicate_design_is_rejected[provided] _________
+tests/test_survey_fpc_v1811.py:153: in test_fpc_with_declared_replicate_design_is_rejected
+    with pytest.raises(SurveyEngineError, match="FPC"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE SurveyEngineError
+_______ test_fpc_with_replicate_columns_is_rejected_even_without_a_type ________
+tests/test_survey_fpc_v1811.py:159: in test_fpc_with_replicate_columns_is_rejected_even_without_a_type
+    with pytest.raises(SurveyEngineError, match="FPC"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE SurveyEngineError
+_______________ test_fpc_is_revalidated_after_dataframe_mutation _______________
+tests/test_survey_fpc_v1811.py:167: in test_fpc_is_revalidated_after_dataframe_mutation
+    with pytest.raises(SurveyEngineError, match="FPC"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE SurveyEngineError
+=========================== short test summary info ============================
+FAILED tests/test_survey_fpc_v1811.py::test_single_stage_covariance_and_inference_match_independent_r[certainty]
+FAILED tests/test_survey_fpc_v1811.py::test_single_stage_covariance_and_inference_match_independent_r[fraction]
+FAILED tests/test_survey_fpc_v1811.py::test_single_stage_covariance_and_inference_match_independent_r[lonely_adjust]
+FAILED tests/test_survey_fpc_v1811.py::test_single_stage_covariance_and_inference_match_independent_r[lonely_average]
+FAILED tests/test_survey_fpc_v1811.py::test_single_stage_covariance_and_inference_match_independent_r[lonely_census]
+FAILED tests/test_survey_fpc_v1811.py::test_single_stage_covariance_and_inference_match_independent_r[lonely_certainty]
+FAILED tests/test_survey_fpc_v1811.py::test_single_stage_covariance_and_inference_match_independent_r[lonely_remove]
+FAILED tests/test_survey_fpc_v1811.py::test_single_stage_covariance_and_inference_match_independent_r[no_psu]
+FAILED tests/test_survey_fpc_v1811.py::test_single_stage_covariance_and_inference_match_independent_r[no_strata]
+FAILED tests/test_survey_fpc_v1811.py::test_single_stage_covariance_and_inference_match_independent_r[population]
+FAILED tests/test_survey_fpc_v1811.py::test_single_stage_covariance_and_inference_match_independent_r[population_certainty]
+FAILED tests/test_survey_fpc_v1811.py::test_single_stage_covariance_and_inference_match_independent_r[subpopulation]
+FAILED tests/test_survey_fpc_v1811.py::test_census_has_zero_variance_even_for_a_single_psu_stratum
+FAILED tests/test_survey_fpc_v1811.py::test_invalid_fpc_values_are_rejected_without_coercion[-0.1]
+FAILED tests/test_survey_fpc_v1811.py::test_invalid_fpc_values_are_rejected_without_coercion[nan]
+FAILED tests/test_survey_fpc_v1811.py::test_invalid_fpc_values_are_rejected_without_coercion[inf]
+FAILED tests/test_survey_fpc_v1811.py::test_invalid_fpc_values_are_rejected_without_coercion[-inf]
+FAILED tests/test_survey_fpc_v1811.py::test_invalid_fpc_values_are_rejected_without_coercion[value4]
+FAILED tests/test_survey_fpc_v1811.py::test_invalid_fpc_values_are_rejected_without_coercion[10]
+FAILED tests/test_survey_fpc_v1811.py::test_invalid_fpc_values_are_rejected_without_coercion[True]
+FAILED tests/test_survey_fpc_v1811.py::test_invalid_fpc_values_are_rejected_without_coercion[10.5]
+FAILED tests/test_survey_fpc_v1811.py::test_invalid_fpc_values_are_rejected_without_coercion[(10+1j)]
+FAILED tests/test_survey_fpc_v1811.py::test_mixed_count_fraction_units_are_rejected_even_across_strata
+FAILED tests/test_survey_fpc_v1811.py::test_boolean_inside_numeric_object_column_is_not_cast
+FAILED tests/test_survey_fpc_v1811.py::test_fpc_must_be_constant_within_each_stratum
+FAILED tests/test_survey_fpc_v1811.py::test_population_cannot_be_smaller_than_full_design_psu_count
+FAILED tests/test_survey_fpc_v1811.py::test_fpc_column_parameter_is_a_single_nonempty_name[True]
+FAILED tests/test_survey_fpc_v1811.py::test_fpc_column_parameter_is_a_single_nonempty_name[False]
+FAILED tests/test_survey_fpc_v1811.py::test_fpc_column_parameter_is_a_single_nonempty_name[0]
+FAILED tests/test_survey_fpc_v1811.py::test_fpc_column_parameter_is_a_single_nonempty_name[1]
+FAILED tests/test_survey_fpc_v1811.py::test_fpc_column_parameter_is_a_single_nonempty_name[column4]
+FAILED tests/test_survey_fpc_v1811.py::test_fpc_column_parameter_is_a_single_nonempty_name[column5]
+FAILED tests/test_survey_fpc_v1811.py::test_fpc_column_parameter_is_a_single_nonempty_name[]
+FAILED tests/test_survey_fpc_v1811.py::test_fpc_with_declared_replicate_design_is_rejected[brr]
+FAILED tests/test_survey_fpc_v1811.py::test_fpc_with_declared_replicate_design_is_rejected[jackknife]
+FAILED tests/test_survey_fpc_v1811.py::test_fpc_with_declared_replicate_design_is_rejected[bootstrap]
+FAILED tests/test_survey_fpc_v1811.py::test_fpc_with_declared_replicate_design_is_rejected[provided]
+FAILED tests/test_survey_fpc_v1811.py::test_fpc_with_replicate_columns_is_rejected_even_without_a_type
+FAILED tests/test_survey_fpc_v1811.py::test_fpc_is_revalidated_after_dataframe_mutation
+39 failed, 5 passed in 1.18s

@@ -751,3 +751,19 @@ def test_duplicate_identity_is_rejected(tmp_path: Path) -> None:
         read_lmm_public_results(tmp_path)
 
     assert raised.value.code == "LMM_DUPLICATE_IDENTITY"
+
+
+@pytest.mark.parametrize("version", ["statsmodels_mixedlm_v1", "statsmodels_mixedlm_v2"])
+def test_reads_both_lmm_covariance_definitions_by_estimator_version(version: str) -> None:
+    # v1: inverse profiled Hessian; v2 (v1.8.11): GLS covariance as lme4 and Stata.
+    payload = _complete_payload()
+    payload["estimator_version"] = version
+    assert parse_lmm_result_payload_v1(payload)["estimator_version"] == version
+
+
+def test_rejects_an_unknown_lmm_estimator_version() -> None:
+    payload = _complete_payload()
+    payload["estimator_version"] = "statsmodels_mixedlm_v3"
+    with pytest.raises(VersionedResultReadError) as raised:
+        parse_lmm_result_payload_v1(payload)
+    assert raised.value.code == "LMM_PAYLOAD_INVALID"

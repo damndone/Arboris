@@ -54,9 +54,20 @@ export function describeInference(result: unknown): string | null {
   const evidence = record(model?.covariance_evidence) ?? record(model?.inference_config);
   if (!evidence) return null;
   const covariance = typeof evidence.covariance === "string" ? evidence.covariance : "";
-  const parts = [`Standard errors: ${STANDARD_ERRORS[covariance] ?? (covariance || "unspecified")}`];
+  // A panel or DID fit (it names its entity) with robust errors did not cluster
+  // by entity: inconsistent with a fixed number of periods. Since v1.8.11 these
+  // fits cluster by entity unless robust is chosen; older results are marked.
+  const unclusteredPanel = covariance === "robust" && typeof model?.entity_col === "string" && evidence.cluster_entity !== true;
+  if (unclusteredPanel && evidence.inference_version === undefined) {
+    return "Standard errors: Heteroskedasticity-robust, not clustered (legacy result; rerun to cluster by entity)";
+  }
+  const label = unclusteredPanel ? "Heteroskedasticity-robust, not clustered" : STANDARD_ERRORS[covariance];
+  const parts = [`Standard errors: ${label ?? (covariance || "unspecified")}`];
   const clusters = count(evidence.cluster_count);
-  if (covariance === "clustered" && clusters !== null) parts.push(`Clusters: ${clusters}`);
+  const clusterVariable = typeof evidence.cluster_variable === "string" && evidence.cluster_variable ? evidence.cluster_variable : null;
+  if (covariance === "clustered" && clusters !== null) {
+    parts.push(clusterVariable && model?.entity_col !== undefined ? `Clusters: ${clusters} (by ${clusterVariable})` : `Clusters: ${clusters}`);
+  }
   const hac = covariance === "hac" ? hacDetail(evidence) : null;
   if (hac) parts.push(hac);
   const df = count(evidence.effective_df);

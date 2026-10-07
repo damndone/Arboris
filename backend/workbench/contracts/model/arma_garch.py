@@ -74,6 +74,7 @@ _VARIANCE_DEFAULTS: dict[str, object] = {
     "include_garch_1_1": True,
 }
 _VALIDATION_DEFAULTS: dict[str, object] = {
+    "evaluation_mode": "train_validation",
     "method": "expanding_window_one_step",
     "validation_n": None,
     "refit_every": 1,
@@ -285,6 +286,7 @@ class ValidationOptions:
     validation_n: int | None
     refit_every: int
     selection_repeated_during_validation: Literal[False]
+    evaluation_mode: Literal["train_validation", "classical_replication"] = "train_validation"
 
     @classmethod
     def from_dict(cls, value: Mapping[str, object]) -> "ValidationOptions":
@@ -301,15 +303,33 @@ class ValidationOptions:
         )
         if value["selection_repeated_during_validation"] is not False:
             _invalid("selection_repeated_during_validation must be false in v1.8")
-        return cls(method, validation_n, refit_every, False)
+        evaluation_mode = _require_choice(
+            value.get("evaluation_mode", "train_validation"), {"train_validation", "classical_replication"},
+            "validation.evaluation_mode",
+        )
+        if evaluation_mode == "classical_replication" and refit_every != 1:
+            _invalid("classical_replication refit_every must be 1")
+        return cls(method, validation_n, refit_every, False, evaluation_mode)
 
     def to_dict(self) -> dict[str, object]:
         return {
+            **({"evaluation_mode": self.evaluation_mode}
+               if self.evaluation_mode == "classical_replication" else {}),
             "method": self.method,
             "validation_n": self.validation_n,
             "refit_every": self.refit_every,
             "selection_repeated_during_validation": self.selection_repeated_during_validation,
         }
+
+
+def normalize_arma_garch_model_options(value: Mapping[str, object]) -> dict[str, object]:
+    """Omit the new default without expanding historical sparse options."""
+
+    payload = dict(value)
+    validation = value.get("validation")
+    if isinstance(validation, Mapping) and validation.get("evaluation_mode") == "train_validation":
+        payload["validation"] = {key: item for key, item in validation.items() if key != "evaluation_mode"}
+    return payload
 
 
 @dataclass(frozen=True)
@@ -449,22 +469,18 @@ class ArmaGarchAnalysisContract:
             {"auto", "sequential", "joint"},
             "estimation_strategy",
         )
-        if estimation_strategy == "joint" and arma.q is not None and arma.q > 0:
+        # The approved replication contract defaults manually specified MA
+        # models to joint estimation. Automatic order search keeps its mapping.
+        if selection_mode == "manual" and arma.q and estimation_strategy == "auto":
+            estimation_strategy = "joint"
+        if (
+            estimation_strategy == "joint" and arma.q is not None and arma.q > 0
+            and resolved["innovation_distribution"] == "student_t"
+        ):
             raise ArmaGarchContractError(
-                "UNSUPPORTED_JOINT_ARMA_GARCH",
-                "v1.8 does not support joint estimation when arma.q is greater than zero",
-                evidence={"arma_q": arma.q, "estimation_strategy": "joint"},
-                impact="当前公共后端不能联合估计包含 MA 项的 ARMA-GARCH",
-                recommended_actions=[
-                    {
-                        "operation": "model.rerun",
-                        "patch": {"estimation_strategy": "sequential"},
-                    },
-                    {
-                        "operation": "model.rerun",
-                        "patch": {"arma": {"q": 0}, "estimation_strategy": "joint"},
-                    },
-                ],
+                "UNSUPPORTED_JOINT_DISTRIBUTION",
+                "Joint ARMA-GARCH with MA terms supports normal innovations only",
+                evidence={"arma_q": arma.q, "distribution": "student_t"},
             )
         random_seed = _require_int(
             resolved["random_seed"], "random_seed", minimum=0

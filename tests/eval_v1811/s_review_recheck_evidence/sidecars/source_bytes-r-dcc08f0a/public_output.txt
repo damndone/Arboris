@@ -1,0 +1,3 @@
+Error in wb_read("data.csv", "5f8d0cc66fc9efdfd08e6a06640ea410d58671fe93ac5cac2ad90d6aa68de937",  : 
+  SHA256 mismatch: data.csv
+Execution halted

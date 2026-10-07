@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from . import __version__
 from .domain import ArtifactRecord
+from .artifact_index import artifact_index_transaction
 from .predictive_research.schema import PayloadContractError, default_v1_prediction_registry
 
 PACKAGE_VERSION_NAMES = (
@@ -88,6 +89,18 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def registered_artifacts_at(run_root: Path, relative_path: str) -> list[dict[str, Any]]:
+    """Index entries registered for one run-relative path (none if unindexed)."""
+
+    index_path = run_root / "artifacts_index.json"
+    if not index_path.is_file():
+        return []
+    index = read_json(index_path)
+    entries = index.get("artifacts") if isinstance(index, dict) else None
+    return [item for item in (entries if isinstance(entries, list) else [])
+            if isinstance(item, dict) and item.get("path") == relative_path]
+
+
 def register_artifact(
     run_root: Path,
     artifact_id: str,
@@ -134,10 +147,8 @@ def register_artifact(
         code_version=__version__,
         payload_contract=normalized_contract,
     )
-    index_path = run_root / "artifacts_index.json"
-    index = read_json(index_path)
-    index["artifacts"].append(record.to_dict())
-    write_json(index_path, index)
+    with artifact_index_transaction(run_root) as index:
+        index["artifacts"].append(record.to_dict())
     return record
 
 

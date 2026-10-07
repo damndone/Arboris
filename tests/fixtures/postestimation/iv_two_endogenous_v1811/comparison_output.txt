@@ -1,0 +1,100 @@
+Writing retained comparison evidence to /Users/jiayuanren/项目规划/.worktrees/codex-v1811-iv-oracles/tests/fixtures/postestimation/iv_two_endogenous_v1811
+{
+  "public_run_root": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-764/iv-two-endogenous-v18110/oracle/runs/20261004_201457_036027_bb50b6cd",
+  "workbench_wald": {
+    "operation": "wald",
+    "model_id": "iv_2sls_1",
+    "model_type": "iv_2sls",
+    "covariance_estimator": "robust",
+    "nobs": 650,
+    "df_method": "asymptotic",
+    "n_clusters": null,
+    "constraints": [
+      {
+        "terms": {
+          "xe1": 1.0
+        },
+        "value": 0.0
+      },
+      {
+        "terms": {
+          "xe2": 1.0
+        },
+        "value": 0.0
+      }
+    ],
+    "distribution": "chi2",
+    "statistic": 52.966469476497096,
+    "df_num": 2,
+    "df_den": null,
+    "p_value": 3.1512095954357576e-12
+  },
+  "kernel_settings": {
+    "reference_distribution": "z",
+    "covariance_estimator": "robust",
+    "df_method": "asymptotic",
+    "df_resid": 646.0,
+    "nobs": 650
+  },
+  "max_differences": {
+    "r": {
+      "params": {
+        "max_abs": 5.551115123125783e-16,
+        "max_rel": 8.461350569728365e-16
+      },
+      "covariance": {
+        "max_abs": 8.239936510889834e-18,
+        "max_rel": 5.145104682392393e-14
+      },
+      "std_error": {
+        "max_abs": 6.938893903907228e-17,
+        "max_rel": 1.1626604679027545e-15
+      },
+      "z": {
+        "max_abs": 7.993605777301127e-15,
+        "max_rel": 1.3958852940679801e-15
+      },
+      "p": {
+        "max_abs": 1.122318655111948e-20,
+        "max_rel": 5.197416307115795e-14
+      },
+      "wald_statistic": {
+        "max_abs": 7.105427357601002e-14
+      },
+      "wald_p": {
+        "max_abs": 1.0945602832122583e-25
+      }
+    },
+    "stata": {
+      "params": {
+        "max_abs": 8.881784197001252e-16,
+        "max_rel": 1.9631204768094846e-15
+      },
+      "covariance": {
+        "max_abs": 8.673617379884035e-18,
+        "max_rel": 2.803194964889583e-14
+      },
+      "std_error": {
+        "max_abs": 4.85722573273506e-17,
+        "max_rel": 1.0019389742893253e-15
+      },
+      "z": {
+        "max_abs": 5.3290705182007514e-14,
+        "max_rel": 3.445044181112054e-15
+      },
+      "p": {
+        "max_abs": 3.705769144237564e-20,
+        "max_rel": 1.0265189425108607e-13
+      },
+      "wald_statistic": {
+        "max_abs": 7.105427357601002e-15
+      },
+      "wald_p": {
+        "max_abs": 2.261821987449685e-26
+      }
+    }
+  },
+  "wald_seconds_single_call": 0.0002764159580692649,
+  "protected_assets_unchanged": 9,
+  "new_data_sha256": "d3b46c7cf6c42c4dc1db66b3ae63a0ef02ffe10ff3b24983687355daa238c497"
+}

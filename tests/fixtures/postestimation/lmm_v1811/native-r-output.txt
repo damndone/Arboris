@@ -1,0 +1,284 @@
+Loading required package: Matrix
+Loading required package: carData
+Registered S3 method overwritten by 'car':
+  method           from
+  na.action.merMod lme4
+R version 4.6.0 (2026-04-24)
+Platform: aarch64-apple-darwin24.6.0
+Running under: macOS Sequoia 15.1
+
+Matrix products: default
+BLAS:   /opt/homebrew/Cellar/openblas/0.3.33/lib/libopenblasp-r0.3.33.dylib 
+LAPACK: /opt/homebrew/Cellar/r/4.6.0/lib/R/lib/libRlapack.dylib;  LAPACK version 3.12.1
+
+locale:
+[1] en_US.UTF-8/en_US.UTF-8/en_US.UTF-8/C/en_US.UTF-8/en_US.UTF-8
+
+time zone: America/New_York
+tzcode source: internal
+
+attached base packages:
+[1] stats     graphics  grDevices utils     datasets  methods   base     
+
+other attached packages:
+[1] jsonlite_2.0.0 car_3.1-5      carData_3.0-6  lme4_2.0-1     Matrix_1.7-5  
+
+loaded via a namespace (and not attached):
+ [1] Formula_1.2-5    lattice_0.22-9   splines_4.6.0    abind_1.4-8     
+ [5] Rdpack_2.6.6     cli_3.6.6        nloptr_2.2.1     grid_4.6.0      
+ [9] reformulas_0.4.4 compiler_4.6.0   boot_1.3-32      rbibutils_2.4.1 
+[13] tools_4.6.0      nlme_3.1-169     minqa_1.2.8      Rcpp_1.1.1-1.1  
+[17] rlang_1.2.0      MASS_7.3-65     
+$meta
+$meta$generator
+[1] "tests/fixtures/postestimation/lmm_v1811/generate_reference.R"
+
+$meta$source
+[1] "/Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-lmm-host/runs/20261005_024643_550779_dbe309ee/raw_snapshot/data.csv"
+
+$meta$data_sha256
+[1] "f971e489477c8c912580aa09b2f0327334f0e12a2f9d5313a5e95f9ccf333828"
+
+$meta$formula
+[1] "y ~ arm * time + x + (1|g)"
+
+$meta$fit_method
+[1] "reml"
+
+$meta$environment
+$meta$environment$R
+[1] "R version 4.6.0 (2026-04-24)"
+
+$meta$environment$lme4
+[1] "2.0.1"
+
+$meta$environment$car
+[1] "3.1.5"
+
+$meta$environment$jsonlite
+[1] "2.0.0"
+
+
+$meta$native_diagnostics
+$meta$native_diagnostics$optimizer
+[1] "bobyqa"
+
+$meta$native_diagnostics$opt_convergence
+[1] 0
+
+$meta$native_diagnostics$convergence_messages
+list()
+
+$meta$native_diagnostics$warnings
+list()
+
+$meta$native_diagnostics$singular
+[1] FALSE
+
+$meta$native_diagnostics$REML
+[1] TRUE
+
+$meta$native_diagnostics$loglik
+[1] -401.77958252689962
+
+$meta$native_diagnostics$sigma
+[1] 0.60204760747578401
+
+
+
+$nobs
+[1] 360
+
+$nominal_fixed_effect_df
+[1] 355
+
+$owner_terms
+[1] "Intercept"                                           
+[2] "C(Q('arm'), Treatment(reference='a'))[T.b]"          
+[3] "time"                                                
+[4] "C(Q('arm'), Treatment(reference='a'))[T.b]:Q('time')"
+[5] "x"                                                   
+
+$coefficient_mapping
+$coefficient_mapping$Intercept
+[1] "(Intercept)"
+
+$coefficient_mapping$`C(Q('arm'), Treatment(reference='a'))[T.b]`
+[1] "armb"
+
+$coefficient_mapping$time
+[1] "time"
+
+$coefficient_mapping$`C(Q('arm'), Treatment(reference='a'))[T.b]:Q('time')`
+[1] "armb:time"
+
+$coefficient_mapping$x
+[1] "x"
+
+
+$params
+$params$`(Intercept)`
+[1] 1.0157906001418116
+
+$params$armb
+[1] 0.33395537711022438
+
+$params$time
+[1] 0.28296112826305542
+
+$params$x
+[1] 0.54943398269927601
+
+$params$`armb:time`
+[1] 0.21719901887088391
+
+
+$std_error
+$std_error$`(Intercept)`
+[1] 0.15023331951117955
+
+$std_error$armb
+[1] 0.21248694164835355
+
+$std_error$time
+[1] 0.026286774629536675
+
+$std_error$x
+[1] 0.036190116484979246
+
+$std_error$`armb:time`
+[1] 0.03718491097469933
+
+
+$covariance_owner_order
+                        [,1]                    [,2]                    [,3]
+[1,]  2.2570050291348162e-02 -0.02255518560926698252 -0.00172770716696598724
+[2,] -2.2555185609266983e-02  0.04515070037107080797  0.00172253339196112355
+[3,] -1.7277071669659872e-03  0.00172253339196112355  0.00069099452042405303
+[4,]  1.7229491305191863e-03 -0.00345825480825956953 -0.00068933844665764181
+[5,] -8.0001845918595068e-05 -0.00016335052359976989  0.00002784530126483664
+                        [,4]                    [,5]
+[1,]  1.7229491305191863e-03 -8.0001845918595068e-05
+[2,] -3.4582548082595695e-03 -1.6335052359976989e-04
+[3,] -6.8933844665764181e-04  2.7845301264836640e-05
+[4,]  1.3827176041963146e-03  5.0049364578766741e-05
+[5,]  5.0049364578766741e-05  1.3097245311963664e-03
+
+$reference_distribution
+[1] "z"
+
+$df_method
+[1] "asymptotic"
+
+$wald_joint
+$wald_joint$distribution
+[1] "chi2"
+
+$wald_joint$statistic
+[1] 337.0835092905391
+
+$wald_joint$df_num
+[1] 2
+
+$wald_joint$df_den
+NULL
+
+$wald_joint$p_value
+[1] 6.3569088942620045e-74
+
+
+$wald_shifted
+$wald_shifted$distribution
+[1] "chi2"
+
+$wald_shifted$statistic
+[1] 824.64268930032279
+
+$wald_shifted$df_num
+[1] 1
+
+$wald_shifted$df_den
+NULL
+
+$wald_shifted$p_value
+[1] 2.3680853107131484e-181
+
+
+$lincom
+$lincom$estimate
+[1] 0.88182909366160755
+
+$lincom$std_error
+[1] 0.077725631874362169
+
+$lincom$statistic
+[1] 11.34540913204823
+
+$lincom$distribution
+[1] "z"
+
+$lincom$df
+NULL
+
+$lincom$p_value
+[1] 7.8159817064077806e-30
+
+
+$nlcom
+$nlcom$estimate
+[1] 0.51500478159890173
+
+$nlcom$std_error
+[1] 0.057833421041155138
+
+$nlcom$statistic
+[1] 8.9049683094558176
+
+$nlcom$distribution
+[1] "z"
+
+$nlcom$df
+NULL
+
+$nlcom$p_value
+[1] 5.3401300770330986e-19
+
+
+$fixed_effect_average_prediction
+$fixed_effect_average_prediction$estimate
+[1] 2.1740461366861261
+
+$fixed_effect_average_prediction$std_error
+[1] 0.09552525270309134
+
+$fixed_effect_average_prediction$mean_design_owner_order
+[1] 1.000000000000000000 0.500000000000000000 2.500000000000000000
+[4] 1.250000000000000000 0.022525460988336268
+
+$fixed_effect_average_prediction$nobs
+[1] 360
+
+$fixed_effect_average_prediction$definition
+[1] "Empirical mean of native predict(fit,re.form=NA) on the unchanged estimation rows"
+
+$fixed_effect_average_prediction$random_effects
+[1] "zero (population fixed-effect prediction)"
+
+$fixed_effect_average_prediction$uncertainty
+[1] "sampling SE of empirical fixed-effect mean; excludes residual/new-subject prediction variance"
+
+$fixed_effect_average_prediction$current_operation
+[1] "lincom with mean fixed-effect design weights; not a margins derivative target"
+
+
+$lr
+$lr$available
+[1] FALSE
+
+$lr$reason
+[1] "REML_FIXED_EFFECT_LIKELIHOODS_NOT_COMPARABLE"
+
+$lr$explanation
+[1] "Do not compare restricted likelihoods across different fixed-effect designs; no LR reference generated"
+
+

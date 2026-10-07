@@ -20,6 +20,7 @@ from workbench.contracts.model.arma_garch import (
     ArmaGarchAnalysisContract,
 )
 from workbench.engine.context import RunInterruptionRequested
+from workbench.engine.packs.arma_garch.statistics import LJUNG_BOX_SIGNIFICANCE_LEVEL
 from workbench.engine.packs.arma_garch.acceptance import assess_acceptance
 from workbench.engine.packs.arma_garch.arma import (
     information_criterion_agreement,
@@ -215,14 +216,14 @@ def _fit_from_context(ctx: Any, env: Any) -> tuple[str, dict[str, Any], None]:
             )
         )
 
-    training_values = split.training_view[TRANSFORMED_VALUE_COLUMN].to_numpy(
+    estimation_values = split.estimation_view[TRANSFORMED_VALUE_COLUMN].to_numpy(
         dtype=float, copy=True
     )
     selected_mean = _selected_mean_candidate(mean_search, mean_candidates)
     variance_searches: list[dict[str, object]] = []
     env.checkpoint("Volatility candidate search")
     selected_variance_search = _search_variance(
-        training_values, selected_mean, contract, env
+        estimation_values, selected_mean, contract, env
     )
     variance_searches.append(
         {
@@ -237,7 +238,7 @@ def _fit_from_context(ctx: Any, env: Any) -> tuple[str, dict[str, Any], None]:
         raise ArmaGarchInputError(
             diagnostic(
                 "NO_VOLATILITY_CANDIDATE_CONVERGED",
-                "No volatility candidate passed the frozen training gates.",
+                "No volatility candidate passed the frozen estimation-scope gates.",
                 evidence={"mean_candidate_id": selected_mean.candidate_id},
                 impact="A final volatility model and rolling validation cannot be produced.",
             )
@@ -252,19 +253,19 @@ def _fit_from_context(ctx: Any, env: Any) -> tuple[str, dict[str, Any], None]:
         contract,
         mean_candidate=selected_mean,
         variance_candidate=selected_variance,
-        checkpoint=lambda: env.checkpoint("Independent rolling evaluation"),
+        checkpoint=lambda: env.checkpoint("Frozen-scope rolling evaluation"),
     )
     final_fit = estimate_arma_garch(
-        training_values,
+        estimation_values,
         contract,
         mean_candidate=selected_mean,
         variance_candidate=selected_variance,
         frozen_hold_back=selected_variance_search.common_hold_back,
-        checkpoint=lambda: env.checkpoint("Final validation fit"),
+        checkpoint=lambda: env.checkpoint("Final estimation-scope fit"),
     )
     final_model = final_fit.to_dict()
     mean_diagnostics = build_mean_diagnostics(
-        training_values,
+        estimation_values,
         np.asarray(selected_mean.residuals, dtype=float),
         model_df=selected_mean.p + selected_mean.q,
     )
@@ -272,7 +273,7 @@ def _fit_from_context(ctx: Any, env: Any) -> tuple[str, dict[str, Any], None]:
         final_model["conditional_series"], "standardized_residual"
     )
     final_diagnostics = build_mean_diagnostics(
-        training_values,
+        estimation_values,
         standardized,
         model_df=selected_mean.p + selected_mean.q,
     )
@@ -289,6 +290,8 @@ def _fit_from_context(ctx: Any, env: Any) -> tuple[str, dict[str, Any], None]:
         squared_standardized_residual_arch=_has_significant_p_value(
             selected_variance.squared_standardized_residual_diagnostics
         ),
+        mean_residual_diagnostics=mean_diagnostics.ljung_box,
+        squared_residual_diagnostics=selected_variance.squared_standardized_residual_diagnostics,
         normality_rejected=_normality_rejected(final_diagnostics),
         volatility_value_added=value_added,
     )
@@ -358,7 +361,8 @@ def _fit_from_context(ctx: Any, env: Any) -> tuple[str, dict[str, Any], None]:
         "model_type": ARMA_GARCH_PACK_ID,
         "model_id": MODEL_ID,
         "status": acceptance.overall_status,
-        "nobs": split.n_train,
+        "nobs": len(split.estimation_row_ids),
+        "fit_scope": split.selection_data_role,
         "contract_hash": contract.contract_hash,
         "analysis_view_hash": split.analysis_view_hash,
         "split_hash": split.split_hash,
@@ -368,8 +372,8 @@ def _fit_from_context(ctx: Any, env: Any) -> tuple[str, dict[str, Any], None]:
         "selection_repeated_during_validation": False,
         "selected_specification": final_spec,
         "validation": {
-            "data_role": "independent_evaluation_after_selection",
-            "candidate_selection_used_validation": False,
+            "data_role": split.validation_data_role,
+            "candidate_selection_used_validation": split.evaluation_mode == "classical_replication",
             "metrics": rolling.metrics.to_dict(),
             "acceptance": acceptance.to_dict(),
         },
@@ -623,7 +627,7 @@ def _eligible_mean_shortlist(
         for candidate_id in search.shortlist_candidate_ids
         if candidate_id in by_id
     ]
-    if contract.estimation_strategy == "joint":
+    if contract.estimation_strategy == "joint" and contract.innovation_distribution == "student_t":
         candidates = [candidate for candidate in candidates if candidate.q == 0]
         if not candidates:
             candidates = [
@@ -668,7 +672,7 @@ def _selected_variance_candidate(
 
 
 def _search_variance(
-    training_values: np.ndarray,
+    estimation_values: np.ndarray,
     mean_candidate: ArmaCandidateResult,
     contract: ArmaGarchAnalysisContract,
     env: Any,
@@ -683,7 +687,7 @@ def _search_variance(
         contract.estimation_strategy == "auto" and mean_candidate.q == 0
     ):
         return search_joint_variance_candidates(
-            training_values.copy(), contract, **kwargs
+            estimation_values.copy(), contract, **kwargs
         )
     return search_variance_candidates(
         np.asarray(mean_candidate.residuals, dtype=float), contract, **kwargs
@@ -723,7 +727,7 @@ def _has_significant_p_value(
         for item in diagnostics
         if item.get("p_value") is not None
     ]
-    return any(value < 0.05 for value in values) if values else None
+    return any(value < LJUNG_BOX_SIGNIFICANCE_LEVEL for value in values) if values else None
 
 
 def _normality_rejected(diagnostics: MeanModelDiagnostics) -> bool | None:
@@ -767,6 +771,11 @@ def _artifact_payloads(
 ) -> dict[str, object]:
     transformed = prepared.transformed_view
     audit = prepared.audited
+    classical = split.evaluation_mode == "classical_replication"
+    selection_basis = (
+        "frozen_full_sample_gates_aicc_bic_parsimony"
+        if classical else "frozen_training_gates_aicc_bic_parsimony"
+    )
     mean_payload = mean_diagnostics.to_dict()
     final_diag_payload = final_diagnostics.to_dict()
     rolling_payload = rolling.to_dict()
@@ -796,9 +805,12 @@ def _artifact_payloads(
             "source_n": audit.time_index.original_row_count,
             "effective_n": len(transformed),
             "training_n": split.n_train,
+            **({"estimation_n": len(split.estimation_row_ids),
+                "evaluation_mode": split.evaluation_mode}
+               if split.evaluation_mode == "classical_replication" else {}),
             "validation_n": split.validation_n,
-            "selection_data_role": "training_only",
-            "validation_data_role": "independent_evaluation_after_selection",
+            "selection_data_role": split.selection_data_role,
+            "validation_data_role": split.validation_data_role,
         },
         "scale": {
             "transform": prepared.contract.transform,
@@ -815,9 +827,14 @@ def _artifact_payloads(
             dict.fromkeys(
                 [
                     *(item.code for item in audit.diagnostics),
+                    *selected_mean.warnings,
                     *mean_diagnostics.warnings,
                     *final_diagnostics.warnings,
                     *rolling.warnings,
+                    *(
+                        ["Classical replication uses full-sample specification selection and diagnostics; rolling tail metrics are retrospective, not independent validation."]
+                        if split.evaluation_mode == "classical_replication" else []
+                    ),
                 ]
             )
         ),
@@ -855,11 +872,13 @@ def _artifact_payloads(
         },
         "ts.train_validation_split": {
             **split.to_dict(),
-            "training_data_role": "candidate_selection_and_estimation",
-            "validation_data_role": "independent_evaluation_after_selection",
-            "candidate_selection_used_validation": False,
+            "training_data_role": ("initial_rolling_history" if classical else "candidate_selection_and_estimation"),
+            "validation_data_role": split.validation_data_role,
+            "candidate_selection_used_validation": split.evaluation_mode == "classical_replication",
         },
         "ts.arma_candidates": {
+            "estimation_row_ids": list(split.estimation_row_ids),
+            "selection_data_role": split.selection_data_role,
             "candidates": [item.to_dict() for item in mean_search.candidates],
             "selection_repeated_during_validation": False,
         },
@@ -869,9 +888,9 @@ def _artifact_payloads(
                 mean_search.shortlist_candidate_ids
             ),
             "final_selected_candidate_id": selected_mean.candidate_id,
-            "final_selection_basis": "frozen_training_gates_aicc_bic_parsimony",
-            "candidate_selection_used_validation": False,
-            "validation_data_role": "independent_evaluation_after_selection",
+            "final_selection_basis": selection_basis,
+            "candidate_selection_used_validation": split.evaluation_mode == "classical_replication",
+            "validation_data_role": split.validation_data_role,
             "information_criterion_agreement": information_criterion_agreement(
                 [item.to_dict() for item in mean_search.candidates]
             ),
@@ -881,13 +900,14 @@ def _artifact_payloads(
         "ts.volatility_selection": {
             "selected_candidate_id": selected_variance.candidate_id,
             "selected_mean_candidate_id": selected_mean.candidate_id,
-            "selection_basis": "frozen_training_gates_aicc_bic_parsimony",
-            "candidate_selection_used_validation": False,
-            "validation_data_role": "independent_evaluation_after_selection",
+            "selection_basis": selection_basis,
+            "candidate_selection_used_validation": split.evaluation_mode == "classical_replication",
+            "validation_data_role": split.validation_data_role,
             "information_criteria_compared_across_strategies": False,
         },
         "ts.final_model": {
-            "validation_fit": final_model,
+            ("in_sample_fit" if classical else "validation_fit"): final_model,
+            "fit_scope": split.selection_data_role,
             "acceptance": acceptance,
             "production_child": production_child,
         },
@@ -948,25 +968,25 @@ def _chart_payloads(
         }
         for _, row in transformed.iterrows()
     ]
-    training = split.training_view
+    estimation = split.estimation_view
     conditional_rows: list[dict[str, object]] = []
     if isinstance(conditional_series, Mapping):
         volatility = conditional_series.get("volatility", [])
         if isinstance(volatility, (list, tuple)):
             conditional_rows = [
                 {
-                    "row_id": str(training.iloc[index][ROW_ID_COLUMN]),
-                    "time": _time_text(training.iloc[index][PARSED_TIME_COLUMN]),
+                    "row_id": str(estimation.iloc[index][ROW_ID_COLUMN]),
+                    "time": _time_text(estimation.iloc[index][PARSED_TIME_COLUMN]),
                     "conditional_volatility": value,
                 }
                 for index, value in enumerate(volatility)
-                if index < len(training)
+                if index < len(estimation)
             ]
-    variance_rows = _training_series_rows(
-        training, conditional_series, "variance", "conditional_variance"
+    variance_rows = _estimation_series_rows(
+        estimation, conditional_series, "variance", "conditional_variance"
     )
-    standardized_rows = _training_series_rows(
-        training, conditional_series, "standardized_residual", "standardized_residual"
+    standardized_rows = _estimation_series_rows(
+        estimation, conditional_series, "standardized_residual", "standardized_residual"
     )
     squared_standardized_rows = [
         {
@@ -981,7 +1001,7 @@ def _chart_payloads(
         for row in _rows_of(mean_diagnostics.get("residual_series"))
         if isinstance(row.get("value"), (int, float))
     ]
-    in_sample_rows = _in_sample_interval_rows(training, conditional_series)
+    in_sample_rows = _in_sample_interval_rows(estimation, conditional_series)
     rolling_rows = rolling.get("rows", [])
     if not isinstance(rolling_rows, list):
         rolling_rows = []
@@ -1251,17 +1271,17 @@ def _rows_of(value: object) -> list[dict[str, Any]]:
     return [dict(item) for item in value if isinstance(item, Mapping)]
 
 
-def _training_series_rows(
-    training: Any,
+def _estimation_series_rows(
+    estimation: Any,
     conditional_series: object,
     series_key: str,
     field_name: str,
 ) -> list[dict[str, object]]:
-    """Align one fitted conditional series to the training rows it came from.
+    """Align one fitted conditional series to the declared estimation rows it came from.
 
     The series are per-observation and carry no identity of their own, so a
     chart that did not attach row ids and times could not be traced back to the
-    data. Anything longer than the training view is truncated rather than
+    data. Anything longer than the estimation view is truncated rather than
     silently paired with the wrong row.
     """
 
@@ -1272,21 +1292,21 @@ def _training_series_rows(
         return []
     rows: list[dict[str, object]] = []
     for index, value in enumerate(values):
-        if index >= len(training):
+        if index >= len(estimation):
             break
         if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
             continue
         rows.append(
             {
-                "row_id": str(training.iloc[index][ROW_ID_COLUMN]),
-                "time": _time_text(training.iloc[index][PARSED_TIME_COLUMN]),
+                "row_id": str(estimation.iloc[index][ROW_ID_COLUMN]),
+                "time": _time_text(estimation.iloc[index][PARSED_TIME_COLUMN]),
                 field_name: float(value),
             }
         )
     return rows
 
 def _in_sample_interval_rows(
-    training: pd.DataFrame, conditional_series: object
+    estimation: pd.DataFrame, conditional_series: object
 ) -> list[dict[str, object]]:
     """Full-history in-sample 95% bands for ARMA-only and ARMA-GARCH.
 
@@ -1315,7 +1335,7 @@ def _in_sample_interval_rows(
 
     rows: list[dict[str, object]] = []
     for index, (mean_value, sd_value) in enumerate(zip(means, volatility)):
-        if index >= len(training):
+        if index >= len(estimation):
             break
         if not isinstance(mean_value, (int, float)) or not isinstance(sd_value, (int, float)):
             continue
@@ -1323,15 +1343,15 @@ def _in_sample_interval_rows(
         sd_float = float(sd_value)
         if not math.isfinite(mean_float) or not math.isfinite(sd_float) or sd_float <= 0.0:
             continue
-        observed = float(training.iloc[index][TRANSFORMED_VALUE_COLUMN])
+        observed = float(estimation.iloc[index][TRANSFORMED_VALUE_COLUMN])
         if not math.isfinite(observed):
             continue
         garch_half = _IN_SAMPLE_Z * sd_float
         arma_half = _IN_SAMPLE_Z * constant_sd
         rows.append(
             {
-                "row_id": str(training.iloc[index][ROW_ID_COLUMN]),
-                "time": _time_text(training.iloc[index][PARSED_TIME_COLUMN]),
+                "row_id": str(estimation.iloc[index][ROW_ID_COLUMN]),
+                "time": _time_text(estimation.iloc[index][PARSED_TIME_COLUMN]),
                 "observed": observed,
                 "conditional_mean": mean_float,
                 "conditional_volatility": sd_float,

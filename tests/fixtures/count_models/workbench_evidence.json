@@ -1,0 +1,267 @@
+{
+  "nb2": {
+    "coefficients": [
+      0.38636443172056784,
+      0.37879429805878007,
+      -0.19864200777322277
+    ],
+    "std_error": [
+      0.0343664739492729,
+      0.034751519774094464,
+      0.03510461797875411
+    ],
+    "max_coefficient_abs_error_stata": 6.6532003795138905e-09,
+    "max_se_relative_error_stata": 1.6741300346012622e-08,
+    "ll": -2007.5082891629145,
+    "ancillary": [
+      {
+        "name": "lnalpha",
+        "estimate": -0.3841795573745957,
+        "std_error": 0.0913087211369594,
+        "conf_low": -0.5631413622774473,
+        "conf_high": -0.2052177524717441,
+        "scale": "log"
+      },
+      {
+        "name": "alpha",
+        "estimate": 0.6810091359881993,
+        "std_error": 0.062182073289668155,
+        "conf_low": 0.5694175046845744,
+        "conf_high": 0.8144699442569796,
+        "scale": "natural"
+      }
+    ],
+    "overdispersion_test": {
+      "statistic": 381.12688017019263,
+      "df": 1,
+      "p_value": 3.536654808021698e-85,
+      "distribution": "chibar2(01)",
+      "restricted_model": "poisson",
+      "log_likelihood_restricted": -2198.071729248011
+    },
+    "convergence": {
+      "converged": true,
+      "iterations": 11,
+      "tolerance": 1e-08,
+      "criterion": "mean log-likelihood gradient in beta and log ancillary"
+    },
+    "warnings": [],
+    "alpha_relative_error_stata": 6.06307268835593e-08,
+    "ancillary_log_se_relative_error_stata": 2.4375057527947774e-10,
+    "lr_relative_error_stata": 0.0,
+    "score_natural": [
+      8.218463197096071e-06,
+      5.399887932355796e-07,
+      -9.28737335925689e-08,
+      -9.524067687353554e-06
+    ],
+    "hessian_eigenvalues": [
+      -1046.0513772325398,
+      -807.4228900058907,
+      -701.0248054694835,
+      -258.6184799717005
+    ],
+    "max_coefficient_abs_error_r": 9.611417162158631e-09,
+    "max_se_relative_error_r": 1.4661883485089788e-08
+  },
+  "nb1": {
+    "coefficients": [
+      0.4269437848106901,
+      0.349441861867247,
+      -0.16051477207474898
+    ],
+    "std_error": [
+      0.030150250590380574,
+      0.027795953434381654,
+      0.026566569277574982
+    ],
+    "max_coefficient_abs_error_stata": 4.773879236363854e-09,
+    "max_se_relative_error_stata": 5.302771333148826e-09,
+    "ll": -2529.4275230328135,
+    "ancillary": [
+      {
+        "name": "lndelta",
+        "estimate": -0.005608975720298626,
+        "std_error": 0.0906859929998805,
+        "conf_low": -0.18335025590231585,
+        "conf_high": 0.17213230446171862,
+        "scale": "log"
+      },
+      {
+        "name": "delta",
+        "estimate": 0.9944067252149127,
+        "std_error": 0.09017876132187366,
+        "conf_low": 0.8324765248509843,
+        "conf_high": 1.1878349786856186,
+        "scale": "natural"
+      }
+    ],
+    "overdispersion_test": {
+      "statistic": 364.66657365230094,
+      "df": 1,
+      "p_value": 1.3565595781015045e-81,
+      "distribution": "chibar2(01)",
+      "restricted_model": "poisson",
+      "log_likelihood_restricted": -2711.760809858964
+    },
+    "convergence": {
+      "converged": true,
+      "iterations": 11,
+      "tolerance": 1e-08,
+      "criterion": "mean log-likelihood gradient in beta and log ancillary"
+    },
+    "warnings": [],
+    "alpha_relative_error_stata": 1.0973827180293938e-08,
+    "ancillary_log_se_relative_error_stata": 2.759623418668866e-09,
+    "lr_relative_error_stata": -4.9960036108132044e-15,
+    "score_natural": [
+      7.982931951033834e-06,
+      3.1966501090607835e-07,
+      -1.0587675625117754e-07,
+      -2.85333249694375e-06
+    ],
+    "hessian_eigenvalues": [
+      -1826.3430700541994,
+      -1447.2364850661406,
+      -972.77946783813,
+      -121.16589192757098
+    ]
+  },
+  "fixed": {
+    "coefficients": [
+      0.3865369283080683,
+      0.3779426773537426,
+      -0.19867403481029067
+    ],
+    "std_error": [
+      0.03208454424965371,
+      0.03217595738957018,
+      0.03243674864983293
+    ],
+    "max_coefficient_abs_error_stata": 1.7041923427996153e-14,
+    "max_se_relative_error_stata": 3.774758283725532e-15,
+    "ll": -2012.7059915349842,
+    "ancillary": [],
+    "overdispersion_test": null,
+    "convergence": {
+      "converged": true,
+      "iterations": 10,
+      "tolerance": 1e-12,
+      "criterion": "absolute parameter change"
+    },
+    "warnings": []
+  },
+  "poisson": {
+    "coefficients": [
+      0.3931736677939775,
+      0.35583721487398545,
+      -0.2082653556452532
+    ],
+    "std_error": [
+      0.019028447666465248,
+      0.017908166987120736,
+      0.018221371969385485
+    ],
+    "max_coefficient_abs_error_stata": 2.99777291878911e-09,
+    "max_se_relative_error_stata": 2.8630626600412157e-05,
+    "ll": -3049.434253313748,
+    "ancillary": [
+      {
+        "name": "lnalpha",
+        "estimate": -14.450422601803213,
+        "std_error": 33428.24103129459,
+        "conf_low": -65532.59891046327,
+        "conf_high": 65503.69806525966,
+        "scale": "log"
+      },
+      {
+        "name": "alpha",
+        "estimate": 5.299821014586573e-07,
+        "std_error": 0.01771636942983202,
+        "conf_low": null,
+        "conf_high": null,
+        "scale": "natural"
+      }
+    ],
+    "overdispersion_test": {
+      "statistic": -2.1726831619162112e-05,
+      "df": 1,
+      "p_value": 1.0,
+      "distribution": "chibar2(01)",
+      "restricted_model": "poisson",
+      "log_likelihood_restricted": -3049.434242450332
+    },
+    "convergence": {
+      "converged": true,
+      "iterations": 26,
+      "tolerance": 1e-08,
+      "criterion": "mean log-likelihood gradient in beta and log ancillary"
+    },
+    "warnings": [
+      {
+        "code": "NB_ANCILLARY_CI_NUMERIC_RANGE",
+        "message": "Natural-scale ancillary confidence limit is unavailable: exponent exceeds the finite numeric range. The log-scale interval is retained."
+      }
+    ],
+    "alpha_relative_error_stata": 1.0701569981602836,
+    "ancillary_log_se_relative_error_stata": 76.29520833119557,
+    "lr_relative_error_stata": -3.2480638144401204,
+    "score_natural": [
+      -2.300187308179602e-06,
+      -1.0359155309558332e-05,
+      -1.573004494659358e-06,
+      -20.49854803880733
+    ],
+    "hessian_eigenvalues": [
+      -4719.197659723293,
+      -3187.93621359421,
+      -3020.103306121512,
+      -2118.7566631558643
+    ]
+  },
+  "fixed_glm": {
+    "coefficients": [
+      0.3865369283080683,
+      0.3779426773537426,
+      -0.19867403481029067
+    ],
+    "std_error": [
+      0.03208873504803751,
+      0.031715920803534386,
+      0.03195338255824475
+    ],
+    "max_coefficient_abs_error_r": 3.4997732489827627e-10,
+    "max_se_relative_error_r": 7.45889794373511e-10,
+    "convergence": {
+      "converged": true,
+      "iterations": 10,
+      "tolerance": 1e-12,
+      "criterion": "absolute parameter change"
+    }
+  },
+  "glm_precision": {
+    "coefficients": [
+      0.4210052615447283,
+      0.3789844117869672,
+      -0.2293064553582496
+    ],
+    "std_error": [
+      0.061923915270531565,
+      0.06423158311977491,
+      0.061345338701274954
+    ],
+    "convergence": {
+      "converged": true,
+      "iterations": 16,
+      "tolerance": 1e-12,
+      "criterion": "absolute parameter change"
+    },
+    "score": [
+      -2.948752353404416e-13,
+      -5.5848659030743875e-12,
+      -7.096545573404001e-13
+    ],
+    "epsilon14_max_abs_error": 1.0561876151449212e-08,
+    "epsilon16_max_abs_error": 2.020605904817785e-14
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "values": {
+    "wald": 52.96646947649708,
+    "wald_df": 2.0,
+    "wald_p": 3.1512095954357774e-12,
+    "lincom": 0.3093092999008241,
+    "lincom_se": 0.07122789759662757,
+    "lincom_p": 1.4085108501376491e-05,
+    "nlcom": 0.7863490730138125,
+    "nlcom_se": 0.03812083420704242
+  },
+  "raw_log": "/private/tmp/v1811-evaluation-8d8a2fd4c7d44af693b267e6d893d16f-r01/test_public_two_endogenous_iv_0/native-e04-iv/lane_e.log",
+  "error_type": null,
+  "public_log": "/Users/jiayuanren/\u9879\u76ee\u89c4\u5212/.worktrees/codex-v1811-evaluation/tests/fixtures/eval_v1811/lane_e_20261005/r01/e04-iv-stata-output.txt",
+  "command": [
+    "/Applications/Stata/StataMP.app/Contents/MacOS/stata-mp",
+    "-b",
+    "do",
+    "lane_e.do"
+  ]
+}

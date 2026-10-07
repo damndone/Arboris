@@ -1,0 +1,2 @@
+Error: is.numeric(wb_fpc) is not TRUE
+Execution halted

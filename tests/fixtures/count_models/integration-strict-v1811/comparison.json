@@ -1,0 +1,576 @@
+{
+  "integration_head": "457d529d9e59bf19ca287aae978f028a8d86aa3d",
+  "reference_branch_head": "edeba374247bd9e4d608a68e87def84883315cdc",
+  "production_module": "/Users/jiayuanren/\u9879\u76ee\u89c4\u5212/.worktrees/workbench-v1.8.11/backend/workbench/econometrics/count_models.py",
+  "hashes": {
+    "/Users/jiayuanren/\u9879\u76ee\u89c4\u5212/.worktrees/codex-v1811-m2/tests/fixtures/postestimation/data.csv": "2e1b92f07632a8c88d047074f77cd6e5f9552b4f932f7d6ed2499161a0bf3084",
+    "/Users/jiayuanren/\u9879\u76ee\u89c4\u5212/.worktrees/codex-v1811-m2/tests/fixtures/postestimation/oracle.json": "d80dbc69f91648cbd17443f89deaf21df63296f1296a6d674c3ef9e135b9302c",
+    "/Users/jiayuanren/\u9879\u76ee\u89c4\u5212/.worktrees/codex-v1811-m2/tests/fixtures/postestimation/generate_oracle.R": "82b35d95a30650daf85de157c93eed380ddcb151557e64cf3ac5b9f0d4d459ef",
+    "/Users/jiayuanren/\u9879\u76ee\u89c4\u5212/.worktrees/codex-v1811-m2/tests/fixtures/admission/glm_negative_binomial/data.csv": "33bf1067bdf7f7ca7f1bf7fb34c16fc167d9318b482f60aae8febd402b084711",
+    "/Users/jiayuanren/\u9879\u76ee\u89c4\u5212/.worktrees/codex-v1811-m2/tests/fixtures/admission/glm_negative_binomial/oracle.json": "67620f2e795f1ee49827436288c1b7c7bcd9894951bac53c495ef7c04773582d",
+    "/Users/jiayuanren/\u9879\u76ee\u89c4\u5212/.worktrees/codex-v1811-m2/tests/fixtures/admission/glm_negative_binomial/oracle_high_precision.json": "0e52e10663056eb28a96ed5095742a651d5ba24ef58e941e79a87e0f963aa777",
+    "/Users/jiayuanren/\u9879\u76ee\u89c4\u5212/.worktrees/workbench-v1.8.11/backend/workbench/econometrics/count_models.py": "143b75513c18d4a5aa0a20ea08b61169f65d1a358a533ee0d497c768cff7dd50",
+    "/Users/jiayuanren/\u9879\u76ee\u89c4\u5212/.worktrees/workbench-v1.8.11/backend/workbench/contracts/model/inference_kernel.py": "be94249889597607e00c62e330f14ea311b1434b23d43dfcb584fac32cf2b431"
+  },
+  "measured": {
+    "params": {
+      "Intercept": 0.5303703456849345,
+      "x1": 0.3813241205336897,
+      "x2": -0.29966972557250415,
+      "x3": -0.1096210128391049
+    },
+    "production_source": "/Users/jiayuanren/\u9879\u76ee\u89c4\u5212/.worktrees/workbench-v1.8.11/backend/workbench/econometrics/count_models.py",
+    "kernel_source": "/Users/jiayuanren/\u9879\u76ee\u89c4\u5212/.worktrees/workbench-v1.8.11/backend/workbench/contracts/model/inference_kernel.py",
+    "kernel": {
+      "contract": "workbench.inference_kernel.v1",
+      "model_id": "strict_nb",
+      "model_type": "negative_binomial",
+      "param_names": [
+        "Intercept",
+        "x1",
+        "x2",
+        "x3"
+      ],
+      "params": [
+        0.5303703456849345,
+        0.3813241205336897,
+        -0.29966972557250415,
+        -0.1096210128391049
+      ],
+      "vcov": [
+        [
+          0.018232621074710173,
+          -0.0005165084531579648,
+          0.00020340820045553328,
+          -0.013963157333441917
+        ],
+        [
+          -0.0005165084531579654,
+          0.003729502646523821,
+          8.512634880670695e-05,
+          -0.0003525259524288143
+        ],
+        [
+          0.0002034082004555334,
+          8.512634880670699e-05,
+          0.0027444148705915604,
+          0.00028925110523703884
+        ],
+        [
+          -0.013963157333441915,
+          -0.0003525259524288147,
+          0.000289251105237039,
+          0.013642166931322969
+        ]
+      ],
+      "vcov_param_names": [
+        "Intercept",
+        "x1",
+        "x2",
+        "x3"
+      ],
+      "vcov_scope": "full",
+      "reference_distribution": "z",
+      "df_resid": 296.0,
+      "df_method": "asymptotic",
+      "n_clusters": null,
+      "loglik": -503.89878931066346,
+      "nobs": 300,
+      "covariance_estimator": "nonrobust",
+      "estimation_sample_fingerprint": "rows-sha256:fa37fb75ef7c31d8e3197b9238acd691810bc518040aa3689c9cab30d3739296",
+      "weights": "none",
+      "interfaces": [
+        "coef_vcov",
+        "loglik"
+      ],
+      "unavailable": {}
+    },
+    "joint_vcov": [
+      [
+        0.018232621074710173,
+        -0.0005165084531579648,
+        0.00020340820045553328,
+        -0.013963157333441917,
+        -0.00016046975158866898
+      ],
+      [
+        -0.0005165084531579654,
+        0.003729502646523821,
+        8.512634880670695e-05,
+        -0.0003525259524288143,
+        -8.372742951714928e-05
+      ],
+      [
+        0.0002034082004555334,
+        8.512634880670699e-05,
+        0.0027444148705915604,
+        0.00028925110523703884,
+        0.00026910772731034507
+      ],
+      [
+        -0.013963157333441915,
+        -0.0003525259524288147,
+        0.000289251105237039,
+        0.013642166931322969,
+        0.0002178483037956348
+      ],
+      [
+        -0.00016046975158866893,
+        -8.372742951714924e-05,
+        0.0002691077273103451,
+        0.0002178483037956348,
+        0.00910534399964299
+      ]
+    ],
+    "beta_vcov": [
+      [
+        0.018232621074710173,
+        -0.0005165084531579648,
+        0.00020340820045553328,
+        -0.013963157333441917
+      ],
+      [
+        -0.0005165084531579654,
+        0.003729502646523821,
+        8.512634880670695e-05,
+        -0.0003525259524288143
+      ],
+      [
+        0.0002034082004555334,
+        8.512634880670699e-05,
+        0.0027444148705915604,
+        0.00028925110523703884
+      ],
+      [
+        -0.013963157333441915,
+        -0.0003525259524288147,
+        0.000289251105237039,
+        0.013642166931322969
+      ]
+    ],
+    "alpha": {
+      "name": "alpha",
+      "estimate": 0.4426186817041305,
+      "std_error": 0.09542192619960567,
+      "conf_low": 0.29008381511126513,
+      "conf_high": 0.675361006674427,
+      "scale": "natural"
+    },
+    "lnalpha": {
+      "name": "lnalpha",
+      "estimate": -0.8150466432543122,
+      "std_error": 0.2155849496280202,
+      "conf_low": -1.2375853801341135,
+      "conf_high": -0.3925079063745109,
+      "scale": "log"
+    },
+    "ll": -503.89878931066346,
+    "natural_score": [
+      -2.5163327554977855e-07,
+      8.344516038150118e-07,
+      9.55767092136739e-08,
+      -9.113859253950807e-07,
+      2.0001992314602326e-07
+    ],
+    "natural_mean_score_max": 3.037953084650269e-09,
+    "wald_joint": {
+      "operation": "wald",
+      "model_id": "strict_nb",
+      "model_type": "negative_binomial",
+      "covariance_estimator": "nonrobust",
+      "nobs": 300,
+      "df_method": "asymptotic",
+      "n_clusters": null,
+      "constraints": [
+        {
+          "terms": {
+            "x1": 1.0
+          },
+          "value": 0.0
+        },
+        {
+          "terms": {
+            "x2": 1.0
+          },
+          "value": 0.0
+        }
+      ],
+      "distribution": "chi2",
+      "statistic": 73.66323512630117,
+      "df_num": 2,
+      "df_den": null,
+      "p_value": 1.0097915513532629e-16
+    },
+    "wald_shifted": {
+      "operation": "wald",
+      "model_id": "strict_nb",
+      "model_type": "negative_binomial",
+      "covariance_estimator": "nonrobust",
+      "nobs": 300,
+      "df_method": "asymptotic",
+      "n_clusters": null,
+      "constraints": [
+        {
+          "terms": {
+            "x1": 1.0,
+            "x2": -1.0
+          },
+          "value": 1.0
+        }
+      ],
+      "distribution": "chi2",
+      "statistic": 16.143771779756346,
+      "df_num": 1,
+      "df_den": null,
+      "p_value": 5.87113123695416e-05
+    },
+    "lincom": {
+      "operation": "lincom",
+      "model_id": "strict_nb",
+      "model_type": "negative_binomial",
+      "covariance_estimator": "nonrobust",
+      "nobs": 300,
+      "df_method": "asymptotic",
+      "n_clusters": null,
+      "terms": {
+        "x1": 1.0,
+        "x2": 2.0
+      },
+      "constant": -0.5,
+      "estimate": -0.7180153306113186,
+      "std_error": 0.1226689346334959,
+      "statistic": -5.8532776269441715,
+      "distribution": "z",
+      "df": null,
+      "p_value": 4.819785553500386e-09,
+      "level": 0.95,
+      "ci": [
+        -0.9584420245148687,
+        -0.4775886367077685
+      ]
+    },
+    "nlcom": {
+      "operation": "nlcom",
+      "model_id": "strict_nb",
+      "model_type": "negative_binomial",
+      "covariance_estimator": "nonrobust",
+      "nobs": 300,
+      "df_method": "asymptotic",
+      "n_clusters": null,
+      "expression": "x1/x2",
+      "estimate": -1.272481295216555,
+      "std_error": 0.30565830686936507,
+      "statistic": -4.163084289282539,
+      "distribution": "z",
+      "df": null,
+      "p_value": 3.139773962415234e-05,
+      "level": 0.95,
+      "ci": [
+        -1.8715605682560024,
+        -0.6734020221771077
+      ],
+      "warnings": [
+        "The expression is strongly non-linear near the estimates; the delta-method interval may be inaccurate."
+      ]
+    },
+    "margins": {
+      "average": {
+        "operation": "margins",
+        "model_id": "strict_nb",
+        "model_type": "negative_binomial",
+        "covariance_estimator": "nonrobust",
+        "at": "average",
+        "label": "average marginal effect",
+        "scale": "response",
+        "inverse_link": "log",
+        "nobs": 300,
+        "distribution": "z",
+        "df": null,
+        "level": 0.95,
+        "effects": [
+          {
+            "variable": "x1",
+            "estimate": 0.6574384746429279,
+            "std_error": 0.11915515706264643,
+            "statistic": 5.517499123409961,
+            "p_value": 3.4385779918497144e-08,
+            "ci": [
+              0.4238986582279275,
+              0.8909782910579284
+            ]
+          },
+          {
+            "variable": "x2",
+            "estimate": -0.516658655112917,
+            "std_error": 0.0996066913846965,
+            "statistic": -5.18698741952487,
+            "p_value": 2.137231624163087e-07,
+            "ci": [
+              -0.7118841828461182,
+              -0.32143312737971574
+            ]
+          }
+        ]
+      },
+      "at_means": {
+        "operation": "margins",
+        "model_id": "strict_nb",
+        "model_type": "negative_binomial",
+        "covariance_estimator": "nonrobust",
+        "at": "means",
+        "label": "marginal effect at the means",
+        "scale": "response",
+        "inverse_link": "log",
+        "nobs": 300,
+        "distribution": "z",
+        "df": null,
+        "level": 0.95,
+        "effects": [
+          {
+            "variable": "x1",
+            "estimate": 0.5750680621208891,
+            "std_error": 0.09175804655002112,
+            "statistic": 6.267222153725729,
+            "p_value": 3.675456236485546e-10,
+            "ci": [
+              0.39522559559109793,
+              0.7549105286506803
+            ]
+          },
+          {
+            "variable": "x2",
+            "estimate": -0.4519265346238525,
+            "std_error": 0.07860858266364655,
+            "statistic": -5.749073692850732,
+            "p_value": 8.973370343120695e-09,
+            "ci": [
+              -0.6059965255203394,
+              -0.2978565437273656
+            ]
+          }
+        ]
+      }
+    },
+    "glm": {
+      "params": {
+        "Intercept": 0.4210052615447283,
+        "x1": 0.3789844117869672,
+        "x2": -0.2293064553582496
+      },
+      "std_error": [
+        0.061923915270531565,
+        0.06423158311977491,
+        0.061345338701274954
+      ],
+      "covariance": [
+        [
+          0.0038345712824319725,
+          -0.0006649248926769508,
+          0.0003721874448587279
+        ],
+        [
+          -0.0006649248926769509,
+          0.004125696270072554,
+          2.9518193899374903e-05
+        ],
+        [
+          0.000372187444858728,
+          2.9518193899374768e-05,
+          0.003763250580374143
+        ]
+      ],
+      "ll": -773.6297882089934,
+      "convergence": {
+        "converged": true,
+        "iterations": 16,
+        "tolerance": 1e-12,
+        "criterion": "absolute parameter change"
+      },
+      "max_absolute_score": 5.5848659030743875e-12
+    }
+  },
+  "differences": {
+    "wald_joint": {
+      "statistic": {
+        "native_final": 73.6632356235842,
+        "old_oracle": 73.6632356225689,
+        "workbench": 73.66323512630117,
+        "native_minus_old": 1.0152945151276072e-09,
+        "workbench_minus_native": -4.972830254246219e-07,
+        "workbench_relative_error": -6.7507627266039094e-09
+      },
+      "p_value": {
+        "native_final": 1.00979130027719e-16,
+        "old_oracle": 1.00979130078979e-16,
+        "workbench": 1.0097915513532629e-16,
+        "native_minus_old": -5.126000905793833e-26,
+        "workbench_minus_native": 2.5107607291310954e-23,
+        "workbench_relative_error": 2.4864154890558154e-07
+      },
+      "df_num": {
+        "native_final": 2,
+        "old_oracle": 2,
+        "workbench": 2,
+        "native_minus_old": 0,
+        "workbench_minus_native": 0,
+        "workbench_relative_error": 0.0
+      }
+    },
+    "wald_shifted": {
+      "statistic": {
+        "native_final": 16.1437713759091,
+        "old_oracle": 16.1437713756835,
+        "workbench": 16.143771779756346,
+        "native_minus_old": 2.256008713175106e-10,
+        "workbench_minus_native": 4.038472454226394e-07,
+        "workbench_relative_error": 2.501566931378818e-08
+      },
+      "p_value": {
+        "native_final": 5.87113248879525e-05,
+        "old_oracle": 5.87113248949466e-05,
+        "workbench": 5.87113123695416e-05,
+        "native_minus_old": -6.994100123277475e-15,
+        "workbench_minus_native": -1.2518410902339922e-11,
+        "workbench_relative_error": -2.132196970094924e-07
+      },
+      "df_num": {
+        "native_final": 1,
+        "old_oracle": 1,
+        "workbench": 1,
+        "native_minus_old": 0,
+        "workbench_minus_native": 0,
+        "workbench_relative_error": 0.0
+      }
+    },
+    "lincom": {
+      "estimate": {
+        "native_final": -0.718015326911863,
+        "old_oracle": -0.718015326911864,
+        "workbench": -0.7180153306113186,
+        "native_minus_old": 9.992007221626409e-16,
+        "workbench_minus_native": -3.6994556307234916e-09,
+        "workbench_relative_error": 5.152335225133697e-09
+      },
+      "std_error": {
+        "native_final": 0.122668934781026,
+        "old_oracle": 0.122668934781767,
+        "workbench": 0.1226689346334959,
+        "native_minus_old": -7.410044799982529e-13,
+        "workbench_minus_native": -1.4753009924817206e-10,
+        "workbench_relative_error": -1.2026687423727367e-09
+      }
+    },
+    "nlcom": {
+      "estimate": {
+        "native_final": -1.27248130738599,
+        "old_oracle": -1.27248130738599,
+        "workbench": -1.272481295216555,
+        "native_minus_old": 0.0,
+        "workbench_minus_native": 1.2169435015252361e-08,
+        "workbench_relative_error": -9.563547176405507e-09
+      },
+      "std_error": {
+        "native_final": 0.305658308860656,
+        "old_oracle": 0.305658308862664,
+        "workbench": 0.30565830686936507,
+        "native_minus_old": -2.0080048734882894e-12,
+        "workbench_minus_native": -1.9912909099417675e-09,
+        "workbench_relative_error": -6.51476128599171e-09
+      }
+    },
+    "margins_average": {
+      "x1": {
+        "estimate": {
+          "native": 0.6574384820804,
+          "workbench": 0.6574384746429279,
+          "relative_error": -1.1312803027685447e-08
+        },
+        "std_error": {
+          "native": 0.119155158267897,
+          "workbench": 0.11915515706264643,
+          "relative_error": -1.0114967641250416e-08
+        }
+      },
+      "x2": {
+        "estimate": {
+          "native": -0.51665865512311,
+          "workbench": -0.516658655112917,
+          "relative_error": -1.9728774169891494e-11
+        },
+        "std_error": {
+          "native": 0.0996066916363687,
+          "workbench": 0.0996066913846965,
+          "relative_error": -2.526659659274344e-09
+        }
+      }
+    },
+    "margins_at_means": {
+      "x1": {
+        "estimate": {
+          "native": 0.575068067816278,
+          "workbench": 0.5750680621208891,
+          "relative_error": -9.903851627690585e-09
+        },
+        "std_error": {
+          "native": 0.0917580472015567,
+          "workbench": 0.09175804655002112,
+          "relative_error": -7.10058245534384e-09
+        }
+      },
+      "x2": {
+        "estimate": {
+          "native": -0.451926533996273,
+          "workbench": -0.4519265346238525,
+          "relative_error": 1.3886758409853428e-09
+        },
+        "std_error": {
+          "native": 0.0786085827557806,
+          "workbench": 0.07860858266364655,
+          "relative_error": -1.1720610038068457e-09
+        }
+      }
+    }
+  },
+  "glm_native_epsilon1e16": {
+    "params": {
+      "(Intercept)": 0.42100526154473,
+      "x1": 0.378984411786947,
+      "x2": -0.229306455358252
+    },
+    "std_error": [
+      0.0619239152705315,
+      0.0642315831197748,
+      0.061345338701275
+    ],
+    "covariance": [
+      [
+        0.00383457128243196,
+        -0.000664924892676922,
+        0.00037218744485873
+      ],
+      [
+        -0.000664924892676922,
+        0.00412569627007254,
+        2.95181938993813e-05
+      ],
+      [
+        0.00037218744485873,
+        2.95181938993813e-05,
+        0.00376325058037415
+      ]
+    ],
+    "ll": -773.629788208993,
+    "iterations": 19,
+    "max_absolute_score": 7.8159700933611e-14,
+    "meta": {
+      "n": 450,
+      "formula": "y ~ x1 + x2",
+      "alpha_fixed": 1,
+      "information": "expected",
+      "scale": 1,
+      "epsilon": 1e-16
+    }
+  },
+  "nb_original_precision_sufficient": true,
+  "note": "Direct primitives with explicit beta positions; registry/admission/callers not changed."
+}

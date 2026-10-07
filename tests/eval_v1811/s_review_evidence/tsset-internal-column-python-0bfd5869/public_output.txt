@@ -1,0 +1,5 @@
+Traceback (most recent call last):
+  File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_evidence/tsset-internal-column-python-0bfd5869/analysis.py", line 35, in <module>
+    assert list(data['result'].columns) == ['time', '__wb_time']
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError

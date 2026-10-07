@@ -1,0 +1,121 @@
+...FFFFF.
+=================================== FAILURES ===================================
+__ test_retained_owner_fixed_effect_postestimation_matches_native[wald_joint] __
+
+reference = {'meta': {'generator': 'tests/fixtures/postestimation/lmm_v1811/generate_reference.R', 'source': '/Users/jiayuanren/项目...C(Q('arm'), Treatment(reference='a'))[T.b]", 'time', "C(Q('arm'), Treatment(reference='a'))[T.b]:Q('time')", 'x'], ...}
+kernel = {'contract': 'workbench.inference_kernel.v1', 'model_id': 'linear_mixed_effects_1', 'model_type': 'linear_mixed_effect...C(Q('arm'), Treatment(reference='a'))[T.b]", 'time', "C(Q('arm'), Treatment(reference='a'))[T.b]:Q('time')", 'x'], ...}
+case = 'wald_joint'
+
+    @pytest.mark.parametrize("case",["wald_joint","wald_shifted","lincom","nlcom"])
+    def test_retained_owner_fixed_effect_postestimation_matches_native(reference,kernel,case):
+        operations={"wald_joint":lambda:wald_test(kernel,JOINT),"wald_shifted":lambda:wald_test(kernel,SHIFTED),
+                    "lincom":lambda:lincom(kernel,{"time":1,"x":2},constant=-.5),
+                    "nlcom":lambda:nlcom(kernel,"time/x")}
+        actual=operations[case](); expected=reference[case]
+        for key in ["statistic","estimate","std_error"]:
+            if key in expected:
+>               assert actual[key]==pytest.approx(expected[key],rel=REL,abs=0),key
+E               AssertionError: statistic
+E               assert 337.0735040574246 == 337.0835092905391 ± 3.4e-04
+E                 
+E                 comparison failed
+E                 Obtained: 337.0735040574246
+E                 Expected: 337.0835092905391 ± 3.4e-04
+
+tests/test_lmm_postestimation_v1811_reference.py:76: AssertionError
+_ test_retained_owner_fixed_effect_postestimation_matches_native[wald_shifted] _
+
+reference = {'meta': {'generator': 'tests/fixtures/postestimation/lmm_v1811/generate_reference.R', 'source': '/Users/jiayuanren/项目...C(Q('arm'), Treatment(reference='a'))[T.b]", 'time', "C(Q('arm'), Treatment(reference='a'))[T.b]:Q('time')", 'x'], ...}
+kernel = {'contract': 'workbench.inference_kernel.v1', 'model_id': 'linear_mixed_effects_1', 'model_type': 'linear_mixed_effect...C(Q('arm'), Treatment(reference='a'))[T.b]", 'time', "C(Q('arm'), Treatment(reference='a'))[T.b]:Q('time')", 'x'], ...}
+case = 'wald_shifted'
+
+    @pytest.mark.parametrize("case",["wald_joint","wald_shifted","lincom","nlcom"])
+    def test_retained_owner_fixed_effect_postestimation_matches_native(reference,kernel,case):
+        operations={"wald_joint":lambda:wald_test(kernel,JOINT),"wald_shifted":lambda:wald_test(kernel,SHIFTED),
+                    "lincom":lambda:lincom(kernel,{"time":1,"x":2},constant=-.5),
+                    "nlcom":lambda:nlcom(kernel,"time/x")}
+        actual=operations[case](); expected=reference[case]
+        for key in ["statistic","estimate","std_error"]:
+            if key in expected:
+>               assert actual[key]==pytest.approx(expected[key],rel=REL,abs=0),key
+E               AssertionError: statistic
+E               assert 824.6196658791449 == 824.6426893003228 ± 8.2e-04
+E                 
+E                 comparison failed
+E                 Obtained: 824.6196658791449
+E                 Expected: 824.6426893003228 ± 8.2e-04
+
+tests/test_lmm_postestimation_v1811_reference.py:76: AssertionError
+____ test_retained_owner_fixed_effect_postestimation_matches_native[lincom] ____
+
+reference = {'meta': {'generator': 'tests/fixtures/postestimation/lmm_v1811/generate_reference.R', 'source': '/Users/jiayuanren/项目...C(Q('arm'), Treatment(reference='a'))[T.b]", 'time', "C(Q('arm'), Treatment(reference='a'))[T.b]:Q('time')", 'x'], ...}
+kernel = {'contract': 'workbench.inference_kernel.v1', 'model_id': 'linear_mixed_effects_1', 'model_type': 'linear_mixed_effect...C(Q('arm'), Treatment(reference='a'))[T.b]", 'time', "C(Q('arm'), Treatment(reference='a'))[T.b]:Q('time')", 'x'], ...}
+case = 'lincom'
+
+    @pytest.mark.parametrize("case",["wald_joint","wald_shifted","lincom","nlcom"])
+    def test_retained_owner_fixed_effect_postestimation_matches_native(reference,kernel,case):
+        operations={"wald_joint":lambda:wald_test(kernel,JOINT),"wald_shifted":lambda:wald_test(kernel,SHIFTED),
+                    "lincom":lambda:lincom(kernel,{"time":1,"x":2},constant=-.5),
+                    "nlcom":lambda:nlcom(kernel,"time/x")}
+        actual=operations[case](); expected=reference[case]
+        for key in ["statistic","estimate","std_error"]:
+            if key in expected:
+>               assert actual[key]==pytest.approx(expected[key],rel=REL,abs=0),key
+E               AssertionError: statistic
+E               assert 11.345188764794134 == 11.34540913204823 ± 1.1e-05
+E                 
+E                 comparison failed
+E                 Obtained: 11.345188764794134
+E                 Expected: 11.34540913204823 ± 1.1e-05
+
+tests/test_lmm_postestimation_v1811_reference.py:76: AssertionError
+____ test_retained_owner_fixed_effect_postestimation_matches_native[nlcom] _____
+
+reference = {'meta': {'generator': 'tests/fixtures/postestimation/lmm_v1811/generate_reference.R', 'source': '/Users/jiayuanren/项目...C(Q('arm'), Treatment(reference='a'))[T.b]", 'time', "C(Q('arm'), Treatment(reference='a'))[T.b]:Q('time')", 'x'], ...}
+kernel = {'contract': 'workbench.inference_kernel.v1', 'model_id': 'linear_mixed_effects_1', 'model_type': 'linear_mixed_effect...C(Q('arm'), Treatment(reference='a'))[T.b]", 'time', "C(Q('arm'), Treatment(reference='a'))[T.b]:Q('time')", 'x'], ...}
+case = 'nlcom'
+
+    @pytest.mark.parametrize("case",["wald_joint","wald_shifted","lincom","nlcom"])
+    def test_retained_owner_fixed_effect_postestimation_matches_native(reference,kernel,case):
+        operations={"wald_joint":lambda:wald_test(kernel,JOINT),"wald_shifted":lambda:wald_test(kernel,SHIFTED),
+                    "lincom":lambda:lincom(kernel,{"time":1,"x":2},constant=-.5),
+                    "nlcom":lambda:nlcom(kernel,"time/x")}
+        actual=operations[case](); expected=reference[case]
+        for key in ["statistic","estimate","std_error"]:
+            if key in expected:
+>               assert actual[key]==pytest.approx(expected[key],rel=REL,abs=0),key
+E               AssertionError: statistic
+E               assert 8.904910305843256 == 8.904968309455818 ± 8.9e-06
+E                 
+E                 comparison failed
+E                 Obtained: 8.904910305843256
+E                 Expected: 8.904968309455818 ± 8.9e-06
+
+tests/test_lmm_postestimation_v1811_reference.py:76: AssertionError
+_____ test_fixed_effect_empirical_average_prediction_is_an_explicit_lincom _____
+
+reference = {'meta': {'generator': 'tests/fixtures/postestimation/lmm_v1811/generate_reference.R', 'source': '/Users/jiayuanren/项目...C(Q('arm'), Treatment(reference='a'))[T.b]", 'time', "C(Q('arm'), Treatment(reference='a'))[T.b]:Q('time')", 'x'], ...}
+kernel = {'contract': 'workbench.inference_kernel.v1', 'model_id': 'linear_mixed_effects_1', 'model_type': 'linear_mixed_effect...C(Q('arm'), Treatment(reference='a'))[T.b]", 'time', "C(Q('arm'), Treatment(reference='a'))[T.b]:Q('time')", 'x'], ...}
+
+    def test_fixed_effect_empirical_average_prediction_is_an_explicit_lincom(reference,kernel):
+        expected=reference["fixed_effect_average_prediction"]
+        assert expected["random_effects"]=="zero (population fixed-effect prediction)"
+        assert expected["uncertainty"]=="sampling SE of empirical fixed-effect mean; excludes residual/new-subject prediction variance"
+        terms=dict(zip(kernel["param_names"],expected["mean_design_owner_order"]))
+        actual=lincom(kernel,terms)
+        assert actual["estimate"]==pytest.approx(expected["estimate"],rel=REL,abs=0)
+>       assert actual["std_error"]==pytest.approx(expected["std_error"],rel=REL,abs=0)
+E       assert 0.09552557213055088 == 0.09552525270309134 ± 9.6e-08
+E         
+E         comparison failed
+E         Obtained: 0.09552557213055088
+E         Expected: 0.09552525270309134 ± 9.6e-08
+
+tests/test_lmm_postestimation_v1811_reference.py:90: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_lmm_postestimation_v1811_reference.py::test_retained_owner_fixed_effect_postestimation_matches_native[wald_joint]
+FAILED tests/test_lmm_postestimation_v1811_reference.py::test_retained_owner_fixed_effect_postestimation_matches_native[wald_shifted]
+FAILED tests/test_lmm_postestimation_v1811_reference.py::test_retained_owner_fixed_effect_postestimation_matches_native[lincom]
+FAILED tests/test_lmm_postestimation_v1811_reference.py::test_retained_owner_fixed_effect_postestimation_matches_native[nlcom]
+FAILED tests/test_lmm_postestimation_v1811_reference.py::test_fixed_effect_empirical_average_prediction_is_an_explicit_lincom
+5 failed, 4 passed in 1.41s

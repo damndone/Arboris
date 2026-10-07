@@ -1,0 +1,190 @@
+{
+  "run": "/private/tmp/v1811-evaluation-8d8a2fd4c7d44af693b267e6d893d16f-r01/test_actual_default_cluster_ke0/public/runs/20261005_091802_302122_1d035ee4",
+  "packet": {
+    "schema_version": 1,
+    "model_id": "panel_ols_1",
+    "model_type": "panel_ols",
+    "engine": "linearmodels",
+    "y_column": "y",
+    "nobs": 216,
+    "r_squared": 0.21176564189837965,
+    "r_squared_adj": null,
+    "df_model": 34.0,
+    "df_resid": 182.0,
+    "coefficients": {
+      "Intercept": {
+        "estimate": 0.7402446499827811,
+        "std_error": 0.0032954638487555053,
+        "p_value": 0.0,
+        "ci_lower": 0.7334274636121921,
+        "ci_upper": 0.74706183635337,
+        "source_id": "model_results.panel_ols_1.coefficients.Intercept"
+      },
+      "x1": {
+        "estimate": 0.48385401548639123,
+        "std_error": 0.0879216166381435,
+        "p_value": 1.4e-05,
+        "ci_lower": 0.3019742941075496,
+        "ci_upper": 0.6657337368652329,
+        "source_id": "model_results.panel_ols_1.coefficients.x1"
+      },
+      "x2": {
+        "estimate": -0.2122833748186243,
+        "std_error": 0.06856258843223131,
+        "p_value": 0.005093,
+        "ci_lower": -0.35411589516898867,
+        "ci_upper": -0.07045085446825997,
+        "source_id": "model_results.panel_ols_1.coefficients.x2"
+      }
+    },
+    "warnings": [],
+    "covariance": "clustered",
+    "covariance_estimator": "clustered_entity",
+    "entity_col": "g",
+    "time_col": "time",
+    "x_columns": [
+      "Intercept",
+      "x1",
+      "x2"
+    ],
+    "covariance_evidence": {
+      "covariance": "clustered",
+      "covariance_estimator": "CR1",
+      "cluster_variable": "g",
+      "cluster_entity": true,
+      "cluster_count": 24,
+      "small_sample_correction": true,
+      "degrees_of_freedom_correction": true,
+      "finite_sample_factor": "G/(G-1) * (N-1)/(N-K)",
+      "parameters_counted": 11,
+      "use_t": true,
+      "inference_version": "workbench.inference.v2",
+      "df_method": "clusters_minus_one",
+      "inference_distribution": "t",
+      "effective_df": 23,
+      "confidence_level": 0.95,
+      "df_resid": 182.0,
+      "reference": "Stata xtreg, fe vce(cluster)"
+    }
+  },
+  "kernel": {
+    "contract": "workbench.inference_kernel.v1",
+    "model_id": "panel_ols_1",
+    "model_type": "panel_ols",
+    "param_names": [
+      "Intercept",
+      "x1",
+      "x2"
+    ],
+    "params": [
+      0.7402446499827811,
+      0.48385401548639123,
+      -0.2122833748186243
+    ],
+    "vcov": [
+      [
+        1.0860081978454447e-05,
+        -0.0002781070185316122,
+        0.00014788637501256342
+      ],
+      [
+        -0.00027810701853161254,
+        0.007730210672264673,
+        -0.002508527700139529
+      ],
+      [
+        0.00014788637501256374,
+        -0.002508527700139532,
+        0.004700828532527538
+      ]
+    ],
+    "vcov_param_names": [
+      "Intercept",
+      "x1",
+      "x2"
+    ],
+    "vcov_scope": "full",
+    "reference_distribution": "t",
+    "df_resid": 23.0,
+    "df_method": "clusters_minus_one",
+    "n_clusters": 24,
+    "loglik": null,
+    "nobs": 216,
+    "covariance_estimator": "cluster",
+    "estimation_sample_fingerprint": null,
+    "weights": "none",
+    "interfaces": [
+      "coef_vcov"
+    ],
+    "unavailable": {
+      "loglik": "The model did not provide a log-likelihood."
+    }
+  },
+  "native": {
+    "b": 0.4907132918351812,
+    "se": 0.0855999367575286,
+    "t": 5.732636149313772,
+    "df": 23.0,
+    "p": 7.727420729968414e-06,
+    "lc": 0.7369375297997587,
+    "lc_se": 0.14423082554238065,
+    "lc_p": 3.557280722094205e-05,
+    "wald": 16.504245479787038,
+    "wald_df": 2.0,
+    "wald_den": 23.0,
+    "wald_p": 3.588811028032811e-05
+  },
+  "lincom": {
+    "operation": "lincom",
+    "model_id": "panel_ols_1",
+    "model_type": "panel_ols",
+    "covariance_estimator": "cluster",
+    "nobs": 216,
+    "df_method": "clusters_minus_one",
+    "n_clusters": 24,
+    "terms": {
+      "x1": 1.0,
+      "x2": -1.0
+    },
+    "constant": 0.0,
+    "estimate": 0.6961373903050155,
+    "std_error": 0.13209123591317962,
+    "statistic": 5.2701254969146465,
+    "distribution": "t",
+    "df": 23.0,
+    "p_value": 2.392778958044923e-05,
+    "level": 0.95,
+    "ci": [
+      0.4228858498635586,
+      0.9693889307464725
+    ]
+  },
+  "wald": {
+    "operation": "wald",
+    "model_id": "panel_ols_1",
+    "model_type": "panel_ols",
+    "covariance_estimator": "cluster",
+    "nobs": 216,
+    "df_method": "clusters_minus_one",
+    "n_clusters": 24,
+    "constraints": [
+      {
+        "terms": {
+          "x1": 1.0
+        },
+        "value": 0.0
+      },
+      {
+        "terms": {
+          "x2": 1.0
+        },
+        "value": 0.0
+      }
+    ],
+    "distribution": "F",
+    "statistic": 15.53578318141657,
+    "df_num": 2,
+    "df_den": 23.0,
+    "p_value": 5.379317559955659e-05
+  }
+}

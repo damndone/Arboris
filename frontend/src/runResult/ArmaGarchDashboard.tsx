@@ -103,8 +103,18 @@ export function ArmaGarchDashboard({ artifacts, charts }: Props) {
         <p>
           {semanticsLabel} · {text(scale.transform)} · {text(scale.lag_unit)}
         </p>
+        <p>{sample.evaluation_mode === "classical_replication" ? "Classical replication" : "Train / validation split"}</p>
+        {sample.evaluation_mode === "classical_replication" && (
+          <p className="ios-hint">Tail evaluation is retrospective, not independent validation; every forecast refits using only earlier observations.</p>
+        )}
         <AcceptanceChips dimensions={dimensions} />
         <dl className="summary-list">
+          {sample.estimation_n != null && (
+            <div>
+              <dt>{sample.evaluation_mode === "classical_replication" ? "Full-sample estimation observations" : "Training estimation observations"}</dt>
+              <dd>{text(sample.estimation_n)}</dd>
+            </div>
+          )}
           <div>
             <dt>Source / train / validation</dt>
             <dd>

@@ -1,0 +1,14 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+___________ test_native_log_redaction_preserves_all_non_header_bytes ___________
+
+    def test_native_log_redaction_preserves_all_non_header_bytes():
+        manifest=json.loads((FIXTURE / "manifest.json").read_text())
+>       assert "log_redaction" in manifest, "Native license headers need documented preservation and redaction"
+E       AssertionError: Native license headers need documented preservation and redaction
+E       assert 'log_redaction' in {'baseline': '01fb0752bce129c8d8848c021eca776dadccb515', 'branch': 'codex/v1811-final-oracles', 'asset_sha256': {'test...sha256': '143b75513c18d4a5aa0a20ea08b61169f65d1a358a533ee0d497c768cff7dd50', 'byte_identical_to_baseline': True}, ...}}
+
+tests/test_glm_nb_v1811_reference.py:50: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_glm_nb_v1811_reference.py::test_native_log_redaction_preserves_all_non_header_bytes
+1 failed in 1.35s

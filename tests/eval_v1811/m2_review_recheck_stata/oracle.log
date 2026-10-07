@@ -1,0 +1,100 @@
+
+  ___  ____  ____  ____  ____ ®
+ /__    /   ____/   /   ____/      18.0
+___/   /   /___/   /   /___/       MP—Parallel Edition
+
+ Statistics and Data Science       Copyright 1985-2023 StataCorp LLC
+                                   StataCorp
+                                   4905 Lakeway Drive
+                                   College Station, Texas 77845 USA
+                                   800-STATA-PC        https://www.stata.com
+                                   979-696-4600        stata@stata.com
+
+Stata license: Single-user 2-core  perpetual
+Serial number: [REDACTED]
+  Licensed to: [REDACTED]
+               
+
+Notes:
+      1. Stata is running in batch mode.
+      2. Unicode is supported; see help unicode_advice.
+      3. More than 2 billion observations are allowed; see help obs_advice.
+      4. Maximum number of variables is set to 5,000 but can be increased;
+          see help set_maxvar.
+
+
+Running /Applications/Stata/profile.do ...
+command window is unrecognized
+r(199);
+
+. do oracle.do 
+
+. version 18
+
+. set more off
+
+. file open wbout using "wb_results.tsv", write replace
+(file wb_results.tsv not found)
+
+. import delimited "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-m2/tests/
+> fixtures/count_models/p1-remediation-20261004/fractional-oracle/data.csv", as
+> double clear case(preserve)
+(encoding automatically selected: UTF-8)
+(3 vars, 1,200 obs)
+
+. glm y x1 x2, family(nbinomial 0.5) link(log) ml iterate(1000) tolerance(1e-12
+> ) ltolerance(1e-12)
+note: y has noninteger values
+
+Iteration 0:  Log likelihood = -2104.4928  
+Iteration 1:  Log likelihood = -2099.6955  
+Iteration 2:  Log likelihood = -2099.6951  
+Iteration 3:  Log likelihood = -2099.6951  
+
+Generalized linear models                         Number of obs   =      1,200
+Optimization     : ML                             Residual df     =      1,197
+                                                  Scale parameter =          1
+Deviance         =  972.4026599                   (1/df) Deviance =   .8123665
+Pearson          =  1070.361859                   (1/df) Pearson  =   .8942037
+
+Variance function: V(u) = u+(.5)u^2               [Neg. Binomial]
+Link function    : g(u) = ln(u)                   [Log]
+
+                                                  AIC             =   3.504492
+Log likelihood   = -2099.695128                   BIC             =  -7514.419
+
+------------------------------------------------------------------------------
+             |                 OIM
+           y | Coefficient  std. err.      z    P>|z|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+          x1 |   .3236619   .0305228    10.60   0.000     .2638383    .3834856
+          x2 |  -.1709456   .0309672    -5.52   0.000    -.2316401    -.110251
+       _cons |   .5540128   .0304171    18.21   0.000     .4943963    .6136293
+------------------------------------------------------------------------------
+
+. file write wbout "b__cons" _tab %24.17g (_b[_cons]) _n
+
+. file write wbout "b_x1" _tab %24.17g (_b[x1]) _n
+
+. file write wbout "b_x2" _tab %24.17g (_b[x2]) _n
+
+. file write wbout "se__cons" _tab %24.17g (_se[_cons]) _n
+
+. file write wbout "se_x1" _tab %24.17g (_se[x1]) _n
+
+. file write wbout "se_x2" _tab %24.17g (_se[x2]) _n
+
+. file write wbout "ll" _tab %24.17g (e(ll)) _n
+
+. replace y=-1 in 1
+(1 real change made)
+
+. capture noisily glm y x1 x2, family(nbinomial 0.5) link(log) ml
+dependent variable y has negative values
+
+. file write wbout "negative_rc" _tab %21.15g (_rc) _n
+
+. file close wbout
+
+. 
+end of do-file

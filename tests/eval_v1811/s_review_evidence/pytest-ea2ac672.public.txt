@@ -1,0 +1,621 @@
+.F.F.....F...F..F....F....FFFFFFFFFF                                     [100%]
+=================================== FAILURES ===================================
+_________ test_categorical_branch_does_not_mutate_continuous_branch[r] _________
+tests/eval_v1811/s_review_test_adversarial.py:108: in test_categorical_branch_does_not_mutate_continuous_branch
+    assert code == 0, output
+E   AssertionError: Error in results[["continuous"]][["beta"]][["category"]] : 
+E       subscript out of bounds
+E     Execution halted
+E     
+E   assert 1 == 0
+----------------------------- Captured stdout call -----------------------------
+Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_evidence/branch-isolation-r-d4cd5917
+____ test_user_predictor_does_not_collide_with_export_internal_name[stata] _____
+tests/eval_v1811/s_review_test_adversarial.py:118: in test_user_predictor_does_not_collide_with_export_internal_name
+    assert code == 0, output
+E   AssertionError: 
+E       ___  ____  ____  ____  ____ ®
+E      /__    /   ____/   /   ____/      18.0
+E     ___/   /   /___/   /   /___/       MP—Parallel Edition
+E     
+E      Statistics and Data Science       Copyright 1985-2023 StataCorp LLC
+E                                        StataCorp
+E                                        4905 Lakeway Drive
+E                                        College Station, Texas 77845 USA
+E                                        800-STATA-PC        https://www.stata.com
+E                                        979-696-4600        stata@stata.com
+E     
+E     Stata license: Single-user 2-core  perpetual
+E                    
+E     
+E     Notes:
+E           1. Stata is running in batch mode.
+E           2. Unicode is supported; see help unicode_advice.
+E           3. More than 2 billion observations are allowed; see help obs_advice.
+E           4. Maximum number of variables is set to 5,000 but can be increased;
+E               see help set_maxvar.
+E     
+E     
+E     Running /Applications/Stata/profile.do ...
+E     command window is unrecognized
+E     r(199);
+E     
+E     . do analysis.do 
+E     
+E     . * Workbench 1.8.11
+E     . * project: review
+E     . * run: internal-column
+E     . * lineage_hash: 2222222222222222222222222222222222222222222222222222222222222
+E     > 222
+E     . * Coverage
+E     . * model | model.ols | native | 
+E     . version 18
+E     
+E     . set more off
+E     
+E     . set type double
+E     
+E     . capture program drop wb_repost
+E     
+E     . program define wb_repost, eclass
+E       1.     args beta covariance
+E       2.     ereturn repost b=`beta' V=`covariance', rename
+E       3. end
+E     
+E     . capture program drop wb_sha
+E     
+E     . program define wb_sha
+E       1.     args filename expected
+E       2.     tempfile digestfile
+E       3.     shell shasum -a 256 "`filename'" > "`digestfile'"
+E       4.     tempname fh
+E       5.     file open `fh' using "`digestfile'", read text
+E       6.     file read `fh' line
+E       7.     file close `fh'
+E       8.     if substr("`line'",1,64) != "`expected'" {
+E       9.         display as error "SHA256 mismatch"
+E      10.         exit 9
+E      11.     }
+E      12. end
+E     
+E     . 
+E     . wb_sha "data.csv" "0bea4e0503803b2c2abcc213d13f39d8a90afd7d4e346aa1ae854bcbae
+E     > 99482f"
+E     
+E     
+E     . frame create wb_src0
+E     
+E     . frame change wb_src0
+E     
+E     . import delimited using "data.csv", asdouble clear case(preserve)
+E     (encoding automatically selected: ISO-8859-2)
+E     (5 vars, 240 obs)
+E     
+E     . frame copy wb_src0 wb_model_data1
+E     
+E     . frame change wb_model_data1
+E     
+E     . capture drop wb_cat0
+E     
+E     . egen long wb_cat0 = group(category)
+E     
+E     . regress y wb_cat0 ib1.wb_cat0
+E     note: 3.wb_cat0 omitted because of collinearity.
+E     
+E           Source |       SS           df       MS      Number of obs   =       240
+E     -------------+----------------------------------   F(2, 237)       =     45.16
+E            Model |  93.6579084         2  46.8289542   Prob > F        =    0.0000
+E         Residual |  245.760948       237  1.03696603   R-squared       =    0.2759
+E     -------------+----------------------------------   Adj R-squared   =    0.2698
+E            Total |  339.418857       239  1.42016258   Root MSE        =    1.0183
+E     
+E     ------------------------------------------------------------------------------
+E                y | Coefficient  Std. err.      t    P>|t|     [95% conf. interval]
+E     -------------+----------------------------------------------------------------
+E          wb_cat0 |   .7550034   .0805049     9.38   0.000     .5964068       .9136
+E                  |
+E          wb_cat0 |
+E               2  |  -.2144652   .1394386    -1.54   0.125    -.4891625    .0602321
+E               3  |          0  (omitted)
+E                  |
+E            _cons |   .5959607   .1800144     3.31   0.001      .241328    .9505934
+E     ------------------------------------------------------------------------------
+E     
+E     . estimates store wb_model1
+E     
+E     . generate long wb_sample_row = _n
+E     
+E     . generate byte wb_sample1 = e(sample)
+E     
+E     . scalar wb_number_0 = _b[_cons]
+E     
+E     . quietly summarize wb_cat0 if category == 2.0
+E     
+E     . local wb_level = r(min)
+E     
+E     . scalar wb_number_1 = _b[`wb_level'.wb_cat0]
+E     
+E     . quietly summarize wb_cat0 if category == 3.0
+E     
+E     . local wb_level = r(min)
+E     
+E     . scalar wb_number_2 = _b[`wb_level'.wb_cat0]
+E     
+E     . scalar wb_number_3 = _b[wb_cat0]
+E     
+E     . scalar wb_number_4 = _se[_cons]
+E     
+E     . quietly summarize wb_cat0 if category == 2.0
+E     
+E     . local wb_level = r(min)
+E     
+E     . scalar wb_number_5 = _se[`wb_level'.wb_cat0]
+E     
+E     . quietly summarize wb_cat0 if category == 3.0
+E     
+E     . local wb_level = r(min)
+E     
+E     . scalar wb_number_6 = _se[`wb_level'.wb_cat0]
+E     
+E     . scalar wb_number_7 = _se[wb_cat0]
+E     
+E     . scalar wb_number_8 = e(N)
+E     
+E     . capture confirm scalar e(df_r)
+E     
+E     . if _rc exit 9
+E     
+E     . scalar wb_number_9 = (_b[_cons]/_se[_cons])
+E     
+E     . scalar wb_number_10 = 2*ttail(e(df_r),abs((_b[_cons]/_se[_cons])))
+E     
+E     . scalar wb_number_11 = e(df_r)
+E     
+E     . quietly summarize wb_cat0 if category == 2.0
+E     
+E     . local wb_level = r(min)
+E     
+E     . capture confirm scalar e(df_r)
+E     
+E     . if _rc exit 9
+E     
+E     . scalar wb_number_12 = (_b[`wb_level'.wb_cat0]/_se[`wb_level'.wb_cat0])
+E     
+E     . scalar wb_number_13 = 2*ttail(e(df_r),abs((_b[`wb_level'.wb_cat0]/_se[`wb_lev
+E     > el'.wb_cat0])))
+E     
+E     . scalar wb_number_14 = e(df_r)
+E     
+E     . quietly summarize wb_cat0 if category == 3.0
+E     
+E     . local wb_level = r(min)
+E     
+E     . capture confirm scalar e(df_r)
+E     
+E     . if _rc exit 9
+E     
+E     . scalar wb_number_15 = (_b[`wb_level'.wb_cat0]/_se[`wb_level'.wb_cat0])
+E     
+E     . scalar wb_number_16 = 2*ttail(e(df_r),abs((_b[`wb_level'.wb_cat0]/_se[`wb_lev
+E     > el'.wb_cat0])))
+E     
+E     . scalar wb_number_17 = e(df_r)
+E     
+E     . capture confirm scalar e(df_r)
+E     
+E     . if _rc exit 9
+E     
+E     . scalar wb_number_18 = (_b[wb_cat0]/_se[wb_cat0])
+E     
+E     . scalar wb_number_19 = 2*ttail(e(df_r),abs((_b[wb_cat0]/_se[wb_cat0])))
+E     
+E     . scalar wb_number_20 = e(df_r)
+E     
+E     . file open wb_review_numbers using "numeric_actual.tsv", write text replace
+E     (file numeric_actual.tsv not found)
+E     
+E     . file write wb_review_numbers %21.17g (wb_number_0) _n
+E     
+E     . file write wb_review_numbers %21.17g (wb_number_1) _n
+E     
+E     . file write wb_review_numbers %21.17g (wb_number_2) _n
+E     
+E     . file write wb_review_numbers %21.17g (wb_number_3) _n
+E     
+E     . file write wb_review_numbers %21.17g (wb_number_4) _n
+E     
+E     . file write wb_review_numbers %21.17g (wb_number_5) _n
+E     
+E     . file write wb_review_numbers %21.17g (wb_number_6) _n
+E     
+E     . file write wb_review_numbers %21.17g (wb_number_7) _n
+E     
+E     . file write wb_review_numbers %21.17g (wb_number_8) _n
+E     
+E     . file write wb_review_numbers %21.17g (wb_number_9) _n
+E     
+E     . file write wb_review_numbers %21.17g (wb_number_10) _n
+E     
+E     . file write wb_review_numbers %21.17g (wb_number_11) _n
+E     
+E     . file write wb_review_numbers %21.17g (wb_number_12) _n
+E     
+E     . file write wb_review_numbers %21.17g (wb_number_13) _n
+E     
+E     . file write wb_review_numbers %21.17g (wb_number_14) _n
+E     
+E     . file write wb_review_numbers %21.17g (wb_number_15) _n
+E     
+E     . file write wb_review_numbers %21.17g (wb_number_16) _n
+E     
+E     . file write wb_review_numbers %21.17g (wb_number_17) _n
+E     
+E     . file write wb_review_numbers %21.17g (wb_number_18) _n
+E     
+E     . file write wb_review_numbers %21.17g (wb_number_19) _n
+E     
+E     . file write wb_review_numbers %21.17g (wb_number_20) _n
+E     
+E     . file close wb_review_numbers
+E     
+E     . * Closing self-checks
+E     . assert !missing(wb_number_0) & abs(wb_number_0-(1.3535431849425417)) <= 1e-08
+E     > +1e-06*abs(1.3535431849425417)
+E     assertion is false
+E     r(9);
+E     
+E     end of do-file
+E     r(9);
+E     
+E   assert 9 == 0
+----------------------------- Captured stdout call -----------------------------
+Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_evidence/internal-column-stata-466de9e9
+_________ test_supported_hac_time_order_is_translated[iso-dates-stata] _________
+tests/eval_v1811/s_review_test_adversarial.py:131: in test_supported_hac_time_order_is_translated
+    assert code == 0, output
+E   AssertionError: 
+E       ___  ____  ____  ____  ____ ®
+E      /__    /   ____/   /   ____/      18.0
+E     ___/   /   /___/   /   /___/       MP—Parallel Edition
+E     
+E      Statistics and Data Science       Copyright 1985-2023 StataCorp LLC
+E                                        StataCorp
+E                                        4905 Lakeway Drive
+E                                        College Station, Texas 77845 USA
+E                                        800-STATA-PC        https://www.stata.com
+E                                        979-696-4600        stata@stata.com
+E     
+E     Stata license: Single-user 2-core  perpetual
+E                    
+E     
+E     Notes:
+E           1. Stata is running in batch mode.
+E           2. Unicode is supported; see help unicode_advice.
+E           3. More than 2 billion observations are allowed; see help obs_advice.
+E           4. Maximum number of variables is set to 5,000 but can be increased;
+E               see help set_maxvar.
+E     
+E     
+E     Running /Applications/Stata/profile.do ...
+E     command window is unrecognized
+E     r(199);
+E     
+E     . do analysis.do 
+E     
+E     . * Workbench 1.8.11
+E     . * project: review
+E     . * run: iso-dates
+E     . * lineage_hash: 3333333333333333333333333333333333333333333333333333333333333
+E     > 333
+E     . * Coverage
+E     . * model | model.ols | native | 
+E     . version 18
+E     
+E     . set more off
+E     
+E     . set type double
+E     
+E     . capture program drop wb_repost
+E     
+E     . program define wb_repost, eclass
+E       1.     args beta covariance
+E       2.     ereturn repost b=`beta' V=`covariance', rename
+E       3. end
+E     
+E     . capture program drop wb_sha
+E     
+E     . program define wb_sha
+E       1.     args filename expected
+E       2.     tempfile digestfile
+E       3.     shell shasum -a 256 "`filename'" > "`digestfile'"
+E       4.     tempname fh
+E       5.     file open `fh' using "`digestfile'", read text
+E       6.     file read `fh' line
+E       7.     file close `fh'
+E       8.     if substr("`line'",1,64) != "`expected'" {
+E       9.         display as error "SHA256 mismatch"
+E      10.         exit 9
+E      11.     }
+E      12. end
+E     
+E     . 
+E     . wb_sha "data.csv" "4248a622d3d0e5c361e3721f7d0341675a5548cee1ce1c34ff0b02170a
+E     > 01ecb8"
+E     
+E     
+E     . frame create wb_src0
+E     
+E     . frame change wb_src0
+E     
+E     . import delimited using "data.csv", asdouble clear case(preserve)
+E     (encoding automatically selected: ISO-8859-2)
+E     (5 vars, 240 obs)
+E     
+E     . frame copy wb_src0 wb_model_data1
+E     
+E     . frame change wb_model_data1
+E     
+E     . tsset time
+E     string variables not allowed in varlist;
+E     time is a string variable
+E     r(109);
+E     
+E     end of do-file
+E     r(109);
+E     
+E   assert 9 == 0
+----------------------------- Captured stdout call -----------------------------
+Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_evidence/hac-iso-dates-stata-c17bba8f
+_________ test_numeric_category_names_keep_full_precision_identity[r] __________
+tests/eval_v1811/s_review_test_adversarial.py:142: in test_numeric_category_names_keep_full_precision_identity
+    assert code == 0, output
+E   AssertionError: Error in results[["model"]][["beta"]][["C(Q('category'))[T.2.0]"]] : 
+E       subscript out of bounds
+E     Execution halted
+E     
+E   assert 1 == 0
+----------------------------- Captured stdout call -----------------------------
+Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_evidence/numeric-category-r-81195458
+_ test_valid_data_operations_preserve_native_semantics[aggregate-empty-group-r] _
+tests/eval_v1811/s_review_test_adversarial.py:173: in test_valid_data_operations_preserve_native_semantics
+    pd.testing.assert_frame_equal(actual, expected.reset_index(drop=True), check_dtype=False, check_names=False,
+pandas/_libs/testing.pyx:53: in pandas._libs.testing.assert_almost_equal
+    ???
+pandas/_libs/testing.pyx:171: in pandas._libs.testing.assert_almost_equal
+    ???
+E   AssertionError: DataFrame.iloc[:, 1] (column name="minimum") are different
+E   
+E   DataFrame.iloc[:, 1] (column name="minimum") values are different (50.0 %)
+E   [index]: [0, 1]
+E   [left]:  [1.0, inf]
+E   [right]: [1.0, nan]
+E   At positional index 1, first diff: inf != nan
+----------------------------- Captured stdout call -----------------------------
+Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_evidence/aggregate-empty-group-r-35308a9d
+_ test_valid_data_operations_preserve_native_semantics[string-only-header-stata] _
+tests/eval_v1811/s_review_test_adversarial.py:171: in test_valid_data_operations_preserve_native_semantics
+    assert code == 0, output
+E   AssertionError: 
+E       ___  ____  ____  ____  ____ ®
+E      /__    /   ____/   /   ____/      18.0
+E     ___/   /   /___/   /   /___/       MP—Parallel Edition
+E     
+E      Statistics and Data Science       Copyright 1985-2023 StataCorp LLC
+E                                        StataCorp
+E                                        4905 Lakeway Drive
+E                                        College Station, Texas 77845 USA
+E                                        800-STATA-PC        https://www.stata.com
+E                                        979-696-4600        stata@stata.com
+E     
+E     Stata license: Single-user 2-core  perpetual
+E                    
+E     
+E     Notes:
+E           1. Stata is running in batch mode.
+E           2. Unicode is supported; see help unicode_advice.
+E           3. More than 2 billion observations are allowed; see help obs_advice.
+E           4. Maximum number of variables is set to 5,000 but can be increased;
+E               see help set_maxvar.
+E     
+E     
+E     Running /Applications/Stata/profile.do ...
+E     command window is unrecognized
+E     r(199);
+E     
+E     . do analysis.do 
+E     
+E     . * Workbench 1.8.11
+E     . * project: review
+E     . * run: string-only-header
+E     . * lineage_hash: 4444444444444444444444444444444444444444444444444444444444444
+E     > 444
+E     . * Coverage
+E     . * result | data.subset | native | 
+E     . version 18
+E     
+E     . set more off
+E     
+E     . set type double
+E     
+E     . capture program drop wb_repost
+E     
+E     . program define wb_repost, eclass
+E       1.     args beta covariance
+E       2.     ereturn repost b=`beta' V=`covariance', rename
+E       3. end
+E     
+E     . capture program drop wb_sha
+E     
+E     . program define wb_sha
+E       1.     args filename expected
+E       2.     tempfile digestfile
+E       3.     shell shasum -a 256 "`filename'" > "`digestfile'"
+E       4.     tempname fh
+E       5.     file open `fh' using "`digestfile'", read text
+E       6.     file read `fh' line
+E       7.     file close `fh'
+E       8.     if substr("`line'",1,64) != "`expected'" {
+E       9.         display as error "SHA256 mismatch"
+E      10.         exit 9
+E      11.     }
+E      12. end
+E     
+E     . 
+E     . wb_sha "data.csv" "2f14ef63766bcce5bfaa54bc6e45b0619a8a1a7e97928f06a5aa025a8b
+E     > 31736f"
+E     
+E     
+E     . frame create wb_src0
+E     
+E     . frame change wb_src0
+E     
+E     . import delimited using "data.csv", asdouble clear case(preserve)
+E     (encoding automatically selected: ISO-8859-2)
+E     (1 var, 4 obs)
+E     
+E     . frame copy wb_src0 wb1
+E     
+E     . frame change wb1
+E     
+E     . keep x
+E     variable x not found
+E     r(111);
+E     
+E     end of do-file
+E     r(111);
+E     
+E   assert 9 == 0
+----------------------------- Captured stdout call -----------------------------
+Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_evidence/string-only-header-stata-3ba4b085
+_ test_valid_data_operations_preserve_native_semantics[tsset-internal-column-python] _
+tests/eval_v1811/s_review_test_adversarial.py:171: in test_valid_data_operations_preserve_native_semantics
+    assert code == 0, output
+E   AssertionError: Traceback (most recent call last):
+E       File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_evidence/tsset-internal-column-python-e85c7e34/analysis.py", line 35, in <module>
+E         assert list(data['result'].columns) == ['time', '__wb_time']
+E                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E     AssertionError
+E     
+E   assert 1 == 0
+----------------------------- Captured stdout call -----------------------------
+Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_evidence/tsset-internal-column-python-e85c7e34
+____ test_workbench_supported_selected_excel_sheet_exports_natively[stata] _____
+tests/eval_v1811/s_review_test_required_coverage.py:43: in test_workbench_supported_selected_excel_sheet_exports_natively
+    record_attempt(target, plan, language)
+tests/eval_v1811/s_review_test_required_coverage.py:19: in record_attempt
+    exported = export_script(plan, language, require_native=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/render.py:31: in export_script
+    lines += ctx.read(source.source_id,source.filename,source.sha256,source.format,source.read_options)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/runtime.py:104: in read
+    refuse('Reader options require an explicit supported translation','UNSUPPORTED_READ_OPTIONS')
+backend/workbench/script_export/syntax.py:12: in refuse
+    raise ScriptExportRefusal(code, message)
+E   workbench.script_export.plan.ScriptExportRefusal: Reader options require an explicit supported translation
+----------------------------- Captured stdout call -----------------------------
+Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_evidence/reader-selected-sheet-stata-f163f01f
+______ test_workbench_supported_selected_excel_sheet_exports_natively[r] _______
+tests/eval_v1811/s_review_test_required_coverage.py:43: in test_workbench_supported_selected_excel_sheet_exports_natively
+    record_attempt(target, plan, language)
+tests/eval_v1811/s_review_test_required_coverage.py:19: in record_attempt
+    exported = export_script(plan, language, require_native=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/render.py:31: in export_script
+    lines += ctx.read(source.source_id,source.filename,source.sha256,source.format,source.read_options)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/runtime.py:104: in read
+    refuse('Reader options require an explicit supported translation','UNSUPPORTED_READ_OPTIONS')
+backend/workbench/script_export/syntax.py:12: in refuse
+    raise ScriptExportRefusal(code, message)
+E   workbench.script_export.plan.ScriptExportRefusal: Reader options require an explicit supported translation
+----------------------------- Captured stdout call -----------------------------
+Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_evidence/reader-selected-sheet-r-40996fec
+____ test_workbench_supported_selected_excel_sheet_exports_natively[python] ____
+tests/eval_v1811/s_review_test_required_coverage.py:43: in test_workbench_supported_selected_excel_sheet_exports_natively
+    record_attempt(target, plan, language)
+tests/eval_v1811/s_review_test_required_coverage.py:19: in record_attempt
+    exported = export_script(plan, language, require_native=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/render.py:31: in export_script
+    lines += ctx.read(source.source_id,source.filename,source.sha256,source.format,source.read_options)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/runtime.py:104: in read
+    refuse('Reader options require an explicit supported translation','UNSUPPORTED_READ_OPTIONS')
+backend/workbench/script_export/syntax.py:12: in refuse
+    raise ScriptExportRefusal(code, message)
+E   workbench.script_export.plan.ScriptExportRefusal: Reader options require an explicit supported translation
+----------------------------- Captured stdout call -----------------------------
+Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_evidence/reader-selected-sheet-python-47f3d79c
+______ test_workbench_supported_complete_sampling_design_is_native[stata] ______
+tests/eval_v1811/s_review_test_required_coverage.py:64: in test_workbench_supported_complete_sampling_design_is_native
+    record_attempt(target, plan, language)
+tests/eval_v1811/s_review_test_required_coverage.py:19: in record_attempt
+    exported = export_script(plan, language, require_native=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/render.py:22: in export_script
+    raise ScriptExportRefusal('NOT_FULLY_NATIVE','Native export unavailable for: '+', '.join(blocked),steps=blocked)
+E   workbench.script_export.plan.ScriptExportRefusal: Native export unavailable for: model
+----------------------------- Captured stdout call -----------------------------
+Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_evidence/sampling-design-stata-4b4f90a5
+________ test_workbench_supported_complete_sampling_design_is_native[r] ________
+tests/eval_v1811/s_review_test_required_coverage.py:64: in test_workbench_supported_complete_sampling_design_is_native
+    record_attempt(target, plan, language)
+tests/eval_v1811/s_review_test_required_coverage.py:19: in record_attempt
+    exported = export_script(plan, language, require_native=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/render.py:22: in export_script
+    raise ScriptExportRefusal('NOT_FULLY_NATIVE','Native export unavailable for: '+', '.join(blocked),steps=blocked)
+E   workbench.script_export.plan.ScriptExportRefusal: Native export unavailable for: model
+----------------------------- Captured stdout call -----------------------------
+Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_evidence/sampling-design-r-3f48fbd4
+_____ test_workbench_supported_complete_sampling_design_is_native[python] ______
+tests/eval_v1811/s_review_test_required_coverage.py:64: in test_workbench_supported_complete_sampling_design_is_native
+    record_attempt(target, plan, language)
+tests/eval_v1811/s_review_test_required_coverage.py:19: in record_attempt
+    exported = export_script(plan, language, require_native=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/render.py:22: in export_script
+    raise ScriptExportRefusal('NOT_FULLY_NATIVE','Native export unavailable for: '+', '.join(blocked),steps=blocked)
+E   workbench.script_export.plan.ScriptExportRefusal: Native export unavailable for: model
+----------------------------- Captured stdout call -----------------------------
+Independent local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_evidence/sampling-design-python-1bff0249
+_ test_glm_postestimation_admission_preserves_declared_family_identity[stata] __
+tests/eval_v1811/s_review_test_required_coverage.py:81: in test_glm_postestimation_admission_preserves_declared_family_identity
+    assert calls == [('glm:poisson', 'wald')]
+E   AssertionError: assert [('glm', 'wald')] == [('glm:poisson', 'wald')]
+E     
+E     At index 0 diff: ('glm', 'wald') != ('glm:poisson', 'wald')
+E     Use -v to get more diff
+___ test_glm_postestimation_admission_preserves_declared_family_identity[r] ____
+tests/eval_v1811/s_review_test_required_coverage.py:81: in test_glm_postestimation_admission_preserves_declared_family_identity
+    assert calls == [('glm:poisson', 'wald')]
+E   AssertionError: assert [('glm', 'wald')] == [('glm:poisson', 'wald')]
+E     
+E     At index 0 diff: ('glm', 'wald') != ('glm:poisson', 'wald')
+E     Use -v to get more diff
+_ test_glm_postestimation_admission_preserves_declared_family_identity[python] _
+tests/eval_v1811/s_review_test_required_coverage.py:81: in test_glm_postestimation_admission_preserves_declared_family_identity
+    assert calls == [('glm:poisson', 'wald')]
+E   AssertionError: assert [('glm', 'wald')] == [('glm:poisson', 'wald')]
+E     
+E     At index 0 diff: ('glm', 'wald') != ('glm:poisson', 'wald')
+E     Use -v to get more diff
+=========================== short test summary info ============================
+FAILED tests/eval_v1811/s_review_test_adversarial.py::test_categorical_branch_does_not_mutate_continuous_branch[r]
+FAILED tests/eval_v1811/s_review_test_adversarial.py::test_user_predictor_does_not_collide_with_export_internal_name[stata]
+FAILED tests/eval_v1811/s_review_test_adversarial.py::test_supported_hac_time_order_is_translated[iso-dates-stata]
+FAILED tests/eval_v1811/s_review_test_adversarial.py::test_numeric_category_names_keep_full_precision_identity[r]
+FAILED tests/eval_v1811/s_review_test_adversarial.py::test_valid_data_operations_preserve_native_semantics[aggregate-empty-group-r]
+FAILED tests/eval_v1811/s_review_test_adversarial.py::test_valid_data_operations_preserve_native_semantics[string-only-header-stata]
+FAILED tests/eval_v1811/s_review_test_adversarial.py::test_valid_data_operations_preserve_native_semantics[tsset-internal-column-python]
+FAILED tests/eval_v1811/s_review_test_required_coverage.py::test_workbench_supported_selected_excel_sheet_exports_natively[stata]
+FAILED tests/eval_v1811/s_review_test_required_coverage.py::test_workbench_supported_selected_excel_sheet_exports_natively[r]
+FAILED tests/eval_v1811/s_review_test_required_coverage.py::test_workbench_supported_selected_excel_sheet_exports_natively[python]
+FAILED tests/eval_v1811/s_review_test_required_coverage.py::test_workbench_supported_complete_sampling_design_is_native[stata]
+FAILED tests/eval_v1811/s_review_test_required_coverage.py::test_workbench_supported_complete_sampling_design_is_native[r]
+FAILED tests/eval_v1811/s_review_test_required_coverage.py::test_workbench_supported_complete_sampling_design_is_native[python]
+FAILED tests/eval_v1811/s_review_test_required_coverage.py::test_glm_postestimation_admission_preserves_declared_family_identity[stata]
+FAILED tests/eval_v1811/s_review_test_required_coverage.py::test_glm_postestimation_admission_preserves_declared_family_identity[r]
+FAILED tests/eval_v1811/s_review_test_required_coverage.py::test_glm_postestimation_admission_preserves_declared_family_identity[python]
+16 failed, 20 passed in 14.91s

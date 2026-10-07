@@ -1,0 +1,21 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+____ test_glm_nb_requires_explicit_positive_numeric_alpha[overflow_integer] ____
+tests/test_script_export_v1811_statistical_adapters.py:191: in test_glm_nb_requires_explicit_positive_numeric_alpha
+    with pytest.raises(ScriptExportRefusal): export_script(replace(plan, steps=(invalid,)), "python", require_native=True)
+                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/render.py:31: in export_script
+    declaration=spec.resolve(step,language)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/exporters/__init__.py:24: in resolve
+    reason = self.capability(step) if self.capability else None
+             ^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/exporters/__init__.py:71: in glm_nb_capability
+    models.glm_nb_alpha(step)
+backend/workbench/script_export/exporters/models.py:250: in glm_nb_alpha
+    if isinstance(alpha,bool) or not isinstance(alpha,(int,float)) or not math.isfinite(alpha) or alpha<=0:
+                                                                          ^^^^^^^^^^^^^^^^^^^^
+E   OverflowError: int too large to convert to float
+=========================== short test summary info ============================
+FAILED tests/test_script_export_v1811_statistical_adapters.py::test_glm_nb_requires_explicit_positive_numeric_alpha[overflow_integer]
+1 failed, 110 deselected in 1.19s

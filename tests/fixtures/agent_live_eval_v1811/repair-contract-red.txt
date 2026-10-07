@@ -1,0 +1,479 @@
+FFFFFFFFFFFFFFFFFFFFFFFFFFF                                              [100%]
+=================================== FAILURES ===================================
+___ test_repair_completed_identity_mutants[operation-agent_session_id-other] ___
+
+where = 'operation', key = 'agent_session_id', bad = 'other'
+
+    @pytest.mark.parametrize("where,key,bad", [("operation", "agent_session_id", "other"), ("operation", "proposal_id", "other"), ("operation", "proposal_revision", 3), ("operation", "proposal_fingerprint", "old"), ("operation", "operation_id", "model.genesis"), ("operation", "target", {"run_id": "source", "node_ref": "other"}), ("confirmation", "session_id", "other"), ("confirmation", "revision", 3), ("confirmation", "fingerprint", "old"), ("confirmation", "proposal_id", "other"), ("confirmation", "operation_id", "model.genesis"), ("confirmation", "target", {"run_id": "other"})])
+    def test_repair_completed_identity_mutants(where, key, bad):
+        proposal, op = repair_proposal_operation()
+        if where == "operation": op[key] = bad
+        else: op["confirmation"][key] = bad
+>       with pytest.raises(ValueError): harness._verify_confirmation_identity(op, "planning", proposal)
+                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'live_eval_v1811' has no attribute '_verify_confirmation_identity'
+
+tests/test_agent_live_eval_v1811_harness.py:300: AttributeError
+_____ test_repair_completed_identity_mutants[operation-proposal_id-other] ______
+
+where = 'operation', key = 'proposal_id', bad = 'other'
+
+    @pytest.mark.parametrize("where,key,bad", [("operation", "agent_session_id", "other"), ("operation", "proposal_id", "other"), ("operation", "proposal_revision", 3), ("operation", "proposal_fingerprint", "old"), ("operation", "operation_id", "model.genesis"), ("operation", "target", {"run_id": "source", "node_ref": "other"}), ("confirmation", "session_id", "other"), ("confirmation", "revision", 3), ("confirmation", "fingerprint", "old"), ("confirmation", "proposal_id", "other"), ("confirmation", "operation_id", "model.genesis"), ("confirmation", "target", {"run_id": "other"})])
+    def test_repair_completed_identity_mutants(where, key, bad):
+        proposal, op = repair_proposal_operation()
+        if where == "operation": op[key] = bad
+        else: op["confirmation"][key] = bad
+>       with pytest.raises(ValueError): harness._verify_confirmation_identity(op, "planning", proposal)
+                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'live_eval_v1811' has no attribute '_verify_confirmation_identity'
+
+tests/test_agent_live_eval_v1811_harness.py:300: AttributeError
+____ test_repair_completed_identity_mutants[operation-proposal_revision-3] _____
+
+where = 'operation', key = 'proposal_revision', bad = 3
+
+    @pytest.mark.parametrize("where,key,bad", [("operation", "agent_session_id", "other"), ("operation", "proposal_id", "other"), ("operation", "proposal_revision", 3), ("operation", "proposal_fingerprint", "old"), ("operation", "operation_id", "model.genesis"), ("operation", "target", {"run_id": "source", "node_ref": "other"}), ("confirmation", "session_id", "other"), ("confirmation", "revision", 3), ("confirmation", "fingerprint", "old"), ("confirmation", "proposal_id", "other"), ("confirmation", "operation_id", "model.genesis"), ("confirmation", "target", {"run_id": "other"})])
+    def test_repair_completed_identity_mutants(where, key, bad):
+        proposal, op = repair_proposal_operation()
+        if where == "operation": op[key] = bad
+        else: op["confirmation"][key] = bad
+>       with pytest.raises(ValueError): harness._verify_confirmation_identity(op, "planning", proposal)
+                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'live_eval_v1811' has no attribute '_verify_confirmation_identity'
+
+tests/test_agent_live_eval_v1811_harness.py:300: AttributeError
+__ test_repair_completed_identity_mutants[operation-proposal_fingerprint-old] __
+
+where = 'operation', key = 'proposal_fingerprint', bad = 'old'
+
+    @pytest.mark.parametrize("where,key,bad", [("operation", "agent_session_id", "other"), ("operation", "proposal_id", "other"), ("operation", "proposal_revision", 3), ("operation", "proposal_fingerprint", "old"), ("operation", "operation_id", "model.genesis"), ("operation", "target", {"run_id": "source", "node_ref": "other"}), ("confirmation", "session_id", "other"), ("confirmation", "revision", 3), ("confirmation", "fingerprint", "old"), ("confirmation", "proposal_id", "other"), ("confirmation", "operation_id", "model.genesis"), ("confirmation", "target", {"run_id": "other"})])
+    def test_repair_completed_identity_mutants(where, key, bad):
+        proposal, op = repair_proposal_operation()
+        if where == "operation": op[key] = bad
+        else: op["confirmation"][key] = bad
+>       with pytest.raises(ValueError): harness._verify_confirmation_identity(op, "planning", proposal)
+                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'live_eval_v1811' has no attribute '_verify_confirmation_identity'
+
+tests/test_agent_live_eval_v1811_harness.py:300: AttributeError
+_ test_repair_completed_identity_mutants[operation-operation_id-model.genesis] _
+
+where = 'operation', key = 'operation_id', bad = 'model.genesis'
+
+    @pytest.mark.parametrize("where,key,bad", [("operation", "agent_session_id", "other"), ("operation", "proposal_id", "other"), ("operation", "proposal_revision", 3), ("operation", "proposal_fingerprint", "old"), ("operation", "operation_id", "model.genesis"), ("operation", "target", {"run_id": "source", "node_ref": "other"}), ("confirmation", "session_id", "other"), ("confirmation", "revision", 3), ("confirmation", "fingerprint", "old"), ("confirmation", "proposal_id", "other"), ("confirmation", "operation_id", "model.genesis"), ("confirmation", "target", {"run_id": "other"})])
+    def test_repair_completed_identity_mutants(where, key, bad):
+        proposal, op = repair_proposal_operation()
+        if where == "operation": op[key] = bad
+        else: op["confirmation"][key] = bad
+>       with pytest.raises(ValueError): harness._verify_confirmation_identity(op, "planning", proposal)
+                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'live_eval_v1811' has no attribute '_verify_confirmation_identity'
+
+tests/test_agent_live_eval_v1811_harness.py:300: AttributeError
+________ test_repair_completed_identity_mutants[operation-target-bad5] _________
+
+where = 'operation', key = 'target'
+bad = {'run_id': 'source', 'node_ref': 'other'}
+
+    @pytest.mark.parametrize("where,key,bad", [("operation", "agent_session_id", "other"), ("operation", "proposal_id", "other"), ("operation", "proposal_revision", 3), ("operation", "proposal_fingerprint", "old"), ("operation", "operation_id", "model.genesis"), ("operation", "target", {"run_id": "source", "node_ref": "other"}), ("confirmation", "session_id", "other"), ("confirmation", "revision", 3), ("confirmation", "fingerprint", "old"), ("confirmation", "proposal_id", "other"), ("confirmation", "operation_id", "model.genesis"), ("confirmation", "target", {"run_id": "other"})])
+    def test_repair_completed_identity_mutants(where, key, bad):
+        proposal, op = repair_proposal_operation()
+        if where == "operation": op[key] = bad
+        else: op["confirmation"][key] = bad
+>       with pytest.raises(ValueError): harness._verify_confirmation_identity(op, "planning", proposal)
+                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'live_eval_v1811' has no attribute '_verify_confirmation_identity'
+
+tests/test_agent_live_eval_v1811_harness.py:300: AttributeError
+____ test_repair_completed_identity_mutants[confirmation-session_id-other] _____
+
+where = 'confirmation', key = 'session_id', bad = 'other'
+
+    @pytest.mark.parametrize("where,key,bad", [("operation", "agent_session_id", "other"), ("operation", "proposal_id", "other"), ("operation", "proposal_revision", 3), ("operation", "proposal_fingerprint", "old"), ("operation", "operation_id", "model.genesis"), ("operation", "target", {"run_id": "source", "node_ref": "other"}), ("confirmation", "session_id", "other"), ("confirmation", "revision", 3), ("confirmation", "fingerprint", "old"), ("confirmation", "proposal_id", "other"), ("confirmation", "operation_id", "model.genesis"), ("confirmation", "target", {"run_id": "other"})])
+    def test_repair_completed_identity_mutants(where, key, bad):
+        proposal, op = repair_proposal_operation()
+        if where == "operation": op[key] = bad
+        else: op["confirmation"][key] = bad
+>       with pytest.raises(ValueError): harness._verify_confirmation_identity(op, "planning", proposal)
+                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'live_eval_v1811' has no attribute '_verify_confirmation_identity'
+
+tests/test_agent_live_eval_v1811_harness.py:300: AttributeError
+_______ test_repair_completed_identity_mutants[confirmation-revision-3] ________
+
+where = 'confirmation', key = 'revision', bad = 3
+
+    @pytest.mark.parametrize("where,key,bad", [("operation", "agent_session_id", "other"), ("operation", "proposal_id", "other"), ("operation", "proposal_revision", 3), ("operation", "proposal_fingerprint", "old"), ("operation", "operation_id", "model.genesis"), ("operation", "target", {"run_id": "source", "node_ref": "other"}), ("confirmation", "session_id", "other"), ("confirmation", "revision", 3), ("confirmation", "fingerprint", "old"), ("confirmation", "proposal_id", "other"), ("confirmation", "operation_id", "model.genesis"), ("confirmation", "target", {"run_id": "other"})])
+    def test_repair_completed_identity_mutants(where, key, bad):
+        proposal, op = repair_proposal_operation()
+        if where == "operation": op[key] = bad
+        else: op["confirmation"][key] = bad
+>       with pytest.raises(ValueError): harness._verify_confirmation_identity(op, "planning", proposal)
+                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'live_eval_v1811' has no attribute '_verify_confirmation_identity'
+
+tests/test_agent_live_eval_v1811_harness.py:300: AttributeError
+_____ test_repair_completed_identity_mutants[confirmation-fingerprint-old] _____
+
+where = 'confirmation', key = 'fingerprint', bad = 'old'
+
+    @pytest.mark.parametrize("where,key,bad", [("operation", "agent_session_id", "other"), ("operation", "proposal_id", "other"), ("operation", "proposal_revision", 3), ("operation", "proposal_fingerprint", "old"), ("operation", "operation_id", "model.genesis"), ("operation", "target", {"run_id": "source", "node_ref": "other"}), ("confirmation", "session_id", "other"), ("confirmation", "revision", 3), ("confirmation", "fingerprint", "old"), ("confirmation", "proposal_id", "other"), ("confirmation", "operation_id", "model.genesis"), ("confirmation", "target", {"run_id": "other"})])
+    def test_repair_completed_identity_mutants(where, key, bad):
+        proposal, op = repair_proposal_operation()
+        if where == "operation": op[key] = bad
+        else: op["confirmation"][key] = bad
+>       with pytest.raises(ValueError): harness._verify_confirmation_identity(op, "planning", proposal)
+                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'live_eval_v1811' has no attribute '_verify_confirmation_identity'
+
+tests/test_agent_live_eval_v1811_harness.py:300: AttributeError
+____ test_repair_completed_identity_mutants[confirmation-proposal_id-other] ____
+
+where = 'confirmation', key = 'proposal_id', bad = 'other'
+
+    @pytest.mark.parametrize("where,key,bad", [("operation", "agent_session_id", "other"), ("operation", "proposal_id", "other"), ("operation", "proposal_revision", 3), ("operation", "proposal_fingerprint", "old"), ("operation", "operation_id", "model.genesis"), ("operation", "target", {"run_id": "source", "node_ref": "other"}), ("confirmation", "session_id", "other"), ("confirmation", "revision", 3), ("confirmation", "fingerprint", "old"), ("confirmation", "proposal_id", "other"), ("confirmation", "operation_id", "model.genesis"), ("confirmation", "target", {"run_id": "other"})])
+    def test_repair_completed_identity_mutants(where, key, bad):
+        proposal, op = repair_proposal_operation()
+        if where == "operation": op[key] = bad
+        else: op["confirmation"][key] = bad
+>       with pytest.raises(ValueError): harness._verify_confirmation_identity(op, "planning", proposal)
+                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'live_eval_v1811' has no attribute '_verify_confirmation_identity'
+
+tests/test_agent_live_eval_v1811_harness.py:300: AttributeError
+_ test_repair_completed_identity_mutants[confirmation-operation_id-model.genesis] _
+
+where = 'confirmation', key = 'operation_id', bad = 'model.genesis'
+
+    @pytest.mark.parametrize("where,key,bad", [("operation", "agent_session_id", "other"), ("operation", "proposal_id", "other"), ("operation", "proposal_revision", 3), ("operation", "proposal_fingerprint", "old"), ("operation", "operation_id", "model.genesis"), ("operation", "target", {"run_id": "source", "node_ref": "other"}), ("confirmation", "session_id", "other"), ("confirmation", "revision", 3), ("confirmation", "fingerprint", "old"), ("confirmation", "proposal_id", "other"), ("confirmation", "operation_id", "model.genesis"), ("confirmation", "target", {"run_id": "other"})])
+    def test_repair_completed_identity_mutants(where, key, bad):
+        proposal, op = repair_proposal_operation()
+        if where == "operation": op[key] = bad
+        else: op["confirmation"][key] = bad
+>       with pytest.raises(ValueError): harness._verify_confirmation_identity(op, "planning", proposal)
+                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'live_eval_v1811' has no attribute '_verify_confirmation_identity'
+
+tests/test_agent_live_eval_v1811_harness.py:300: AttributeError
+______ test_repair_completed_identity_mutants[confirmation-target-bad11] _______
+
+where = 'confirmation', key = 'target', bad = {'run_id': 'other'}
+
+    @pytest.mark.parametrize("where,key,bad", [("operation", "agent_session_id", "other"), ("operation", "proposal_id", "other"), ("operation", "proposal_revision", 3), ("operation", "proposal_fingerprint", "old"), ("operation", "operation_id", "model.genesis"), ("operation", "target", {"run_id": "source", "node_ref": "other"}), ("confirmation", "session_id", "other"), ("confirmation", "revision", 3), ("confirmation", "fingerprint", "old"), ("confirmation", "proposal_id", "other"), ("confirmation", "operation_id", "model.genesis"), ("confirmation", "target", {"run_id": "other"})])
+    def test_repair_completed_identity_mutants(where, key, bad):
+        proposal, op = repair_proposal_operation()
+        if where == "operation": op[key] = bad
+        else: op["confirmation"][key] = bad
+>       with pytest.raises(ValueError): harness._verify_confirmation_identity(op, "planning", proposal)
+                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'live_eval_v1811' has no attribute '_verify_confirmation_identity'
+
+tests/test_agent_live_eval_v1811_harness.py:300: AttributeError
+_________ test_repair_completed_identity_requires_durable_confirmation _________
+
+    def test_repair_completed_identity_requires_durable_confirmation():
+        proposal, op = repair_proposal_operation()
+>       harness._verify_confirmation_identity(op, "planning", proposal)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'live_eval_v1811' has no attribute '_verify_confirmation_identity'
+
+tests/test_agent_live_eval_v1811_harness.py:304: AttributeError
+___ test_repair_tool_owner_cannot_use_substrings_or_merge_objects[objects0] ____
+
+objects = [{'run_id': 'result_unrelated', 'model_id': 'poisson_10'}]
+
+    @pytest.mark.parametrize("objects", [[{"run_id": "result_unrelated", "model_id": "poisson_10"}], [{"run_id": "result"}, {"model_id": "poisson_1"}], [{"run_id": "result", "model_id": "poisson_1", "evidence_ref": {"run_id": "wrong", "model_id": "poisson_1"}}]])
+    def test_repair_tool_owner_cannot_use_substrings_or_merge_objects(objects):
+        entries = [{"payload": {"role": "tool", "name": "inspect_project_model_coefficients", "content": json.dumps({"models": objects})}}]
+>       assert not harness._answer_owner_evidence(entries, "result", "poisson_1", [])
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'live_eval_v1811' has no attribute '_answer_owner_evidence'
+
+tests/test_agent_live_eval_v1811_harness.py:311: AttributeError
+___ test_repair_tool_owner_cannot_use_substrings_or_merge_objects[objects1] ____
+
+objects = [{'run_id': 'result'}, {'model_id': 'poisson_1'}]
+
+    @pytest.mark.parametrize("objects", [[{"run_id": "result_unrelated", "model_id": "poisson_10"}], [{"run_id": "result"}, {"model_id": "poisson_1"}], [{"run_id": "result", "model_id": "poisson_1", "evidence_ref": {"run_id": "wrong", "model_id": "poisson_1"}}]])
+    def test_repair_tool_owner_cannot_use_substrings_or_merge_objects(objects):
+        entries = [{"payload": {"role": "tool", "name": "inspect_project_model_coefficients", "content": json.dumps({"models": objects})}}]
+>       assert not harness._answer_owner_evidence(entries, "result", "poisson_1", [])
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'live_eval_v1811' has no attribute '_answer_owner_evidence'
+
+tests/test_agent_live_eval_v1811_harness.py:311: AttributeError
+___ test_repair_tool_owner_cannot_use_substrings_or_merge_objects[objects2] ____
+
+objects = [{'run_id': 'result', 'model_id': 'poisson_1', 'evidence_ref': {'run_id': 'wrong', 'model_id': 'poisson_1'}}]
+
+    @pytest.mark.parametrize("objects", [[{"run_id": "result_unrelated", "model_id": "poisson_10"}], [{"run_id": "result"}, {"model_id": "poisson_1"}], [{"run_id": "result", "model_id": "poisson_1", "evidence_ref": {"run_id": "wrong", "model_id": "poisson_1"}}]])
+    def test_repair_tool_owner_cannot_use_substrings_or_merge_objects(objects):
+        entries = [{"payload": {"role": "tool", "name": "inspect_project_model_coefficients", "content": json.dumps({"models": objects})}}]
+>       assert not harness._answer_owner_evidence(entries, "result", "poisson_1", [])
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'live_eval_v1811' has no attribute '_answer_owner_evidence'
+
+tests/test_agent_live_eval_v1811_harness.py:311: AttributeError
+______________ test_repair_tool_owner_positive_and_role_boundary _______________
+
+    def test_repair_tool_owner_positive_and_role_boundary():
+        payload = {"models": [{"run_id": "result", "model_id": "poisson_1", "evidence_ref": {"run_id": "result", "model_id": "poisson_1"}}]}
+        entry = {"payload": {"role": "tool", "name": "inspect_project_model_coefficients", "content": json.dumps(payload)}}
+>       assert harness._answer_owner_evidence([entry], "result", "poisson_1", [])
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'live_eval_v1811' has no attribute '_answer_owner_evidence'
+
+tests/test_agent_live_eval_v1811_harness.py:316: AttributeError
+________________ test_repair_answer_exact_signed_fields[field] _________________
+
+mutation = 'field'
+
+    @pytest.mark.parametrize("mutation", ["field", "sign", "term", "missing", "duplicate", "rounded", "bool", "owner", "nan"])
+    def test_repair_answer_exact_signed_fields(mutation):
+        fields = [{"path": ["coefficients", "x1", "estimate"], "artifact": None}]
+        rows = [{"field": fields[0]["path"], "actual": .40536541665861775, "tolerance": 1e-6}]
+        answer = {"schema": "workbench-live-answer-v1", "run_id": "result", "model_id": "poisson_1", "fields": [{"path": fields[0]["path"].copy(), "artifact": None, "value": .405365416659}]}
+        if mutation == "field": answer["fields"][0]["path"][-1] = "std_error"
+        if mutation == "sign": answer["fields"][0]["value"] *= -1
+        if mutation == "term": answer["fields"][0]["path"][1] = "x10"
+        if mutation == "missing": answer["fields"] = []
+        if mutation == "duplicate": answer["fields"] *= 2
+        if mutation == "rounded": answer["fields"][0]["value"] = .40536542
+        if mutation == "bool": answer["fields"][0]["value"] = True
+        if mutation == "owner": answer["run_id"] = "result_unrelated"
+        if mutation == "nan": answer["fields"][0]["value"] = float("nan")
+>       assert not harness._verify_answer_fields(json.dumps(answer), "result", "poisson_1", fields, rows)["passed"]
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'live_eval_v1811' has no attribute '_verify_answer_fields'
+
+tests/test_agent_live_eval_v1811_harness.py:334: AttributeError
+_________________ test_repair_answer_exact_signed_fields[sign] _________________
+
+mutation = 'sign'
+
+    @pytest.mark.parametrize("mutation", ["field", "sign", "term", "missing", "duplicate", "rounded", "bool", "owner", "nan"])
+    def test_repair_answer_exact_signed_fields(mutation):
+        fields = [{"path": ["coefficients", "x1", "estimate"], "artifact": None}]
+        rows = [{"field": fields[0]["path"], "actual": .40536541665861775, "tolerance": 1e-6}]
+        answer = {"schema": "workbench-live-answer-v1", "run_id": "result", "model_id": "poisson_1", "fields": [{"path": fields[0]["path"].copy(), "artifact": None, "value": .405365416659}]}
+        if mutation == "field": answer["fields"][0]["path"][-1] = "std_error"
+        if mutation == "sign": answer["fields"][0]["value"] *= -1
+        if mutation == "term": answer["fields"][0]["path"][1] = "x10"
+        if mutation == "missing": answer["fields"] = []
+        if mutation == "duplicate": answer["fields"] *= 2
+        if mutation == "rounded": answer["fields"][0]["value"] = .40536542
+        if mutation == "bool": answer["fields"][0]["value"] = True
+        if mutation == "owner": answer["run_id"] = "result_unrelated"
+        if mutation == "nan": answer["fields"][0]["value"] = float("nan")
+>       assert not harness._verify_answer_fields(json.dumps(answer), "result", "poisson_1", fields, rows)["passed"]
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'live_eval_v1811' has no attribute '_verify_answer_fields'
+
+tests/test_agent_live_eval_v1811_harness.py:334: AttributeError
+_________________ test_repair_answer_exact_signed_fields[term] _________________
+
+mutation = 'term'
+
+    @pytest.mark.parametrize("mutation", ["field", "sign", "term", "missing", "duplicate", "rounded", "bool", "owner", "nan"])
+    def test_repair_answer_exact_signed_fields(mutation):
+        fields = [{"path": ["coefficients", "x1", "estimate"], "artifact": None}]
+        rows = [{"field": fields[0]["path"], "actual": .40536541665861775, "tolerance": 1e-6}]
+        answer = {"schema": "workbench-live-answer-v1", "run_id": "result", "model_id": "poisson_1", "fields": [{"path": fields[0]["path"].copy(), "artifact": None, "value": .405365416659}]}
+        if mutation == "field": answer["fields"][0]["path"][-1] = "std_error"
+        if mutation == "sign": answer["fields"][0]["value"] *= -1
+        if mutation == "term": answer["fields"][0]["path"][1] = "x10"
+        if mutation == "missing": answer["fields"] = []
+        if mutation == "duplicate": answer["fields"] *= 2
+        if mutation == "rounded": answer["fields"][0]["value"] = .40536542
+        if mutation == "bool": answer["fields"][0]["value"] = True
+        if mutation == "owner": answer["run_id"] = "result_unrelated"
+        if mutation == "nan": answer["fields"][0]["value"] = float("nan")
+>       assert not harness._verify_answer_fields(json.dumps(answer), "result", "poisson_1", fields, rows)["passed"]
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'live_eval_v1811' has no attribute '_verify_answer_fields'
+
+tests/test_agent_live_eval_v1811_harness.py:334: AttributeError
+_______________ test_repair_answer_exact_signed_fields[missing] ________________
+
+mutation = 'missing'
+
+    @pytest.mark.parametrize("mutation", ["field", "sign", "term", "missing", "duplicate", "rounded", "bool", "owner", "nan"])
+    def test_repair_answer_exact_signed_fields(mutation):
+        fields = [{"path": ["coefficients", "x1", "estimate"], "artifact": None}]
+        rows = [{"field": fields[0]["path"], "actual": .40536541665861775, "tolerance": 1e-6}]
+        answer = {"schema": "workbench-live-answer-v1", "run_id": "result", "model_id": "poisson_1", "fields": [{"path": fields[0]["path"].copy(), "artifact": None, "value": .405365416659}]}
+        if mutation == "field": answer["fields"][0]["path"][-1] = "std_error"
+        if mutation == "sign": answer["fields"][0]["value"] *= -1
+        if mutation == "term": answer["fields"][0]["path"][1] = "x10"
+        if mutation == "missing": answer["fields"] = []
+        if mutation == "duplicate": answer["fields"] *= 2
+        if mutation == "rounded": answer["fields"][0]["value"] = .40536542
+        if mutation == "bool": answer["fields"][0]["value"] = True
+        if mutation == "owner": answer["run_id"] = "result_unrelated"
+        if mutation == "nan": answer["fields"][0]["value"] = float("nan")
+>       assert not harness._verify_answer_fields(json.dumps(answer), "result", "poisson_1", fields, rows)["passed"]
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'live_eval_v1811' has no attribute '_verify_answer_fields'
+
+tests/test_agent_live_eval_v1811_harness.py:334: AttributeError
+______________ test_repair_answer_exact_signed_fields[duplicate] _______________
+
+mutation = 'duplicate'
+
+    @pytest.mark.parametrize("mutation", ["field", "sign", "term", "missing", "duplicate", "rounded", "bool", "owner", "nan"])
+    def test_repair_answer_exact_signed_fields(mutation):
+        fields = [{"path": ["coefficients", "x1", "estimate"], "artifact": None}]
+        rows = [{"field": fields[0]["path"], "actual": .40536541665861775, "tolerance": 1e-6}]
+        answer = {"schema": "workbench-live-answer-v1", "run_id": "result", "model_id": "poisson_1", "fields": [{"path": fields[0]["path"].copy(), "artifact": None, "value": .405365416659}]}
+        if mutation == "field": answer["fields"][0]["path"][-1] = "std_error"
+        if mutation == "sign": answer["fields"][0]["value"] *= -1
+        if mutation == "term": answer["fields"][0]["path"][1] = "x10"
+        if mutation == "missing": answer["fields"] = []
+        if mutation == "duplicate": answer["fields"] *= 2
+        if mutation == "rounded": answer["fields"][0]["value"] = .40536542
+        if mutation == "bool": answer["fields"][0]["value"] = True
+        if mutation == "owner": answer["run_id"] = "result_unrelated"
+        if mutation == "nan": answer["fields"][0]["value"] = float("nan")
+>       assert not harness._verify_answer_fields(json.dumps(answer), "result", "poisson_1", fields, rows)["passed"]
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'live_eval_v1811' has no attribute '_verify_answer_fields'
+
+tests/test_agent_live_eval_v1811_harness.py:334: AttributeError
+_______________ test_repair_answer_exact_signed_fields[rounded] ________________
+
+mutation = 'rounded'
+
+    @pytest.mark.parametrize("mutation", ["field", "sign", "term", "missing", "duplicate", "rounded", "bool", "owner", "nan"])
+    def test_repair_answer_exact_signed_fields(mutation):
+        fields = [{"path": ["coefficients", "x1", "estimate"], "artifact": None}]
+        rows = [{"field": fields[0]["path"], "actual": .40536541665861775, "tolerance": 1e-6}]
+        answer = {"schema": "workbench-live-answer-v1", "run_id": "result", "model_id": "poisson_1", "fields": [{"path": fields[0]["path"].copy(), "artifact": None, "value": .405365416659}]}
+        if mutation == "field": answer["fields"][0]["path"][-1] = "std_error"
+        if mutation == "sign": answer["fields"][0]["value"] *= -1
+        if mutation == "term": answer["fields"][0]["path"][1] = "x10"
+        if mutation == "missing": answer["fields"] = []
+        if mutation == "duplicate": answer["fields"] *= 2
+        if mutation == "rounded": answer["fields"][0]["value"] = .40536542
+        if mutation == "bool": answer["fields"][0]["value"] = True
+        if mutation == "owner": answer["run_id"] = "result_unrelated"
+        if mutation == "nan": answer["fields"][0]["value"] = float("nan")
+>       assert not harness._verify_answer_fields(json.dumps(answer), "result", "poisson_1", fields, rows)["passed"]
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'live_eval_v1811' has no attribute '_verify_answer_fields'
+
+tests/test_agent_live_eval_v1811_harness.py:334: AttributeError
+_________________ test_repair_answer_exact_signed_fields[bool] _________________
+
+mutation = 'bool'
+
+    @pytest.mark.parametrize("mutation", ["field", "sign", "term", "missing", "duplicate", "rounded", "bool", "owner", "nan"])
+    def test_repair_answer_exact_signed_fields(mutation):
+        fields = [{"path": ["coefficients", "x1", "estimate"], "artifact": None}]
+        rows = [{"field": fields[0]["path"], "actual": .40536541665861775, "tolerance": 1e-6}]
+        answer = {"schema": "workbench-live-answer-v1", "run_id": "result", "model_id": "poisson_1", "fields": [{"path": fields[0]["path"].copy(), "artifact": None, "value": .405365416659}]}
+        if mutation == "field": answer["fields"][0]["path"][-1] = "std_error"
+        if mutation == "sign": answer["fields"][0]["value"] *= -1
+        if mutation == "term": answer["fields"][0]["path"][1] = "x10"
+        if mutation == "missing": answer["fields"] = []
+        if mutation == "duplicate": answer["fields"] *= 2
+        if mutation == "rounded": answer["fields"][0]["value"] = .40536542
+        if mutation == "bool": answer["fields"][0]["value"] = True
+        if mutation == "owner": answer["run_id"] = "result_unrelated"
+        if mutation == "nan": answer["fields"][0]["value"] = float("nan")
+>       assert not harness._verify_answer_fields(json.dumps(answer), "result", "poisson_1", fields, rows)["passed"]
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'live_eval_v1811' has no attribute '_verify_answer_fields'
+
+tests/test_agent_live_eval_v1811_harness.py:334: AttributeError
+________________ test_repair_answer_exact_signed_fields[owner] _________________
+
+mutation = 'owner'
+
+    @pytest.mark.parametrize("mutation", ["field", "sign", "term", "missing", "duplicate", "rounded", "bool", "owner", "nan"])
+    def test_repair_answer_exact_signed_fields(mutation):
+        fields = [{"path": ["coefficients", "x1", "estimate"], "artifact": None}]
+        rows = [{"field": fields[0]["path"], "actual": .40536541665861775, "tolerance": 1e-6}]
+        answer = {"schema": "workbench-live-answer-v1", "run_id": "result", "model_id": "poisson_1", "fields": [{"path": fields[0]["path"].copy(), "artifact": None, "value": .405365416659}]}
+        if mutation == "field": answer["fields"][0]["path"][-1] = "std_error"
+        if mutation == "sign": answer["fields"][0]["value"] *= -1
+        if mutation == "term": answer["fields"][0]["path"][1] = "x10"
+        if mutation == "missing": answer["fields"] = []
+        if mutation == "duplicate": answer["fields"] *= 2
+        if mutation == "rounded": answer["fields"][0]["value"] = .40536542
+        if mutation == "bool": answer["fields"][0]["value"] = True
+        if mutation == "owner": answer["run_id"] = "result_unrelated"
+        if mutation == "nan": answer["fields"][0]["value"] = float("nan")
+>       assert not harness._verify_answer_fields(json.dumps(answer), "result", "poisson_1", fields, rows)["passed"]
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'live_eval_v1811' has no attribute '_verify_answer_fields'
+
+tests/test_agent_live_eval_v1811_harness.py:334: AttributeError
+_________________ test_repair_answer_exact_signed_fields[nan] __________________
+
+mutation = 'nan'
+
+    @pytest.mark.parametrize("mutation", ["field", "sign", "term", "missing", "duplicate", "rounded", "bool", "owner", "nan"])
+    def test_repair_answer_exact_signed_fields(mutation):
+        fields = [{"path": ["coefficients", "x1", "estimate"], "artifact": None}]
+        rows = [{"field": fields[0]["path"], "actual": .40536541665861775, "tolerance": 1e-6}]
+        answer = {"schema": "workbench-live-answer-v1", "run_id": "result", "model_id": "poisson_1", "fields": [{"path": fields[0]["path"].copy(), "artifact": None, "value": .405365416659}]}
+        if mutation == "field": answer["fields"][0]["path"][-1] = "std_error"
+        if mutation == "sign": answer["fields"][0]["value"] *= -1
+        if mutation == "term": answer["fields"][0]["path"][1] = "x10"
+        if mutation == "missing": answer["fields"] = []
+        if mutation == "duplicate": answer["fields"] *= 2
+        if mutation == "rounded": answer["fields"][0]["value"] = .40536542
+        if mutation == "bool": answer["fields"][0]["value"] = True
+        if mutation == "owner": answer["run_id"] = "result_unrelated"
+        if mutation == "nan": answer["fields"][0]["value"] = float("nan")
+>       assert not harness._verify_answer_fields(json.dumps(answer), "result", "poisson_1", fields, rows)["passed"]
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'live_eval_v1811' has no attribute '_verify_answer_fields'
+
+tests/test_agent_live_eval_v1811_harness.py:334: AttributeError
+______ test_repair_answer_multiple_fields_positive_and_unverifiable_prose ______
+
+    def test_repair_answer_multiple_fields_positive_and_unverifiable_prose():
+        fields = [{"path": ["fits", tau, "coefficients", "x1", "estimate"], "artifact": None} for tau in ["0.25", "0.5", "0.75"]]
+        rows = [{"field": f["path"], "actual": v, "tolerance": 1e-5} for f,v in zip(fields, [-.6,.4,.7])]
+        answer = {"schema": "workbench-live-answer-v1", "run_id": "result", "model_id": "quantile_regression_1", "fields": [{**f, "value": row["actual"]} for f,row in zip(fields,rows)]}
+>       assert harness._verify_answer_fields('```json\n'+json.dumps(answer)+'\n```', "result", "quantile_regression_1", fields, rows)["passed"]
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'live_eval_v1811' has no attribute '_verify_answer_fields'
+
+tests/test_agent_live_eval_v1811_harness.py:340: AttributeError
+=============================== warnings summary ===============================
+../../.venv/lib/python3.14/site-packages/fastapi/testclient.py:1
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_repair_completed_identity_mutants[operation-agent_session_id-other]
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_repair_completed_identity_mutants[operation-proposal_id-other]
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_repair_completed_identity_mutants[operation-proposal_revision-3]
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_repair_completed_identity_mutants[operation-proposal_fingerprint-old]
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_repair_completed_identity_mutants[operation-operation_id-model.genesis]
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_repair_completed_identity_mutants[operation-target-bad5]
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_repair_completed_identity_mutants[confirmation-session_id-other]
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_repair_completed_identity_mutants[confirmation-revision-3]
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_repair_completed_identity_mutants[confirmation-fingerprint-old]
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_repair_completed_identity_mutants[confirmation-proposal_id-other]
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_repair_completed_identity_mutants[confirmation-operation_id-model.genesis]
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_repair_completed_identity_mutants[confirmation-target-bad11]
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_repair_completed_identity_requires_durable_confirmation
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_repair_tool_owner_cannot_use_substrings_or_merge_objects[objects0]
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_repair_tool_owner_cannot_use_substrings_or_merge_objects[objects1]
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_repair_tool_owner_cannot_use_substrings_or_merge_objects[objects2]
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_repair_tool_owner_positive_and_role_boundary
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_repair_answer_exact_signed_fields[field]
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_repair_answer_exact_signed_fields[sign]
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_repair_answer_exact_signed_fields[term]
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_repair_answer_exact_signed_fields[missing]
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_repair_answer_exact_signed_fields[duplicate]
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_repair_answer_exact_signed_fields[rounded]
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_repair_answer_exact_signed_fields[bool]
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_repair_answer_exact_signed_fields[owner]
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_repair_answer_exact_signed_fields[nan]
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_repair_answer_multiple_fields_positive_and_unverifiable_prose
+27 failed, 46 deselected, 1 warning in 1.88s

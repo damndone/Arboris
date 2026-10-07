@@ -1,0 +1,86 @@
+Writing native Stata evidence to /Users/jiayuanren/项目规划/.worktrees/codex-v1811-iv-oracles/tests/fixtures/postestimation/iv_two_endogenous_v1811
+{
+  "reference": "Stata 18 ivregress 2sls y x1 (xe1 xe2=z1 z2), vce(robust), no small",
+  "binary": "/Applications/Stata/StataMP.app/Contents/MacOS/stata-mp",
+  "batch_directory": "stata_batch_a64072b627",
+  "data_sha256": "d3b46c7cf6c42c4dc1db66b3ae63a0ef02ffe10ff3b24983687355daa238c497",
+  "terms": [
+    "Intercept",
+    "x1",
+    "xe1",
+    "xe2"
+  ],
+  "nobs": 650,
+  "params": {
+    "Intercept": 0.725129365954498,
+    "x1": 0.340520389132504,
+    "xe1": 0.3280277230792,
+    "xe2": -0.240354471892905
+  },
+  "std_error": {
+    "Intercept": 0.0468768933382109,
+    "x1": 0.0594634532603699,
+    "xe1": 0.0596811717218168,
+    "xe2": 0.0484782592291141
+  },
+  "z": {
+    "Intercept": 15.4688016699993,
+    "x1": 5.72654917368292,
+    "xe1": 5.49633516929239,
+    "xe2": -4.95798478977888
+  },
+  "p": {
+    "Intercept": 5.63461919862916e-54,
+    "x1": 1.02494063012584e-08,
+    "xe1": 3.87765194737664e-08,
+    "xe2": 7.12281381940876e-07
+  },
+  "covariance": [
+    [
+      0.002197443129042,
+      0.000482742680087517,
+      9.54847645935687e-06,
+      0.00033042713154411
+    ],
+    [
+      0.000482742680087517,
+      0.0035359022736482,
+      -0.00120952045136653,
+      0.00038691570863858
+    ],
+    [
+      9.54847645935687e-06,
+      -0.00120952045136653,
+      0.00356184225808899,
+      -0.000100248466487977
+    ],
+    [
+      0.00033042713154411,
+      0.00038691570863858,
+      -0.000100248466487977,
+      0.00235014161788519
+    ]
+  ],
+  "nominal_residual_df": 646,
+  "inference": {
+    "covariance_estimator": "HC0",
+    "unbiased": false,
+    "debiased": false,
+    "reference_distribution": "z",
+    "df_method": "asymptotic",
+    "df_den": null,
+    "small_option": false,
+    "small_sample_factor": 1
+  },
+  "wald_joint": {
+    "distribution": "chi2",
+    "statistic": 52.9664694764971,
+    "df_num": 2,
+    "df_den": null,
+    "p_value": 3.15120959543578e-12,
+    "constraints": [
+      "xe1=0",
+      "xe2=0"
+    ]
+  }
+}

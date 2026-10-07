@@ -16,6 +16,7 @@ import re
 import secrets
 import stat
 import threading
+from ..artifact_index import locked_owner_index
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -951,19 +952,20 @@ def _write_lmm_index(pinned: PinnedRunDirectory, index: dict[str, object]) -> No
 
 
 def _index_lmm_record(pinned: PinnedRunDirectory, record: dict[str, object]) -> None:
-    index = _read_lmm_index(pinned)
-    artifacts = index["artifacts"]
-    assert isinstance(artifacts, list)
-    existing = [item for item in artifacts if item["artifact_id"] == record["artifact_id"] or item["path"] == record["path"]]
-    if len(existing) > 1 or (existing and any(item != record for item in existing)):
-        _raise("LMM_TERMINAL_PERSISTENCE_CONFLICT")
-    if record["artifact_type"] == "model_result_packet":
-        model_records = [item for item in artifacts if item["artifact_type"] == "model_result_packet"]
-        if len(model_records) > 1 or (model_records and any(item != record for item in model_records)):
+    with locked_owner_index(pinned._require_open()):
+        index = _read_lmm_index(pinned)
+        artifacts = index["artifacts"]
+        assert isinstance(artifacts, list)
+        existing = [item for item in artifacts if item["artifact_id"] == record["artifact_id"] or item["path"] == record["path"]]
+        if len(existing) > 1 or (existing and any(item != record for item in existing)):
             _raise("LMM_TERMINAL_PERSISTENCE_CONFLICT")
-    if not existing:
-        artifacts.append(record)
-        _write_lmm_index(pinned, index)
+        if record["artifact_type"] == "model_result_packet":
+            model_records = [item for item in artifacts if item["artifact_type"] == "model_result_packet"]
+            if len(model_records) > 1 or (model_records and any(item != record for item in model_records)):
+                _raise("LMM_TERMINAL_PERSISTENCE_CONFLICT")
+        if not existing:
+            artifacts.append(record)
+            _write_lmm_index(pinned, index)
 
 
 class LmmLifecycleFailureSink:
@@ -1130,19 +1132,20 @@ class _LmmPinnedPersistenceFacade:
 
     def _index_record(self, admission: _LmmExecutionAdmission, record: dict[str, object]) -> None:
         pinned = admission._pinned
-        index = self._read_index(pinned)
-        artifacts = index["artifacts"]
-        assert isinstance(artifacts, list)
-        existing = [item for item in artifacts if item["artifact_id"] == record["artifact_id"] or item["path"] == record["path"]]
-        if len(existing) > 1 or (existing and any(item != record for item in existing)):
-            _raise("LMM_TERMINAL_PERSISTENCE_CONFLICT")
-        if record["artifact_type"] == "model_result_packet":
-            model_records = [item for item in artifacts if item["artifact_type"] == "model_result_packet"]
-            if len(model_records) > 1 or (model_records and any(item != record for item in model_records)):
+        with locked_owner_index(pinned._require_open()):
+            index = self._read_index(pinned)
+            artifacts = index["artifacts"]
+            assert isinstance(artifacts, list)
+            existing = [item for item in artifacts if item["artifact_id"] == record["artifact_id"] or item["path"] == record["path"]]
+            if len(existing) > 1 or (existing and any(item != record for item in existing)):
                 _raise("LMM_TERMINAL_PERSISTENCE_CONFLICT")
-        if not existing:
-            artifacts.append(record)
-            self._write_index(pinned, index)
+            if record["artifact_type"] == "model_result_packet":
+                model_records = [item for item in artifacts if item["artifact_type"] == "model_result_packet"]
+                if len(model_records) > 1 or (model_records and any(item != record for item in model_records)):
+                    _raise("LMM_TERMINAL_PERSISTENCE_CONFLICT")
+            if not existing:
+                artifacts.append(record)
+                self._write_index(pinned, index)
 
     def _persist(
         self,

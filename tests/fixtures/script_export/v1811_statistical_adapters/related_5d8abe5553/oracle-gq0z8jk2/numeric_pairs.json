@@ -1,0 +1,146 @@
+[
+  {
+    "expected": 4.652711573943123,
+    "abs": 1e-08,
+    "rel": 1e-06,
+    "label": "model:coefficients",
+    "actual": 4.652711573943111,
+    "difference": 1.2434497875801753e-14,
+    "allowed": 4.662711573943123e-06
+  },
+  {
+    "expected": 1.475820771771979,
+    "abs": 1e-08,
+    "rel": 1e-06,
+    "label": "model:coefficients",
+    "actual": 1.475820771771979,
+    "difference": 0.0,
+    "allowed": 1.4858207717719787e-06
+  },
+  {
+    "expected": -0.40404481777033774,
+    "abs": 1e-08,
+    "rel": 1e-06,
+    "label": "model:coefficients",
+    "actual": -0.40404481777033774,
+    "difference": 0.0,
+    "allowed": 4.1404481777033774e-07
+  },
+  {
+    "expected": 1.5955241455226616,
+    "abs": 1e-08,
+    "rel": 1e-05,
+    "label": "model:std_errors",
+    "actual": 1.5955241455226683,
+    "difference": 6.661338147750939e-15,
+    "allowed": 1.596524145522662e-05
+  },
+  {
+    "expected": 0.17732404110690134,
+    "abs": 1e-08,
+    "rel": 1e-05,
+    "label": "model:std_errors",
+    "actual": 0.17732404110690198,
+    "difference": 6.38378239159465e-16,
+    "allowed": 1.7832404110690134e-06
+  },
+  {
+    "expected": 0.08888234469730581,
+    "abs": 1e-08,
+    "rel": 1e-05,
+    "label": "model:std_errors",
+    "actual": 0.08888234469730617,
+    "difference": 3.608224830031759e-16,
+    "allowed": 8.988234469730582e-07
+  },
+  {
+    "expected": 80.0,
+    "abs": 0.0,
+    "rel": 0.0,
+    "label": "model:nobs",
+    "actual": 80.0,
+    "difference": 0.0,
+    "allowed": 0.0
+  },
+  {
+    "expected": 2.9161022645752492,
+    "abs": 1e-08,
+    "rel": 1e-05,
+    "label": "model:statistics.value",
+    "actual": 2.9161022645752293,
+    "difference": 1.9984014443252818e-14,
+    "allowed": 2.9171022645752497e-05
+  },
+  {
+    "expected": 0.026766795825847126,
+    "abs": 1e-06,
+    "rel": 0.0,
+    "label": "model:statistics.p_value",
+    "actual": 0.0267667958258478,
+    "difference": 6.730727086790012e-16,
+    "allowed": 1e-06
+  },
+  {
+    "expected": 6.0,
+    "abs": 0.0,
+    "rel": 0.0,
+    "label": "model:statistics.df",
+    "actual": 6.0,
+    "difference": 0.0,
+    "allowed": 0.0
+  },
+  {
+    "expected": 8.322733694537604,
+    "abs": 1e-08,
+    "rel": 1e-05,
+    "label": "model:statistics.value",
+    "actual": 8.322733694537574,
+    "difference": 3.019806626980426e-14,
+    "allowed": 8.323733694537604e-05
+  },
+  {
+    "expected": 0.00016326932451573436,
+    "abs": 1e-06,
+    "rel": 0.0,
+    "label": "model:statistics.p_value",
+    "actual": 0.00016326932451573778,
+    "difference": 3.415236843329339e-18,
+    "allowed": 1e-06
+  },
+  {
+    "expected": 6.0,
+    "abs": 0.0,
+    "rel": 0.0,
+    "label": "model:statistics.df",
+    "actual": 6.0,
+    "difference": 0.0,
+    "allowed": 0.0
+  },
+  {
+    "expected": -4.545838874371921,
+    "abs": 1e-08,
+    "rel": 1e-05,
+    "label": "model:statistics.value",
+    "actual": -4.545838874371903,
+    "difference": 1.865174681370263e-14,
+    "allowed": 4.546838874371922e-05
+  },
+  {
+    "expected": 0.003909008379856854,
+    "abs": 1e-06,
+    "rel": 0.0,
+    "label": "model:statistics.p_value",
+    "actual": 0.00390900837985693,
+    "difference": 7.632783294297951e-17,
+    "allowed": 1e-06
+  },
+  {
+    "expected": 6.0,
+    "abs": 0.0,
+    "rel": 0.0,
+    "label": "model:statistics.df",
+    "actual": 6.0,
+    "difference": 0.0,
+    "allowed": 0.0
+  }
+]

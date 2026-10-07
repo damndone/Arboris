@@ -837,7 +837,7 @@ describe("WorkbenchRouteContainer", () => {
       "Original OLS",
     );
 
-    fireEvent.change(screen.getByRole("combobox"), { target: { value: "robust" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Covariance" }), { target: { value: "robust" } });
     confirmOperationRerun();
 
     await waitFor(() =>
@@ -894,7 +894,7 @@ describe("WorkbenchRouteContainer", () => {
     );
     expect(await screen.findByTestId("detail-drawer")).toBeInTheDocument();
 
-    fireEvent.change(screen.getByRole("combobox"), { target: { value: "robust" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Covariance" }), { target: { value: "robust" } });
     confirmOperationRerun();
 
     await waitFor(() =>
@@ -942,7 +942,7 @@ describe("WorkbenchRouteContainer", () => {
     );
     expect(await screen.findByTestId("detail-drawer")).toBeInTheDocument();
 
-    fireEvent.change(screen.getByRole("combobox"), { target: { value: "robust" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Covariance" }), { target: { value: "robust" } });
     confirmOperationRerun();
 
     await waitFor(() => expect(api.fetchProjectForest).toHaveBeenCalledTimes(3));
@@ -1005,7 +1005,7 @@ describe("WorkbenchRouteContainer", () => {
     );
     expect(await screen.findByTestId("detail-drawer")).toBeInTheDocument();
 
-    fireEvent.change(screen.getByRole("combobox"), { target: { value: "robust" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Covariance" }), { target: { value: "robust" } });
     confirmOperationRerun();
 
     await waitFor(() => expect(api.fetchProjectForest).toHaveBeenCalledTimes(3));

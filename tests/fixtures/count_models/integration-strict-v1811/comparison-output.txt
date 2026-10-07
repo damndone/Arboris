@@ -1,0 +1,156 @@
+/Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/genmod/generalized_linear_model.py:1923: FutureWarning: The bic value is computed using the deviance formula. After 0.13 this will change to the log-likelihood based formula. This change has no impact on the relative rank of models compared using BIC. You can directly access the log-likelihood version using the `bic_llf` attribute. You can suppress this message by calling statsmodels.genmod.generalized_linear_model.SET_USE_BIC_LLF with True to get the LLF-based version now or False to retainthe deviance version.
+  warnings.warn(
+{
+  "integration_head": "457d529d9e59bf19ca287aae978f028a8d86aa3d",
+  "differences": {
+    "wald_joint": {
+      "statistic": {
+        "native_final": 73.6632356235842,
+        "old_oracle": 73.6632356225689,
+        "workbench": 73.66323512630117,
+        "native_minus_old": 1.0152945151276072e-09,
+        "workbench_minus_native": -4.972830254246219e-07,
+        "workbench_relative_error": -6.7507627266039094e-09
+      },
+      "p_value": {
+        "native_final": 1.00979130027719e-16,
+        "old_oracle": 1.00979130078979e-16,
+        "workbench": 1.0097915513532629e-16,
+        "native_minus_old": -5.126000905793833e-26,
+        "workbench_minus_native": 2.5107607291310954e-23,
+        "workbench_relative_error": 2.4864154890558154e-07
+      },
+      "df_num": {
+        "native_final": 2,
+        "old_oracle": 2,
+        "workbench": 2,
+        "native_minus_old": 0,
+        "workbench_minus_native": 0,
+        "workbench_relative_error": 0.0
+      }
+    },
+    "wald_shifted": {
+      "statistic": {
+        "native_final": 16.1437713759091,
+        "old_oracle": 16.1437713756835,
+        "workbench": 16.143771779756346,
+        "native_minus_old": 2.256008713175106e-10,
+        "workbench_minus_native": 4.038472454226394e-07,
+        "workbench_relative_error": 2.501566931378818e-08
+      },
+      "p_value": {
+        "native_final": 5.87113248879525e-05,
+        "old_oracle": 5.87113248949466e-05,
+        "workbench": 5.87113123695416e-05,
+        "native_minus_old": -6.994100123277475e-15,
+        "workbench_minus_native": -1.2518410902339922e-11,
+        "workbench_relative_error": -2.132196970094924e-07
+      },
+      "df_num": {
+        "native_final": 1,
+        "old_oracle": 1,
+        "workbench": 1,
+        "native_minus_old": 0,
+        "workbench_minus_native": 0,
+        "workbench_relative_error": 0.0
+      }
+    },
+    "lincom": {
+      "estimate": {
+        "native_final": -0.718015326911863,
+        "old_oracle": -0.718015326911864,
+        "workbench": -0.7180153306113186,
+        "native_minus_old": 9.992007221626409e-16,
+        "workbench_minus_native": -3.6994556307234916e-09,
+        "workbench_relative_error": 5.152335225133697e-09
+      },
+      "std_error": {
+        "native_final": 0.122668934781026,
+        "old_oracle": 0.122668934781767,
+        "workbench": 0.1226689346334959,
+        "native_minus_old": -7.410044799982529e-13,
+        "workbench_minus_native": -1.4753009924817206e-10,
+        "workbench_relative_error": -1.2026687423727367e-09
+      }
+    },
+    "nlcom": {
+      "estimate": {
+        "native_final": -1.27248130738599,
+        "old_oracle": -1.27248130738599,
+        "workbench": -1.272481295216555,
+        "native_minus_old": 0.0,
+        "workbench_minus_native": 1.2169435015252361e-08,
+        "workbench_relative_error": -9.563547176405507e-09
+      },
+      "std_error": {
+        "native_final": 0.305658308860656,
+        "old_oracle": 0.305658308862664,
+        "workbench": 0.30565830686936507,
+        "native_minus_old": -2.0080048734882894e-12,
+        "workbench_minus_native": -1.9912909099417675e-09,
+        "workbench_relative_error": -6.51476128599171e-09
+      }
+    },
+    "margins_average": {
+      "x1": {
+        "estimate": {
+          "native": 0.6574384820804,
+          "workbench": 0.6574384746429279,
+          "relative_error": -1.1312803027685447e-08
+        },
+        "std_error": {
+          "native": 0.119155158267897,
+          "workbench": 0.11915515706264643,
+          "relative_error": -1.0114967641250416e-08
+        }
+      },
+      "x2": {
+        "estimate": {
+          "native": -0.51665865512311,
+          "workbench": -0.516658655112917,
+          "relative_error": -1.9728774169891494e-11
+        },
+        "std_error": {
+          "native": 0.0996066916363687,
+          "workbench": 0.0996066913846965,
+          "relative_error": -2.526659659274344e-09
+        }
+      }
+    },
+    "margins_at_means": {
+      "x1": {
+        "estimate": {
+          "native": 0.575068067816278,
+          "workbench": 0.5750680621208891,
+          "relative_error": -9.903851627690585e-09
+        },
+        "std_error": {
+          "native": 0.0917580472015567,
+          "workbench": 0.09175804655002112,
+          "relative_error": -7.10058245534384e-09
+        }
+      },
+      "x2": {
+        "estimate": {
+          "native": -0.451926533996273,
+          "workbench": -0.4519265346238525,
+          "relative_error": 1.3886758409853428e-09
+        },
+        "std_error": {
+          "native": 0.0786085827557806,
+          "workbench": 0.07860858266364655,
+          "relative_error": -1.1720610038068457e-09
+        }
+      }
+    }
+  },
+  "alpha": {
+    "name": "alpha",
+    "estimate": 0.4426186817041305,
+    "std_error": 0.09542192619960567,
+    "conf_low": 0.29008381511126513,
+    "conf_high": 0.675361006674427,
+    "scale": "natural"
+  },
+  "nb_natural_mean_score_max": 3.037953084650269e-09
+}

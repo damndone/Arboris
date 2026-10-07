@@ -1,0 +1,1185 @@
+{
+  "pytest": "9 passed, 76 deselected in 4.74s",
+  "records": [
+    {
+      "execution": {
+        "run": "survey_safety_final",
+        "language": "stata",
+        "command": [
+          "/Applications/Stata/StataMP.app/Contents/MacOS/stata-mp",
+          "-b",
+          "do",
+          "analysis.do"
+        ],
+        "os_exit": 0,
+        "normalized_exit": 0
+      },
+      "plan": {
+        "schema_version": 1,
+        "project_id": "internal",
+        "run_id": "identities",
+        "workbench_version": "1.8.11",
+        "lineage_hash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "sources": [
+          {
+            "source_id": "source",
+            "format": "csv",
+            "filename": "data.csv",
+            "sha256": "b13d3167d3499328f9a247d014b6a55057ccf2c1319fbe0792c5f46d89dce671",
+            "read_options": {}
+          }
+        ],
+        "steps": [
+          {
+            "step_id": "step",
+            "kind": "data_operation",
+            "operation": "data.tsset",
+            "label": "",
+            "parameters": {
+              "time_column": "date",
+              "panel_id_column": "time",
+              "frequency": "D"
+            },
+            "inputs": [
+              "source"
+            ],
+            "output_dataset": null,
+            "expected": {
+              "nrows": 4,
+              "columns": [
+                "time",
+                "date",
+                "__wb_time"
+              ]
+            },
+            "tolerances": {},
+            "seed": null,
+            "snapshot": null
+          }
+        ]
+      },
+      "numbers": [
+        {
+          "scalar": "wb_number_0",
+          "expected": 4.0,
+          "abs": 0.0,
+          "rel": 0.0,
+          "actual": 4.0,
+          "difference": 0.0,
+          "allowed": 0.0
+        }
+      ],
+      "output": ". do analysis.do \n\n. * Workbench 1.8.11\n. * project: internal\n. * run: identities\n. * lineage_hash: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\n> eee\n. * Coverage\n. * step | data.tsset | native | \n. version 18\n\n. set more off\n\n. set type double\n\n. capture program drop wb_repost\n\n. program define wb_repost, eclass\n  1.     args beta covariance\n  2.     ereturn repost b=`beta' V=`covariance', rename\n  3. end\n\n. capture program drop wb_sha\n\n. program define wb_sha\n  1.     args filename expected\n  2.     tempfile digestfile\n  3.     shell shasum -a 256 \"`filename'\" > \"`digestfile'\"\n  4.     tempname fh\n  5.     file open `fh' using \"`digestfile'\", read text\n  6.     file read `fh' line\n  7.     file close `fh'\n  8.     if substr(\"`line'\",1,64) != \"`expected'\" {\n  9.         display as error \"SHA256 mismatch\"\n 10.         exit 9\n 11.     }\n 12. end\n\n. \n. wb_sha \"data.csv\" \"b13d3167d3499328f9a247d014b6a55057ccf2c1319fbe0792c5f46d89\n> dce671\"\n\n\n. frame create wb_src0\n\n. frame change wb_src0\n\n. import delimited using \"data.csv\", varnames(1) delimiters(\",\") encoding(\"UTF-\n> 8\") asdouble clear case(preserve)\n(3 vars, 4 obs)\n\n. frame copy wb_src0 wb1\n\n. frame change wb1\n\n. tempvar wb_time\n\n. capture confirm string variable date\n\n. if !_rc generate double `wb_time' = cond(missing(clock(date, \"YMDhms\")), cloc\n> k(date, \"YMD\"), clock(date, \"YMDhms\"))\n\n. else generate double `wb_time' = date\n\n. assert !missing(`wb_time')\n\n. sort time `wb_time'\n\n. drop `wb_time'\n\n. scalar wb_number_0 = _N\n\n. unab wb_columns: _all\n\n. scalar wb_check_1 = (`\"`wb_columns'\"' == \"time date __wb_time\")\n\n. file open wb_numbers using \"numeric_actual.tsv\", write text replace\n(file numeric_actual.tsv not found)\n\n. file write wb_numbers %21.17g (wb_number_0) _n\n\n. file close wb_numbers\n\n. * Closing self-checks\n. assert !missing(wb_number_0) & abs(wb_number_0-(4)) <= 0.0+0.0*abs(4)\n\n. assert wb_check_1 == 1\n\n. \n. frame wb1: export delimited using \"result.csv\", replace\n(file result.csv not found)\nfile result.csv saved\n\n. \nend of do-file\n",
+      "data": {
+        "actual": {
+          "columns": [
+            "time",
+            "date",
+            "__wb_time"
+          ],
+          "index": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "data": [
+            [
+              1,
+              "2020-01-01",
+              84
+            ],
+            [
+              1,
+              "2020-01-02",
+              82
+            ],
+            [
+              2,
+              "2020-01-01",
+              83
+            ],
+            [
+              2,
+              "2020-01-02",
+              81
+            ]
+          ]
+        },
+        "expected": {
+          "columns": [
+            "time",
+            "date",
+            "__wb_time"
+          ],
+          "index": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "data": [
+            [
+              1,
+              "2020-01-01",
+              84
+            ],
+            [
+              1,
+              "2020-01-02",
+              82
+            ],
+            [
+              2,
+              "2020-01-01",
+              83
+            ],
+            [
+              2,
+              "2020-01-02",
+              81
+            ]
+          ]
+        },
+        "max_differences": {
+          "time": 0.0,
+          "__wb_time": 0.0
+        },
+        "rtol": 1e-08,
+        "atol": 1e-08
+      }
+    },
+    {
+      "execution": {
+        "run": "survey_safety_final",
+        "language": "r",
+        "command": [
+          "Rscript",
+          "analysis.R"
+        ],
+        "os_exit": 1,
+        "normalized_exit": 1
+      },
+      "plan": {
+        "schema_version": 1,
+        "project_id": "survey",
+        "run_id": "native",
+        "workbench_version": "1.8.11",
+        "lineage_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "sources": [
+          {
+            "source_id": "source",
+            "format": "csv",
+            "filename": "data.csv",
+            "sha256": "5f8d0cc66fc9efdfd08e6a06640ea410d58671fe93ac5cac2ad90d6aa68de937",
+            "read_options": {}
+          }
+        ],
+        "steps": [
+          {
+            "step_id": "model",
+            "kind": "model",
+            "operation": "model.ols",
+            "label": "",
+            "parameters": {
+              "model_type": "ols",
+              "y": "y",
+              "x": [
+                "x1",
+                "x2"
+              ],
+              "categorical_x": [],
+              "covariance": "survey_design",
+              "weights": {
+                "kind": "sampling",
+                "column": "weight"
+              },
+              "model_options": {
+                "survey_design": {
+                  "sampling_weight": "weight",
+                  "survey_strata_col": "stratum",
+                  "survey_psu_col": "psu",
+                  "survey_df": "design"
+                }
+              }
+            },
+            "inputs": [
+              "source"
+            ],
+            "output_dataset": null,
+            "expected": {
+              "nobs": 80,
+              "coefficients": {
+                "Intercept": 4.652711573943123,
+                "x1": 99.0,
+                "x2": -0.40404481777033774
+              },
+              "std_errors": {
+                "Intercept": 1.5955241455226616,
+                "x1": 0.17732404110690134,
+                "x2": 0.08888234469730581
+              },
+              "statistics": {
+                "Intercept": {
+                  "value": 2.9161022645752492,
+                  "p_value": 0.019406798019796175,
+                  "df": 8,
+                  "distribution": "t"
+                },
+                "x1": {
+                  "value": 8.322733694537604,
+                  "p_value": 3.2813378097179405e-05,
+                  "df": 8,
+                  "distribution": "t"
+                },
+                "x2": {
+                  "value": -4.545838874371921,
+                  "p_value": 0.0018846599328036571,
+                  "df": 8,
+                  "distribution": "t"
+                }
+              }
+            },
+            "tolerances": {},
+            "seed": null,
+            "snapshot": null
+          }
+        ]
+      },
+      "numbers": [
+        {
+          "expected": 4.652711573943123,
+          "abs": 1e-08,
+          "rel": 1e-06,
+          "label": "model:coefficients",
+          "actual": 4.652711573943111,
+          "difference": 1.2434497875801753e-14,
+          "allowed": 4.662711573943123e-06
+        },
+        {
+          "expected": 99.0,
+          "abs": 1e-08,
+          "rel": 1e-06,
+          "label": "model:coefficients",
+          "actual": 1.475820771771979,
+          "difference": 97.52417922822802,
+          "allowed": 9.900999999999999e-05
+        },
+        {
+          "expected": -0.40404481777033774,
+          "abs": 1e-08,
+          "rel": 1e-06,
+          "label": "model:coefficients",
+          "actual": -0.40404481777033774,
+          "difference": 0.0,
+          "allowed": 4.1404481777033774e-07
+        },
+        {
+          "expected": 1.5955241455226616,
+          "abs": 1e-08,
+          "rel": 1e-05,
+          "label": "model:std_errors",
+          "actual": 1.5955241455226683,
+          "difference": 6.661338147750939e-15,
+          "allowed": 1.596524145522662e-05
+        },
+        {
+          "expected": 0.17732404110690134,
+          "abs": 1e-08,
+          "rel": 1e-05,
+          "label": "model:std_errors",
+          "actual": 0.17732404110690198,
+          "difference": 6.38378239159465e-16,
+          "allowed": 1.7832404110690134e-06
+        },
+        {
+          "expected": 0.08888234469730581,
+          "abs": 1e-08,
+          "rel": 1e-05,
+          "label": "model:std_errors",
+          "actual": 0.08888234469730617,
+          "difference": 3.608224830031759e-16,
+          "allowed": 8.988234469730582e-07
+        },
+        {
+          "expected": 80.0,
+          "abs": 0.0,
+          "rel": 0.0,
+          "label": "model:nobs",
+          "actual": 80.0,
+          "difference": 0.0,
+          "allowed": 0.0
+        },
+        {
+          "expected": 2.9161022645752492,
+          "abs": 1e-08,
+          "rel": 1e-05,
+          "label": "model:statistics.value",
+          "actual": 2.9161022645752293,
+          "difference": 1.9984014443252818e-14,
+          "allowed": 2.9171022645752497e-05
+        },
+        {
+          "expected": 0.019406798019796175,
+          "abs": 1e-06,
+          "rel": 0.0,
+          "label": "model:statistics.p_value",
+          "actual": 0.019406798019796747,
+          "difference": 5.724587470723463e-16,
+          "allowed": 1e-06
+        },
+        {
+          "expected": 8.0,
+          "abs": 0.0,
+          "rel": 0.0,
+          "label": "model:statistics.df",
+          "actual": 8.0,
+          "difference": 0.0,
+          "allowed": 0.0
+        },
+        {
+          "expected": 8.322733694537604,
+          "abs": 1e-08,
+          "rel": 1e-05,
+          "label": "model:statistics.value",
+          "actual": 8.322733694537574,
+          "difference": 3.019806626980426e-14,
+          "allowed": 8.323733694537604e-05
+        },
+        {
+          "expected": 3.2813378097179405e-05,
+          "abs": 1e-06,
+          "rel": 0.0,
+          "label": "model:statistics.p_value",
+          "actual": 3.2813378097180286e-05,
+          "difference": 8.809142651444724e-19,
+          "allowed": 1e-06
+        },
+        {
+          "expected": 8.0,
+          "abs": 0.0,
+          "rel": 0.0,
+          "label": "model:statistics.df",
+          "actual": 8.0,
+          "difference": 0.0,
+          "allowed": 0.0
+        },
+        {
+          "expected": -4.545838874371921,
+          "abs": 1e-08,
+          "rel": 1e-05,
+          "label": "model:statistics.value",
+          "actual": -4.545838874371903,
+          "difference": 1.865174681370263e-14,
+          "allowed": 4.546838874371922e-05
+        },
+        {
+          "expected": 0.0018846599328036571,
+          "abs": 1e-06,
+          "rel": 0.0,
+          "label": "model:statistics.p_value",
+          "actual": 0.0018846599328037035,
+          "difference": 4.640385298237959e-17,
+          "allowed": 1e-06
+        },
+        {
+          "expected": 8.0,
+          "abs": 0.0,
+          "rel": 0.0,
+          "label": "model:statistics.df",
+          "actual": 8.0,
+          "difference": 0.0,
+          "allowed": 0.0
+        }
+      ],
+      "output": "Error in wb_check(checks[[2]], 99, 1e-08, 1e-06, \"model:coefficients\") : \n  model:coefficients 1.47582077177198 != 99\nExecution halted\n",
+      "data": null
+    },
+    {
+      "execution": {
+        "run": "survey_safety_final",
+        "language": "r",
+        "command": [
+          "Rscript",
+          "analysis.R"
+        ],
+        "os_exit": 0,
+        "normalized_exit": 0
+      },
+      "plan": {
+        "schema_version": 1,
+        "project_id": "internal",
+        "run_id": "identities",
+        "workbench_version": "1.8.11",
+        "lineage_hash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "sources": [
+          {
+            "source_id": "source",
+            "format": "csv",
+            "filename": "data.csv",
+            "sha256": "b13d3167d3499328f9a247d014b6a55057ccf2c1319fbe0792c5f46d89dce671",
+            "read_options": {}
+          }
+        ],
+        "steps": [
+          {
+            "step_id": "step",
+            "kind": "data_operation",
+            "operation": "data.tsset",
+            "label": "",
+            "parameters": {
+              "time_column": "date",
+              "panel_id_column": "time",
+              "frequency": "D"
+            },
+            "inputs": [
+              "source"
+            ],
+            "output_dataset": null,
+            "expected": {
+              "nrows": 4,
+              "columns": [
+                "time",
+                "date",
+                "__wb_time"
+              ]
+            },
+            "tolerances": {},
+            "seed": null,
+            "snapshot": null
+          }
+        ]
+      },
+      "numbers": [
+        {
+          "expected": 4.0,
+          "abs": 0.0,
+          "rel": 0.0,
+          "label": "step:nrows",
+          "actual": 4.0,
+          "difference": 0.0,
+          "allowed": 0.0
+        }
+      ],
+      "output": "",
+      "data": {
+        "actual": {
+          "columns": [
+            "time",
+            "date",
+            "__wb_time"
+          ],
+          "index": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "data": [
+            [
+              1,
+              "2020-01-01",
+              84
+            ],
+            [
+              1,
+              "2020-01-02",
+              82
+            ],
+            [
+              2,
+              "2020-01-01",
+              83
+            ],
+            [
+              2,
+              "2020-01-02",
+              81
+            ]
+          ]
+        },
+        "expected": {
+          "columns": [
+            "time",
+            "date",
+            "__wb_time"
+          ],
+          "index": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "data": [
+            [
+              1,
+              "2020-01-01",
+              84
+            ],
+            [
+              1,
+              "2020-01-02",
+              82
+            ],
+            [
+              2,
+              "2020-01-01",
+              83
+            ],
+            [
+              2,
+              "2020-01-02",
+              81
+            ]
+          ]
+        },
+        "max_differences": {
+          "time": 0.0,
+          "__wb_time": 0.0
+        },
+        "rtol": 1e-08,
+        "atol": 1e-08
+      }
+    },
+    {
+      "execution": {
+        "run": "survey_safety_final",
+        "language": "stata",
+        "command": [
+          "/Applications/Stata/StataMP.app/Contents/MacOS/stata-mp",
+          "-b",
+          "do",
+          "analysis.do"
+        ],
+        "os_exit": 0,
+        "normalized_exit": 9
+      },
+      "plan": {
+        "schema_version": 1,
+        "project_id": "survey",
+        "run_id": "native",
+        "workbench_version": "1.8.11",
+        "lineage_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "sources": [
+          {
+            "source_id": "source",
+            "format": "csv",
+            "filename": "data.csv",
+            "sha256": "5f8d0cc66fc9efdfd08e6a06640ea410d58671fe93ac5cac2ad90d6aa68de937",
+            "read_options": {}
+          }
+        ],
+        "steps": [
+          {
+            "step_id": "model",
+            "kind": "model",
+            "operation": "model.ols",
+            "label": "",
+            "parameters": {
+              "model_type": "ols",
+              "y": "y",
+              "x": [
+                "x1",
+                "x2"
+              ],
+              "categorical_x": [],
+              "covariance": "survey_design",
+              "weights": {
+                "kind": "sampling",
+                "column": "weight"
+              },
+              "model_options": {
+                "survey_design": {
+                  "sampling_weight": "weight",
+                  "survey_strata_col": "stratum",
+                  "survey_psu_col": "psu",
+                  "survey_df": "design"
+                }
+              }
+            },
+            "inputs": [
+              "source"
+            ],
+            "output_dataset": null,
+            "expected": {
+              "nobs": 80,
+              "coefficients": {
+                "Intercept": 4.652711573943123,
+                "x1": 99.0,
+                "x2": -0.40404481777033774
+              },
+              "std_errors": {
+                "Intercept": 1.5955241455226616,
+                "x1": 0.17732404110690134,
+                "x2": 0.08888234469730581
+              },
+              "statistics": {
+                "Intercept": {
+                  "value": 2.9161022645752492,
+                  "p_value": 0.019406798019796175,
+                  "df": 8,
+                  "distribution": "t"
+                },
+                "x1": {
+                  "value": 8.322733694537604,
+                  "p_value": 3.2813378097179405e-05,
+                  "df": 8,
+                  "distribution": "t"
+                },
+                "x2": {
+                  "value": -4.545838874371921,
+                  "p_value": 0.0018846599328036571,
+                  "df": 8,
+                  "distribution": "t"
+                }
+              }
+            },
+            "tolerances": {},
+            "seed": null,
+            "snapshot": null
+          }
+        ]
+      },
+      "numbers": [
+        {
+          "scalar": "wb_number_0",
+          "expected": 4.652711573943123,
+          "abs": 1e-08,
+          "rel": 1e-06,
+          "actual": 4.652711573943117,
+          "difference": 6.217248937900877e-15,
+          "allowed": 4.662711573943123e-06
+        },
+        {
+          "scalar": "wb_number_1",
+          "expected": 99.0,
+          "abs": 1e-08,
+          "rel": 1e-06,
+          "actual": 1.4758207717719791,
+          "difference": 97.52417922822802,
+          "allowed": 9.900999999999999e-05
+        },
+        {
+          "scalar": "wb_number_2",
+          "expected": -0.40404481777033774,
+          "abs": 1e-08,
+          "rel": 1e-06,
+          "actual": -0.40404481777033824,
+          "difference": 4.996003610813204e-16,
+          "allowed": 4.1404481777033774e-07
+        },
+        {
+          "scalar": "wb_number_3",
+          "expected": 1.5955241455226616,
+          "abs": 1e-08,
+          "rel": 1e-05,
+          "actual": 1.595524145522668,
+          "difference": 6.439293542825908e-15,
+          "allowed": 1.596524145522662e-05
+        },
+        {
+          "scalar": "wb_number_4",
+          "expected": 0.17732404110690134,
+          "abs": 1e-08,
+          "rel": 1e-05,
+          "actual": 0.17732404110690184,
+          "difference": 4.996003610813204e-16,
+          "allowed": 1.7832404110690134e-06
+        },
+        {
+          "scalar": "wb_number_5",
+          "expected": 0.08888234469730581,
+          "abs": 1e-08,
+          "rel": 1e-05,
+          "actual": 0.08888234469730623,
+          "difference": 4.163336342344337e-16,
+          "allowed": 8.988234469730582e-07
+        },
+        {
+          "scalar": "wb_number_6",
+          "expected": 80.0,
+          "abs": 0.0,
+          "rel": 0.0,
+          "actual": 80.0,
+          "difference": 0.0,
+          "allowed": 0.0
+        },
+        {
+          "scalar": "wb_number_7",
+          "expected": 2.9161022645752492,
+          "abs": 1e-08,
+          "rel": 1e-05,
+          "actual": 2.9161022645752337,
+          "difference": 1.554312234475219e-14,
+          "allowed": 2.9171022645752497e-05
+        },
+        {
+          "scalar": "wb_number_8",
+          "expected": 0.019406798019796175,
+          "abs": 1e-06,
+          "rel": 0.0,
+          "actual": 0.019406798019796622,
+          "difference": 4.475586568020162e-16,
+          "allowed": 1e-06
+        },
+        {
+          "scalar": "wb_number_9",
+          "expected": 8.0,
+          "abs": 0.0,
+          "rel": 0.0,
+          "actual": 8.0,
+          "difference": 0.0,
+          "allowed": 0.0
+        },
+        {
+          "scalar": "wb_number_10",
+          "expected": 8.322733694537604,
+          "abs": 1e-08,
+          "rel": 1e-05,
+          "actual": 8.322733694537582,
+          "difference": 2.1316282072803006e-14,
+          "allowed": 8.323733694537604e-05
+        },
+        {
+          "scalar": "wb_number_11",
+          "expected": 3.2813378097179405e-05,
+          "abs": 1e-06,
+          "rel": 0.0,
+          "actual": 3.28133780971801e-05,
+          "difference": 6.979551485375435e-19,
+          "allowed": 1e-06
+        },
+        {
+          "scalar": "wb_number_12",
+          "expected": 8.0,
+          "abs": 0.0,
+          "rel": 0.0,
+          "actual": 8.0,
+          "difference": 0.0,
+          "allowed": 0.0
+        },
+        {
+          "scalar": "wb_number_13",
+          "expected": -4.545838874371921,
+          "abs": 1e-08,
+          "rel": 1e-05,
+          "actual": -4.545838874371905,
+          "difference": 1.5987211554602254e-14,
+          "allowed": 4.546838874371922e-05
+        },
+        {
+          "scalar": "wb_number_14",
+          "expected": 0.0018846599328036571,
+          "abs": 1e-06,
+          "rel": 0.0,
+          "actual": 0.0018846599328036966,
+          "difference": 3.946495907847236e-17,
+          "allowed": 1e-06
+        },
+        {
+          "scalar": "wb_number_15",
+          "expected": 8.0,
+          "abs": 0.0,
+          "rel": 0.0,
+          "actual": 8.0,
+          "difference": 0.0,
+          "allowed": 0.0
+        }
+      ],
+      "output": ". do analysis.do \n\n. * Workbench 1.8.11\n. * project: survey\n. * run: native\n. * lineage_hash: ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n> ddd\n. * Coverage\n. * model | model.ols | native_with_equivalence_note | Full no-FPC linearizatio\n> n design; coefficient and joint-test df preserve the executed Workbench conve\n> ntion.\n. version 18\n\n. set more off\n\n. set type double\n\n. capture program drop wb_repost\n\n. program define wb_repost, eclass\n  1.     args beta covariance\n  2.     ereturn repost b=`beta' V=`covariance', rename\n  3. end\n\n. capture program drop wb_sha\n\n. program define wb_sha\n  1.     args filename expected\n  2.     tempfile digestfile\n  3.     shell shasum -a 256 \"`filename'\" > \"`digestfile'\"\n  4.     tempname fh\n  5.     file open `fh' using \"`digestfile'\", read text\n  6.     file read `fh' line\n  7.     file close `fh'\n  8.     if substr(\"`line'\",1,64) != \"`expected'\" {\n  9.         display as error \"SHA256 mismatch\"\n 10.         exit 9\n 11.     }\n 12. end\n\n. \n. wb_sha \"data.csv\" \"5f8d0cc66fc9efdfd08e6a06640ea410d58671fe93ac5cac2ad90d6aa6\n> 8de937\"\n\n\n. frame create wb_src0\n\n. frame change wb_src0\n\n. import delimited using \"data.csv\", varnames(1) delimiters(\",\") encoding(\"UTF-\n> 8\") asdouble clear case(preserve)\n(8 vars, 80 obs)\n\n. frame copy wb_src0 wb_model_data1\n\n. frame change wb_model_data1\n\n. drop if missing(y) | missing(x1) | missing(x2)\n(0 observations deleted)\n\n. svyset psu [pw=weight], strata(stratum) singleunit(missing)\n\nSampling weights: weight\n             VCE: linearized\n     Single unit: missing\n        Strata 1: stratum\n Sampling unit 1: psu\n           FPC 1: <zero>\n\n. svy: regress y x1 x2\n(running regress on estimation sample)\n\nSurvey: Linear regression\n\nNumber of strata =  8                                 Number of obs   =     80\nNumber of PSUs   = 16                                 Population size =  1,520\n                                                      Design df       =      8\n                                                      F(2, 7)         = 107.30\n                                                      Prob > F        = 0.0000\n                                                      R-squared       = 0.7871\n\n------------------------------------------------------------------------------\n             |             Linearized\n           y | Coefficient  std. err.      t    P>|t|     [95% conf. interval]\n-------------+----------------------------------------------------------------\n          x1 |   1.475821    .177324     8.32   0.000     1.066911    1.884731\n          x2 |  -.4040448   .0888823    -4.55   0.002    -.6090079   -.1990818\n       _cons |   4.652712   1.595524     2.92   0.019     .9734263    8.331997\n------------------------------------------------------------------------------\n\n. assert e(df_r) > 0\n\n. matrix wb_survey_v = e(V)\n\n. mata: assert(!hasmissing(st_matrix(\"wb_survey_v\")))\n\n. estimates store wb_model1\n\n. generate long wb_sample_row = _n\n\n. generate byte wb_sample1 = e(sample)\n\n. scalar wb_number_0 = _b[_cons]\n\n. scalar wb_number_1 = _b[x1]\n\n. scalar wb_number_2 = _b[x2]\n\n. scalar wb_number_3 = _se[_cons]\n\n. scalar wb_number_4 = _se[x1]\n\n. scalar wb_number_5 = _se[x2]\n\n. scalar wb_number_6 = e(N)\n\n. capture confirm scalar e(df_r)\n\n. if _rc exit 9\n\n. scalar wb_number_7 = (_b[_cons]/_se[_cons])\n\n. scalar wb_number_8 = 2*ttail(e(df_r),abs((_b[_cons]/_se[_cons])))\n\n. scalar wb_number_9 = e(df_r)\n\n. capture confirm scalar e(df_r)\n\n. if _rc exit 9\n\n. scalar wb_number_10 = (_b[x1]/_se[x1])\n\n. scalar wb_number_11 = 2*ttail(e(df_r),abs((_b[x1]/_se[x1])))\n\n. scalar wb_number_12 = e(df_r)\n\n. capture confirm scalar e(df_r)\n\n. if _rc exit 9\n\n. scalar wb_number_13 = (_b[x2]/_se[x2])\n\n. scalar wb_number_14 = 2*ttail(e(df_r),abs((_b[x2]/_se[x2])))\n\n. scalar wb_number_15 = e(df_r)\n\n. file open wb_numbers using \"numeric_actual.tsv\", write text replace\n(file numeric_actual.tsv not found)\n\n. file write wb_numbers %21.17g (wb_number_0) _n\n\n. file write wb_numbers %21.17g (wb_number_1) _n\n\n. file write wb_numbers %21.17g (wb_number_2) _n\n\n. file write wb_numbers %21.17g (wb_number_3) _n\n\n. file write wb_numbers %21.17g (wb_number_4) _n\n\n. file write wb_numbers %21.17g (wb_number_5) _n\n\n. file write wb_numbers %21.17g (wb_number_6) _n\n\n. file write wb_numbers %21.17g (wb_number_7) _n\n\n. file write wb_numbers %21.17g (wb_number_8) _n\n\n. file write wb_numbers %21.17g (wb_number_9) _n\n\n. file write wb_numbers %21.17g (wb_number_10) _n\n\n. file write wb_numbers %21.17g (wb_number_11) _n\n\n. file write wb_numbers %21.17g (wb_number_12) _n\n\n. file write wb_numbers %21.17g (wb_number_13) _n\n\n. file write wb_numbers %21.17g (wb_number_14) _n\n\n. file write wb_numbers %21.17g (wb_number_15) _n\n\n. file close wb_numbers\n\n. * Closing self-checks\n. assert !missing(wb_number_0) & abs(wb_number_0-(4.652711573943123)) <= 1e-08+\n> 1e-06*abs(4.652711573943123)\n\n. assert !missing(wb_number_1) & abs(wb_number_1-(99.0)) <= 1e-08+1e-06*abs(99.\n> 0)\nassertion is false\nr(9);\n\nend of do-file\nr(9);\n",
+      "data": null
+    },
+    {
+      "execution": {
+        "run": "survey_safety_final",
+        "language": "python",
+        "command": [
+          "/Users/jiayuanren/\u9879\u76ee\u89c4\u5212/.venv/bin/python",
+          "analysis.py"
+        ],
+        "os_exit": 1,
+        "normalized_exit": 1
+      },
+      "plan": {
+        "schema_version": 1,
+        "project_id": "survey",
+        "run_id": "native",
+        "workbench_version": "1.8.11",
+        "lineage_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "sources": [
+          {
+            "source_id": "source",
+            "format": "csv",
+            "filename": "data.csv",
+            "sha256": "5f8d0cc66fc9efdfd08e6a06640ea410d58671fe93ac5cac2ad90d6aa68de937",
+            "read_options": {}
+          }
+        ],
+        "steps": [
+          {
+            "step_id": "model",
+            "kind": "model",
+            "operation": "model.ols",
+            "label": "",
+            "parameters": {
+              "model_type": "ols",
+              "y": "y",
+              "x": [
+                "x1",
+                "x2"
+              ],
+              "categorical_x": [],
+              "covariance": "survey_design",
+              "weights": {
+                "kind": "sampling",
+                "column": "weight"
+              },
+              "model_options": {
+                "survey_design": {
+                  "sampling_weight": "weight",
+                  "survey_strata_col": "stratum",
+                  "survey_psu_col": "psu",
+                  "survey_df": "design"
+                }
+              }
+            },
+            "inputs": [
+              "source"
+            ],
+            "output_dataset": null,
+            "expected": {
+              "nobs": 80,
+              "coefficients": {
+                "Intercept": 4.652711573943123,
+                "x1": 99.0,
+                "x2": -0.40404481777033774
+              },
+              "std_errors": {
+                "Intercept": 1.5955241455226616,
+                "x1": 0.17732404110690134,
+                "x2": 0.08888234469730581
+              },
+              "statistics": {
+                "Intercept": {
+                  "value": 2.9161022645752492,
+                  "p_value": 0.019406798019796175,
+                  "df": 8,
+                  "distribution": "t"
+                },
+                "x1": {
+                  "value": 8.322733694537604,
+                  "p_value": 3.2813378097179405e-05,
+                  "df": 8,
+                  "distribution": "t"
+                },
+                "x2": {
+                  "value": -4.545838874371921,
+                  "p_value": 0.0018846599328036571,
+                  "df": 8,
+                  "distribution": "t"
+                }
+              }
+            },
+            "tolerances": {},
+            "seed": null,
+            "snapshot": null
+          }
+        ]
+      },
+      "numbers": [
+        {
+          "expected": 4.652711573943123,
+          "abs": 1e-08,
+          "rel": 1e-06,
+          "label": "model:coefficients",
+          "actual": 4.652711573943123,
+          "difference": 0.0,
+          "allowed": 4.662711573943123e-06
+        },
+        {
+          "expected": 99.0,
+          "abs": 1e-08,
+          "rel": 1e-06,
+          "label": "model:coefficients",
+          "actual": 1.475820771771979,
+          "difference": 97.52417922822802,
+          "allowed": 9.900999999999999e-05
+        },
+        {
+          "expected": -0.40404481777033774,
+          "abs": 1e-08,
+          "rel": 1e-06,
+          "label": "model:coefficients",
+          "actual": -0.40404481777033774,
+          "difference": 0.0,
+          "allowed": 4.1404481777033774e-07
+        },
+        {
+          "expected": 1.5955241455226616,
+          "abs": 1e-08,
+          "rel": 1e-05,
+          "label": "model:std_errors",
+          "actual": 1.5955241455226616,
+          "difference": 0.0,
+          "allowed": 1.596524145522662e-05
+        },
+        {
+          "expected": 0.17732404110690134,
+          "abs": 1e-08,
+          "rel": 1e-05,
+          "label": "model:std_errors",
+          "actual": 0.17732404110690134,
+          "difference": 0.0,
+          "allowed": 1.7832404110690134e-06
+        },
+        {
+          "expected": 0.08888234469730581,
+          "abs": 1e-08,
+          "rel": 1e-05,
+          "label": "model:std_errors",
+          "actual": 0.08888234469730581,
+          "difference": 0.0,
+          "allowed": 8.988234469730582e-07
+        },
+        {
+          "expected": 80.0,
+          "abs": 0.0,
+          "rel": 0.0,
+          "label": "model:nobs",
+          "actual": 80.0,
+          "difference": 0.0,
+          "allowed": 0.0
+        },
+        {
+          "expected": 2.9161022645752492,
+          "abs": 1e-08,
+          "rel": 1e-05,
+          "label": "model:statistics.value",
+          "actual": 2.9161022645752492,
+          "difference": 0.0,
+          "allowed": 2.9171022645752497e-05
+        },
+        {
+          "expected": 0.019406798019796175,
+          "abs": 1e-06,
+          "rel": 0.0,
+          "label": "model:statistics.p_value",
+          "actual": 0.019406798019796175,
+          "difference": 0.0,
+          "allowed": 1e-06
+        },
+        {
+          "expected": 8.0,
+          "abs": 0.0,
+          "rel": 0.0,
+          "label": "model:statistics.df",
+          "actual": 8.0,
+          "difference": 0.0,
+          "allowed": 0.0
+        },
+        {
+          "expected": 8.322733694537604,
+          "abs": 1e-08,
+          "rel": 1e-05,
+          "label": "model:statistics.value",
+          "actual": 8.322733694537604,
+          "difference": 0.0,
+          "allowed": 8.323733694537604e-05
+        },
+        {
+          "expected": 3.2813378097179405e-05,
+          "abs": 1e-06,
+          "rel": 0.0,
+          "label": "model:statistics.p_value",
+          "actual": 3.2813378097179405e-05,
+          "difference": 0.0,
+          "allowed": 1e-06
+        },
+        {
+          "expected": 8.0,
+          "abs": 0.0,
+          "rel": 0.0,
+          "label": "model:statistics.df",
+          "actual": 8.0,
+          "difference": 0.0,
+          "allowed": 0.0
+        },
+        {
+          "expected": -4.545838874371921,
+          "abs": 1e-08,
+          "rel": 1e-05,
+          "label": "model:statistics.value",
+          "actual": -4.545838874371921,
+          "difference": 0.0,
+          "allowed": 4.546838874371922e-05
+        },
+        {
+          "expected": 0.0018846599328036571,
+          "abs": 1e-06,
+          "rel": 0.0,
+          "label": "model:statistics.p_value",
+          "actual": 0.0018846599328036571,
+          "difference": 0.0,
+          "allowed": 1e-06
+        },
+        {
+          "expected": 8.0,
+          "abs": 0.0,
+          "rel": 0.0,
+          "label": "model:statistics.df",
+          "actual": 8.0,
+          "difference": 0.0,
+          "allowed": 0.0
+        }
+      ],
+      "output": "Traceback (most recent call last):\n  File \"/Users/jiayuanren/\u9879\u76ee\u89c4\u5212/.worktrees/codex-v1811-s/tests/fixtures/script_export/local_runs/oracle-v9l0nla0/analysis.py\", line 95, in <module>\n    wb_check(checks[1], 99.0, 1e-08, 1e-06, 'model:coefficients')\n    ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/jiayuanren/\u9879\u76ee\u89c4\u5212/.worktrees/codex-v1811-s/tests/fixtures/script_export/local_runs/oracle-v9l0nla0/analysis.py\", line 28, in wb_check\n    raise AssertionError(f'{label}: {actual!r} != {expected!r}')\nAssertionError: model:coefficients: 1.475820771771979 != 99.0\n",
+      "data": null
+    },
+    {
+      "execution": {
+        "run": "survey_safety_final",
+        "language": "python",
+        "command": [
+          "/Users/jiayuanren/\u9879\u76ee\u89c4\u5212/.venv/bin/python",
+          "analysis.py"
+        ],
+        "os_exit": 0,
+        "normalized_exit": 0
+      },
+      "plan": {
+        "schema_version": 1,
+        "project_id": "internal",
+        "run_id": "identities",
+        "workbench_version": "1.8.11",
+        "lineage_hash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "sources": [
+          {
+            "source_id": "source",
+            "format": "csv",
+            "filename": "data.csv",
+            "sha256": "b13d3167d3499328f9a247d014b6a55057ccf2c1319fbe0792c5f46d89dce671",
+            "read_options": {}
+          }
+        ],
+        "steps": [
+          {
+            "step_id": "step",
+            "kind": "data_operation",
+            "operation": "data.tsset",
+            "label": "",
+            "parameters": {
+              "time_column": "date",
+              "panel_id_column": "time",
+              "frequency": "D"
+            },
+            "inputs": [
+              "source"
+            ],
+            "output_dataset": null,
+            "expected": {
+              "nrows": 4,
+              "columns": [
+                "time",
+                "date",
+                "__wb_time"
+              ]
+            },
+            "tolerances": {},
+            "seed": null,
+            "snapshot": null
+          }
+        ]
+      },
+      "numbers": [
+        {
+          "expected": 4.0,
+          "abs": 0.0,
+          "rel": 0.0,
+          "label": "step:nrows",
+          "actual": 4.0,
+          "difference": 0.0,
+          "allowed": 0.0
+        }
+      ],
+      "output": "",
+      "data": {
+        "actual": {
+          "columns": [
+            "time",
+            "date",
+            "__wb_time"
+          ],
+          "index": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "data": [
+            [
+              1,
+              "2020-01-01",
+              84
+            ],
+            [
+              1,
+              "2020-01-02",
+              82
+            ],
+            [
+              2,
+              "2020-01-01",
+              83
+            ],
+            [
+              2,
+              "2020-01-02",
+              81
+            ]
+          ]
+        },
+        "expected": {
+          "columns": [
+            "time",
+            "date",
+            "__wb_time"
+          ],
+          "index": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "data": [
+            [
+              1,
+              "2020-01-01",
+              84
+            ],
+            [
+              1,
+              "2020-01-02",
+              82
+            ],
+            [
+              2,
+              "2020-01-01",
+              83
+            ],
+            [
+              2,
+              "2020-01-02",
+              81
+            ]
+          ]
+        },
+        "max_differences": {
+          "time": 0.0,
+          "__wb_time": 0.0
+        },
+        "rtol": 1e-08,
+        "atol": 1e-08
+      }
+    }
+  ]
+}

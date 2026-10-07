@@ -1,0 +1,111 @@
+
+  ___  ____  ____  ____  ____ ®
+ /__    /   ____/   /   ____/      18.0
+___/   /   /___/   /   /___/       MP—Parallel Edition
+
+ Statistics and Data Science       Copyright 1985-2023 StataCorp LLC
+                                   StataCorp
+                                   4905 Lakeway Drive
+                                   College Station, Texas 77845 USA
+                                   800-STATA-PC        https://www.stata.com
+                                   979-696-4600        stata@stata.com
+
+Stata license: Single-user 2-core  perpetual
+Serial number: [REDACTED]
+  Licensed to: [REDACTED]
+               
+
+Notes:
+      1. Stata is running in batch mode.
+      2. Unicode is supported; see help unicode_advice.
+      3. More than 2 billion observations are allowed; see help obs_advice.
+      4. Maximum number of variables is set to 5,000 but can be increased;
+          see help set_maxvar.
+
+
+Running /Applications/Stata/profile.do ...
+command window is unrecognized
+r(199);
+
+. do oracle.do 
+
+. version 18
+
+. set more off
+
+. file open wbout using "wb_results.tsv", write replace
+(file wb_results.tsv not found)
+
+. import delimited "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-m2/tests/
+> fixtures/count_models/reference-v3/poisson.csv", asdouble clear case(preserve
+> )
+(encoding automatically selected: UTF-8)
+(3 vars, 2,000 obs)
+
+. nbreg y x1 x2, dispersion(constant) difficult iterate(1000) tolerance(1e-10) 
+> ltolerance(1e-12)
+
+Fitting Poisson model:
+
+Iteration 0:  Log likelihood = -3049.4342  
+Iteration 1:  Log likelihood = -3049.4342  
+Iteration 2:  Log likelihood = -3049.4342  
+
+Fitting constant-only model:
+
+Iteration 0:  Log likelihood = -3367.1282  
+Iteration 1:  Log likelihood = -3285.8116  
+Iteration 2:  Log likelihood = -3285.8095  
+Iteration 3:  Log likelihood = -3285.8095  
+Iteration 4:  Log likelihood = -3285.8095  
+
+Fitting full model:
+
+Iteration 0:  Log likelihood = -3285.8095  
+Iteration 1:  Log likelihood =  -3238.422  (not concave)
+Iteration 2:  Log likelihood = -3051.1332  
+Iteration 3:  Log likelihood =  -3049.485  
+Iteration 4:  Log likelihood = -3049.4405  
+Iteration 5:  Log likelihood = -3049.4353  
+Iteration 6:  Log likelihood = -3049.4344  
+Iteration 7:  Log likelihood = -3049.4343  
+Iteration 8:  Log likelihood = -3049.4343  
+Iteration 9:  Log likelihood = -3049.4342  
+Iteration 10: Log likelihood = -3049.4342  
+Iteration 11: Log likelihood = -3049.4342  
+Iteration 12: Log likelihood = -3049.4342  
+Iteration 13: Log likelihood = -3049.4342  
+Iteration 14: Log likelihood = -3049.4342  (backed up)
+
+Negative binomial regression                            Number of obs =  2,000
+                                                        LR chi2(1)    = 472.75
+Dispersion: constant                                    Prob > chi2   = 0.0000
+Log likelihood = -3049.4342                             Pseudo R2     = 0.0719
+
+------------------------------------------------------------------------------
+           y | Coefficient  Std. err.      z    P>|z|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+          x1 |   .3558372   .0179076    19.87   0.000     .3207389    .3909356
+          x2 |  -.2082654   .0182213   -11.43   0.000    -.2439785   -.1725522
+       _cons |   .3931737   .0190284    20.66   0.000     .3558786    .4304687
+-------------+----------------------------------------------------------------
+    /lndelta |  -20.17575          .                             .           .
+-------------+----------------------------------------------------------------
+       delta |   1.73e-09          .                             .           .
+------------------------------------------------------------------------------
+LR test of delta=0: chibar2(01) = 0.00                 Prob >= chibar2 = 1.000
+
+. file write wbout "converged" _tab %21.15g (e(converged)) _n
+
+. file write wbout "ll" _tab %21.15g (e(ll)) _n
+
+. file write wbout "b_log" _tab %21.15g (_b[/lndelta]) _n
+
+. file write wbout "se_log" _tab %21.15g (_se[/lndelta]) _n
+
+. file write wbout "lr" _tab %21.15g (e(chi2_c)) _n
+
+. file close wbout
+
+. 
+end of do-file

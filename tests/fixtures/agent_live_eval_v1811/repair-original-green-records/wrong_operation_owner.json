@@ -1,0 +1,204 @@
+{
+  "id": "v1811_poisson",
+  "elapsed_s": 0,
+  "http_status": 200,
+  "empty_reply": true,
+  "assistant": "",
+  "reply_language": "unknown",
+  "proposals": {
+    "proposals": []
+  },
+  "fabricated_numbers": [],
+  "tool_calls": [],
+  "executed": false,
+  "executions": [
+    {
+      "proposal_id": "independent-poisson-proposal",
+      "operation_id": "model.rerun",
+      "confirmed_revision": 1,
+      "confirmed_fingerprint": "4e441affcf3d8b850c12c2cf829cabcbb89e6c89b5ec0e70f7d92b38e664f825",
+      "status": "completed",
+      "error": null,
+      "result_run_ids": null,
+      "elapsed_s": 2.1,
+      "operation": {
+        "record_type": "state",
+        "record_id": "oprec_a0aa3412d5676b410f797318",
+        "operation_id": "model.rerun",
+        "operation_version": "v1",
+        "proposal_id": "different_proposal",
+        "proposal_revision": 1,
+        "proposal_fingerprint": "4e441affcf3d8b850c12c2cf829cabcbb89e6c89b5ec0e70f7d92b38e664f825",
+        "agent_session_id": "different_session",
+        "chain_id": "planning-chain-review",
+        "command_id": null,
+        "target": {
+          "run_id": "different_source"
+        },
+        "preconditions": {
+          "active_head_run_id": "20261004_212556_162385_81272ede",
+          "context_fingerprint": "nocv1:25324507",
+          "context_version": "node-operation-context/v1",
+          "owner_resolution": "active_head_contains_node",
+          "run_family_id": "legacy-family:20261004_212556_162385_81272ede"
+        },
+        "actor_type": "user",
+        "status": "completed",
+        "confirmation": {
+          "actor_type": "user",
+          "chain_id": "planning-chain-review",
+          "changes": {
+            "x": {
+              "new": [
+                "x1",
+                "x2",
+                "x3"
+              ],
+              "old": [
+                "x1",
+                "x2",
+                "x3"
+              ]
+            }
+          },
+          "command_id": null,
+          "confirmed_at": "2026-10-04T21:25:57.619992+00:00",
+          "fingerprint": "4e441affcf3d8b850c12c2cf829cabcbb89e6c89b5ec0e70f7d92b38e664f825",
+          "operation_id": "model.rerun",
+          "operation_version": "v1",
+          "preconditions": {
+            "active_head_run_id": "20261004_212556_162385_81272ede",
+            "context_fingerprint": "nocv1:25324507",
+            "context_version": "node-operation-context/v1",
+            "owner_resolution": "active_head_contains_node",
+            "run_family_id": "legacy-family:20261004_212556_162385_81272ede"
+          },
+          "proposal_id": "independent-poisson-proposal",
+          "record_type": "confirmation",
+          "revision": 1,
+          "session_id": "planning-review",
+          "status": "confirmed",
+          "target": {
+            "forest_node_key": "bbc5d60d1d2fa33e05697879d484f9d2566ed0b695ff3bb86310ab5567a327e1",
+            "node_hash": "bbc5d60d1d2fa33e05697879d484f9d2566ed0b695ff3bb86310ab5567a327e1",
+            "node_ref": "model:poisson_1",
+            "run_id": "20261004_212556_162385_81272ede"
+          }
+        },
+        "execution": {
+          "active_head_run_id": "20261004_212556_162385_81272ede",
+          "bindings": {
+            "child_chain_id": "chain_31889cd004415e55df0d26134b0e51e8",
+            "child_run_id": "20261004_212557_626870_dc022ca9",
+            "child_session_id": "session_chain_31889cd004415e55df0d26134b0e51e8",
+            "fork_id": "fork_31889cd004415e55df0d26134b0e51e8"
+          },
+          "child_chain_id": "chain_31889cd004415e55df0d26134b0e51e8",
+          "child_session_id": "session_chain_31889cd004415e55df0d26134b0e51e8",
+          "claim_owner": "agent:db01871bd11c4dc580d9d36cb1fa95b2",
+          "claimed_at": "2026-10-04T21:25:59.691113+00:00",
+          "execution_key": "exec_31889cd004415e55df0d26134b0e51e8",
+          "fork_id": "fork_31889cd004415e55df0d26134b0e51e8",
+          "lease_expires_at": "2026-10-04T21:30:59.691113+00:00",
+          "run_family_id": "legacy-family:20261004_212556_162385_81272ede",
+          "source_node_ref": "model:poisson_1",
+          "source_run_id": "20261004_212556_162385_81272ede",
+          "source_session_entry_id": "fc17e723961b4a77952ee6f1dd505f0e",
+          "source_session_id": "planning-review"
+        },
+        "outputs": {
+          "status": "completed",
+          "target_run_id": "20261004_212557_626870_dc022ca9"
+        },
+        "diff_ref": {
+          "kind": "input_diff.v1",
+          "source_run_id": "20261004_212556_162385_81272ede",
+          "target_run_id": "20261004_212557_626870_dc022ca9",
+          "changed_fields": [
+            "x"
+          ]
+        },
+        "verification": {
+          "passed": true,
+          "checks": {
+            "child_terminal_status": true,
+            "rerun_of": true,
+            "from_node": true,
+            "override_hash": true,
+            "workbench_context": true
+          },
+          "changed_fields": [
+            "x"
+          ]
+        },
+        "error": null,
+        "changes": {
+          "x": {
+            "new": [
+              "x1",
+              "x2",
+              "x3"
+            ],
+            "old": [
+              "x1",
+              "x2",
+              "x3"
+            ]
+          }
+        },
+        "effect_status": "committed",
+        "projection_status": "complete",
+        "created_at": "2026-10-04T21:25:57.620351+00:00",
+        "updated_at": "2026-10-04T21:25:59.698193+00:00",
+        "workflow_id": null,
+        "workflow_confirmation_id": null,
+        "workflow_step_id": null,
+        "workflow_plan_fingerprint": null,
+        "confirmation_mode": null
+      }
+    }
+  ],
+  "result_run_id": "20261004_212557_626870_dc022ca9",
+  "error": "completed operation current identity mismatch: agent_session_id",
+  "family_checks": [
+    {
+      "check": "current_confirmation_identity",
+      "passed": false,
+      "detail": "completed operation current identity mismatch: agent_session_id"
+    }
+  ],
+  "checks": [
+    {
+      "check": "reply",
+      "passed": false,
+      "detail": "completed operation current identity mismatch: agent_session_id"
+    },
+    {
+      "check": "language",
+      "passed": false,
+      "detail": "unknown"
+    },
+    {
+      "check": "executed",
+      "passed": false,
+      "detail": "False"
+    },
+    {
+      "check": "confirmed_operations_completed",
+      "passed": true,
+      "detail": "['completed']"
+    },
+    {
+      "check": "no_fabricated_numbers",
+      "passed": true,
+      "detail": "[]"
+    },
+    {
+      "check": "current_confirmation_identity",
+      "passed": false,
+      "detail": "completed operation current identity mismatch: agent_session_id"
+    }
+  ],
+  "passed": false,
+  "scope": "OFFLINE_ADVERSARIAL_ANSWER_REAL_PUBLIC_OWNER_NOT_PROVIDER_LIVE"
+}

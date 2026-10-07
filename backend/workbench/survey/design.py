@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from numbers import Real
 from typing import Any
 
 import numpy as np
@@ -71,6 +72,10 @@ class SurveyDesign:
     hadamard_matrix: list[list[int]] | None = None
 
     def __post_init__(self) -> None:
+        if self.fpc is not None and (not isinstance(self.fpc, str) or not self.fpc.strip()):
+            raise SurveyEngineError(
+                "SURVEY_FPC_COLUMN_INVALID", "FPC requires one nonempty column name"
+            )
         if self.lonely_psu not in LONELY_PSU_POLICIES:
             raise SurveyEngineError(
                 "SURVEY_LONELY_PSU_POLICY_INVALID",
@@ -93,6 +98,55 @@ class SurveyDesign:
                 "SURVEY_REPLICATE_WEIGHTS_MISSING",
                 "replicate_type='provided' requires replicate_weight_columns",
             )
+        self._fpc_fractions()
+
+    def _fpc_fractions(self) -> dict[str, float]:
+        """Validate a single-stage FPC against the full, unfiltered design.
+
+        All values in [0, 1] denote sampling fractions; all values greater
+        than one denote integer population PSU counts. Units cannot be mixed.
+        Revalidate on use because the caller retains the mutable DataFrame.
+        """
+        if self.fpc is None:
+            return {}
+        if not isinstance(self.fpc, str) or not self.fpc.strip():
+            raise SurveyEngineError("SURVEY_FPC_COLUMN_INVALID", "FPC requires one nonempty column name")
+        if self.replicate_type is not None or self.replicate_weight_columns:
+            raise SurveyEngineError(
+                "SURVEY_FPC_REPLICATE_UNSUPPORTED", "FPC cannot be combined with a replicate design"
+            )
+        if self.fpc not in self.frame.columns:
+            raise SurveyEngineError("SURVEY_DESIGN_COLUMN_MISSING", f"column {self.fpc!r} is not in the frame")
+        column = self.frame[self.fpc]
+        if not isinstance(column, pd.Series) or column.empty:
+            raise SurveyEngineError("SURVEY_FPC_INVALID", "FPC requires one nonempty numeric column")
+        raw = column.tolist()
+        if any(isinstance(value, (bool, np.bool_)) or not isinstance(value, Real) for value in raw):
+            raise SurveyEngineError("SURVEY_FPC_INVALID", "FPC values must be real numbers, not booleans or strings")
+        try:
+            values = np.asarray(raw, dtype=float)
+        except (OverflowError, ValueError) as exc:
+            raise SurveyEngineError("SURVEY_FPC_INVALID", "FPC values must be finite real numbers") from exc
+        if not np.isfinite(values).all() or np.any(values < 0):
+            raise SurveyEngineError("SURVEY_FPC_INVALID", "FPC values must be finite, nonmissing and nonnegative")
+        fractions = bool(np.all(values <= 1))
+        if not fractions and not np.all(values > 1):
+            raise SurveyEngineError("SURVEY_FPC_INVALID", "FPC mixes sampling fractions and population counts")
+        if not fractions and np.any(values != np.floor(values)):
+            raise SurveyEngineError("SURVEY_FPC_INVALID", "FPC population counts must be integers")
+        strata = self._stratum_key.to_numpy()
+        counts = self.psu_counts()
+        result = {}
+        for stratum in pd.unique(strata):
+            group = values[strata == stratum]
+            if not np.all(group == group[0]):
+                raise SurveyEngineError("SURVEY_FPC_INVALID", "FPC must be constant within each stratum", stratum=str(stratum))
+            value = float(group[0])
+            n_h = int(counts.loc[stratum])
+            if not fractions and value < n_h:
+                raise SurveyEngineError("SURVEY_FPC_INVALID", "FPC population is smaller than the full-design PSU count", stratum=str(stratum), sampled_psus=n_h)
+            result[str(stratum)] = value if fractions else n_h / value
+        return result
 
     # -- structure ---------------------------------------------------------
 
@@ -207,14 +261,15 @@ class SurveyDesign:
     # -- linearization -----------------------------------------------------
 
     def _design_variance(self, contributions: np.ndarray, mask: np.ndarray | None = None) -> np.ndarray:
-        """Stratified multistage variance of a total of influence contributions.
+        """Single-stage stratified variance of influence contributions.
 
-            V = sum_h  n_h/(n_h-1) * sum_i (u_hi - ubar_h)(u_hi - ubar_h)'
+            V = sum_h (1-f_h) n_h/(n_h-1) sum_i (u_hi-ubar_h)(u_hi-ubar_h)'
 
         Contributions outside the subpopulation are zeroed rather than dropped:
         that is precisely what keeps a subpopulation analysis honest, because the
         PSUs and strata they belong to still shape the variance.
         """
+        fractions = self._fpc_fractions()
         contrib = np.asarray(contributions, dtype=float)
         if mask is not None:
             full = np.zeros((len(self.frame), contrib.shape[1]), dtype=float)
@@ -238,7 +293,7 @@ class SurveyDesign:
             )
 
         healthy = {h: u for h, u in per_stratum.items() if len(u) >= 2}
-        lonely = [h for h, u in per_stratum.items() if len(u) < 2]
+        lonely = [h for h, u in per_stratum.items() if len(u) < 2 and fractions.get(h, 0.) != 1.]
 
         if lonely and self.lonely_psu == "fail":
             raise SurveyEngineError(
@@ -249,10 +304,10 @@ class SurveyDesign:
             )
 
         total = np.zeros((p, p), dtype=float)
-        for u in healthy.values():
+        for h, u in healthy.items():
             n_h = len(u)
             centered = u - u.mean(axis=0)
-            total += (n_h / (n_h - 1)) * (centered.T @ centered)
+            total += (1 - fractions.get(h, 0.)) * (n_h / (n_h - 1)) * (centered.T @ centered)
 
         if not lonely:
             return total
@@ -268,17 +323,19 @@ class SurveyDesign:
             grand = all_u.mean(axis=0)
             for h in lonely:
                 centered = per_stratum[h] - grand
-                total += centered.T @ centered
+                total += (1 - fractions.get(h, 0.)) * (centered.T @ centered)
             return total
 
         if self.lonely_psu == "average":
             # Borrow the mean per-stratum variance from the strata that have one.
             if healthy:
                 contributions = []
-                for u in healthy.values():
+                for h, u in healthy.items():
                     n_h = len(u)
                     centered = u - u.mean(axis=0)
-                    contributions.append((n_h / (n_h - 1)) * (centered.T @ centered))
+                    # Borrow the mean of actual, already FPC-corrected stratum
+                    # variances, as R survey's existing average policy does.
+                    contributions.append((1 - fractions.get(h, 0.)) * (n_h / (n_h - 1)) * (centered.T @ centered))
                 total += np.mean(contributions, axis=0) * len(lonely)
             return total
 

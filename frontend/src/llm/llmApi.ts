@@ -3,6 +3,8 @@ import type {
   LlmConfigInfo,
   LlmProvider,
   LlmProvidersResponse,
+  ModelsDiscoveryInput,
+  ModelsDiscoveryResult,
   ProviderUpsertInput,
 } from "./llmTypes";
 
@@ -75,6 +77,12 @@ export function refreshLlmProviderModels(
     providerPath(providerId, "/models/refresh"),
     { method: "POST" },
   );
+}
+
+export function discoverLlmProviderModels(input: ModelsDiscoveryInput): Promise<ModelsDiscoveryResult> {
+  return readLlmResponse<ModelsDiscoveryResult>("/llm/providers/models/discover", {
+    method: "POST", headers: jsonHeaders, body: JSON.stringify(input),
+  });
 }
 
 export function probeLlmProvider(providerId: string): Promise<LlmProvider> {

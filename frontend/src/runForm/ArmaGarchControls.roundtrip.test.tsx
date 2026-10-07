@@ -68,3 +68,25 @@ describe("armaGarchValueFromModelOptions", () => {
     expect(restored.validationN).toBe(base.validationN);
   });
 });
+
+test("classical replication survives a contract roundtrip with a 509-point tail", () => {
+  const original = {
+    ...createDefaultArmaGarchValue(),
+    evaluationMode: "classical_replication" as const,
+    validationN: 509,
+    refitEvery: 1,
+  };
+  const options = buildArmaGarchModelOptions(original, "dataset:classic");
+  expect(options.validation).toMatchObject({ evaluation_mode: "classical_replication", validation_n: 509 });
+  const restored = armaGarchValueFromModelOptions(options, createDefaultArmaGarchValue());
+  expect(restored.evaluationMode).toBe("classical_replication");
+});
+
+test("default scope keeps the legacy options shape and absent scope restores the default", () => {
+  const options = buildArmaGarchModelOptions(createDefaultArmaGarchValue(), "dataset:legacy");
+  expect(options.validation).not.toHaveProperty("evaluation_mode");
+  const restored = armaGarchValueFromModelOptions(options, {
+    ...createDefaultArmaGarchValue(), evaluationMode: "classical_replication",
+  });
+  expect(restored.evaluationMode).toBe("train_validation");
+});

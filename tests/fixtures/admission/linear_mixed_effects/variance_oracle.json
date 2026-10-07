@@ -1,0 +1,32 @@
+{
+  "meta": {
+    "generator": "tests/fixtures/admission/linear_mixed_effects/generate_variance_oracle.R",
+    "r_version": "R version 4.6.0 (2026-04-24)",
+    "lme4_version": "2.0.1",
+    "data_sha256": "f971e489477c8c912580aa09b2f0327334f0e12a2f9d5313a5e95f9ccf333828",
+    "nobs": 360,
+    "n_groups": 60,
+    "reml": true,
+    "formula": "y ~ arm * time + x + (1 | g)",
+    "optimizer": "bobyqa",
+    "verification_level": "R-only; host Workbench verification pending"
+  },
+  "coefficients": {
+    "Intercept": 1.01579060014181,
+    "armb": 0.333955377110224,
+    "time": 0.282961128263055,
+    "x": 0.549433982699276,
+    "armb:time": 0.217199018870884
+  },
+  "std_error": {
+    "Intercept": 0.15023331951118,
+    "armb": 0.212486941648354,
+    "time": 0.0262867746295367,
+    "x": 0.0361901164849792,
+    "armb:time": 0.0371849109746993
+  },
+  "random_effects": {
+    "intercept_variance": 0.487094213961484,
+    "residual_variance": 0.362461321667316
+  }
+}

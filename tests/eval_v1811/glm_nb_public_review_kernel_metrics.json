@@ -1,0 +1,74 @@
+[
+  {
+    "http_owner": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204234_977370_4928da50",
+    "alpha": 0.5,
+    "role": "full",
+    "kernel_sha256": "028d67d1567656b60c7f1da79fe2c9c2bdba6fbcb0b41959ce864de77211277d",
+    "kernel_sha256_after": "028d67d1567656b60c7f1da79fe2c9c2bdba6fbcb0b41959ce864de77211277d",
+    "beta_max_abs_difference": 3.863576125695545e-14,
+    "se_max_abs_difference": 5.273559366969494e-16,
+    "vcov_max_abs_difference_reported_only": 1.457167719820518e-16,
+    "native_score_over_n": 2.5121844995380524e-16,
+    "native_min_information_eigenvalue": 30.641812368367244
+  },
+  {
+    "http_owner": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204236_505642_755b294b",
+    "alpha": 0.5,
+    "role": "restricted",
+    "kernel_sha256": "2c2bab1c4939b27ad67c5d0d2467ae59b4da64742b58001a14358316915d2d26",
+    "kernel_sha256_after": "2c2bab1c4939b27ad67c5d0d2467ae59b4da64742b58001a14358316915d2d26",
+    "beta_max_abs_difference": 5.551115123125783e-17,
+    "se_max_abs_difference": 6.938893903907228e-18,
+    "vcov_max_abs_difference_reported_only": 8.673617379884035e-19,
+    "native_score_over_n": 7.315445926744769e-17,
+    "native_min_information_eigenvalue": 207.96952979546472
+  },
+  {
+    "http_owner": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204237_190068_d209c695",
+    "alpha": 1.0,
+    "role": "full",
+    "kernel_sha256": "721fe0d143077f39f497703a50e4f75070d7931304c85654dc02481258bcfc37",
+    "kernel_sha256_after": "721fe0d143077f39f497703a50e4f75070d7931304c85654dc02481258bcfc37",
+    "beta_max_abs_difference": 5.46229728115577e-14,
+    "se_max_abs_difference": 4.440892098500626e-16,
+    "vcov_max_abs_difference_reported_only": 1.5265566588595902e-16,
+    "native_score_over_n": 1.267767761616672e-16,
+    "native_min_information_eigenvalue": 20.84350213103215
+  },
+  {
+    "http_owner": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204238_589179_4c5e749f",
+    "alpha": 1.0,
+    "role": "restricted",
+    "kernel_sha256": "e9d41e3f74f6acea2a70ff2010b3350ec6feae121256e2caeaf85232590d3b21",
+    "kernel_sha256_after": "e9d41e3f74f6acea2a70ff2010b3350ec6feae121256e2caeaf85232590d3b21",
+    "beta_max_abs_difference": 2.220446049250313e-16,
+    "se_max_abs_difference": 1.3877787807814457e-17,
+    "vcov_max_abs_difference_reported_only": 1.734723475976807e-18,
+    "native_score_over_n": 2.4646951146678477e-16,
+    "native_min_information_eigenvalue": 151.62885575445208
+  },
+  {
+    "http_owner": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204239_373535_e5ab00dc",
+    "alpha": 2.0,
+    "role": "full",
+    "kernel_sha256": "c24621938269d4ecd3a19253a2c719f2124a5a6c8a25d601369547cc8db7f657",
+    "kernel_sha256_after": "c24621938269d4ecd3a19253a2c719f2124a5a6c8a25d601369547cc8db7f657",
+    "beta_max_abs_difference": 1.78207448797707e-12,
+    "se_max_abs_difference": 1.4391265956703592e-14,
+    "vcov_max_abs_difference_reported_only": 4.093947403305265e-15,
+    "native_score_over_n": 6.171477660345201e-13,
+    "native_min_information_eigenvalue": 12.842844756396923
+  },
+  {
+    "http_owner": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-799/glm-nb-public-independent0/native-owner/runs/20261004_204240_791683_27109594",
+    "alpha": 2.0,
+    "role": "restricted",
+    "kernel_sha256": "534cf4f7c140459364de8e85b18d61c19be88e6a4b3f0a955d4272da96fb23a9",
+    "kernel_sha256_after": "534cf4f7c140459364de8e85b18d61c19be88e6a4b3f0a955d4272da96fb23a9",
+    "beta_max_abs_difference": 4.440892098500626e-16,
+    "se_max_abs_difference": 0.0,
+    "vcov_max_abs_difference_reported_only": 8.673617379884035e-19,
+    "native_score_over_n": 1.2412514523613976e-16,
+    "native_min_information_eigenvalue": 99.09927296442528
+  }
+]

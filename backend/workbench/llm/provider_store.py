@@ -225,14 +225,10 @@ def environment_provider_from_env() -> ProviderRecord | None:
     raw_timeout = os.environ.get("WORKBENCH_LLM_TIMEOUT_S", "")
     timeout_s = _timeout_value(raw_timeout or DEFAULT_TIMEOUT_S)
 
-    known_display_names = {
-        "deepseek-v4-flash": "DeepSeek V4 Flash",
-        "deepseek-v4-pro": "DeepSeek V4 Pro",
-    }
     # An environment configuration declares one configured model. It is not a
     # capability-discovery protocol: adding vendor-looking alternatives here can
     # make the UI offer a model the credential was never configured to use.
-    models = [ModelRecord(known_display_names.get(model, model), model, None, False)]
+    models = [ModelRecord(model, model, None, False)]
 
     return ProviderRecord(
         id="environment",

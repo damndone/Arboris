@@ -1,0 +1,16 @@
+{
+  "values": {
+    "ll": -210.1463009514374,
+    "variance": 1.0841775206953714,
+    "prefix_variance": 1.0877129146043252
+  },
+  "raw_log": "/private/tmp/v1811-evaluation-df8776f74956480ba74501dbc3c2e1b3-r02/test_full_and_first_origin_mat0/native-e06-classic/lane_e.log",
+  "error_type": null,
+  "public_log": "/Users/jiayuanren/\u9879\u76ee\u89c4\u5212/.worktrees/codex-v1811-evaluation/tests/fixtures/eval_v1811/lane_e_20261005/r02/e06-classic-stata-output.txt",
+  "command": [
+    "/Applications/Stata/StataMP.app/Contents/MacOS/stata-mp",
+    "-b",
+    "do",
+    "lane_e.do"
+  ]
+}

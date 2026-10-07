@@ -61,3 +61,30 @@ def test_a_referenced_oracle_that_does_not_exist_does_not_count() -> None:
     }}
     report = assess("fake_logit", root=ROOT, evidence=evidence, declaration=declaration)
     assert report["missing"] == ["oracle"] and "missing" in report["items"]["oracle"]["detail"]
+
+
+def test_lmm_host_verified_oracles_cover_fixed_effects_and_variance_components() -> None:
+    report = assess("linear_mixed_effects", root=ROOT)
+    assert report["items"]["oracle"]["met"] is True
+    fixtures = {oracle.fixture for oracle in ADMISSION_EVIDENCE["linear_mixed_effects"]["oracle"]}
+    assert fixtures == {
+        "tests/fixtures/admission/linear_mixed_effects/oracle.json",
+        "tests/fixtures/admission/linear_mixed_effects/variance_oracle.json",
+        # v1.8.11: fixed-effect inference (GLS covariance) for REML/ML x intercept/slope.
+        "tests/fixtures/postestimation/lmm_v1811/gls_reference_r.json",
+    }
+    # Live: host-contained run with real deepseek-flash on 2026-10-07.
+    assert report["missing"] == []
+    assert "v1811_linear_mixed_effects" in ADMISSION_EVIDENCE["linear_mixed_effects"]["live_eval"]
+    assert "linear_mixed_effects" not in PLANNED
+
+
+def test_v1811_families_with_completed_live_evidence_are_registered() -> None:
+    import json
+    cases = json.loads((ROOT / "scripts/agent_live_eval_cases.json").read_text())
+    verified = {c["fixture"]: c["id"] for c in cases[37:] if c["fixture"] != "linear_mixed_effects"}
+    for family, case_id in verified.items():
+        family = {"glm_binomial":"glm:binomial", "glm_poisson":"glm:poisson", "glm_negative_binomial":"glm:negative_binomial"}.get(family, family)
+        assert case_id in ADMISSION_EVIDENCE[family]["live_eval"], family
+        assert assess(family, root=ROOT)["items"]["live_eval"]["met"] is True
+        assert "live_eval" not in PLANNED.get(family, {})

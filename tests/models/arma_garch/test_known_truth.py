@@ -160,7 +160,7 @@ def test_ar1_garch11_joint_recovers_parameters_and_removes_arch_signal() -> None
     assert standardized_p > raw_p
 
 
-def test_arma11_garch11_is_sequential_and_joint_request_is_explicitly_rejected() -> None:
+def test_arma11_garch11_keeps_auto_sequential_and_supports_explicit_joint() -> None:
     from workbench.engine.packs.arma_garch.arma import (
         ArmaCandidateSpec,
         fit_arma_candidate,
@@ -192,10 +192,7 @@ def test_arma11_garch11_is_sequential_and_joint_request_is_explicitly_rejected()
     assert "aic" in payload["mean_stage"]
     assert "aic" in payload["variance_stage"]
 
-    with pytest.raises(ArmaGarchInputError) as exc_info:
-        resolve_estimation_strategy("joint", mean_q=1)
-    assert exc_info.value.code == "UNSUPPORTED_JOINT_ARMA_GARCH"
-    assert exc_info.value.evidence == {"arma_q": 1, "requested_strategy": "joint"}
+    assert resolve_estimation_strategy("joint", mean_q=1) == "joint_arma_garch"
 
 
 def test_arch5_evidence_favors_higher_order_over_arch1() -> None:

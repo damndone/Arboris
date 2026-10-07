@@ -1,0 +1,1843 @@
+{
+  "baseline_tip": "68b35a6cdeb892286b70a4155fce472a6daa75cf",
+  "pytest": "44 passed in 5.75s",
+  "records": [
+    {
+      "execution": {
+        "run": "reader_complete_final",
+        "language": "stata",
+        "command": [
+          "/Applications/Stata/StataMP.app/Contents/MacOS/stata-mp",
+          "-b",
+          "do",
+          "analysis.do"
+        ],
+        "os_exit": 0,
+        "normalized_exit": 0
+      },
+      "plan": {
+        "schema_version": 1,
+        "project_id": "reader",
+        "run_id": "translated",
+        "workbench_version": "1.8.11",
+        "lineage_hash": "9999999999999999999999999999999999999999999999999999999999999999",
+        "sources": [
+          {
+            "source_id": "source",
+            "format": "xlsx",
+            "filename": "data.xlsx",
+            "sha256": "0e9c9a2359bfed0925b76ea9d9049a7574044448b58bfa80ced0a4a0bb5da75f",
+            "read_options": {
+              "sheet_name": null,
+              "transpose": false
+            }
+          }
+        ],
+        "steps": [
+          {
+            "step_id": "result",
+            "kind": "data_operation",
+            "operation": "data.subset",
+            "label": "",
+            "parameters": {
+              "columns": [
+                "x"
+              ]
+            },
+            "inputs": [
+              "source"
+            ],
+            "output_dataset": null,
+            "expected": {
+              "nrows": 1,
+              "columns": [
+                "x"
+              ]
+            },
+            "tolerances": {},
+            "seed": null,
+            "snapshot": null
+          }
+        ]
+      },
+      "numbers": [
+        {
+          "scalar": "wb_number_0",
+          "expected": 1.0,
+          "abs": 0.0,
+          "rel": 0.0,
+          "actual": 1.0,
+          "difference": 0.0,
+          "allowed": 0.0
+        }
+      ],
+      "data": {
+        "actual": {
+          "columns": [
+            "x"
+          ],
+          "index": [
+            0
+          ],
+          "data": [
+            [
+              999
+            ]
+          ]
+        },
+        "expected": {
+          "columns": [
+            "x"
+          ],
+          "index": [
+            0
+          ],
+          "data": [
+            [
+              999
+            ]
+          ]
+        },
+        "max_differences": {
+          "x": 0.0
+        },
+        "rtol": 1e-08,
+        "atol": 1e-08
+      },
+      "output": ". do analysis.do \n\n. * Workbench 1.8.11\n. * project: reader\n. * run: translated\n. * lineage_hash: 9999999999999999999999999999999999999999999999999999999999999\n> 999\n. * Coverage\n. * result | data.subset | native | \n. version 18\n\n. set more off\n\n. set type double\n\n. capture program drop wb_repost\n\n. program define wb_repost, eclass\n  1.     args beta covariance\n  2.     ereturn repost b=`beta' V=`covariance', rename\n  3. end\n\n. capture program drop wb_sha\n\n. program define wb_sha\n  1.     args filename expected\n  2.     tempfile digestfile\n  3.     shell shasum -a 256 \"`filename'\" > \"`digestfile'\"\n  4.     tempname fh\n  5.     file open `fh' using \"`digestfile'\", read text\n  6.     file read `fh' line\n  7.     file close `fh'\n  8.     if substr(\"`line'\",1,64) != \"`expected'\" {\n  9.         display as error \"SHA256 mismatch\"\n 10.         exit 9\n 11.     }\n 12. end\n\n. \n. wb_sha \"data.xlsx\" \"0e9c9a2359bfed0925b76ea9d9049a7574044448b58bfa80ced0a4a0b\n> b5da75f\"\n\n\n. frame create wb_src0\n\n. frame change wb_src0\n\n. import excel using \"data.xlsx\", firstrow clear\n(1 var, 1 obs)\n\n. frame copy wb_src0 wb1\n\n. frame change wb1\n\n. keep x\n\n. order x\n\n. scalar wb_number_0 = _N\n\n. unab wb_columns: _all\n\n. scalar wb_check_1 = (`\"`wb_columns'\"' == \"x\")\n\n. file open wb_numbers using \"numeric_actual.tsv\", write text replace\n(file numeric_actual.tsv not found)\n\n. file write wb_numbers %21.17g (wb_number_0) _n\n\n. file close wb_numbers\n\n. * Closing self-checks\n. assert !missing(wb_number_0) & abs(wb_number_0-(1)) <= 0.0+0.0*abs(1)\n\n. assert wb_check_1 == 1\n\n. \n. frame wb1: export delimited using \"result.csv\", replace\n(file result.csv not found)\nfile result.csv saved\n\n. \nend of do-file\n"
+    },
+    {
+      "execution": {
+        "run": "reader_complete_final",
+        "language": "r",
+        "command": [
+          "Rscript",
+          "analysis.R"
+        ],
+        "os_exit": 0,
+        "normalized_exit": 0
+      },
+      "plan": {
+        "schema_version": 1,
+        "project_id": "reader",
+        "run_id": "translated",
+        "workbench_version": "1.8.11",
+        "lineage_hash": "9999999999999999999999999999999999999999999999999999999999999999",
+        "sources": [
+          {
+            "source_id": "source",
+            "format": "csv",
+            "filename": "data.csv",
+            "sha256": "077c588edd39d06811d68d5b7577ea9d6fbc63cb72d89e4fbbeab14da7c9df72",
+            "read_options": {
+              "delimiter": "\t",
+              "encoding": "utf-8",
+              "header": null,
+              "names": [
+                "id",
+                "city",
+                "value"
+              ]
+            }
+          }
+        ],
+        "steps": [
+          {
+            "step_id": "result",
+            "kind": "data_operation",
+            "operation": "data.subset",
+            "label": "",
+            "parameters": {
+              "columns": [
+                "id",
+                "city",
+                "value"
+              ]
+            },
+            "inputs": [
+              "source"
+            ],
+            "output_dataset": null,
+            "expected": {
+              "nrows": 2,
+              "columns": [
+                "id",
+                "city",
+                "value"
+              ]
+            },
+            "tolerances": {},
+            "seed": null,
+            "snapshot": null
+          }
+        ]
+      },
+      "numbers": [
+        {
+          "expected": 2.0,
+          "abs": 0.0,
+          "rel": 0.0,
+          "label": "result:nrows",
+          "actual": 2.0,
+          "difference": 0.0,
+          "allowed": 0.0
+        }
+      ],
+      "data": {
+        "actual": {
+          "columns": [
+            "id",
+            "city",
+            "value"
+          ],
+          "index": [
+            0,
+            1
+          ],
+          "data": [
+            [
+              1,
+              "west",
+              1.25
+            ],
+            [
+              2,
+              "east",
+              2.5
+            ]
+          ]
+        },
+        "expected": {
+          "columns": [
+            "id",
+            "city",
+            "value"
+          ],
+          "index": [
+            0,
+            1
+          ],
+          "data": [
+            [
+              1,
+              "west",
+              1.25
+            ],
+            [
+              2,
+              "east",
+              2.5
+            ]
+          ]
+        },
+        "max_differences": {
+          "id": 0.0,
+          "value": 0.0
+        },
+        "rtol": 1e-08,
+        "atol": 1e-08
+      },
+      "output": ""
+    },
+    {
+      "execution": {
+        "run": "reader_complete_final",
+        "language": "stata",
+        "command": [
+          "/Applications/Stata/StataMP.app/Contents/MacOS/stata-mp",
+          "-b",
+          "do",
+          "analysis.do"
+        ],
+        "os_exit": 0,
+        "normalized_exit": 0
+      },
+      "plan": {
+        "schema_version": 1,
+        "project_id": "reader",
+        "run_id": "translated",
+        "workbench_version": "1.8.11",
+        "lineage_hash": "9999999999999999999999999999999999999999999999999999999999999999",
+        "sources": [
+          {
+            "source_id": "source",
+            "format": "csv",
+            "filename": "data.csv",
+            "sha256": "077c588edd39d06811d68d5b7577ea9d6fbc63cb72d89e4fbbeab14da7c9df72",
+            "read_options": {
+              "delimiter": "\t",
+              "encoding": "utf-8",
+              "header": null,
+              "names": [
+                "id",
+                "city",
+                "value"
+              ]
+            }
+          }
+        ],
+        "steps": [
+          {
+            "step_id": "result",
+            "kind": "data_operation",
+            "operation": "data.subset",
+            "label": "",
+            "parameters": {
+              "columns": [
+                "id",
+                "city",
+                "value"
+              ]
+            },
+            "inputs": [
+              "source"
+            ],
+            "output_dataset": null,
+            "expected": {
+              "nrows": 2,
+              "columns": [
+                "id",
+                "city",
+                "value"
+              ]
+            },
+            "tolerances": {},
+            "seed": null,
+            "snapshot": null
+          }
+        ]
+      },
+      "numbers": [
+        {
+          "scalar": "wb_number_0",
+          "expected": 2.0,
+          "abs": 0.0,
+          "rel": 0.0,
+          "actual": 2.0,
+          "difference": 0.0,
+          "allowed": 0.0
+        }
+      ],
+      "data": {
+        "actual": {
+          "columns": [
+            "id",
+            "city",
+            "value"
+          ],
+          "index": [
+            0,
+            1
+          ],
+          "data": [
+            [
+              1,
+              "west",
+              1.25
+            ],
+            [
+              2,
+              "east",
+              2.5
+            ]
+          ]
+        },
+        "expected": {
+          "columns": [
+            "id",
+            "city",
+            "value"
+          ],
+          "index": [
+            0,
+            1
+          ],
+          "data": [
+            [
+              1,
+              "west",
+              1.25
+            ],
+            [
+              2,
+              "east",
+              2.5
+            ]
+          ]
+        },
+        "max_differences": {
+          "id": 0.0,
+          "value": 0.0
+        },
+        "rtol": 1e-08,
+        "atol": 1e-08
+      },
+      "output": ". do analysis.do \n\n. * Workbench 1.8.11\n. * project: reader\n. * run: translated\n. * lineage_hash: 9999999999999999999999999999999999999999999999999999999999999\n> 999\n. * Coverage\n. * result | data.subset | native | \n. version 18\n\n. set more off\n\n. set type double\n\n. capture program drop wb_repost\n\n. program define wb_repost, eclass\n  1.     args beta covariance\n  2.     ereturn repost b=`beta' V=`covariance', rename\n  3. end\n\n. capture program drop wb_sha\n\n. program define wb_sha\n  1.     args filename expected\n  2.     tempfile digestfile\n  3.     shell shasum -a 256 \"`filename'\" > \"`digestfile'\"\n  4.     tempname fh\n  5.     file open `fh' using \"`digestfile'\", read text\n  6.     file read `fh' line\n  7.     file close `fh'\n  8.     if substr(\"`line'\",1,64) != \"`expected'\" {\n  9.         display as error \"SHA256 mismatch\"\n 10.         exit 9\n 11.     }\n 12. end\n\n. \n. wb_sha \"data.csv\" \"077c588edd39d06811d68d5b7577ea9d6fbc63cb72d89e4fbbeab14da7\n> c9df72\"\n\n\n. frame create wb_src0\n\n. frame change wb_src0\n\n. import delimited using \"data.csv\", varnames(nonames) delimiters(\"\\t\") encodin\n> g(\"UTF-8\") asdouble clear case(preserve)\n(3 vars, 2 obs)\n\n. unab wb_read_columns: _all\n\n. local wb_read_count : word count `wb_read_columns'\n\n. assert `wb_read_count' == 3\n\n. rename (`wb_read_columns') (id city value)\n\n. frame copy wb_src0 wb1\n\n. frame change wb1\n\n. keep id city value\n\n. order id city value\n\n. scalar wb_number_0 = _N\n\n. unab wb_columns: _all\n\n. scalar wb_check_1 = (`\"`wb_columns'\"' == \"id city value\")\n\n. file open wb_numbers using \"numeric_actual.tsv\", write text replace\n(file numeric_actual.tsv not found)\n\n. file write wb_numbers %21.17g (wb_number_0) _n\n\n. file close wb_numbers\n\n. * Closing self-checks\n. assert !missing(wb_number_0) & abs(wb_number_0-(2)) <= 0.0+0.0*abs(2)\n\n. assert wb_check_1 == 1\n\n. \n. frame wb1: export delimited using \"result.csv\", replace\n(file result.csv not found)\nfile result.csv saved\n\n. \nend of do-file\n"
+    },
+    {
+      "execution": {
+        "run": "reader_complete_final",
+        "language": "r",
+        "command": [
+          "Rscript",
+          "analysis.R"
+        ],
+        "os_exit": 0,
+        "normalized_exit": 0
+      },
+      "plan": {
+        "schema_version": 1,
+        "project_id": "reader",
+        "run_id": "translated",
+        "workbench_version": "1.8.11",
+        "lineage_hash": "9999999999999999999999999999999999999999999999999999999999999999",
+        "sources": [
+          {
+            "source_id": "source",
+            "format": "xlsx",
+            "filename": "data.xlsx",
+            "sha256": "971d17b97f6b4cb4aec41e588de8b345165f2d4b64a04b9f19dd314c71db3210",
+            "read_options": {
+              "sheet_name": "Chosen",
+              "transpose": false
+            }
+          }
+        ],
+        "steps": [
+          {
+            "step_id": "result",
+            "kind": "data_operation",
+            "operation": "data.subset",
+            "label": "",
+            "parameters": {
+              "columns": [
+                "x"
+              ]
+            },
+            "inputs": [
+              "source"
+            ],
+            "output_dataset": null,
+            "expected": {
+              "nrows": 3,
+              "columns": [
+                "x"
+              ]
+            },
+            "tolerances": {},
+            "seed": null,
+            "snapshot": null
+          }
+        ]
+      },
+      "numbers": [
+        {
+          "expected": 3.0,
+          "abs": 0.0,
+          "rel": 0.0,
+          "label": "result:nrows",
+          "actual": 3.0,
+          "difference": 0.0,
+          "allowed": 0.0
+        }
+      ],
+      "data": {
+        "actual": {
+          "columns": [
+            "x"
+          ],
+          "index": [
+            0,
+            1,
+            2
+          ],
+          "data": [
+            [
+              3
+            ],
+            [
+              4
+            ],
+            [
+              5
+            ]
+          ]
+        },
+        "expected": {
+          "columns": [
+            "x"
+          ],
+          "index": [
+            0,
+            1,
+            2
+          ],
+          "data": [
+            [
+              3
+            ],
+            [
+              4
+            ],
+            [
+              5
+            ]
+          ]
+        },
+        "max_differences": {
+          "x": 0.0
+        },
+        "rtol": 1e-08,
+        "atol": 1e-08
+      },
+      "output": ""
+    },
+    {
+      "execution": {
+        "run": "reader_complete_final",
+        "language": "python",
+        "command": [
+          "/Users/jiayuanren/项目规划/.venv/bin/python",
+          "analysis.py"
+        ],
+        "os_exit": 0,
+        "normalized_exit": 0
+      },
+      "plan": {
+        "schema_version": 1,
+        "project_id": "reader",
+        "run_id": "translated",
+        "workbench_version": "1.8.11",
+        "lineage_hash": "9999999999999999999999999999999999999999999999999999999999999999",
+        "sources": [
+          {
+            "source_id": "source",
+            "format": "csv",
+            "filename": "data.csv",
+            "sha256": "bed0e397b042f75c4dce0c81c3fa2168e35d6b23824ef5f44843b9f61b15d4f4",
+            "read_options": {
+              "delimiter": "|",
+              "encoding": "latin1",
+              "header": 0
+            }
+          }
+        ],
+        "steps": [
+          {
+            "step_id": "result",
+            "kind": "data_operation",
+            "operation": "data.subset",
+            "label": "",
+            "parameters": {
+              "columns": [
+                "id",
+                "city",
+                "value"
+              ]
+            },
+            "inputs": [
+              "source"
+            ],
+            "output_dataset": null,
+            "expected": {
+              "nrows": 2,
+              "columns": [
+                "id",
+                "city",
+                "value"
+              ]
+            },
+            "tolerances": {},
+            "seed": null,
+            "snapshot": null
+          }
+        ]
+      },
+      "numbers": [
+        {
+          "expected": 2.0,
+          "abs": 0.0,
+          "rel": 0.0,
+          "label": "result:nrows",
+          "actual": 2.0,
+          "difference": 0.0,
+          "allowed": 0.0
+        }
+      ],
+      "data": {
+        "actual": {
+          "columns": [
+            "id",
+            "city",
+            "value"
+          ],
+          "index": [
+            0,
+            1
+          ],
+          "data": [
+            [
+              1,
+              "café",
+              1.25
+            ],
+            [
+              2,
+              "été",
+              2.5
+            ]
+          ]
+        },
+        "expected": {
+          "columns": [
+            "id",
+            "city",
+            "value"
+          ],
+          "index": [
+            0,
+            1
+          ],
+          "data": [
+            [
+              1,
+              "café",
+              1.25
+            ],
+            [
+              2,
+              "été",
+              2.5
+            ]
+          ]
+        },
+        "max_differences": {
+          "id": 0.0,
+          "value": 0.0
+        },
+        "rtol": 1e-08,
+        "atol": 1e-08
+      },
+      "output": ""
+    },
+    {
+      "execution": {
+        "run": "reader_complete_final",
+        "language": "stata",
+        "command": [
+          "/Applications/Stata/StataMP.app/Contents/MacOS/stata-mp",
+          "-b",
+          "do",
+          "analysis.do"
+        ],
+        "os_exit": 0,
+        "normalized_exit": 0
+      },
+      "plan": {
+        "schema_version": 1,
+        "project_id": "reader",
+        "run_id": "translated",
+        "workbench_version": "1.8.11",
+        "lineage_hash": "9999999999999999999999999999999999999999999999999999999999999999",
+        "sources": [
+          {
+            "source_id": "source",
+            "format": "csv",
+            "filename": "data.csv",
+            "sha256": "3d1f78ae09893df37553c88bd9168fbcba7202efd3275dfc7992ff7edbf03c15",
+            "read_options": {
+              "delimiter": ";",
+              "encoding": "utf-8",
+              "header": 0
+            }
+          }
+        ],
+        "steps": [
+          {
+            "step_id": "result",
+            "kind": "data_operation",
+            "operation": "data.subset",
+            "label": "",
+            "parameters": {
+              "columns": [
+                "id",
+                "city",
+                "value"
+              ]
+            },
+            "inputs": [
+              "source"
+            ],
+            "output_dataset": null,
+            "expected": {
+              "nrows": 2,
+              "columns": [
+                "id",
+                "city",
+                "value"
+              ]
+            },
+            "tolerances": {},
+            "seed": null,
+            "snapshot": null
+          }
+        ]
+      },
+      "numbers": [
+        {
+          "scalar": "wb_number_0",
+          "expected": 2.0,
+          "abs": 0.0,
+          "rel": 0.0,
+          "actual": 2.0,
+          "difference": 0.0,
+          "allowed": 0.0
+        }
+      ],
+      "data": {
+        "actual": {
+          "columns": [
+            "id",
+            "city",
+            "value"
+          ],
+          "index": [
+            0,
+            1
+          ],
+          "data": [
+            [
+              1,
+              "北京",
+              1.25
+            ],
+            [
+              2,
+              "café",
+              2.5
+            ]
+          ]
+        },
+        "expected": {
+          "columns": [
+            "id",
+            "city",
+            "value"
+          ],
+          "index": [
+            0,
+            1
+          ],
+          "data": [
+            [
+              1,
+              "北京",
+              1.25
+            ],
+            [
+              2,
+              "café",
+              2.5
+            ]
+          ]
+        },
+        "max_differences": {
+          "id": 0.0,
+          "value": 0.0
+        },
+        "rtol": 1e-08,
+        "atol": 1e-08
+      },
+      "output": ". do analysis.do \n\n. * Workbench 1.8.11\n. * project: reader\n. * run: translated\n. * lineage_hash: 9999999999999999999999999999999999999999999999999999999999999\n> 999\n. * Coverage\n. * result | data.subset | native | \n. version 18\n\n. set more off\n\n. set type double\n\n. capture program drop wb_repost\n\n. program define wb_repost, eclass\n  1.     args beta covariance\n  2.     ereturn repost b=`beta' V=`covariance', rename\n  3. end\n\n. capture program drop wb_sha\n\n. program define wb_sha\n  1.     args filename expected\n  2.     tempfile digestfile\n  3.     shell shasum -a 256 \"`filename'\" > \"`digestfile'\"\n  4.     tempname fh\n  5.     file open `fh' using \"`digestfile'\", read text\n  6.     file read `fh' line\n  7.     file close `fh'\n  8.     if substr(\"`line'\",1,64) != \"`expected'\" {\n  9.         display as error \"SHA256 mismatch\"\n 10.         exit 9\n 11.     }\n 12. end\n\n. \n. wb_sha \"data.csv\" \"3d1f78ae09893df37553c88bd9168fbcba7202efd3275dfc7992ff7edb\n> f03c15\"\n\n\n. frame create wb_src0\n\n. frame change wb_src0\n\n. import delimited using \"data.csv\", varnames(1) delimiters(\";\") encoding(\"UTF-\n> 8\") asdouble clear case(preserve)\n(3 vars, 2 obs)\n\n. frame copy wb_src0 wb1\n\n. frame change wb1\n\n. keep id city value\n\n. order id city value\n\n. scalar wb_number_0 = _N\n\n. unab wb_columns: _all\n\n. scalar wb_check_1 = (`\"`wb_columns'\"' == \"id city value\")\n\n. file open wb_numbers using \"numeric_actual.tsv\", write text replace\n(file numeric_actual.tsv not found)\n\n. file write wb_numbers %21.17g (wb_number_0) _n\n\n. file close wb_numbers\n\n. * Closing self-checks\n. assert !missing(wb_number_0) & abs(wb_number_0-(2)) <= 0.0+0.0*abs(2)\n\n. assert wb_check_1 == 1\n\n. \n. frame wb1: export delimited using \"result.csv\", replace\n(file result.csv not found)\nfile result.csv saved\n\n. \nend of do-file\n"
+    },
+    {
+      "execution": {
+        "run": "reader_complete_final",
+        "language": "stata",
+        "command": [
+          "/Applications/Stata/StataMP.app/Contents/MacOS/stata-mp",
+          "-b",
+          "do",
+          "analysis.do"
+        ],
+        "os_exit": 0,
+        "normalized_exit": 0
+      },
+      "plan": {
+        "schema_version": 1,
+        "project_id": "reader",
+        "run_id": "translated",
+        "workbench_version": "1.8.11",
+        "lineage_hash": "9999999999999999999999999999999999999999999999999999999999999999",
+        "sources": [
+          {
+            "source_id": "source",
+            "format": "xlsx",
+            "filename": "data.xlsx",
+            "sha256": "971d17b97f6b4cb4aec41e588de8b345165f2d4b64a04b9f19dd314c71db3210",
+            "read_options": {
+              "sheet_name": "Chosen",
+              "transpose": false
+            }
+          }
+        ],
+        "steps": [
+          {
+            "step_id": "result",
+            "kind": "data_operation",
+            "operation": "data.subset",
+            "label": "",
+            "parameters": {
+              "columns": [
+                "x"
+              ]
+            },
+            "inputs": [
+              "source"
+            ],
+            "output_dataset": null,
+            "expected": {
+              "nrows": 3,
+              "columns": [
+                "x"
+              ]
+            },
+            "tolerances": {},
+            "seed": null,
+            "snapshot": null
+          }
+        ]
+      },
+      "numbers": [
+        {
+          "scalar": "wb_number_0",
+          "expected": 3.0,
+          "abs": 0.0,
+          "rel": 0.0,
+          "actual": 3.0,
+          "difference": 0.0,
+          "allowed": 0.0
+        }
+      ],
+      "data": {
+        "actual": {
+          "columns": [
+            "x"
+          ],
+          "index": [
+            0,
+            1,
+            2
+          ],
+          "data": [
+            [
+              3
+            ],
+            [
+              4
+            ],
+            [
+              5
+            ]
+          ]
+        },
+        "expected": {
+          "columns": [
+            "x"
+          ],
+          "index": [
+            0,
+            1,
+            2
+          ],
+          "data": [
+            [
+              3
+            ],
+            [
+              4
+            ],
+            [
+              5
+            ]
+          ]
+        },
+        "max_differences": {
+          "x": 0.0
+        },
+        "rtol": 1e-08,
+        "atol": 1e-08
+      },
+      "output": ". do analysis.do \n\n. * Workbench 1.8.11\n. * project: reader\n. * run: translated\n. * lineage_hash: 9999999999999999999999999999999999999999999999999999999999999\n> 999\n. * Coverage\n. * result | data.subset | native | \n. version 18\n\n. set more off\n\n. set type double\n\n. capture program drop wb_repost\n\n. program define wb_repost, eclass\n  1.     args beta covariance\n  2.     ereturn repost b=`beta' V=`covariance', rename\n  3. end\n\n. capture program drop wb_sha\n\n. program define wb_sha\n  1.     args filename expected\n  2.     tempfile digestfile\n  3.     shell shasum -a 256 \"`filename'\" > \"`digestfile'\"\n  4.     tempname fh\n  5.     file open `fh' using \"`digestfile'\", read text\n  6.     file read `fh' line\n  7.     file close `fh'\n  8.     if substr(\"`line'\",1,64) != \"`expected'\" {\n  9.         display as error \"SHA256 mismatch\"\n 10.         exit 9\n 11.     }\n 12. end\n\n. \n. wb_sha \"data.xlsx\" \"971d17b97f6b4cb4aec41e588de8b345165f2d4b64a04b9f19dd314c7\n> 1db3210\"\n\n\n. frame create wb_src0\n\n. frame change wb_src0\n\n. import excel using \"data.xlsx\", firstrow clear sheet(\"Chosen\")\n(1 var, 3 obs)\n\n. frame copy wb_src0 wb1\n\n. frame change wb1\n\n. keep x\n\n. order x\n\n. scalar wb_number_0 = _N\n\n. unab wb_columns: _all\n\n. scalar wb_check_1 = (`\"`wb_columns'\"' == \"x\")\n\n. file open wb_numbers using \"numeric_actual.tsv\", write text replace\n(file numeric_actual.tsv not found)\n\n. file write wb_numbers %21.17g (wb_number_0) _n\n\n. file close wb_numbers\n\n. * Closing self-checks\n. assert !missing(wb_number_0) & abs(wb_number_0-(3)) <= 0.0+0.0*abs(3)\n\n. assert wb_check_1 == 1\n\n. \n. frame wb1: export delimited using \"result.csv\", replace\n(file result.csv not found)\nfile result.csv saved\n\n. \nend of do-file\n"
+    },
+    {
+      "execution": {
+        "run": "reader_complete_final",
+        "language": "r",
+        "command": [
+          "Rscript",
+          "analysis.R"
+        ],
+        "os_exit": 0,
+        "normalized_exit": 0
+      },
+      "plan": {
+        "schema_version": 1,
+        "project_id": "reader",
+        "run_id": "translated",
+        "workbench_version": "1.8.11",
+        "lineage_hash": "9999999999999999999999999999999999999999999999999999999999999999",
+        "sources": [
+          {
+            "source_id": "source",
+            "format": "csv",
+            "filename": "data.csv",
+            "sha256": "3d1f78ae09893df37553c88bd9168fbcba7202efd3275dfc7992ff7edbf03c15",
+            "read_options": {
+              "delimiter": ";",
+              "encoding": "utf-8",
+              "header": 0
+            }
+          }
+        ],
+        "steps": [
+          {
+            "step_id": "result",
+            "kind": "data_operation",
+            "operation": "data.subset",
+            "label": "",
+            "parameters": {
+              "columns": [
+                "id",
+                "city",
+                "value"
+              ]
+            },
+            "inputs": [
+              "source"
+            ],
+            "output_dataset": null,
+            "expected": {
+              "nrows": 2,
+              "columns": [
+                "id",
+                "city",
+                "value"
+              ]
+            },
+            "tolerances": {},
+            "seed": null,
+            "snapshot": null
+          }
+        ]
+      },
+      "numbers": [
+        {
+          "expected": 2.0,
+          "abs": 0.0,
+          "rel": 0.0,
+          "label": "result:nrows",
+          "actual": 2.0,
+          "difference": 0.0,
+          "allowed": 0.0
+        }
+      ],
+      "data": {
+        "actual": {
+          "columns": [
+            "id",
+            "city",
+            "value"
+          ],
+          "index": [
+            0,
+            1
+          ],
+          "data": [
+            [
+              1,
+              "北京",
+              1.25
+            ],
+            [
+              2,
+              "café",
+              2.5
+            ]
+          ]
+        },
+        "expected": {
+          "columns": [
+            "id",
+            "city",
+            "value"
+          ],
+          "index": [
+            0,
+            1
+          ],
+          "data": [
+            [
+              1,
+              "北京",
+              1.25
+            ],
+            [
+              2,
+              "café",
+              2.5
+            ]
+          ]
+        },
+        "max_differences": {
+          "id": 0.0,
+          "value": 0.0
+        },
+        "rtol": 1e-08,
+        "atol": 1e-08
+      },
+      "output": ""
+    },
+    {
+      "execution": {
+        "run": "reader_complete_final",
+        "language": "python",
+        "command": [
+          "/Users/jiayuanren/项目规划/.venv/bin/python",
+          "analysis.py"
+        ],
+        "os_exit": 0,
+        "normalized_exit": 0
+      },
+      "plan": {
+        "schema_version": 1,
+        "project_id": "reader",
+        "run_id": "translated",
+        "workbench_version": "1.8.11",
+        "lineage_hash": "9999999999999999999999999999999999999999999999999999999999999999",
+        "sources": [
+          {
+            "source_id": "source",
+            "format": "csv",
+            "filename": "data.csv",
+            "sha256": "3d1f78ae09893df37553c88bd9168fbcba7202efd3275dfc7992ff7edbf03c15",
+            "read_options": {
+              "delimiter": ";",
+              "encoding": "utf-8",
+              "header": 0
+            }
+          }
+        ],
+        "steps": [
+          {
+            "step_id": "result",
+            "kind": "data_operation",
+            "operation": "data.subset",
+            "label": "",
+            "parameters": {
+              "columns": [
+                "id",
+                "city",
+                "value"
+              ]
+            },
+            "inputs": [
+              "source"
+            ],
+            "output_dataset": null,
+            "expected": {
+              "nrows": 2,
+              "columns": [
+                "id",
+                "city",
+                "value"
+              ]
+            },
+            "tolerances": {},
+            "seed": null,
+            "snapshot": null
+          }
+        ]
+      },
+      "numbers": [
+        {
+          "expected": 2.0,
+          "abs": 0.0,
+          "rel": 0.0,
+          "label": "result:nrows",
+          "actual": 2.0,
+          "difference": 0.0,
+          "allowed": 0.0
+        }
+      ],
+      "data": {
+        "actual": {
+          "columns": [
+            "id",
+            "city",
+            "value"
+          ],
+          "index": [
+            0,
+            1
+          ],
+          "data": [
+            [
+              1,
+              "北京",
+              1.25
+            ],
+            [
+              2,
+              "café",
+              2.5
+            ]
+          ]
+        },
+        "expected": {
+          "columns": [
+            "id",
+            "city",
+            "value"
+          ],
+          "index": [
+            0,
+            1
+          ],
+          "data": [
+            [
+              1,
+              "北京",
+              1.25
+            ],
+            [
+              2,
+              "café",
+              2.5
+            ]
+          ]
+        },
+        "max_differences": {
+          "id": 0.0,
+          "value": 0.0
+        },
+        "rtol": 1e-08,
+        "atol": 1e-08
+      },
+      "output": ""
+    },
+    {
+      "execution": {
+        "run": "reader_complete_final",
+        "language": "stata",
+        "command": [
+          "/Applications/Stata/StataMP.app/Contents/MacOS/stata-mp",
+          "-b",
+          "do",
+          "analysis.do"
+        ],
+        "os_exit": 0,
+        "normalized_exit": 0
+      },
+      "plan": {
+        "schema_version": 1,
+        "project_id": "reader",
+        "run_id": "translated",
+        "workbench_version": "1.8.11",
+        "lineage_hash": "9999999999999999999999999999999999999999999999999999999999999999",
+        "sources": [
+          {
+            "source_id": "source",
+            "format": "csv",
+            "filename": "data.csv",
+            "sha256": "bed0e397b042f75c4dce0c81c3fa2168e35d6b23824ef5f44843b9f61b15d4f4",
+            "read_options": {
+              "delimiter": "|",
+              "encoding": "latin1",
+              "header": 0
+            }
+          }
+        ],
+        "steps": [
+          {
+            "step_id": "result",
+            "kind": "data_operation",
+            "operation": "data.subset",
+            "label": "",
+            "parameters": {
+              "columns": [
+                "id",
+                "city",
+                "value"
+              ]
+            },
+            "inputs": [
+              "source"
+            ],
+            "output_dataset": null,
+            "expected": {
+              "nrows": 2,
+              "columns": [
+                "id",
+                "city",
+                "value"
+              ]
+            },
+            "tolerances": {},
+            "seed": null,
+            "snapshot": null
+          }
+        ]
+      },
+      "numbers": [
+        {
+          "scalar": "wb_number_0",
+          "expected": 2.0,
+          "abs": 0.0,
+          "rel": 0.0,
+          "actual": 2.0,
+          "difference": 0.0,
+          "allowed": 0.0
+        }
+      ],
+      "data": {
+        "actual": {
+          "columns": [
+            "id",
+            "city",
+            "value"
+          ],
+          "index": [
+            0,
+            1
+          ],
+          "data": [
+            [
+              1,
+              "café",
+              1.25
+            ],
+            [
+              2,
+              "été",
+              2.5
+            ]
+          ]
+        },
+        "expected": {
+          "columns": [
+            "id",
+            "city",
+            "value"
+          ],
+          "index": [
+            0,
+            1
+          ],
+          "data": [
+            [
+              1,
+              "café",
+              1.25
+            ],
+            [
+              2,
+              "été",
+              2.5
+            ]
+          ]
+        },
+        "max_differences": {
+          "id": 0.0,
+          "value": 0.0
+        },
+        "rtol": 1e-08,
+        "atol": 1e-08
+      },
+      "output": ". do analysis.do \n\n. * Workbench 1.8.11\n. * project: reader\n. * run: translated\n. * lineage_hash: 9999999999999999999999999999999999999999999999999999999999999\n> 999\n. * Coverage\n. * result | data.subset | native | \n. version 18\n\n. set more off\n\n. set type double\n\n. capture program drop wb_repost\n\n. program define wb_repost, eclass\n  1.     args beta covariance\n  2.     ereturn repost b=`beta' V=`covariance', rename\n  3. end\n\n. capture program drop wb_sha\n\n. program define wb_sha\n  1.     args filename expected\n  2.     tempfile digestfile\n  3.     shell shasum -a 256 \"`filename'\" > \"`digestfile'\"\n  4.     tempname fh\n  5.     file open `fh' using \"`digestfile'\", read text\n  6.     file read `fh' line\n  7.     file close `fh'\n  8.     if substr(\"`line'\",1,64) != \"`expected'\" {\n  9.         display as error \"SHA256 mismatch\"\n 10.         exit 9\n 11.     }\n 12. end\n\n. \n. wb_sha \"data.csv\" \"bed0e397b042f75c4dce0c81c3fa2168e35d6b23824ef5f44843b9f61b\n> 15d4f4\"\n\n\n. frame create wb_src0\n\n. frame change wb_src0\n\n. import delimited using \"data.csv\", varnames(1) delimiters(\"|\") encoding(\"ISO-\n> 8859-1\") asdouble clear case(preserve)\n(3 vars, 2 obs)\n\n. frame copy wb_src0 wb1\n\n. frame change wb1\n\n. keep id city value\n\n. order id city value\n\n. scalar wb_number_0 = _N\n\n. unab wb_columns: _all\n\n. scalar wb_check_1 = (`\"`wb_columns'\"' == \"id city value\")\n\n. file open wb_numbers using \"numeric_actual.tsv\", write text replace\n(file numeric_actual.tsv not found)\n\n. file write wb_numbers %21.17g (wb_number_0) _n\n\n. file close wb_numbers\n\n. * Closing self-checks\n. assert !missing(wb_number_0) & abs(wb_number_0-(2)) <= 0.0+0.0*abs(2)\n\n. assert wb_check_1 == 1\n\n. \n. frame wb1: export delimited using \"result.csv\", replace\n(file result.csv not found)\nfile result.csv saved\n\n. \nend of do-file\n"
+    },
+    {
+      "execution": {
+        "run": "reader_complete_final",
+        "language": "python",
+        "command": [
+          "/Users/jiayuanren/项目规划/.venv/bin/python",
+          "analysis.py"
+        ],
+        "os_exit": 0,
+        "normalized_exit": 0
+      },
+      "plan": {
+        "schema_version": 1,
+        "project_id": "reader",
+        "run_id": "translated",
+        "workbench_version": "1.8.11",
+        "lineage_hash": "9999999999999999999999999999999999999999999999999999999999999999",
+        "sources": [
+          {
+            "source_id": "source",
+            "format": "csv",
+            "filename": "data.csv",
+            "sha256": "077c588edd39d06811d68d5b7577ea9d6fbc63cb72d89e4fbbeab14da7c9df72",
+            "read_options": {
+              "delimiter": "\t",
+              "encoding": "utf-8",
+              "header": null,
+              "names": [
+                "id",
+                "city",
+                "value"
+              ]
+            }
+          }
+        ],
+        "steps": [
+          {
+            "step_id": "result",
+            "kind": "data_operation",
+            "operation": "data.subset",
+            "label": "",
+            "parameters": {
+              "columns": [
+                "id",
+                "city",
+                "value"
+              ]
+            },
+            "inputs": [
+              "source"
+            ],
+            "output_dataset": null,
+            "expected": {
+              "nrows": 2,
+              "columns": [
+                "id",
+                "city",
+                "value"
+              ]
+            },
+            "tolerances": {},
+            "seed": null,
+            "snapshot": null
+          }
+        ]
+      },
+      "numbers": [
+        {
+          "expected": 2.0,
+          "abs": 0.0,
+          "rel": 0.0,
+          "label": "result:nrows",
+          "actual": 2.0,
+          "difference": 0.0,
+          "allowed": 0.0
+        }
+      ],
+      "data": {
+        "actual": {
+          "columns": [
+            "id",
+            "city",
+            "value"
+          ],
+          "index": [
+            0,
+            1
+          ],
+          "data": [
+            [
+              1,
+              "west",
+              1.25
+            ],
+            [
+              2,
+              "east",
+              2.5
+            ]
+          ]
+        },
+        "expected": {
+          "columns": [
+            "id",
+            "city",
+            "value"
+          ],
+          "index": [
+            0,
+            1
+          ],
+          "data": [
+            [
+              1,
+              "west",
+              1.25
+            ],
+            [
+              2,
+              "east",
+              2.5
+            ]
+          ]
+        },
+        "max_differences": {
+          "id": 0.0,
+          "value": 0.0
+        },
+        "rtol": 1e-08,
+        "atol": 1e-08
+      },
+      "output": ""
+    },
+    {
+      "execution": {
+        "run": "reader_complete_final",
+        "language": "r",
+        "command": [
+          "Rscript",
+          "analysis.R"
+        ],
+        "os_exit": 0,
+        "normalized_exit": 0
+      },
+      "plan": {
+        "schema_version": 1,
+        "project_id": "reader",
+        "run_id": "translated",
+        "workbench_version": "1.8.11",
+        "lineage_hash": "9999999999999999999999999999999999999999999999999999999999999999",
+        "sources": [
+          {
+            "source_id": "source",
+            "format": "xlsx",
+            "filename": "data.xlsx",
+            "sha256": "0e9c9a2359bfed0925b76ea9d9049a7574044448b58bfa80ced0a4a0bb5da75f",
+            "read_options": {
+              "sheet_name": null,
+              "transpose": false
+            }
+          }
+        ],
+        "steps": [
+          {
+            "step_id": "result",
+            "kind": "data_operation",
+            "operation": "data.subset",
+            "label": "",
+            "parameters": {
+              "columns": [
+                "x"
+              ]
+            },
+            "inputs": [
+              "source"
+            ],
+            "output_dataset": null,
+            "expected": {
+              "nrows": 1,
+              "columns": [
+                "x"
+              ]
+            },
+            "tolerances": {},
+            "seed": null,
+            "snapshot": null
+          }
+        ]
+      },
+      "numbers": [
+        {
+          "expected": 1.0,
+          "abs": 0.0,
+          "rel": 0.0,
+          "label": "result:nrows",
+          "actual": 1.0,
+          "difference": 0.0,
+          "allowed": 0.0
+        }
+      ],
+      "data": {
+        "actual": {
+          "columns": [
+            "x"
+          ],
+          "index": [
+            0
+          ],
+          "data": [
+            [
+              999
+            ]
+          ]
+        },
+        "expected": {
+          "columns": [
+            "x"
+          ],
+          "index": [
+            0
+          ],
+          "data": [
+            [
+              999
+            ]
+          ]
+        },
+        "max_differences": {
+          "x": 0.0
+        },
+        "rtol": 1e-08,
+        "atol": 1e-08
+      },
+      "output": ""
+    },
+    {
+      "execution": {
+        "run": "reader_complete_final",
+        "language": "r",
+        "command": [
+          "Rscript",
+          "analysis.R"
+        ],
+        "os_exit": 0,
+        "normalized_exit": 0
+      },
+      "plan": {
+        "schema_version": 1,
+        "project_id": "reader",
+        "run_id": "translated",
+        "workbench_version": "1.8.11",
+        "lineage_hash": "9999999999999999999999999999999999999999999999999999999999999999",
+        "sources": [
+          {
+            "source_id": "source",
+            "format": "csv",
+            "filename": "data.csv",
+            "sha256": "bed0e397b042f75c4dce0c81c3fa2168e35d6b23824ef5f44843b9f61b15d4f4",
+            "read_options": {
+              "delimiter": "|",
+              "encoding": "latin1",
+              "header": 0
+            }
+          }
+        ],
+        "steps": [
+          {
+            "step_id": "result",
+            "kind": "data_operation",
+            "operation": "data.subset",
+            "label": "",
+            "parameters": {
+              "columns": [
+                "id",
+                "city",
+                "value"
+              ]
+            },
+            "inputs": [
+              "source"
+            ],
+            "output_dataset": null,
+            "expected": {
+              "nrows": 2,
+              "columns": [
+                "id",
+                "city",
+                "value"
+              ]
+            },
+            "tolerances": {},
+            "seed": null,
+            "snapshot": null
+          }
+        ]
+      },
+      "numbers": [
+        {
+          "expected": 2.0,
+          "abs": 0.0,
+          "rel": 0.0,
+          "label": "result:nrows",
+          "actual": 2.0,
+          "difference": 0.0,
+          "allowed": 0.0
+        }
+      ],
+      "data": {
+        "actual": {
+          "columns": [
+            "id",
+            "city",
+            "value"
+          ],
+          "index": [
+            0,
+            1
+          ],
+          "data": [
+            [
+              1,
+              "café",
+              1.25
+            ],
+            [
+              2,
+              "été",
+              2.5
+            ]
+          ]
+        },
+        "expected": {
+          "columns": [
+            "id",
+            "city",
+            "value"
+          ],
+          "index": [
+            0,
+            1
+          ],
+          "data": [
+            [
+              1,
+              "café",
+              1.25
+            ],
+            [
+              2,
+              "été",
+              2.5
+            ]
+          ]
+        },
+        "max_differences": {
+          "id": 0.0,
+          "value": 0.0
+        },
+        "rtol": 1e-08,
+        "atol": 1e-08
+      },
+      "output": ""
+    },
+    {
+      "execution": {
+        "run": "reader_complete_final",
+        "language": "python",
+        "command": [
+          "/Users/jiayuanren/项目规划/.venv/bin/python",
+          "analysis.py"
+        ],
+        "os_exit": 0,
+        "normalized_exit": 0
+      },
+      "plan": {
+        "schema_version": 1,
+        "project_id": "reader",
+        "run_id": "translated",
+        "workbench_version": "1.8.11",
+        "lineage_hash": "9999999999999999999999999999999999999999999999999999999999999999",
+        "sources": [
+          {
+            "source_id": "source",
+            "format": "xlsx",
+            "filename": "data.xlsx",
+            "sha256": "971d17b97f6b4cb4aec41e588de8b345165f2d4b64a04b9f19dd314c71db3210",
+            "read_options": {
+              "sheet_name": "Chosen",
+              "transpose": false
+            }
+          }
+        ],
+        "steps": [
+          {
+            "step_id": "result",
+            "kind": "data_operation",
+            "operation": "data.subset",
+            "label": "",
+            "parameters": {
+              "columns": [
+                "x"
+              ]
+            },
+            "inputs": [
+              "source"
+            ],
+            "output_dataset": null,
+            "expected": {
+              "nrows": 3,
+              "columns": [
+                "x"
+              ]
+            },
+            "tolerances": {},
+            "seed": null,
+            "snapshot": null
+          }
+        ]
+      },
+      "numbers": [
+        {
+          "expected": 3.0,
+          "abs": 0.0,
+          "rel": 0.0,
+          "label": "result:nrows",
+          "actual": 3.0,
+          "difference": 0.0,
+          "allowed": 0.0
+        }
+      ],
+      "data": {
+        "actual": {
+          "columns": [
+            "x"
+          ],
+          "index": [
+            0,
+            1,
+            2
+          ],
+          "data": [
+            [
+              3
+            ],
+            [
+              4
+            ],
+            [
+              5
+            ]
+          ]
+        },
+        "expected": {
+          "columns": [
+            "x"
+          ],
+          "index": [
+            0,
+            1,
+            2
+          ],
+          "data": [
+            [
+              3
+            ],
+            [
+              4
+            ],
+            [
+              5
+            ]
+          ]
+        },
+        "max_differences": {
+          "x": 0.0
+        },
+        "rtol": 1e-08,
+        "atol": 1e-08
+      },
+      "output": ""
+    },
+    {
+      "execution": {
+        "run": "reader_complete_final",
+        "language": "python",
+        "command": [
+          "/Users/jiayuanren/项目规划/.venv/bin/python",
+          "analysis.py"
+        ],
+        "os_exit": 0,
+        "normalized_exit": 0
+      },
+      "plan": {
+        "schema_version": 1,
+        "project_id": "reader",
+        "run_id": "translated",
+        "workbench_version": "1.8.11",
+        "lineage_hash": "9999999999999999999999999999999999999999999999999999999999999999",
+        "sources": [
+          {
+            "source_id": "source",
+            "format": "xlsx",
+            "filename": "data.xlsx",
+            "sha256": "0e9c9a2359bfed0925b76ea9d9049a7574044448b58bfa80ced0a4a0bb5da75f",
+            "read_options": {
+              "sheet_name": null,
+              "transpose": false
+            }
+          }
+        ],
+        "steps": [
+          {
+            "step_id": "result",
+            "kind": "data_operation",
+            "operation": "data.subset",
+            "label": "",
+            "parameters": {
+              "columns": [
+                "x"
+              ]
+            },
+            "inputs": [
+              "source"
+            ],
+            "output_dataset": null,
+            "expected": {
+              "nrows": 1,
+              "columns": [
+                "x"
+              ]
+            },
+            "tolerances": {},
+            "seed": null,
+            "snapshot": null
+          }
+        ]
+      },
+      "numbers": [
+        {
+          "expected": 1.0,
+          "abs": 0.0,
+          "rel": 0.0,
+          "label": "result:nrows",
+          "actual": 1.0,
+          "difference": 0.0,
+          "allowed": 0.0
+        }
+      ],
+      "data": {
+        "actual": {
+          "columns": [
+            "x"
+          ],
+          "index": [
+            0
+          ],
+          "data": [
+            [
+              999
+            ]
+          ]
+        },
+        "expected": {
+          "columns": [
+            "x"
+          ],
+          "index": [
+            0
+          ],
+          "data": [
+            [
+              999
+            ]
+          ]
+        },
+        "max_differences": {
+          "x": 0.0
+        },
+        "rtol": 1e-08,
+        "atol": 1e-08
+      },
+      "output": ""
+    }
+  ]
+}

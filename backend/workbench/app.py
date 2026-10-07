@@ -43,6 +43,7 @@ from .http.data_operation_routes import router as data_operation_router
 from .http.dataset_routes import router as dataset_router
 from .http.disclosure_routes import router as disclosure_router
 from .http.egress_routes import router as egress_router
+from .http.script_export_routes import router as script_export_router
 from .http.graph_routes import router as graph_router
 from .http.llm_routes import router as llm_router
 from .http.memory_routes import router as memory_router
@@ -343,6 +344,7 @@ app.include_router(drafts_router)
 app.include_router(data_operation_router)
 app.include_router(dataset_router)
 app.include_router(egress_router)
+app.include_router(script_export_router)
 app.include_router(disclosure_router)
 app.include_router(agent_router)
 app.include_router(notebook_router)

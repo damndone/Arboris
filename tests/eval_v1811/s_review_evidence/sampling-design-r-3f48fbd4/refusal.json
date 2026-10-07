@@ -1,0 +1,7 @@
+{
+  "code": "NOT_FULLY_NATIVE",
+  "message": "Native export unavailable for: model",
+  "steps": [
+    "model"
+  ]
+}

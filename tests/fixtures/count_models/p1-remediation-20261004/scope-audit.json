@@ -1,0 +1,15 @@
+{
+  "baseline": "6f0f87c6d8241a93d81e2c34f8ef8e9408a907b3",
+  "repair_start_head": "87e5c5decfaea3512300a35d06258d443b7d7670",
+  "branch": "lane/v1811-m2-negative-binomial",
+  "worktree": "/Users/jiayuanren/\u9879\u76ee\u89c4\u5212/.worktrees/codex-v1811-m2",
+  "original_manifest_files": 82,
+  "changed_from_original_manifest": [
+    "backend/workbench/econometrics/count_models.py",
+    "docs/superpowers/handoffs/2026-10-04-codex-v1811-m2-report.md"
+  ],
+  "all_other_original_manifest_files_sha256_unchanged": true,
+  "runner_outside_owned_functions": "AST identical to contract lock",
+  "old_review_and_fixtures": "unchanged",
+  "current_production_sha256": "143b75513c18d4a5aa0a20ea08b61169f65d1a358a533ee0d497c768cff7dd50"
+}

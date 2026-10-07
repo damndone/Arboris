@@ -275,6 +275,14 @@ export type ModelResult = {
   bic?: number | null;
   nobs?: number;
   coefficients: Record<string, CoefficientRecord>;
+  dispersion?: string | null;
+  alpha_estimated?: boolean;
+  alpha_fixed_value?: number | null;
+  ancillary_parameters?: {name: string; estimate: number; std_error: number;
+    conf_low: number | null; conf_high: number | null; scale: string}[];
+  overdispersion_test?: {statistic: number; df: number; p_value: number; distribution: string} | null;
+  information_matrix?: string;
+  warnings?: Array<string | {code: string; message: string}>;
 };
 
 export type ArtifactItem = {
@@ -1833,6 +1841,33 @@ export async function exportDataset(
     { method: "POST", headers: { "Content-Type": "application/json" }, body: exportBody(nodeId, options) },
   );
   return readResponse<DatasetExportResult>(response);
+}
+
+export interface AnalysisScriptExportResult {
+  artifact_id: string;
+  filename: string;
+  language: 'stata' | 'r' | 'python';
+  fully_native: boolean;
+  coverage: Array<{ step_id: string; operation: string; status: string; note: string }>;
+  required_packages: string[];
+}
+
+export interface ScriptExportTargets {
+  targets: Array<{ target: string; label: string }>;
+}
+
+export async function listScriptExportTargets(projectRoot: string, runId: string, modelTarget: string): Promise<ScriptExportTargets> {
+  const response = await fetch(apiUrl(`/runs/${encodeURIComponent(runId)}/script-export/targets?project_root=${encodeURIComponent(projectRoot)}&model_target=${encodeURIComponent(modelTarget)}`));
+  return readResponse<ScriptExportTargets>(response);
+}
+
+export async function exportAnalysisScript(projectRoot: string, runId: string, target: string,
+  language: 'stata' | 'r' | 'python', requireNative: boolean): Promise<AnalysisScriptExportResult> {
+  const response = await fetch(apiUrl(`/runs/${encodeURIComponent(runId)}/script-export?project_root=${encodeURIComponent(projectRoot)}`), {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ target, language, require_native: requireNative }),
+  });
+  return readResponse<AnalysisScriptExportResult>(response);
 }
 
 /** Exactly what the file will contain, without writing it. */

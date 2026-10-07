@@ -1,0 +1,15 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_____________ test_native_lmm_postestimation_reference_is_present ______________
+
+    def test_native_lmm_postestimation_reference_is_present():
+>       assert (FIXTURE/"r_reference.json").is_file(),"Independent native LMM fixed-effect reference is missing"
+E       AssertionError: Independent native LMM fixed-effect reference is missing
+E       assert False
+E        +  where False = is_file()
+E        +    where is_file = (PosixPath('/Users/jiayuanren/项目规划/.worktrees/codex-v1811-m2/tests/fixtures/postestimation/lmm_v1811') / 'r_reference.json').is_file
+
+tests/test_lmm_postestimation_v1811_reference.py:21: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_lmm_postestimation_v1811_reference.py::test_native_lmm_postestimation_reference_is_present
+1 failed in 1.42s

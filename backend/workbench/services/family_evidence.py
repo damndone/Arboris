@@ -18,7 +18,7 @@ from ..contracts.model.result_envelope_registry import declaration_for
 def report_family_evidence(run_root: Path, primary: Mapping[str, Any] | None) -> dict[str, Any] | None:
     if not isinstance(primary, Mapping):
         return None
-    declaration = declaration_for(primary.get("model_type"))
+    declaration = declaration_for(primary.get("kernel_family") or primary.get("model_type"))
     if declaration is None:
         return None
     if declaration.report_document is not None:

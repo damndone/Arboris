@@ -1,0 +1,332 @@
+{
+  "owner_results": {
+    "wald_joint": {
+      "operation": "wald",
+      "model_id": "linear_mixed_effects_1",
+      "model_type": "linear_mixed_effects",
+      "covariance_estimator": null,
+      "nobs": 360,
+      "df_method": "asymptotic",
+      "n_clusters": null,
+      "constraints": [
+        {
+          "terms": {
+            "time": 1.0
+          },
+          "value": 0.0
+        },
+        {
+          "terms": {
+            "x": 1.0
+          },
+          "value": 0.0
+        }
+      ],
+      "distribution": "chi2",
+      "statistic": 337.0735040574246,
+      "df_num": 2,
+      "df_den": null,
+      "p_value": 6.388789749307977e-74
+    },
+    "wald_shifted": {
+      "operation": "wald",
+      "model_id": "linear_mixed_effects_1",
+      "model_type": "linear_mixed_effects",
+      "covariance_estimator": null,
+      "nobs": 360,
+      "df_method": "asymptotic",
+      "n_clusters": null,
+      "constraints": [
+        {
+          "terms": {
+            "time": 1.0,
+            "x": -1.0
+          },
+          "value": 1.0
+        }
+      ],
+      "distribution": "chi2",
+      "statistic": 824.6196658791449,
+      "df_num": 1,
+      "df_den": null,
+      "p_value": 2.3955368964460368e-181
+    },
+    "lincom": {
+      "operation": "lincom",
+      "model_id": "linear_mixed_effects_1",
+      "model_type": "linear_mixed_effects",
+      "covariance_estimator": null,
+      "nobs": 360,
+      "df_method": "asymptotic",
+      "n_clusters": null,
+      "terms": {
+        "time": 1.0,
+        "x": 2.0
+      },
+      "constant": -0.5,
+      "estimate": 0.8818290743275814,
+      "std_error": 0.0777271399012798,
+      "statistic": 11.345188764794134,
+      "distribution": "z",
+      "df": null,
+      "p_value": 7.835697061795856e-30,
+      "level": 0.95,
+      "ci": [
+        0.7294866794997668,
+        1.034171469155396
+      ]
+    },
+    "nlcom": {
+      "operation": "nlcom",
+      "model_id": "linear_mixed_effects_1",
+      "model_type": "linear_mixed_effects",
+      "covariance_estimator": null,
+      "nobs": 360,
+      "df_method": "asymptotic",
+      "n_clusters": null,
+      "expression": "time/x",
+      "estimate": 0.5150047901947135,
+      "std_error": 0.05783379871403935,
+      "statistic": 8.904910305843256,
+      "distribution": "z",
+      "df": null,
+      "p_value": 5.342923041050978e-19,
+      "level": 0.95,
+      "ci": [
+        0.40165262762605747,
+        0.6283569527633694
+      ],
+      "warnings": []
+    },
+    "fixed_effect_average_prediction": {
+      "operation": "lincom",
+      "model_id": "linear_mixed_effects_1",
+      "model_type": "linear_mixed_effects",
+      "covariance_estimator": null,
+      "nobs": 360,
+      "df_method": "asymptotic",
+      "n_clusters": null,
+      "terms": {
+        "Intercept": 1.0,
+        "C(Q('arm'), Treatment(reference='a'))[T.b]": 0.5,
+        "time": 2.5,
+        "C(Q('arm'), Treatment(reference='a'))[T.b]:Q('time')": 1.25,
+        "x": 0.022525460988336268
+      },
+      "constant": 0.0,
+      "estimate": 2.174046136686118,
+      "std_error": 0.09552557213055088,
+      "statistic": 22.758786869289185,
+      "distribution": "z",
+      "df": null,
+      "p_value": 1.1745048443628004e-114,
+      "level": 0.95,
+      "ci": [
+        1.9868194557076553,
+        2.361272817664581
+      ]
+    }
+  },
+  "comparisons": [
+    {
+      "case": "wald_joint",
+      "quantity": "statistic",
+      "owner": 337.0735040574246,
+      "native": 337.0835092905391,
+      "absolute_error": 0.010005233114497969,
+      "relative_error": 2.9681763832220746e-05,
+      "relative_tolerance": 1e-06
+    },
+    {
+      "case": "wald_joint",
+      "quantity": "p_value",
+      "owner": 6.388789749307977e-74,
+      "native": 6.3569088942620045e-74,
+      "absolute_error": 3.1880855045972294e-76,
+      "relative_error": 0.005015150535624194,
+      "relative_tolerance": 1e-05
+    },
+    {
+      "case": "wald_shifted",
+      "quantity": "statistic",
+      "owner": 824.6196658791449,
+      "native": 824.6426893003228,
+      "absolute_error": 0.02302342117786793,
+      "relative_error": 2.7919269129036248e-05,
+      "relative_tolerance": 1e-06
+    },
+    {
+      "case": "wald_shifted",
+      "quantity": "p_value",
+      "owner": 2.3955368964460368e-181,
+      "native": 2.3680853107131484e-181,
+      "absolute_error": 2.7451585732888384e-183,
+      "relative_error": 0.01159231283125579,
+      "relative_tolerance": 1e-05
+    },
+    {
+      "case": "lincom",
+      "quantity": "estimate",
+      "owner": 0.8818290743275814,
+      "native": 0.8818290936616076,
+      "absolute_error": 1.9334026157835638e-08,
+      "relative_error": 2.192491299822646e-08,
+      "relative_tolerance": 1e-06
+    },
+    {
+      "case": "lincom",
+      "quantity": "std_error",
+      "owner": 0.0777271399012798,
+      "native": 0.07772563187436217,
+      "absolute_error": 1.508026917632077e-06,
+      "relative_error": 1.9401925481541185e-05,
+      "relative_tolerance": 1e-06
+    },
+    {
+      "case": "lincom",
+      "quantity": "statistic",
+      "owner": 11.345188764794134,
+      "native": 11.34540913204823,
+      "absolute_error": 0.00022036725409613211,
+      "relative_error": 1.94234735417028e-05,
+      "relative_tolerance": 1e-06
+    },
+    {
+      "case": "lincom",
+      "quantity": "p_value",
+      "owner": 7.835697061795856e-30,
+      "native": 7.81598170640778e-30,
+      "absolute_error": 1.971535538807496e-32,
+      "relative_error": 0.0025224413424498817,
+      "relative_tolerance": 1e-05
+    },
+    {
+      "case": "nlcom",
+      "quantity": "estimate",
+      "owner": 0.5150047901947135,
+      "native": 0.5150047815989017,
+      "absolute_error": 8.595811729072977e-09,
+      "relative_error": 1.669074159347826e-08,
+      "relative_tolerance": 1e-06
+    },
+    {
+      "case": "nlcom",
+      "quantity": "std_error",
+      "owner": 0.05783379871403935,
+      "native": 0.05783342104115514,
+      "absolute_error": 3.77672884209479e-07,
+      "relative_error": 6.530356970249455e-06,
+      "relative_tolerance": 1e-06
+    },
+    {
+      "case": "nlcom",
+      "quantity": "statistic",
+      "owner": 8.904910305843256,
+      "native": 8.904968309455818,
+      "absolute_error": 5.800361256191877e-05,
+      "relative_error": 6.513623692554541e-06,
+      "relative_tolerance": 1e-06
+    },
+    {
+      "case": "nlcom",
+      "quantity": "p_value",
+      "owner": 5.342923041050978e-19,
+      "native": 5.340130077033099e-19,
+      "absolute_error": 2.792964017879204e-22,
+      "relative_error": 0.0005230142295393178,
+      "relative_tolerance": 1e-05
+    },
+    {
+      "case": "fixed_effect_average_prediction",
+      "quantity": "estimate",
+      "owner": 2.174046136686118,
+      "native": 2.174046136686126,
+      "absolute_error": 7.993605777301127e-15,
+      "relative_error": 3.676833551235343e-15,
+      "relative_tolerance": 1e-06
+    },
+    {
+      "case": "fixed_effect_average_prediction",
+      "quantity": "std_error",
+      "owner": 0.09552557213055088,
+      "native": 0.09552525270309134,
+      "absolute_error": 3.194274595386126e-07,
+      "relative_error": 3.3439059358622926e-06,
+      "relative_tolerance": 1e-06
+    }
+  ],
+  "vcov_owner": [
+    [
+      0.022570166927718988,
+      -0.022555301591897958,
+      -0.0017277049888474749,
+      0.0017229467431450658,
+      -8.000536435211169e-05
+    ],
+    [
+      -0.02255530159189796,
+      0.045150934109984796,
+      0.0017225309863030764,
+      -0.003458250576944911,
+      -0.00016335770765847033
+    ],
+    [
+      -0.0017277049888474783,
+      0.0017225309863030793,
+      0.0006909936452912238,
+      -0.0006893374986916753,
+      2.78465258845953e-05
+    ],
+    [
+      0.00172294674314507,
+      -0.003458250576944918,
+      -0.0006893374986916755,
+      0.0013827158859724378,
+      5.005156572000036e-05
+    ],
+    [
+      -8.000536435211134e-05,
+      -0.000163357707658471,
+      2.7846525884595257e-05,
+      5.005156572000039e-05,
+      0.0013097821321008795
+    ]
+  ],
+  "vcov_native": [
+    [
+      0.022570050291348162,
+      -0.022555185609266983,
+      -0.0017277071669659872,
+      0.0017229491305191863,
+      -8.000184591859507e-05
+    ],
+    [
+      -0.022555185609266983,
+      0.04515070037107081,
+      0.0017225333919611235,
+      -0.0034582548082595695,
+      -0.0001633505235997699
+    ],
+    [
+      -0.0017277071669659872,
+      0.0017225333919611235,
+      0.000690994520424053,
+      -0.0006893384466576418,
+      2.784530126483664e-05
+    ],
+    [
+      0.0017229491305191863,
+      -0.0034582548082595695,
+      -0.0006893384466576418,
+      0.0013827176041963146,
+      5.004936457876674e-05
+    ],
+    [
+      -8.000184591859507e-05,
+      -0.0001633505235997699,
+      2.784530126483664e-05,
+      5.004936457876674e-05,
+      0.0013097245311963664
+    ]
+  ]
+}

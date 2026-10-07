@@ -1,0 +1,470 @@
+[
+  {
+    "expected": 0.524033398275554,
+    "abs": 1e-08,
+    "rel": 0.0,
+    "label": "full:coefficients",
+    "actual": 0.524033398275554,
+    "difference": 0.0,
+    "allowed": 1e-08
+  },
+  {
+    "expected": 0.37889378683709035,
+    "abs": 1e-08,
+    "rel": 0.0,
+    "label": "full:coefficients",
+    "actual": 0.37889378683709035,
+    "difference": 0.0,
+    "allowed": 1e-08
+  },
+  {
+    "expected": -0.28894515154376593,
+    "abs": 1e-08,
+    "rel": 0.0,
+    "label": "full:coefficients",
+    "actual": -0.28894515154376593,
+    "difference": 0.0,
+    "allowed": 1e-08
+  },
+  {
+    "expected": -0.10121807811349151,
+    "abs": 1e-08,
+    "rel": 0.0,
+    "label": "full:coefficients",
+    "actual": -0.10121807811349151,
+    "difference": 0.0,
+    "allowed": 1e-08
+  },
+  {
+    "expected": 0.16986251046239487,
+    "abs": 1e-06,
+    "rel": 0.0,
+    "label": "full:std_errors",
+    "actual": 0.16986251046239487,
+    "difference": 0.0,
+    "allowed": 1e-06
+  },
+  {
+    "expected": 0.07594663821229021,
+    "abs": 1e-06,
+    "rel": 0.0,
+    "label": "full:std_errors",
+    "actual": 0.07594663821229021,
+    "difference": 0.0,
+    "allowed": 1e-06
+  },
+  {
+    "expected": 0.06578041865981685,
+    "abs": 1e-06,
+    "rel": 0.0,
+    "label": "full:std_errors",
+    "actual": 0.06578041865981685,
+    "difference": 0.0,
+    "allowed": 1e-06
+  },
+  {
+    "expected": 0.14744903698769615,
+    "abs": 1e-06,
+    "rel": 0.0,
+    "label": "full:std_errors",
+    "actual": 0.14744903698769615,
+    "difference": 0.0,
+    "allowed": 1e-06
+  },
+  {
+    "expected": 300.0,
+    "abs": 0.0,
+    "rel": 0.0,
+    "label": "full:nobs",
+    "actual": 300.0,
+    "difference": 0.0,
+    "allowed": 0.0
+  },
+  {
+    "expected": 0.028853272460587203,
+    "abs": 1e-08,
+    "rel": 1e-06,
+    "label": "full:statistics.value",
+    "actual": 0.028853272460587203,
+    "difference": 0.0,
+    "allowed": 3.8853272460587206e-08
+  },
+  {
+    "expected": -0.0001870336902630863,
+    "abs": 1e-08,
+    "rel": 1e-06,
+    "label": "full:statistics.value",
+    "actual": -0.0001870336902630863,
+    "difference": 0.0,
+    "allowed": 1.0187033690263086e-08
+  },
+  {
+    "expected": -0.0001220058983948316,
+    "abs": 1e-08,
+    "rel": 1e-06,
+    "label": "full:statistics.value",
+    "actual": -0.0001220058983948316,
+    "difference": 0.0,
+    "allowed": 1.0122005898394831e-08
+  },
+  {
+    "expected": -0.022391429324453097,
+    "abs": 1e-08,
+    "rel": 1e-06,
+    "label": "full:statistics.value",
+    "actual": -0.022391429324453097,
+    "difference": 0.0,
+    "allowed": 3.2391429324453095e-08
+  },
+  {
+    "expected": -0.000187033690263085,
+    "abs": 1e-08,
+    "rel": 1e-06,
+    "label": "full:statistics.value",
+    "actual": -0.000187033690263085,
+    "difference": 0.0,
+    "allowed": 1.0187033690263085e-08
+  },
+  {
+    "expected": 0.0057678918557485,
+    "abs": 1e-08,
+    "rel": 1e-06,
+    "label": "full:statistics.value",
+    "actual": 0.0057678918557485,
+    "difference": 0.0,
+    "allowed": 1.57678918557485e-08
+  },
+  {
+    "expected": -8.623713349002263e-05,
+    "abs": 1e-08,
+    "rel": 1e-06,
+    "label": "full:statistics.value",
+    "actual": -8.623713349002263e-05,
+    "difference": 0.0,
+    "allowed": 1.0086237133490023e-08
+  },
+  {
+    "expected": -0.0007567698511704407,
+    "abs": 1e-08,
+    "rel": 1e-06,
+    "label": "full:statistics.value",
+    "actual": -0.0007567698511704407,
+    "difference": 0.0,
+    "allowed": 1.0756769851170441e-08
+  },
+  {
+    "expected": -0.00012200589839483038,
+    "abs": 1e-08,
+    "rel": 1e-06,
+    "label": "full:statistics.value",
+    "actual": -0.00012200589839483038,
+    "difference": 0.0,
+    "allowed": 1.0122005898394831e-08
+  },
+  {
+    "expected": -8.623713349002254e-05,
+    "abs": 1e-08,
+    "rel": 1e-06,
+    "label": "full:statistics.value",
+    "actual": -8.623713349002254e-05,
+    "difference": 0.0,
+    "allowed": 1.0086237133490023e-08
+  },
+  {
+    "expected": 0.00432706347906078,
+    "abs": 1e-08,
+    "rel": 1e-06,
+    "label": "full:statistics.value",
+    "actual": 0.00432706347906078,
+    "difference": 0.0,
+    "allowed": 1.432706347906078e-08
+  },
+  {
+    "expected": 0.0005314706280484755,
+    "abs": 1e-08,
+    "rel": 1e-06,
+    "label": "full:statistics.value",
+    "actual": 0.0005314706280484755,
+    "difference": 0.0,
+    "allowed": 1.0531470628048475e-08
+  },
+  {
+    "expected": -0.022391429324453094,
+    "abs": 1e-08,
+    "rel": 1e-06,
+    "label": "full:statistics.value",
+    "actual": -0.022391429324453094,
+    "difference": 0.0,
+    "allowed": 3.2391429324453095e-08
+  },
+  {
+    "expected": -0.0007567698511704395,
+    "abs": 1e-08,
+    "rel": 1e-06,
+    "label": "full:statistics.value",
+    "actual": -0.0007567698511704395,
+    "difference": 0.0,
+    "allowed": 1.075676985117044e-08
+  },
+  {
+    "expected": 0.0005314706280484765,
+    "abs": 1e-08,
+    "rel": 1e-06,
+    "label": "full:statistics.value",
+    "actual": 0.0005314706280484765,
+    "difference": 0.0,
+    "allowed": 1.0531470628048477e-08
+  },
+  {
+    "expected": 0.021741218508598985,
+    "abs": 1e-08,
+    "rel": 1e-06,
+    "label": "full:statistics.value",
+    "actual": 0.021741218508598985,
+    "difference": 0.0,
+    "allowed": 3.1741218508598984e-08
+  },
+  {
+    "expected": 43.44065374496691,
+    "abs": 0.0,
+    "rel": 1e-06,
+    "label": "wald_joint:statistics.value",
+    "actual": 43.440653744966916,
+    "difference": 7.105427357601002e-15,
+    "allowed": 4.3440653744966904e-05
+  },
+  {
+    "expected": 3.689622161148643e-10,
+    "abs": 0.0,
+    "rel": 1e-05,
+    "label": "wald_joint:statistics.p_value",
+    "actual": 3.6896221611486294e-10,
+    "difference": 1.34416849539867e-24,
+    "allowed": 3.689622161148643e-15
+  },
+  {
+    "expected": 2.0,
+    "abs": 0.0,
+    "rel": 0.0,
+    "label": "wald_joint:statistics.df",
+    "actual": 2.0,
+    "difference": 0.0,
+    "allowed": 0.0
+  },
+  {
+    "expected": 10.745724600510435,
+    "abs": 0.0,
+    "rel": 1e-06,
+    "label": "wald_shifted:statistics.value",
+    "actual": 10.745724600510435,
+    "difference": 0.0,
+    "allowed": 1.0745724600510435e-05
+  },
+  {
+    "expected": 0.0010452050791167394,
+    "abs": 0.0,
+    "rel": 1e-05,
+    "label": "wald_shifted:statistics.p_value",
+    "actual": 0.0010452050791167394,
+    "difference": 0.0,
+    "allowed": 1.0452050791167395e-08
+  },
+  {
+    "expected": 1.0,
+    "abs": 0.0,
+    "rel": 0.0,
+    "label": "wald_shifted:statistics.df",
+    "actual": 1.0,
+    "difference": 0.0,
+    "allowed": 0.0
+  },
+  {
+    "expected": -0.6989965162504415,
+    "abs": 0.0,
+    "rel": 1e-06,
+    "label": "lincom:coefficients",
+    "actual": -0.6989965162504415,
+    "difference": 0.0,
+    "allowed": 6.989965162504415e-07
+  },
+  {
+    "expected": 0.1507686878567016,
+    "abs": 0.0,
+    "rel": 1e-06,
+    "label": "lincom:std_errors",
+    "actual": 0.1507686878567016,
+    "difference": 0.0,
+    "allowed": 1.507686878567016e-07
+  },
+  {
+    "expected": -4.636218078085312,
+    "abs": 0.0,
+    "rel": 1e-06,
+    "label": "lincom:statistics.value",
+    "actual": -4.636218078085312,
+    "difference": 0.0,
+    "allowed": 4.636218078085312e-06
+  },
+  {
+    "expected": 3.548415987298015e-06,
+    "abs": 0.0,
+    "rel": 1e-05,
+    "label": "lincom:statistics.p_value",
+    "actual": 3.5484159872980144e-06,
+    "difference": 4.235164736271502e-22,
+    "allowed": 3.548415987298015e-11
+  },
+  {
+    "expected": -1.3113000332857292,
+    "abs": 0.0,
+    "rel": 1e-06,
+    "label": "nlcom:coefficients",
+    "actual": -1.3113000332857292,
+    "difference": 0.0,
+    "allowed": 1.311300033285729e-06
+  },
+  {
+    "expected": 0.3943281916651146,
+    "abs": 0.0,
+    "rel": 1e-06,
+    "label": "nlcom:std_errors",
+    "actual": 0.3943281917615478,
+    "difference": 9.643319476282386e-11,
+    "allowed": 3.943281916651146e-07
+  },
+  {
+    "expected": -3.3254027000924093,
+    "abs": 0.0,
+    "rel": 1e-06,
+    "label": "nlcom:statistics.value",
+    "actual": -3.32540269927918,
+    "difference": 8.132294837537302e-10,
+    "allowed": 3.325402700092409e-06
+  },
+  {
+    "expected": 0.0008829091096100815,
+    "abs": 0.0,
+    "rel": 1e-05,
+    "label": "nlcom:statistics.p_value",
+    "actual": 0.0008829091121856502,
+    "difference": 2.575568664592298e-12,
+    "allowed": 8.829091096100816e-09
+  },
+  {
+    "expected": 20.9225036111211,
+    "abs": 0.0,
+    "rel": 1e-06,
+    "label": "lr_drop_x2_x3:statistics.value",
+    "actual": 20.9225036111211,
+    "difference": 0.0,
+    "allowed": 2.09225036111211e-05
+  },
+  {
+    "expected": 2.862437857314723e-05,
+    "abs": 0.0,
+    "rel": 1e-05,
+    "label": "lr_drop_x2_x3:statistics.p_value",
+    "actual": 2.862437857314723e-05,
+    "difference": 0.0,
+    "allowed": 2.862437857314723e-10
+  },
+  {
+    "expected": 2.0,
+    "abs": 0.0,
+    "rel": 0.0,
+    "label": "lr_drop_x2_x3:statistics.df",
+    "actual": 2.0,
+    "difference": 0.0,
+    "allowed": 0.0
+  },
+  {
+    "expected": 0.6517441141230731,
+    "abs": 0.0,
+    "rel": 1e-06,
+    "label": "margins_average:coefficients",
+    "actual": 0.6517441126386452,
+    "difference": 1.4844279139225591e-09,
+    "allowed": 6.51744114123073e-07
+  },
+  {
+    "expected": -0.49702135014477106,
+    "abs": 0.0,
+    "rel": 1e-06,
+    "label": "margins_average:coefficients",
+    "actual": -0.4970213498779281,
+    "difference": 2.6684293663592484e-10,
+    "allowed": 4.970213501447711e-07
+  },
+  {
+    "expected": 0.1514857182227496,
+    "abs": 0.0,
+    "rel": 1e-05,
+    "label": "margins_average:std_errors",
+    "actual": 0.1514857173156908,
+    "difference": 9.070587891901738e-10,
+    "allowed": 1.514857182227496e-06
+  },
+  {
+    "expected": 0.12705412477458178,
+    "abs": 0.0,
+    "rel": 1e-05,
+    "label": "margins_average:std_errors",
+    "actual": 0.12705412459059065,
+    "difference": 1.8399112788891614e-10,
+    "allowed": 1.270541247745818e-06
+  },
+  {
+    "expected": 300.0,
+    "abs": 0.0,
+    "rel": 0.0,
+    "label": "margins_average:nobs",
+    "actual": 300.0,
+    "difference": 0.0,
+    "allowed": 0.0
+  },
+  {
+    "expected": 0.5730412374002157,
+    "abs": 0.0,
+    "rel": 1e-06,
+    "label": "margins_means:coefficients",
+    "actual": 0.5730412360950231,
+    "difference": 1.3051926206486542e-09,
+    "allowed": 5.730412374002157e-07
+  },
+  {
+    "expected": -0.4370023807343474,
+    "abs": 0.0,
+    "rel": 1e-06,
+    "label": "margins_means:coefficients",
+    "actual": -0.43700238049956547,
+    "difference": 2.3478191613079957e-10,
+    "allowed": 4.3700238073434735e-07
+  },
+  {
+    "expected": 0.1167857486671616,
+    "abs": 0.0,
+    "rel": 1e-05,
+    "label": "margins_means:std_errors",
+    "actual": 0.11678574791503003,
+    "difference": 7.521315653624683e-10,
+    "allowed": 1.167857486671616e-06
+  },
+  {
+    "expected": 0.1008076409375375,
+    "abs": 0.0,
+    "rel": 1e-05,
+    "label": "margins_means:std_errors",
+    "actual": 0.10080764078252072,
+    "difference": 1.5501677719242934e-10,
+    "allowed": 1.008076409375375e-06
+  },
+  {
+    "expected": 300.0,
+    "abs": 0.0,
+    "rel": 0.0,
+    "label": "margins_means:nobs",
+    "actual": 300.0,
+    "difference": 0.0,
+    "allowed": 0.0
+  }
+]

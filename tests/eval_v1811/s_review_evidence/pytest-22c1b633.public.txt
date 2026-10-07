@@ -1,0 +1,1404 @@
+........................................................................ [ 23%]
+........................................................................ [ 46%]
+...............................FFF...................................... [ 69%]
+........................................................................ [ 92%]
+.FFFFFF......FFFFFFFFFFFF                                                [100%]
+=================================== FAILURES ===================================
+___________ test_native_model_engine_oracle[negative_binomial-stata] ___________
+tests/test_script_export_model_oracles.py:65: in test_native_model_engine_oracle
+    assert code==0,output
+E   AssertionError: . do analysis.do 
+E     
+E     . * Workbench 1.8.11
+E     . * project: model-oracle
+E     . * run: negative_binomial
+E     . * lineage_hash: 1111111111111111111111111111111111111111111111111111111111111
+E     > 111
+E     . * Coverage
+E     . * model | model.negative_binomial | native | 
+E     . version 18
+E     
+E     . set more off
+E     
+E     . set type double
+E     
+E     . capture program drop wb_repost
+E     
+E     . program define wb_repost, eclass
+E       1.     args beta covariance
+E       2.     ereturn repost b=`beta' V=`covariance', rename
+E       3. end
+E     
+E     . capture program drop wb_sha
+E     
+E     . program define wb_sha
+E       1.     args filename expected
+E       2.     tempfile digestfile
+E       3.     shell shasum -a 256 "`filename'" > "`digestfile'"
+E       4.     tempname fh
+E       5.     file open `fh' using "`digestfile'", read text
+E       6.     file read `fh' line
+E       7.     file close `fh'
+E       8.     if substr("`line'",1,64) != "`expected'" {
+E       9.         display as error "SHA256 mismatch"
+E      10.         exit 9
+E      11.     }
+E      12. end
+E     
+E     . 
+E     . wb_sha "data.csv" "0f643fba418a92bc7a08befa218425056e866314340e1148775107241a
+E     > f4e143"
+E     
+E     
+E     . frame create wb_src0
+E     
+E     . frame change wb_src0
+E     
+E     . import delimited using "data.csv", asdouble clear case(preserve)
+E     (encoding automatically selected: ISO-8859-1)
+E     (10 vars, 350 obs)
+E     
+E     . frame copy wb_src0 wb_model_data1
+E     
+E     . frame change wb_model_data1
+E     
+E     . nbreg nb x z, iterate(100) tolerance(1e-12)
+E     
+E     Fitting Poisson model:
+E     
+E     Iteration 0:  Log likelihood = -542.24988  
+E     Iteration 1:  Log likelihood = -542.24988  
+E     
+E     Fitting constant-only model:
+E     
+E     Iteration 0:  Log likelihood = -527.49282  
+E     Iteration 1:  Log likelihood =  -526.4036  
+E     Iteration 2:  Log likelihood = -526.40348  
+E     Iteration 3:  Log likelihood = -526.40348  
+E     
+E     Fitting full model:
+E     
+E     Iteration 0:  Log likelihood = -513.54168  
+E     Iteration 1:  Log likelihood = -512.36194  
+E     Iteration 2:  Log likelihood = -512.35156  
+E     Iteration 3:  Log likelihood = -512.35156  
+E     
+E     Negative binomial regression                            Number of obs =    350
+E                                                             LR chi2(2)    =  28.10
+E     Dispersion: mean                                        Prob > chi2   = 0.0000
+E     Log likelihood = -512.35156                             Pseudo R2     = 0.0267
+E     
+E     ------------------------------------------------------------------------------
+E               nb | Coefficient  Std. err.      z    P>|z|     [95% conf. interval]
+E     -------------+----------------------------------------------------------------
+E                x |   .3249247   .0653253     4.97   0.000     .1968894      .45296
+E                z |  -.1537548   .0705561    -2.18   0.029    -.2920422   -.0154673
+E            _cons |   .1085129   .0666904     1.63   0.104    -.0221979    .2392237
+E     -------------+----------------------------------------------------------------
+E         /lnalpha |  -.5028288   .2073193                     -.9091671   -.0964905
+E     -------------+----------------------------------------------------------------
+E            alpha |   .6048173   .1253903                      .4028596    .9080185
+E     ------------------------------------------------------------------------------
+E     LR test of alpha=0: chibar2(01) = 59.80                Prob >= chibar2 = 0.000
+E     
+E     . estimates store wb_model1
+E     
+E     . generate long wb_sample_row = _n
+E     
+E     . generate byte wb_sample1 = e(sample)
+E     
+E     . scalar wb_number_0 = _b[_cons]
+E     
+E     . scalar wb_number_1 = _b[x]
+E     
+E     . scalar wb_number_2 = _b[z]
+E     
+E     . scalar wb_number_3 = _se[_cons]
+E     
+E     . scalar wb_number_4 = _se[x]
+E     
+E     . scalar wb_number_5 = _se[z]
+E     
+E     . scalar wb_number_6 = e(N)
+E     
+E     . scalar wb_number_7 = (_b[_cons]/_se[_cons])
+E     
+E     . scalar wb_number_8 = 2*normal(-abs((_b[_cons]/_se[_cons])))
+E     
+E     . scalar wb_number_9 = (_b[x]/_se[x])
+E     
+E     . scalar wb_number_10 = 2*normal(-abs((_b[x]/_se[x])))
+E     
+E     . scalar wb_number_11 = (_b[z]/_se[z])
+E     
+E     . scalar wb_number_12 = 2*normal(-abs((_b[z]/_se[z])))
+E     
+E     . file open wb_numbers using "numeric_actual.tsv", write text replace
+E     (file numeric_actual.tsv not found)
+E     
+E     . file write wb_numbers %21.17g (wb_number_0) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_1) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_2) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_3) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_4) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_5) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_6) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_7) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_8) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_9) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_10) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_11) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_12) _n
+E     
+E     . file close wb_numbers
+E     
+E     . * Closing self-checks
+E     . assert !missing(wb_number_0) & abs(wb_number_0-(0.10852296766580023)) <= 1e-0
+E     > 8+1e-06*abs(0.10852296766580023)
+E     assertion is false
+E     r(9);
+E     
+E     end of do-file
+E     r(9);
+E     
+E   assert 9 == 0
+----------------------------- Captured stdout call -----------------------------
+Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/fixtures/script_export/local_runs/oracle-k4sqdj3_
+_____________ test_native_model_engine_oracle[negative_binomial-r] _____________
+tests/test_script_export_model_oracles.py:65: in test_native_model_engine_oracle
+    assert code==0,output
+E   AssertionError: Error in wb_check(checks[[1]], 0.1085229676658, 1e-08, 1e-06, "model:coefficients") : 
+E       model:coefficients 0.108512923662649 != 0.1085229676658
+E     Execution halted
+E     
+E   assert 1 == 0
+----------------------------- Captured stdout call -----------------------------
+Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/fixtures/script_export/local_runs/oracle-0yu7c5r6
+__________ test_native_model_engine_oracle[negative_binomial-python] ___________
+tests/test_script_export_model_oracles.py:65: in test_native_model_engine_oracle
+    assert code==0,output
+E   AssertionError: Traceback (most recent call last):
+E       File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/fixtures/script_export/local_runs/oracle-qeh0jmy6/analysis.py", line 74, in <module>
+E         wb_check(checks[0], 0.10852296766580023, 1e-08, 1e-06, 'model:coefficients')
+E         ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/fixtures/script_export/local_runs/oracle-qeh0jmy6/analysis.py", line 28, in wb_check
+E         raise AssertionError(f'{label}: {actual!r} != {expected!r}')
+E     AssertionError: model:coefficients: 0.1085129236626457 != 0.10852296766580023
+E     
+E   assert 1 == 0
+----------------------------- Captured stdout call -----------------------------
+Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/fixtures/script_export/local_runs/oracle-qeh0jmy6
+____ test_postestimation_native_kernel_oracle[negative_binomial-wald-stata] ____
+tests/test_script_export_postestimation_oracles.py:62: in test_postestimation_native_kernel_oracle
+    assert code==0,output
+E   AssertionError: . do analysis.do 
+E     
+E     . * Workbench 1.8.11
+E     . * project: postestimation
+E     . * run: negative_binomial
+E     . * lineage_hash: 6666666666666666666666666666666666666666666666666666666666666
+E     > 666
+E     . * Coverage
+E     . * model | model.negative_binomial | native | 
+E     . * test | postestimation.wald | native | 
+E     . version 18
+E     
+E     . set more off
+E     
+E     . set type double
+E     
+E     . capture program drop wb_repost
+E     
+E     . program define wb_repost, eclass
+E       1.     args beta covariance
+E       2.     ereturn repost b=`beta' V=`covariance', rename
+E       3. end
+E     
+E     . capture program drop wb_sha
+E     
+E     . program define wb_sha
+E       1.     args filename expected
+E       2.     tempfile digestfile
+E       3.     shell shasum -a 256 "`filename'" > "`digestfile'"
+E       4.     tempname fh
+E       5.     file open `fh' using "`digestfile'", read text
+E       6.     file read `fh' line
+E       7.     file close `fh'
+E       8.     if substr("`line'",1,64) != "`expected'" {
+E       9.         display as error "SHA256 mismatch"
+E      10.         exit 9
+E      11.     }
+E      12. end
+E     
+E     . 
+E     . wb_sha "data.csv" "0f643fba418a92bc7a08befa218425056e866314340e1148775107241a
+E     > f4e143"
+E     
+E     
+E     . frame create wb_src0
+E     
+E     . frame change wb_src0
+E     
+E     . import delimited using "data.csv", asdouble clear case(preserve)
+E     (encoding automatically selected: ISO-8859-1)
+E     (10 vars, 350 obs)
+E     
+E     . frame copy wb_src0 wb_model_data1
+E     
+E     . frame change wb_model_data1
+E     
+E     . nbreg nb x z, iterate(100) tolerance(1e-12)
+E     
+E     Fitting Poisson model:
+E     
+E     Iteration 0:  Log likelihood = -542.24988  
+E     Iteration 1:  Log likelihood = -542.24988  
+E     
+E     Fitting constant-only model:
+E     
+E     Iteration 0:  Log likelihood = -527.49282  
+E     Iteration 1:  Log likelihood =  -526.4036  
+E     Iteration 2:  Log likelihood = -526.40348  
+E     Iteration 3:  Log likelihood = -526.40348  
+E     
+E     Fitting full model:
+E     
+E     Iteration 0:  Log likelihood = -513.54168  
+E     Iteration 1:  Log likelihood = -512.36194  
+E     Iteration 2:  Log likelihood = -512.35156  
+E     Iteration 3:  Log likelihood = -512.35156  
+E     
+E     Negative binomial regression                            Number of obs =    350
+E                                                             LR chi2(2)    =  28.10
+E     Dispersion: mean                                        Prob > chi2   = 0.0000
+E     Log likelihood = -512.35156                             Pseudo R2     = 0.0267
+E     
+E     ------------------------------------------------------------------------------
+E               nb | Coefficient  Std. err.      z    P>|z|     [95% conf. interval]
+E     -------------+----------------------------------------------------------------
+E                x |   .3249247   .0653253     4.97   0.000     .1968894      .45296
+E                z |  -.1537548   .0705561    -2.18   0.029    -.2920422   -.0154673
+E            _cons |   .1085129   .0666904     1.63   0.104    -.0221979    .2392237
+E     -------------+----------------------------------------------------------------
+E         /lnalpha |  -.5028288   .2073193                     -.9091671   -.0964905
+E     -------------+----------------------------------------------------------------
+E            alpha |   .6048173   .1253903                      .4028596    .9080185
+E     ------------------------------------------------------------------------------
+E     LR test of alpha=0: chibar2(01) = 59.80                Prob >= chibar2 = 0.000
+E     
+E     . estimates store wb_model1
+E     
+E     . generate long wb_sample_row = _n
+E     
+E     . generate byte wb_sample1 = e(sample)
+E     
+E     . scalar wb_number_0 = _b[_cons]
+E     
+E     . scalar wb_number_1 = _b[x]
+E     
+E     . scalar wb_number_2 = _b[z]
+E     
+E     . scalar wb_number_3 = _se[_cons]
+E     
+E     . scalar wb_number_4 = _se[x]
+E     
+E     . scalar wb_number_5 = _se[z]
+E     
+E     . scalar wb_number_6 = e(N)
+E     
+E     . scalar wb_number_7 = (_b[_cons]/_se[_cons])
+E     
+E     . scalar wb_number_8 = 2*normal(-abs((_b[_cons]/_se[_cons])))
+E     
+E     . scalar wb_number_9 = (_b[x]/_se[x])
+E     
+E     . scalar wb_number_10 = 2*normal(-abs((_b[x]/_se[x])))
+E     
+E     . scalar wb_number_11 = (_b[z]/_se[z])
+E     
+E     . scalar wb_number_12 = 2*normal(-abs((_b[z]/_se[z])))
+E     
+E     . frame change wb_model_data1
+E     
+E     . estimates restore wb_model1
+E     (results wb_model1 are active now)
+E     
+E     . test ((1*_b[x]) = 0.2) ((1*_b[z]) = 0)
+E     
+E      ( 1)  [nb]x = .2
+E      ( 2)  [nb]z = 0
+E     
+E                chi2(  2) =    8.05
+E              Prob > chi2 =    0.0179
+E     
+E     . scalar wb_number_13 = r(chi2)
+E     
+E     . scalar wb_number_14 = r(p)
+E     
+E     . scalar wb_number_15 = r(df)
+E     
+E     . file open wb_numbers using "numeric_actual.tsv", write text replace
+E     (file numeric_actual.tsv not found)
+E     
+E     . file write wb_numbers %21.17g (wb_number_0) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_1) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_2) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_3) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_4) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_5) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_6) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_7) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_8) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_9) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_10) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_11) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_12) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_13) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_14) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_15) _n
+E     
+E     . file close wb_numbers
+E     
+E     . * Closing self-checks
+E     . assert !missing(wb_number_0) & abs(wb_number_0-(0.10852296766580023)) <= 1e-0
+E     > 8+1e-06*abs(0.10852296766580023)
+E     assertion is false
+E     r(9);
+E     
+E     end of do-file
+E     r(9);
+E     
+E   assert 9 == 0
+----------------------------- Captured stdout call -----------------------------
+Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/fixtures/script_export/local_runs/oracle-z6wb2p_6
+______ test_postestimation_native_kernel_oracle[negative_binomial-wald-r] ______
+tests/test_script_export_postestimation_oracles.py:62: in test_postestimation_native_kernel_oracle
+    assert code==0,output
+E   AssertionError: Error in wb_check(checks[[1]], 0.1085229676658, 1e-08, 1e-06, "model:coefficients") : 
+E       model:coefficients 0.108512923662649 != 0.1085229676658
+E     Execution halted
+E     
+E   assert 1 == 0
+----------------------------- Captured stdout call -----------------------------
+Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/fixtures/script_export/local_runs/oracle-9dy7241m
+___ test_postestimation_native_kernel_oracle[negative_binomial-wald-python] ____
+tests/test_script_export_postestimation_oracles.py:62: in test_postestimation_native_kernel_oracle
+    assert code==0,output
+E   AssertionError: Traceback (most recent call last):
+E       File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/fixtures/script_export/local_runs/oracle-4gqfay88/analysis.py", line 144, in <module>
+E         wb_check(checks[0], 0.10852296766580023, 1e-08, 1e-06, 'model:coefficients')
+E         ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/fixtures/script_export/local_runs/oracle-4gqfay88/analysis.py", line 29, in wb_check
+E         raise AssertionError(f'{label}: {actual!r} != {expected!r}')
+E     AssertionError: model:coefficients: 0.1085129236626457 != 0.10852296766580023
+E     
+E   assert 1 == 0
+----------------------------- Captured stdout call -----------------------------
+Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/fixtures/script_export/local_runs/oracle-4gqfay88
+___ test_postestimation_native_kernel_oracle[negative_binomial-lincom-stata] ___
+tests/test_script_export_postestimation_oracles.py:62: in test_postestimation_native_kernel_oracle
+    assert code==0,output
+E   AssertionError: . do analysis.do 
+E     
+E     . * Workbench 1.8.11
+E     . * project: postestimation
+E     . * run: negative_binomial
+E     . * lineage_hash: 6666666666666666666666666666666666666666666666666666666666666
+E     > 666
+E     . * Coverage
+E     . * model | model.negative_binomial | native | 
+E     . * test | postestimation.lincom | native | 
+E     . version 18
+E     
+E     . set more off
+E     
+E     . set type double
+E     
+E     . capture program drop wb_repost
+E     
+E     . program define wb_repost, eclass
+E       1.     args beta covariance
+E       2.     ereturn repost b=`beta' V=`covariance', rename
+E       3. end
+E     
+E     . capture program drop wb_sha
+E     
+E     . program define wb_sha
+E       1.     args filename expected
+E       2.     tempfile digestfile
+E       3.     shell shasum -a 256 "`filename'" > "`digestfile'"
+E       4.     tempname fh
+E       5.     file open `fh' using "`digestfile'", read text
+E       6.     file read `fh' line
+E       7.     file close `fh'
+E       8.     if substr("`line'",1,64) != "`expected'" {
+E       9.         display as error "SHA256 mismatch"
+E      10.         exit 9
+E      11.     }
+E      12. end
+E     
+E     . 
+E     . wb_sha "data.csv" "0f643fba418a92bc7a08befa218425056e866314340e1148775107241a
+E     > f4e143"
+E     
+E     
+E     . frame create wb_src0
+E     
+E     . frame change wb_src0
+E     
+E     . import delimited using "data.csv", asdouble clear case(preserve)
+E     (encoding automatically selected: ISO-8859-1)
+E     (10 vars, 350 obs)
+E     
+E     . frame copy wb_src0 wb_model_data1
+E     
+E     . frame change wb_model_data1
+E     
+E     . nbreg nb x z, iterate(100) tolerance(1e-12)
+E     
+E     Fitting Poisson model:
+E     
+E     Iteration 0:  Log likelihood = -542.24988  
+E     Iteration 1:  Log likelihood = -542.24988  
+E     
+E     Fitting constant-only model:
+E     
+E     Iteration 0:  Log likelihood = -527.49282  
+E     Iteration 1:  Log likelihood =  -526.4036  
+E     Iteration 2:  Log likelihood = -526.40348  
+E     Iteration 3:  Log likelihood = -526.40348  
+E     
+E     Fitting full model:
+E     
+E     Iteration 0:  Log likelihood = -513.54168  
+E     Iteration 1:  Log likelihood = -512.36194  
+E     Iteration 2:  Log likelihood = -512.35156  
+E     Iteration 3:  Log likelihood = -512.35156  
+E     
+E     Negative binomial regression                            Number of obs =    350
+E                                                             LR chi2(2)    =  28.10
+E     Dispersion: mean                                        Prob > chi2   = 0.0000
+E     Log likelihood = -512.35156                             Pseudo R2     = 0.0267
+E     
+E     ------------------------------------------------------------------------------
+E               nb | Coefficient  Std. err.      z    P>|z|     [95% conf. interval]
+E     -------------+----------------------------------------------------------------
+E                x |   .3249247   .0653253     4.97   0.000     .1968894      .45296
+E                z |  -.1537548   .0705561    -2.18   0.029    -.2920422   -.0154673
+E            _cons |   .1085129   .0666904     1.63   0.104    -.0221979    .2392237
+E     -------------+----------------------------------------------------------------
+E         /lnalpha |  -.5028288   .2073193                     -.9091671   -.0964905
+E     -------------+----------------------------------------------------------------
+E            alpha |   .6048173   .1253903                      .4028596    .9080185
+E     ------------------------------------------------------------------------------
+E     LR test of alpha=0: chibar2(01) = 59.80                Prob >= chibar2 = 0.000
+E     
+E     . estimates store wb_model1
+E     
+E     . generate long wb_sample_row = _n
+E     
+E     . generate byte wb_sample1 = e(sample)
+E     
+E     . scalar wb_number_0 = _b[_cons]
+E     
+E     . scalar wb_number_1 = _b[x]
+E     
+E     . scalar wb_number_2 = _b[z]
+E     
+E     . scalar wb_number_3 = _se[_cons]
+E     
+E     . scalar wb_number_4 = _se[x]
+E     
+E     . scalar wb_number_5 = _se[z]
+E     
+E     . scalar wb_number_6 = e(N)
+E     
+E     . scalar wb_number_7 = (_b[_cons]/_se[_cons])
+E     
+E     . scalar wb_number_8 = 2*normal(-abs((_b[_cons]/_se[_cons])))
+E     
+E     . scalar wb_number_9 = (_b[x]/_se[x])
+E     
+E     . scalar wb_number_10 = 2*normal(-abs((_b[x]/_se[x])))
+E     
+E     . scalar wb_number_11 = (_b[z]/_se[z])
+E     
+E     . scalar wb_number_12 = 2*normal(-abs((_b[z]/_se[z])))
+E     
+E     . frame change wb_model_data1
+E     
+E     . estimates restore wb_model1
+E     (results wb_model1 are active now)
+E     
+E     . lincom (1*x)+(2*z)+(-0.5)
+E     
+E      ( 1)  [nb]x + 2*[nb]z = .5
+E     
+E     ------------------------------------------------------------------------------
+E               nb | Coefficient  Std. err.      z    P>|z|     [95% conf. interval]
+E     -------------+----------------------------------------------------------------
+E              (1) |  -.4825848   .1527997    -3.16   0.002    -.7820667    -.183103
+E     ------------------------------------------------------------------------------
+E     
+E     . scalar wb_number_13 = r(estimate)
+E     
+E     . scalar wb_number_14 = r(se)
+E     
+E     . scalar wb_number_15 = r(estimate)/r(se)
+E     
+E     . scalar wb_number_16 = r(p)
+E     
+E     . file open wb_numbers using "numeric_actual.tsv", write text replace
+E     (file numeric_actual.tsv not found)
+E     
+E     . file write wb_numbers %21.17g (wb_number_0) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_1) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_2) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_3) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_4) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_5) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_6) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_7) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_8) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_9) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_10) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_11) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_12) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_13) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_14) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_15) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_16) _n
+E     
+E     . file close wb_numbers
+E     
+E     . * Closing self-checks
+E     . assert !missing(wb_number_0) & abs(wb_number_0-(0.10852296766580023)) <= 1e-0
+E     > 8+1e-06*abs(0.10852296766580023)
+E     assertion is false
+E     r(9);
+E     
+E     end of do-file
+E     r(9);
+E     
+E   assert 9 == 0
+----------------------------- Captured stdout call -----------------------------
+Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/fixtures/script_export/local_runs/oracle-9nvk_g9x
+_____ test_postestimation_native_kernel_oracle[negative_binomial-lincom-r] _____
+tests/test_script_export_postestimation_oracles.py:62: in test_postestimation_native_kernel_oracle
+    assert code==0,output
+E   AssertionError: Error in wb_check(checks[[1]], 0.1085229676658, 1e-08, 1e-06, "model:coefficients") : 
+E       model:coefficients 0.108512923662649 != 0.1085229676658
+E     Execution halted
+E     
+E   assert 1 == 0
+----------------------------- Captured stdout call -----------------------------
+Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/fixtures/script_export/local_runs/oracle-wpnyv1lm
+__ test_postestimation_native_kernel_oracle[negative_binomial-lincom-python] ___
+tests/test_script_export_postestimation_oracles.py:62: in test_postestimation_native_kernel_oracle
+    assert code==0,output
+E   AssertionError: Traceback (most recent call last):
+E       File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/fixtures/script_export/local_runs/oracle-i8pv67jv/analysis.py", line 145, in <module>
+E         wb_check(checks[0], 0.10852296766580023, 1e-08, 1e-06, 'model:coefficients')
+E         ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/fixtures/script_export/local_runs/oracle-i8pv67jv/analysis.py", line 29, in wb_check
+E         raise AssertionError(f'{label}: {actual!r} != {expected!r}')
+E     AssertionError: model:coefficients: 0.1085129236626457 != 0.10852296766580023
+E     
+E   assert 1 == 0
+----------------------------- Captured stdout call -----------------------------
+Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/fixtures/script_export/local_runs/oracle-i8pv67jv
+__________ test_panel_clustered_runner_oracle[entity-panel_ols-stata] __________
+tests/test_script_export_iv_panel_oracles.py:53: in test_panel_clustered_runner_oracle
+    assert code==0,output
+E   AssertionError: . do analysis.do 
+E     
+E     . * Workbench 1.8.11
+E     . * project: panel
+E     . * run: panel_ols_entity
+E     . * lineage_hash: 9999999999999999999999999999999999999999999999999999999999999
+E     > 999
+E     . * Coverage
+E     . * model | model.panel_ols | native | 
+E     . version 18
+E     
+E     . set more off
+E     
+E     . set type double
+E     
+E     . capture program drop wb_repost
+E     
+E     . program define wb_repost, eclass
+E       1.     args beta covariance
+E       2.     ereturn repost b=`beta' V=`covariance', rename
+E       3. end
+E     
+E     . capture program drop wb_sha
+E     
+E     . program define wb_sha
+E       1.     args filename expected
+E       2.     tempfile digestfile
+E       3.     shell shasum -a 256 "`filename'" > "`digestfile'"
+E       4.     tempname fh
+E       5.     file open `fh' using "`digestfile'", read text
+E       6.     file read `fh' line
+E       7.     file close `fh'
+E       8.     if substr("`line'",1,64) != "`expected'" {
+E       9.         display as error "SHA256 mismatch"
+E      10.         exit 9
+E      11.     }
+E      12. end
+E     
+E     . 
+E     . wb_sha "data.csv" "5a343c51b3dc532904f7611c86acd1cf2a16a1282f7e1804d2fdd39a7f
+E     > 7da92f"
+E     
+E     
+E     . frame create wb_src0
+E     
+E     . frame change wb_src0
+E     
+E     . import delimited using "data.csv", asdouble clear case(preserve)
+E     (encoding automatically selected: ISO-8859-1)
+E     (8 vars, 320 obs)
+E     
+E     . frame copy wb_src0 wb_model_data1
+E     
+E     . frame change wb_model_data1
+E     
+E     . tempvar wb_order
+E     
+E     . generate long `wb_order' = _n
+E     
+E     . keep if !missing(y) & !missing(x) & !missing(entity) & !missing(time) & !miss
+E     > ing(cluster)
+E     (0 observations deleted)
+E     
+E     . tempvar wb_cluster
+E     
+E     . egen long `wb_cluster' = group(cluster)
+E     
+E     . tempvar wb_within0
+E     
+E     . generate double `wb_within0' = y
+E     
+E     . tempvar wb_within1
+E     
+E     . generate double `wb_within1' = x
+E     
+E     . scalar wb_converged = 0
+E     
+E     . forvalues wb_iter = 1/10000 {
+E       2.     scalar wb_maxdiff = 0
+E       3.     tempvar wb_previous0
+E       4.     generate double `wb_previous0' = `wb_within0'
+E       5.     tempvar wb_previous1
+E       6.     generate double `wb_previous1' = `wb_within1'
+E       7.     tempvar wb_group_mean
+E       8.     bysort entity: egen double `wb_group_mean' = mean(`wb_within0')
+E       9.     replace `wb_within0' = `wb_within0' - `wb_group_mean'
+E      10.     drop `wb_group_mean'
+E      11.     tempvar wb_group_mean
+E      12.     bysort entity: egen double `wb_group_mean' = mean(`wb_within1')
+E      13.     replace `wb_within1' = `wb_within1' - `wb_group_mean'
+E      14.     drop `wb_group_mean'
+E      15.     tempvar wb_group_mean
+E      16.     bysort time: egen double `wb_group_mean' = mean(`wb_within0')
+E      17.     replace `wb_within0' = `wb_within0' - `wb_group_mean'
+E      18.     drop `wb_group_mean'
+E      19.     tempvar wb_group_mean
+E      20.     bysort time: egen double `wb_group_mean' = mean(`wb_within1')
+E      21.     replace `wb_within1' = `wb_within1' - `wb_group_mean'
+E      22.     drop `wb_group_mean'
+E      23.     tempvar wb_difference
+E      24.     generate double `wb_difference' = abs(`wb_within0' - `wb_previous0')
+E      25.     quietly summarize `wb_difference', meanonly
+E      26.     scalar wb_maxdiff = max(wb_maxdiff,r(max))
+E      27.     drop `wb_difference' `wb_previous0'
+E      28.     tempvar wb_difference
+E      29.     generate double `wb_difference' = abs(`wb_within1' - `wb_previous1')
+E      30.     quietly summarize `wb_difference', meanonly
+E      31.     scalar wb_maxdiff = max(wb_maxdiff,r(max))
+E      32.     drop `wb_difference' `wb_previous1'
+E      33.     if wb_maxdiff < 1e-13 {
+E      34.         scalar wb_converged = 1
+E      35.         continue, break
+E      36.     }
+E      37. }
+E     (320 real changes made)
+E     (320 real changes made)
+E     (320 real changes made)
+E     (320 real changes made)
+E     (124 real changes made)
+E     (101 real changes made)
+E     (128 real changes made)
+E     (83 real changes made)
+E     
+E     . assert wb_converged == 1
+E     
+E     . quietly summarize y, meanonly
+E     
+E     . replace `wb_within0' = `wb_within0' + r(mean)
+E     (320 real changes made)
+E     
+E     . quietly summarize x, meanonly
+E     
+E     . replace `wb_within1' = `wb_within1' + r(mean)
+E     (320 real changes made)
+E     
+E     . sort `wb_order'
+E     
+E     . regress `wb_within0' `wb_within1', vce(cluster `wb_cluster')
+E     
+E     Linear regression                               Number of obs     =        320
+E                                                     F(0, 39)          =          .
+E                                                     Prob > F          =          .
+E                                                     R-squared         =     0.0813
+E                                                     Root MSE          =     1.4093
+E     
+E                                   (Std. err. adjusted for 40 clusters in __000001)
+E     ------------------------------------------------------------------------------
+E                  |               Robust
+E         __000002 | Coefficient  std. err.      t    P>|t|     [95% conf. interval]
+E     -------------+----------------------------------------------------------------
+E         __000003 |   .4564435   .0918079     4.97   0.000     .2707446    .6421424
+E            _cons |   1.081334   .0023405   462.01   0.000       1.0766    1.086068
+E     ------------------------------------------------------------------------------
+E     
+E     . scalar wb_K = 2
+E     
+E     . tempvar wb_mincluster wb_maxcluster
+E     
+E     . bysort entity: egen double `wb_mincluster' = min(`wb_cluster')
+E     
+E     . bysort entity: egen double `wb_maxcluster' = max(`wb_cluster')
+E     
+E     . count if `wb_mincluster' != `wb_maxcluster'
+E       0
+E     
+E     . if r(N) {
+E     .     quietly levelsof entity, local(wb_levels)
+E     .     local wb_nlevels : word count `wb_levels'
+E     .     scalar wb_K = wb_K + `wb_nlevels' - 1
+E     . }
+E     
+E     . drop `wb_mincluster' `wb_maxcluster'
+E     
+E     . tempvar wb_mincluster wb_maxcluster
+E     
+E     . bysort time: egen double `wb_mincluster' = min(`wb_cluster')
+E     
+E     . bysort time: egen double `wb_maxcluster' = max(`wb_cluster')
+E     
+E     . count if `wb_mincluster' != `wb_maxcluster'
+E       320
+E     
+E     . if r(N) {
+E     .     quietly levelsof time, local(wb_levels)
+E     .     local wb_nlevels : word count `wb_levels'
+E     .     scalar wb_K = wb_K + `wb_nlevels' - 1
+E     . }
+E     
+E     . drop `wb_mincluster' `wb_maxcluster'
+E     
+E     . matrix wb_cov = e(V)*(e(N)-2)/(e(N)-wb_K)
+E     
+E     . matrix wb_beta = e(b)
+E     
+E     . matrix colnames wb_beta = x _cons
+E     
+E     . matrix colnames wb_cov = x _cons
+E     
+E     . matrix rownames wb_cov = x _cons
+E     
+E     . wb_repost wb_beta wb_cov
+E     
+E     . estimates store wb_model1
+E     
+E     . generate long wb_sample_row = _n
+E     
+E     . generate byte wb_sample1 = e(sample)
+E     
+E     . scalar wb_number_0 = _b[_cons]
+E     
+E     . scalar wb_number_1 = _b[x]
+E     
+E     . scalar wb_number_2 = _se[_cons]
+E     
+E     . scalar wb_number_3 = _se[x]
+E     
+E     . scalar wb_number_4 = e(N)
+E     
+E     . capture confirm scalar e(df_r)
+E     
+E     . if _rc exit 9
+E     
+E     . scalar wb_number_5 = (_b[_cons]/_se[_cons])
+E     
+E     . scalar wb_number_6 = 2*ttail(e(df_r),abs((_b[_cons]/_se[_cons])))
+E     
+E     . scalar wb_number_7 = e(df_r)
+E     
+E     . capture confirm scalar e(df_r)
+E     
+E     . if _rc exit 9
+E     
+E     . scalar wb_number_8 = (_b[x]/_se[x])
+E     
+E     . scalar wb_number_9 = 2*ttail(e(df_r),abs((_b[x]/_se[x])))
+E     
+E     . scalar wb_number_10 = e(df_r)
+E     
+E     . file open wb_numbers using "numeric_actual.tsv", write text replace
+E     (file numeric_actual.tsv not found)
+E     
+E     . file write wb_numbers %21.17g (wb_number_0) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_1) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_2) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_3) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_4) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_5) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_6) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_7) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_8) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_9) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_10) _n
+E     
+E     . file close wb_numbers
+E     
+E     . * Closing self-checks
+E     . assert !missing(wb_number_0) & abs(wb_number_0-(1.0813341651830135)) <= 1e-08
+E     > +1e-06*abs(1.0813341651830135)
+E     
+E     . assert !missing(wb_number_1) & abs(wb_number_1-(0.45644348398230805)) <= 1e-0
+E     > 8+1e-06*abs(0.45644348398230805)
+E     
+E     . assert !missing(wb_number_2) & abs(wb_number_2-(0.0025027726423520295)) <= 1e
+E     > -08+1e-05*abs(0.0025027726423520295)
+E     assertion is false
+E     r(9);
+E     
+E     end of do-file
+E     r(9);
+E     
+E   assert 9 == 0
+----------------------------- Captured stdout call -----------------------------
+Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/fixtures/script_export/local_runs/oracle-tkg5drxt
+____________ test_panel_clustered_runner_oracle[entity-panel_ols-r] ____________
+tests/test_script_export_iv_panel_oracles.py:53: in test_panel_clustered_runner_oracle
+    assert code==0,output
+E   AssertionError: Error in wb_check(checks[[3]], 0.00250277264235203, 1e-08, 1e-05, "model:std_errors") : 
+E       model:std_errors 0.00236670267206428 != 0.00250277264235203
+E     Execution halted
+E     
+E   assert 1 == 0
+----------------------------- Captured stdout call -----------------------------
+Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/fixtures/script_export/local_runs/oracle-gz7tk4yy
+_________ test_panel_clustered_runner_oracle[entity-panel_ols-python] __________
+tests/test_script_export_iv_panel_oracles.py:53: in test_panel_clustered_runner_oracle
+    assert code==0,output
+E   AssertionError: Traceback (most recent call last):
+E       File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/fixtures/script_export/local_runs/oracle-yrr9pwvc/analysis.py", line 109, in <module>
+E         wb_check(checks[2], 0.0025027726423520295, 1e-08, 1e-05, 'model:std_errors')
+E         ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/fixtures/script_export/local_runs/oracle-yrr9pwvc/analysis.py", line 28, in wb_check
+E         raise AssertionError(f'{label}: {actual!r} != {expected!r}')
+E     AssertionError: model:std_errors: 0.0023667026720642645 != 0.0025027726423520295
+E     
+E   assert 1 == 0
+----------------------------- Captured stdout call -----------------------------
+Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/fixtures/script_export/local_runs/oracle-yrr9pwvc
+_____________ test_panel_clustered_runner_oracle[entity-did-stata] _____________
+tests/test_script_export_iv_panel_oracles.py:53: in test_panel_clustered_runner_oracle
+    assert code==0,output
+E   AssertionError: . do analysis.do 
+E     
+E     . * Workbench 1.8.11
+E     . * project: panel
+E     . * run: did_entity
+E     . * lineage_hash: 9999999999999999999999999999999999999999999999999999999999999
+E     > 999
+E     . * Coverage
+E     . * model | model.did | native | 
+E     . version 18
+E     
+E     . set more off
+E     
+E     . set type double
+E     
+E     . capture program drop wb_repost
+E     
+E     . program define wb_repost, eclass
+E       1.     args beta covariance
+E       2.     ereturn repost b=`beta' V=`covariance', rename
+E       3. end
+E     
+E     . capture program drop wb_sha
+E     
+E     . program define wb_sha
+E       1.     args filename expected
+E       2.     tempfile digestfile
+E       3.     shell shasum -a 256 "`filename'" > "`digestfile'"
+E       4.     tempname fh
+E       5.     file open `fh' using "`digestfile'", read text
+E       6.     file read `fh' line
+E       7.     file close `fh'
+E       8.     if substr("`line'",1,64) != "`expected'" {
+E       9.         display as error "SHA256 mismatch"
+E      10.         exit 9
+E      11.     }
+E      12. end
+E     
+E     . 
+E     . wb_sha "data.csv" "5a343c51b3dc532904f7611c86acd1cf2a16a1282f7e1804d2fdd39a7f
+E     > 7da92f"
+E     
+E     
+E     . frame create wb_src0
+E     
+E     . frame change wb_src0
+E     
+E     . import delimited using "data.csv", asdouble clear case(preserve)
+E     (encoding automatically selected: ISO-8859-1)
+E     (8 vars, 320 obs)
+E     
+E     . frame copy wb_src0 wb_model_data1
+E     
+E     . frame change wb_model_data1
+E     
+E     . tempvar wb_order
+E     
+E     . generate long `wb_order' = _n
+E     
+E     . keep if !missing(y) & !missing(_did_D) & !missing(x) & !missing(entity) & !mi
+E     > ssing(time) & !missing(cluster)
+E     (0 observations deleted)
+E     
+E     . tempvar wb_cluster
+E     
+E     . egen long `wb_cluster' = group(cluster)
+E     
+E     . tempvar wb_within0
+E     
+E     . generate double `wb_within0' = y
+E     
+E     . tempvar wb_within1
+E     
+E     . generate double `wb_within1' = _did_D
+E     
+E     . tempvar wb_within2
+E     
+E     . generate double `wb_within2' = x
+E     
+E     . scalar wb_converged = 0
+E     
+E     . forvalues wb_iter = 1/10000 {
+E       2.     scalar wb_maxdiff = 0
+E       3.     tempvar wb_previous0
+E       4.     generate double `wb_previous0' = `wb_within0'
+E       5.     tempvar wb_previous1
+E       6.     generate double `wb_previous1' = `wb_within1'
+E       7.     tempvar wb_previous2
+E       8.     generate double `wb_previous2' = `wb_within2'
+E       9.     tempvar wb_group_mean
+E      10.     bysort entity: egen double `wb_group_mean' = mean(`wb_within0')
+E      11.     replace `wb_within0' = `wb_within0' - `wb_group_mean'
+E      12.     drop `wb_group_mean'
+E      13.     tempvar wb_group_mean
+E      14.     bysort entity: egen double `wb_group_mean' = mean(`wb_within1')
+E      15.     replace `wb_within1' = `wb_within1' - `wb_group_mean'
+E      16.     drop `wb_group_mean'
+E      17.     tempvar wb_group_mean
+E      18.     bysort entity: egen double `wb_group_mean' = mean(`wb_within2')
+E      19.     replace `wb_within2' = `wb_within2' - `wb_group_mean'
+E      20.     drop `wb_group_mean'
+E      21.     tempvar wb_group_mean
+E      22.     bysort time: egen double `wb_group_mean' = mean(`wb_within0')
+E      23.     replace `wb_within0' = `wb_within0' - `wb_group_mean'
+E      24.     drop `wb_group_mean'
+E      25.     tempvar wb_group_mean
+E      26.     bysort time: egen double `wb_group_mean' = mean(`wb_within1')
+E      27.     replace `wb_within1' = `wb_within1' - `wb_group_mean'
+E      28.     drop `wb_group_mean'
+E      29.     tempvar wb_group_mean
+E      30.     bysort time: egen double `wb_group_mean' = mean(`wb_within2')
+E      31.     replace `wb_within2' = `wb_within2' - `wb_group_mean'
+E      32.     drop `wb_group_mean'
+E      33.     tempvar wb_difference
+E      34.     generate double `wb_difference' = abs(`wb_within0' - `wb_previous0')
+E      35.     quietly summarize `wb_difference', meanonly
+E      36.     scalar wb_maxdiff = max(wb_maxdiff,r(max))
+E      37.     drop `wb_difference' `wb_previous0'
+E      38.     tempvar wb_difference
+E      39.     generate double `wb_difference' = abs(`wb_within1' - `wb_previous1')
+E      40.     quietly summarize `wb_difference', meanonly
+E      41.     scalar wb_maxdiff = max(wb_maxdiff,r(max))
+E      42.     drop `wb_difference' `wb_previous1'
+E      43.     tempvar wb_difference
+E      44.     generate double `wb_difference' = abs(`wb_within2' - `wb_previous2')
+E      45.     quietly summarize `wb_difference', meanonly
+E      46.     scalar wb_maxdiff = max(wb_maxdiff,r(max))
+E      47.     drop `wb_difference' `wb_previous2'
+E      48.     if wb_maxdiff < 1e-13 {
+E      49.         scalar wb_converged = 1
+E      50.         continue, break
+E      51.     }
+E      52. }
+E     (320 real changes made)
+E     (160 real changes made)
+E     (320 real changes made)
+E     (320 real changes made)
+E     (320 real changes made)
+E     (320 real changes made)
+E     (124 real changes made)
+E     (0 real changes made)
+E     (101 real changes made)
+E     (128 real changes made)
+E     (0 real changes made)
+E     (83 real changes made)
+E     
+E     . assert wb_converged == 1
+E     
+E     . quietly summarize y, meanonly
+E     
+E     . replace `wb_within0' = `wb_within0' + r(mean)
+E     (320 real changes made)
+E     
+E     . quietly summarize _did_D, meanonly
+E     
+E     . replace `wb_within1' = `wb_within1' + r(mean)
+E     (320 real changes made)
+E     
+E     . quietly summarize x, meanonly
+E     
+E     . replace `wb_within2' = `wb_within2' + r(mean)
+E     (320 real changes made)
+E     
+E     . sort `wb_order'
+E     
+E     . regress `wb_within0' `wb_within1' `wb_within2', vce(cluster `wb_cluster')
+E     
+E     Linear regression                               Number of obs     =        320
+E                                                     F(1, 39)          =          .
+E                                                     Prob > F          =          .
+E                                                     R-squared         =     0.0867
+E                                                     Root MSE          =     1.4073
+E     
+E                                   (Std. err. adjusted for 40 clusters in __000001)
+E     ------------------------------------------------------------------------------
+E                  |               Robust
+E         __000002 | Coefficient  std. err.      t    P>|t|     [95% conf. interval]
+E     -------------+----------------------------------------------------------------
+E         __000003 |  -.4328097    .340507    -1.27   0.211     -1.12155    .2559308
+E         __000004 |   .4573196   .0896347     5.10   0.000     .2760163    .6386229
+E            _cons |   1.189559   .0844471    14.09   0.000     1.018749    1.360369
+E     ------------------------------------------------------------------------------
+E     
+E     . scalar wb_K = 3
+E     
+E     . tempvar wb_mincluster wb_maxcluster
+E     
+E     . bysort entity: egen double `wb_mincluster' = min(`wb_cluster')
+E     
+E     . bysort entity: egen double `wb_maxcluster' = max(`wb_cluster')
+E     
+E     . count if `wb_mincluster' != `wb_maxcluster'
+E       0
+E     
+E     . if r(N) {
+E     .     quietly levelsof entity, local(wb_levels)
+E     .     local wb_nlevels : word count `wb_levels'
+E     .     scalar wb_K = wb_K + `wb_nlevels' - 1
+E     . }
+E     
+E     . drop `wb_mincluster' `wb_maxcluster'
+E     
+E     . tempvar wb_mincluster wb_maxcluster
+E     
+E     . bysort time: egen double `wb_mincluster' = min(`wb_cluster')
+E     
+E     . bysort time: egen double `wb_maxcluster' = max(`wb_cluster')
+E     
+E     . count if `wb_mincluster' != `wb_maxcluster'
+E       320
+E     
+E     . if r(N) {
+E     .     quietly levelsof time, local(wb_levels)
+E     .     local wb_nlevels : word count `wb_levels'
+E     .     scalar wb_K = wb_K + `wb_nlevels' - 1
+E     . }
+E     
+E     . drop `wb_mincluster' `wb_maxcluster'
+E     
+E     . matrix wb_cov = e(V)*(e(N)-3)/(e(N)-wb_K)
+E     
+E     . matrix wb_beta = e(b)
+E     
+E     . matrix colnames wb_beta = _did_D x _cons
+E     
+E     . matrix colnames wb_cov = _did_D x _cons
+E     
+E     . matrix rownames wb_cov = _did_D x _cons
+E     
+E     . wb_repost wb_beta wb_cov
+E     
+E     . estimates store wb_model1
+E     
+E     . generate long wb_sample_row = _n
+E     
+E     . generate byte wb_sample1 = e(sample)
+E     
+E     . scalar wb_number_0 = _b[_cons]
+E     
+E     . scalar wb_number_1 = _b[_did_D]
+E     
+E     . scalar wb_number_2 = _b[x]
+E     
+E     . scalar wb_number_3 = _se[_cons]
+E     
+E     . scalar wb_number_4 = _se[_did_D]
+E     
+E     . scalar wb_number_5 = _se[x]
+E     
+E     . scalar wb_number_6 = e(N)
+E     
+E     . capture confirm scalar e(df_r)
+E     
+E     . if _rc exit 9
+E     
+E     . scalar wb_number_7 = (_b[_cons]/_se[_cons])
+E     
+E     . scalar wb_number_8 = 2*ttail(e(df_r),abs((_b[_cons]/_se[_cons])))
+E     
+E     . scalar wb_number_9 = e(df_r)
+E     
+E     . capture confirm scalar e(df_r)
+E     
+E     . if _rc exit 9
+E     
+E     . scalar wb_number_10 = (_b[_did_D]/_se[_did_D])
+E     
+E     . scalar wb_number_11 = 2*ttail(e(df_r),abs((_b[_did_D]/_se[_did_D])))
+E     
+E     . scalar wb_number_12 = e(df_r)
+E     
+E     . capture confirm scalar e(df_r)
+E     
+E     . if _rc exit 9
+E     
+E     . scalar wb_number_13 = (_b[x]/_se[x])
+E     
+E     . scalar wb_number_14 = 2*ttail(e(df_r),abs((_b[x]/_se[x])))
+E     
+E     . scalar wb_number_15 = e(df_r)
+E     
+E     . file open wb_numbers using "numeric_actual.tsv", write text replace
+E     (file numeric_actual.tsv not found)
+E     
+E     . file write wb_numbers %21.17g (wb_number_0) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_1) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_2) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_3) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_4) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_5) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_6) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_7) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_8) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_9) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_10) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_11) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_12) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_13) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_14) _n
+E     
+E     . file write wb_numbers %21.17g (wb_number_15) _n
+E     
+E     . file close wb_numbers
+E     
+E     . * Closing self-checks
+E     . assert !missing(wb_number_0) & abs(wb_number_0-(1.1895589237919928)) <= 1e-08
+E     > +1e-06*abs(1.1895589237919928)
+E     
+E     . assert !missing(wb_number_1) & abs(wb_number_1-(-0.43280969612833226)) <= 1e-
+E     > 08+1e-06*abs(-0.43280969612833226)
+E     
+E     . assert !missing(wb_number_2) & abs(wb_number_2-(0.45731957097194625)) <= 1e-0
+E     > 8+1e-06*abs(0.45731957097194625)
+E     
+E     . assert !missing(wb_number_3) & abs(wb_number_3-(0.12556471194223834)) <= 1e-0
+E     > 8+1e-05*abs(0.12556471194223834)
+E     assertion is false
+E     r(9);
+E     
+E     end of do-file
+E     r(9);
+E     
+E   assert 9 == 0
+----------------------------- Captured stdout call -----------------------------
+Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/fixtures/script_export/local_runs/oracle-tvyj1qfs
+_______________ test_panel_clustered_runner_oracle[entity-did-r] _______________
+tests/test_script_export_iv_panel_oracles.py:53: in test_panel_clustered_runner_oracle
+    assert code==0,output
+E   AssertionError: Error in wb_check(checks[[4]], 0.125564711942238, 1e-08, 1e-05, "model:std_errors") : 
+E       model:std_errors 0.0853952209972437 != 0.125564711942238
+E     Execution halted
+E     
+E   assert 1 == 0
+----------------------------- Captured stdout call -----------------------------
+Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/fixtures/script_export/local_runs/oracle-azig9d8i
+____________ test_panel_clustered_runner_oracle[entity-did-python] _____________
+tests/test_script_export_iv_panel_oracles.py:53: in test_panel_clustered_runner_oracle
+    assert code==0,output
+E   AssertionError: Traceback (most recent call last):
+E       File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/fixtures/script_export/local_runs/oracle-9v1ui_xf/analysis.py", line 116, in <module>
+E         wb_check(checks[3], 0.12556471194223834, 1e-08, 1e-05, 'model:std_errors')
+E         ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/fixtures/script_export/local_runs/oracle-9v1ui_xf/analysis.py", line 28, in wb_check
+E         raise AssertionError(f'{label}: {actual!r} != {expected!r}')
+E     AssertionError: model:std_errors: 0.08539522099724382 != 0.12556471194223834
+E     
+E   assert 1 == 0
+----------------------------- Captured stdout call -----------------------------
+Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/fixtures/script_export/local_runs/oracle-9v1ui_xf
+______ test_panel_clustered_runner_oracle[coarse_string-panel_ols-stata] _______
+tests/test_script_export_iv_panel_oracles.py:43: in test_panel_clustered_runner_oracle
+    else:result,fit=runner.run_panel_ols(d,'y',['x'],'entity','time','model',covariance='clustered',**cluster_argument)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: run_panel_ols() got an unexpected keyword argument 'cluster_col'
+----------------------------- Captured stdout call -----------------------------
+Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/fixtures/script_export/local_runs/oracle-bz72vt6d
+________ test_panel_clustered_runner_oracle[coarse_string-panel_ols-r] _________
+tests/test_script_export_iv_panel_oracles.py:43: in test_panel_clustered_runner_oracle
+    else:result,fit=runner.run_panel_ols(d,'y',['x'],'entity','time','model',covariance='clustered',**cluster_argument)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: run_panel_ols() got an unexpected keyword argument 'cluster_col'
+----------------------------- Captured stdout call -----------------------------
+Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/fixtures/script_export/local_runs/oracle-5swrhq2n
+______ test_panel_clustered_runner_oracle[coarse_string-panel_ols-python] ______
+tests/test_script_export_iv_panel_oracles.py:43: in test_panel_clustered_runner_oracle
+    else:result,fit=runner.run_panel_ols(d,'y',['x'],'entity','time','model',covariance='clustered',**cluster_argument)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: run_panel_ols() got an unexpected keyword argument 'cluster_col'
+----------------------------- Captured stdout call -----------------------------
+Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/fixtures/script_export/local_runs/oracle-hs5ts2_x
+_________ test_panel_clustered_runner_oracle[coarse_string-did-stata] __________
+tests/test_script_export_iv_panel_oracles.py:42: in test_panel_clustered_runner_oracle
+    if model=='did':result,fit=runner.run_did(d,'y',['x'],'entity','time','model',covariance='clustered',**cluster_argument)
+                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: run_did() got an unexpected keyword argument 'cluster_col'
+----------------------------- Captured stdout call -----------------------------
+Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/fixtures/script_export/local_runs/oracle-4isrh_9a
+___________ test_panel_clustered_runner_oracle[coarse_string-did-r] ____________
+tests/test_script_export_iv_panel_oracles.py:42: in test_panel_clustered_runner_oracle
+    if model=='did':result,fit=runner.run_did(d,'y',['x'],'entity','time','model',covariance='clustered',**cluster_argument)
+                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: run_did() got an unexpected keyword argument 'cluster_col'
+----------------------------- Captured stdout call -----------------------------
+Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/fixtures/script_export/local_runs/oracle-btqp15gz
+_________ test_panel_clustered_runner_oracle[coarse_string-did-python] _________
+tests/test_script_export_iv_panel_oracles.py:42: in test_panel_clustered_runner_oracle
+    if model=='did':result,fit=runner.run_did(d,'y',['x'],'entity','time','model',covariance='clustered',**cluster_argument)
+                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: run_did() got an unexpected keyword argument 'cluster_col'
+----------------------------- Captured stdout call -----------------------------
+Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/fixtures/script_export/local_runs/oracle-ljljj7gv
+=============================== warnings summary ===============================
+tests/test_script_export_model_oracles.py::test_native_model_engine_oracle[glm_binomial-stata]
+tests/test_script_export_model_oracles.py::test_native_model_engine_oracle[glm_binomial-r]
+tests/test_script_export_model_oracles.py::test_native_model_engine_oracle[glm_binomial-python]
+tests/test_script_export_model_oracles.py::test_native_model_engine_oracle[glm_poisson-stata]
+tests/test_script_export_model_oracles.py::test_native_model_engine_oracle[glm_poisson-r]
+tests/test_script_export_model_oracles.py::test_native_model_engine_oracle[glm_poisson-python]
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/genmod/generalized_linear_model.py:1923: FutureWarning: The bic value is computed using the deviance formula. After 0.13 this will change to the log-likelihood based formula. This change has no impact on the relative rank of models compared using BIC. You can directly access the log-likelihood version using the `bic_llf` attribute. You can suppress this message by calling statsmodels.genmod.generalized_linear_model.SET_USE_BIC_LLF with True to get the LLF-based version now or False to retainthe deviance version.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_script_export_model_oracles.py::test_native_model_engine_oracle[negative_binomial-stata]
+FAILED tests/test_script_export_model_oracles.py::test_native_model_engine_oracle[negative_binomial-r]
+FAILED tests/test_script_export_model_oracles.py::test_native_model_engine_oracle[negative_binomial-python]
+FAILED tests/test_script_export_postestimation_oracles.py::test_postestimation_native_kernel_oracle[negative_binomial-wald-stata]
+FAILED tests/test_script_export_postestimation_oracles.py::test_postestimation_native_kernel_oracle[negative_binomial-wald-r]
+FAILED tests/test_script_export_postestimation_oracles.py::test_postestimation_native_kernel_oracle[negative_binomial-wald-python]
+FAILED tests/test_script_export_postestimation_oracles.py::test_postestimation_native_kernel_oracle[negative_binomial-lincom-stata]
+FAILED tests/test_script_export_postestimation_oracles.py::test_postestimation_native_kernel_oracle[negative_binomial-lincom-r]
+FAILED tests/test_script_export_postestimation_oracles.py::test_postestimation_native_kernel_oracle[negative_binomial-lincom-python]
+FAILED tests/test_script_export_iv_panel_oracles.py::test_panel_clustered_runner_oracle[entity-panel_ols-stata]
+FAILED tests/test_script_export_iv_panel_oracles.py::test_panel_clustered_runner_oracle[entity-panel_ols-r]
+FAILED tests/test_script_export_iv_panel_oracles.py::test_panel_clustered_runner_oracle[entity-panel_ols-python]
+FAILED tests/test_script_export_iv_panel_oracles.py::test_panel_clustered_runner_oracle[entity-did-stata]
+FAILED tests/test_script_export_iv_panel_oracles.py::test_panel_clustered_runner_oracle[entity-did-r]
+FAILED tests/test_script_export_iv_panel_oracles.py::test_panel_clustered_runner_oracle[entity-did-python]
+FAILED tests/test_script_export_iv_panel_oracles.py::test_panel_clustered_runner_oracle[coarse_string-panel_ols-stata]
+FAILED tests/test_script_export_iv_panel_oracles.py::test_panel_clustered_runner_oracle[coarse_string-panel_ols-r]
+FAILED tests/test_script_export_iv_panel_oracles.py::test_panel_clustered_runner_oracle[coarse_string-panel_ols-python]
+FAILED tests/test_script_export_iv_panel_oracles.py::test_panel_clustered_runner_oracle[coarse_string-did-stata]
+FAILED tests/test_script_export_iv_panel_oracles.py::test_panel_clustered_runner_oracle[coarse_string-did-r]
+FAILED tests/test_script_export_iv_panel_oracles.py::test_panel_clustered_runner_oracle[coarse_string-did-python]
+21 failed, 292 passed, 6 warnings in 140.79s (0:02:20)

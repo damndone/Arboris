@@ -1,0 +1,9 @@
+/Users/jiayuanren/.matplotlib is not a writable directory
+Matplotlib created a temporary cache directory at /var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/matplotlib-vt2cc0yi because there was an issue with the default path ({configdir}); it is highly recommended to set the MPLCONFIGDIR environment variable to a writable directory, in particular to speed up the import of Matplotlib and to better support multiprocessing.
+
+Fontconfig error: No writable cache directories
+	/opt/homebrew/var/cache/fontconfig
+	/Users/jiayuanren/.cache/fontconfig
+	/Users/jiayuanren/.fontconfig
+Matplotlib is building the font cache; this may take a moment.
+Fresh R moments, native Stata default/small controls and public owner captured; all producer and 9 protected assets unchanged

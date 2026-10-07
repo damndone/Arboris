@@ -1,0 +1,24 @@
+
+Fontconfig error: No writable cache directories
+	/opt/homebrew/var/cache/fontconfig
+	/Users/jiayuanren/.cache/fontconfig
+	/Users/jiayuanren/.fontconfig
+first three coefficients and SE (Workbench / R): [('Intercept', 1.979790765819515, 1.97979076581951, 0.05234658129519699, 0.052346581295197), ('x1', 0.7127667823556812, 0.712766782355681, 0.06332817660704627, 0.0633281766070462), ('x2', -0.3891917163179698, -0.38919171631797, 0.05943168305973262, 0.0594316830597326)]
+kernel settings: {'covariance_estimator': None, 'df_method': 'asymptotic', 'reference_distribution': 'z', 'df_resid': 341.0}
+max absolute differences: 5.10702591327572e-15 6.938893903907228e-17
+.F
+=================================== FAILURES ===================================
+___________ test_inference_kernel_declares_its_covariance_estimator ____________
+
+fitted = {'contract': 'workbench.inference_kernel.v1', 'model_id': 'panel_ols_1', 'model_type': 'panel_ols', 'param_names': ['Intercept', 'x1', 'x2'], ...}
+
+    def test_inference_kernel_declares_its_covariance_estimator(fitted):
+>       assert fitted["covariance_estimator"] is not None, (
+            "Admission settings cannot be bound from a null covariance_estimator", fitted)
+E       AssertionError: ('Admission settings cannot be bound from a null covariance_estimator', {'contract': 'workbench.inference_kernel.v1', 'model_id': 'panel_ols_1', 'model_type': 'panel_ols', 'param_names': ['Intercept', 'x1', 'x2'], ...})
+E       assert None is not None
+
+tests/test_admission_oracle_panel_ols.py:49: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_admission_oracle_panel_ols.py::test_inference_kernel_declares_its_covariance_estimator
+1 failed, 1 passed in 11.50s

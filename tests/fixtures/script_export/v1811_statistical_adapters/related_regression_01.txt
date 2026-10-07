@@ -1,0 +1,58 @@
+Related retained evidence: tests/fixtures/script_export/v1811_statistical_adapters/related_1198de1a90
+........FFF.....Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/related_1198de1a90/oracle-z21c1iij
+.Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/related_1198de1a90/oracle-_zm_2hs_
+.Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/related_1198de1a90/oracle-vkcucyn1
+.Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/related_1198de1a90/oracle-mu1h0zx1
+.Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/related_1198de1a90/oracle-zblkn0qc
+.Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/related_1198de1a90/oracle-44ipl278
+.Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/related_1198de1a90/oracle-jhrg0tqf
+.Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/related_1198de1a90/oracle-r51zez3d
+.Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/related_1198de1a90/oracle-wchqkl_j
+.Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/related_1198de1a90/oracle-llrb7mn1
+.Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/related_1198de1a90/oracle-ws5yhzxg
+.Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/related_1198de1a90/oracle-lk7x2hbg
+.Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/related_1198de1a90/oracle-2v1cfw2o
+.Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/related_1198de1a90/oracle-zrjffo1k
+.Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/related_1198de1a90/oracle-olft9g9h
+.Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/related_1198de1a90/oracle-419pm0n7
+.Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/related_1198de1a90/oracle-8axura31
+.Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/related_1198de1a90/oracle-tg_8_fzk
+.Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/related_1198de1a90/oracle-tbb2m5gu
+.Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/related_1198de1a90/oracle-7_xxw_9o
+.Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/related_1198de1a90/oracle-x6gldoiq
+.Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/related_1198de1a90/oracle-fzy2gyn2
+.Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/related_1198de1a90/oracle-rzz79_7q
+.Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/related_1198de1a90/oracle-wndjblkb
+.
+=================================== FAILURES ===================================
+_______ test_unopened_postestimation_pair_is_explicitly_rejected[stata] ________
+tests/test_script_export_render.py:68: in test_unopened_postestimation_pair_is_explicitly_rejected
+    with pytest.raises(ScriptExportRefusal) as caught:renderer()(plan,language)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE ScriptExportRefusal
+_________ test_unopened_postestimation_pair_is_explicitly_rejected[r] __________
+tests/test_script_export_render.py:68: in test_unopened_postestimation_pair_is_explicitly_rejected
+    with pytest.raises(ScriptExportRefusal) as caught:renderer()(plan,language)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE ScriptExportRefusal
+_______ test_unopened_postestimation_pair_is_explicitly_rejected[python] _______
+tests/test_script_export_render.py:68: in test_unopened_postestimation_pair_is_explicitly_rejected
+    with pytest.raises(ScriptExportRefusal) as caught:renderer()(plan,language)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE ScriptExportRefusal
+=============================== warnings summary ===============================
+tests/test_script_export_model_oracles.py::test_native_model_engine_oracle[glm_binomial-stata]
+tests/test_script_export_model_oracles.py::test_native_model_engine_oracle[glm_binomial-r]
+tests/test_script_export_model_oracles.py::test_native_model_engine_oracle[glm_binomial-python]
+tests/test_script_export_model_oracles.py::test_native_model_engine_oracle[glm_poisson-stata]
+tests/test_script_export_model_oracles.py::test_native_model_engine_oracle[glm_poisson-r]
+tests/test_script_export_model_oracles.py::test_native_model_engine_oracle[glm_poisson-python]
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/genmod/generalized_linear_model.py:1923: FutureWarning: The bic value is computed using the deviance formula. After 0.13 this will change to the log-likelihood based formula. This change has no impact on the relative rank of models compared using BIC. You can directly access the log-likelihood version using the `bic_llf` attribute. You can suppress this message by calling statsmodels.genmod.generalized_linear_model.SET_USE_BIC_LLF with True to get the LLF-based version now or False to retainthe deviance version.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_script_export_render.py::test_unopened_postestimation_pair_is_explicitly_rejected[stata]
+FAILED tests/test_script_export_render.py::test_unopened_postestimation_pair_is_explicitly_rejected[r]
+FAILED tests/test_script_export_render.py::test_unopened_postestimation_pair_is_explicitly_rejected[python]
+3 failed, 37 passed, 27 deselected, 6 warnings in 15.16s

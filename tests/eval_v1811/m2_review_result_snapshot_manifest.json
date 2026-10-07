@@ -1,0 +1,22 @@
+{
+  "reviewed_tip": "821ccda5f11ef00244222aed24efd4d0acdd4820",
+  "reviewed_module": "backend/workbench/script_export/result_snapshot.py",
+  "reviewed_module_sha256": "8a0f5729951f327ce23f9d9442e8d26ea6a8a3e01291f3d76e1f77b4b6d11d2c",
+  "result": "2 failed, 32 passed in 0.86s",
+  "evidence": [
+    {
+      "path": "tests/eval_v1811/m2_review_result_snapshot_adversarial.py",
+      "sha256": "d9051b7374f1042c6b55cddede2244a763e4c7a2258a7c375a73cade985b04b7"
+    },
+    {
+      "path": "tests/eval_v1811/m2_review_result_snapshot_red.txt",
+      "sha256": "de40240e9a35b5b17ee3088c6573de65b5a89b25b4c3882e7b13930ca84bfcf7"
+    },
+    {
+      "path": "tests/eval_v1811/m2_review_result_snapshot_review.md",
+      "sha256": "9e2bb1b07b8fb0424614f3466c758f935462878d44bd4a4da2a25dbdd78c0ec7"
+    }
+  ],
+  "trusted_projector_required": true,
+  "upstream_source_identity_builder_verified": false
+}

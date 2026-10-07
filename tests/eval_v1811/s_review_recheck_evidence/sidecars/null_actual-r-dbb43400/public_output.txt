@@ -1,0 +1,3 @@
+Error in wb_check(checks[[18]], 88.6728244577567, 1e-08, 1e-05, "post:statistics.value") : 
+  post:statistics.value  != 88.6728244577567
+Execution halted

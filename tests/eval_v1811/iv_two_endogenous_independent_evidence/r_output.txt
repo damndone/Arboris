@@ -1,0 +1,184 @@
+R version 4.6.0 (2026-04-24)
+Platform: aarch64-apple-darwin24.6.0
+Running under: macOS Sequoia 15.1
+
+Matrix products: default
+BLAS:   /opt/homebrew/Cellar/openblas/0.3.33/lib/libopenblasp-r0.3.33.dylib 
+LAPACK: /opt/homebrew/Cellar/r/4.6.0/lib/R/lib/libRlapack.dylib;  LAPACK version 3.12.1
+
+locale:
+[1] en_US.UTF-8/en_US.UTF-8/en_US.UTF-8/C/en_US.UTF-8/en_US.UTF-8
+
+time zone: America/New_York
+tzcode source: internal
+
+attached base packages:
+[1] stats     graphics  grDevices utils     datasets  methods   base     
+
+other attached packages:
+[1] jsonlite_2.0.0
+
+loaded via a namespace (and not attached):
+[1] compiler_4.6.0
+$method
+[1] "Exactly identified moment solve beta=(Z'X)^-1 Z'y; HC0 moment sandwich A S A'/N"
+
+$environment
+$environment$R
+[1] "R version 4.6.0 (2026-04-24)"
+
+$environment$jsonlite
+[1] "2.0.0"
+
+
+$nobs
+[1] 650
+
+$nominal_residual_df
+[1] 646
+
+$terms
+[1] "Intercept" "x1"        "xe1"       "xe2"      
+
+$params
+$params$Intercept
+[1] 0.72512936595449828
+
+$params$x1
+[1] 0.34052038913250421
+
+$params$xe1
+[1] 0.32802772307920036
+
+$params$xe2
+[1] -0.24035447189290535
+
+
+$covariance
+                       [,1]                    [,2]                    [,3]
+[1,] 2.1974431290420031e-03  0.00048274268008751666  9.5484764593568037e-06
+[2,] 4.8274268008751677e-04  0.00353590227364819877 -1.2095204513665322e-03
+[3,] 9.5484764593568105e-06 -0.00120952045136653178  3.5618422580889920e-03
+[4,] 3.3042713154410932e-04  0.00038691570863857874 -1.0024846648797864e-04
+                        [,4]
+[1,]  0.00033042713154410932
+[2,]  0.00038691570863857874
+[3,] -0.00010024846648797853
+[4,]  0.00235014161788518056
+
+$std_error
+$std_error$Intercept
+[1] 0.04687689333821092
+
+$std_error$x1
+[1] 0.059463453260369926
+
+$std_error$xe1
+[1] 0.059681171721816854
+
+$std_error$xe2
+[1] 0.048478259229114043
+
+
+$z
+$z$Intercept
+[1] 15.468801669999346
+
+$z$x1
+[1] 5.7265491736829182
+
+$z$xe1
+[1] 5.4963351692923883
+
+$z$xe2
+[1] -4.9579847897788865
+
+
+$p
+$p$Intercept
+[1] 5.6346191986293183e-54
+
+$p$x1
+[1] 1.0249406301258188e-08
+
+$p$xe1
+[1] 3.8776519473766961e-08
+
+$p$xe2
+[1] 7.1228138194084709e-07
+
+
+$wald_joint
+$wald_joint$distribution
+[1] "chi2"
+
+$wald_joint$statistic
+[1] 52.966469476497089
+
+$wald_joint$df_num
+[1] 2
+
+$wald_joint$df_den
+NULL
+
+$wald_joint$p_value
+[1] 3.1512095954357664e-12
+
+
+$inference
+$inference$HC0
+[1] TRUE
+
+$inference$unbiased
+[1] FALSE
+
+$inference$debiased
+[1] FALSE
+
+$inference$small_sample_factor
+[1] 1
+
+$inference$reference_distribution
+[1] "z"
+
+
+$diagnostics
+$diagnostics$X_rank
+[1] 4
+
+$diagnostics$Z_rank
+[1] 4
+
+$diagnostics$moment_max_abs
+[1] 1.5341055214013367e-16
+
+$diagnostics$conditional_instrument_rank
+[1] 2
+
+$diagnostics$conditional_instrument_singular_values
+[1] 0.95988913386877306 0.76025067766077170
+
+$diagnostics$corr_endogenous_structural_error
+[1]  0.44177504289699415 -0.35213131211397070
+
+$diagnostics$corr_excluded_structural_error
+[1]  0.056109133825794022 -0.032371424006860543
+
+$diagnostics$ols_beta
+[1]  0.71622960724706231  0.17045404923718457  0.66197233951020995
+[4] -0.50010519527185593
+
+$diagnostics$ols_difference
+[1] -0.0088997587074359785 -0.1700663398953196348  0.3339446164310095888
+[4] -0.2597507233789505543
+
+
+$source_sha256
+[1] "d3b46c7cf6c42c4dc1db66b3ae63a0ef02ffe10ff3b24983687355daa238c497"
+
+$reconstructed_sha256
+[1] "428deb6f68e5337331c331b8bb0b0f626f39fbc9414da7176a374634550462b8"
+
+$reconstructed_max_abs_difference
+[1] 1.021405182655144e-14
+

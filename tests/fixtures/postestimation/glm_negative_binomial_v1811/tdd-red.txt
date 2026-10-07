@@ -1,0 +1,23 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+________ test_native_reference_exists_and_has_all_five_operation_shapes ________
+
+    def test_native_reference_exists_and_has_all_five_operation_shapes():
+>       reference = load_oracle()
+                    ^^^^^^^^^^^^^
+
+tests/test_glm_nb_v1811_reference.py:33: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def load_oracle():
+        path = FIXTURE / "native-r/oracle.json"
+>       assert path.exists(), "Frozen fixed-alpha GLM-NB native five-operation reference is missing"
+E       AssertionError: Frozen fixed-alpha GLM-NB native five-operation reference is missing
+E       assert False
+E        +  where False = exists()
+E        +    where exists = PosixPath('/Users/jiayuanren/项目规划/.worktrees/codex-v1811-final-oracles/tests/fixtures/postestimation/glm_negative_binomial_v1811/native-r/oracle.json').exists
+
+tests/test_glm_nb_v1811_reference.py:28: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_glm_nb_v1811_reference.py::test_native_reference_exists_and_has_all_five_operation_shapes
+1 failed in 1.81s

@@ -1,0 +1,2 @@
+Error: wb_fpc[wb_rows[1]] >= length(unique(wb_fpc_units[wb_rows])) is not TRUE
+Execution halted

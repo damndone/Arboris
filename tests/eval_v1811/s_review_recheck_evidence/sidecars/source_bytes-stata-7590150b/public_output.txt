@@ -1,0 +1,56 @@
+. do analysis.do 
+
+. * Workbench 1.8.11
+. * project: sidecar
+. * run: executed
+. * lineage_hash: fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+> fff
+. * Coverage
+. * completed | model.ols | snapshot | FPC is supplied, but the frozen Workbenc
+> h linearization engine does not apply FPC; native FPC would change the execut
+> ed covariance. Workbench completed this step; numeric values come from a veri
+> fied result sidecar, without native re-estimation.
+. * post | postestimation.wald | snapshot | Dependent post-estimation needs its
+>  own completed Workbench result sidecar; no fitted state is reconstructed. Wo
+> rkbench completed this step; numeric values come from a verified result sidec
+> ar, without native re-estimation.
+. * selected | data.subset | native | 
+. * independent | model.ols | native | 
+. version 18
+
+. set more off
+
+. set type double
+
+. capture program drop wb_repost
+
+. program define wb_repost, eclass
+  1.     args beta covariance
+  2.     ereturn repost b=`beta' V=`covariance', rename
+  3. end
+
+. capture program drop wb_sha
+
+. program define wb_sha
+  1.     args filename expected
+  2.     tempfile digestfile
+  3.     shell shasum -a 256 "`filename'" > "`digestfile'"
+  4.     tempname fh
+  5.     file open `fh' using "`digestfile'", read text
+  6.     file read `fh' line
+  7.     file close `fh'
+  8.     if substr("`line'",1,64) != "`expected'" {
+  9.         display as error "SHA256 mismatch"
+ 10.         exit 9
+ 11.     }
+ 12. end
+
+. 
+. wb_sha "data.csv" "5f8d0cc66fc9efdfd08e6a06640ea410d58671fe93ac5cac2ad90d6aa6
+> 8de937"
+
+SHA256 mismatch
+r(9);
+
+end of do-file
+r(9);

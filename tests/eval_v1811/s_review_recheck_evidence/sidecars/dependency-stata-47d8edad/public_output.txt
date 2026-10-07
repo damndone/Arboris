@@ -1,0 +1,203 @@
+. do analysis.do 
+
+. * Workbench 1.8.11
+. * project: sidecar
+. * run: executed
+. * lineage_hash: fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+> fff
+. * Coverage
+. * completed | model.ols | snapshot | FPC is supplied, but the frozen Workbenc
+> h linearization engine does not apply FPC; native FPC would change the execut
+> ed covariance. Workbench completed this step; numeric values come from a veri
+> fied result sidecar, without native re-estimation.
+. * post | postestimation.wald | snapshot | Dependent post-estimation needs its
+>  own completed Workbench result sidecar; no fitted state is reconstructed. Wo
+> rkbench completed this step; numeric values come from a verified result sidec
+> ar, without native re-estimation.
+. * selected | data.subset | native | 
+. * independent | model.ols | native | 
+. version 18
+
+. set more off
+
+. set type double
+
+. capture program drop wb_repost
+
+. program define wb_repost, eclass
+  1.     args beta covariance
+  2.     ereturn repost b=`beta' V=`covariance', rename
+  3. end
+
+. capture program drop wb_sha
+
+. program define wb_sha
+  1.     args filename expected
+  2.     tempfile digestfile
+  3.     shell shasum -a 256 "`filename'" > "`digestfile'"
+  4.     tempname fh
+  5.     file open `fh' using "`digestfile'", read text
+  6.     file read `fh' line
+  7.     file close `fh'
+  8.     if substr("`line'",1,64) != "`expected'" {
+  9.         display as error "SHA256 mismatch"
+ 10.         exit 9
+ 11.     }
+ 12. end
+
+. 
+. wb_sha "data.csv" "5f8d0cc66fc9efdfd08e6a06640ea410d58671fe93ac5cac2ad90d6aa6
+> 8de937"
+
+
+. frame create wb_src0
+
+. frame change wb_src0
+
+. import delimited using "data.csv", varnames(1) delimiters(",") encoding("UTF-
+> 8") asdouble clear case(preserve)
+(8 vars, 80 obs)
+
+. * Workbench completed this step: Sampling OLS completed in Workbench
+. wb_sha "completed.csv" "5f8d0cc66fc9efdfd08e6a06640ea410d58671fe93ac5cac2ad90
+> d6aa68de937"
+
+
+. frame create wb1
+
+. frame change wb1
+
+. import delimited using "completed.csv", varnames(1) delimiters(",") encoding(
+> "UTF-8") asdouble clear case(preserve)
+(8 vars, 80 obs)
+
+. scalar wb_number_0 = _N
+
+. unab wb_columns: _all
+
+. scalar wb_check_1 = (`"`wb_columns'"' == "stratum psu y x1 x2 weight fpc subp
+> op")
+
+. tempfile wb_result_bridge
+
+. tempname wb_result_writer
+
+. file open `wb_result_writer' using "`wb_result_bridge'", write text
+
+. file write `wb_result_writer' `"import base64"' _n
+
+. file write `wb_result_writer' `"import json"' _n
+
+. file write `wb_result_writer' `"import os"' _n
+
+. file write `wb_result_writer' `"from pathlib import Path"' _n
+
+. file write `wb_result_writer' `"import sys"' _n
+
+. file write `wb_result_writer' `"from workbench.contracts.common.envelope impo
+> rt thaw_json"' _n
+
+. file write `wb_result_writer' `"from workbench.script_export.result_snapshot 
+> import ResultSnapshotRef, read_result_snapshot"' _n
+
+. file write `wb_result_writer' `""' _n
+
+. file write `wb_result_writer' `"configuration = json.loads(base64.b64decode(s
+> ys.argv[2]))"' _n
+
+. file write `wb_result_writer' `"reference = ResultSnapshotRef(**configuration
+> ['reference'])"' _n
+
+. file write `wb_result_writer' `"values = read_result_snapshot(Path(sys.argv[1
+> ]), reference, expected_binding=configuration['binding'])"' _n
+
+. file write `wb_result_writer' `"for name, distribution in configuration['dist
+> ributions'].items():"' _n
+
+. file write `wb_result_writer' `"    if values['statistics'][name]['distributi
+> on'] != distribution:"' _n
+
+. file write `wb_result_writer' `"        raise AssertionError('Result sidecar 
+> reference distribution differs')"' _n
+
+. file write `wb_result_writer' `"if sys.argv[3] == 'r':"' _n
+
+. file write `wb_result_writer' `"    print(json.dumps(thaw_json(values), ensur
+> e_ascii=False, allow_nan=False))"' _n
+
+. file write `wb_result_writer' `"elif sys.argv[3] == 'stata':"' _n
+
+. file write `wb_result_writer' `"    lines = []"' _n
+
+. file write `wb_result_writer' `"    for index, path in enumerate(configuratio
+> n['queries']):"' _n
+
+. file write `wb_result_writer' `"        value = values"' _n
+
+. file write `wb_result_writer' `"        for key in path:"' _n
+
+. file write `wb_result_writer' `"            value = value[key]"' _n
+
+. file write `wb_result_writer' `"        if value is not None and type(value) 
+> not in (int, float):"' _n
+
+. file write `wb_result_writer' `"            raise AssertionError('Result side
+> car query is not numeric')"' _n
+
+. file write `wb_result_writer' `"        token = '.' if value is None else rep
+> r(value)"' _n
+
+. file write `wb_result_writer' `"        lines.append('scalar wb_result_' + st
+> r(configuration['index']) + '_' + str(index) + ' = ' + token)"' _n
+
+. file write `wb_result_writer' `"    lines.append('scalar wb_result_valid_' + 
+> str(configuration['index']) + ' = 1')"' _n
+
+. file write `wb_result_writer' `"    fd = os.open(sys.argv[4], os.O_WRONLY | o
+> s.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)"' _n
+
+. file write `wb_result_writer' `"    with os.fdopen(fd, 'w', encoding='utf-8')
+>  as handle:"' _n
+
+. file write `wb_result_writer' `"        handle.write('\n'.join(lines) + '\n')
+> "' _n
+
+. file write `wb_result_writer' `"else:"' _n
+
+. file write `wb_result_writer' `"    raise AssertionError('Unsupported result 
+> bridge mode')"' _n
+
+. file close `wb_result_writer'
+
+. tempfile wb_result_commands
+
+. shell independent_missing_python_bridge "`wb_result_bridge'" . eyJyZWZlcmVuY2
+> UiOiB7ImZpbGVuYW1lIjogImNvbXBsZXRlZF9yZXN1bHQuanNvbiIsICJzaGEyNTYiOiAiMmViYjl
+> hYjdmYWFkZGVmM2ExYTFjNGEzMDc0Zjg2MWUxZDUxYTBlYjgwMjBlNDU1ODQzMTJlMzZiMzEwMGQ1
+> NCIsICJzY2hlbWFfdmVyc2lvbiI6IDF9LCAiYmluZGluZyI6IHsicHJvamVjdF9pZCI6ICJzaWRlY
+> 2FyIiwgInJ1bl9pZCI6ICJleGVjdXRlZCIsICJsaW5lYWdlX2hhc2giOiAiZmZmZmZmZmZmZmZmZm
+> ZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZiIsICJzdGV
+> wX2lkIjogImNvbXBsZXRlZCIsICJraW5kIjogIm1vZGVsIiwgIm9wZXJhdGlvbiI6ICJtb2RlbC5v
+> bHMiLCAicGFyYW1ldGVyc19zaGEyNTYiOiAiYWM1ZDZiMzc1YWRhOTIwYTBmM2MyZDI5NzFmM2I4Z
+> Tk5NTA0YWYwN2ExMjY0MTE1MjUwYzA1NDg0N2FiNmZiMiIsICJpbnB1dHMiOiBbInNvdXJjZSJdLC
+> AibW9kZWxzIjogW119LCAicXVlcmllcyI6IFtbIm5vYnMiXSwgWyJjb2VmZmljaWVudHMiLCAiSW5
+> 0ZXJjZXB0Il0sIFsiY29lZmZpY2llbnRzIiwgIngxIl0sIFsiY29lZmZpY2llbnRzIiwgIngyIl0s
+> IFsic3RkX2Vycm9ycyIsICJJbnRlcmNlcHQiXSwgWyJzdGRfZXJyb3JzIiwgIngxIl0sIFsic3RkX
+> 2Vycm9ycyIsICJ4MiJdLCBbInN0YXRpc3RpY3MiLCAiSW50ZXJjZXB0IiwgInZhbHVlIl0sIFsic3
+> RhdGlzdGljcyIsICJJbnRlcmNlcHQiLCAiZGYiXSwgWyJzdGF0aXN0aWNzIiwgIkludGVyY2VwdCI
+> sICJwX3ZhbHVlIl0sIFsic3RhdGlzdGljcyIsICJ4MSIsICJ2YWx1ZSJdLCBbInN0YXRpc3RpY3Mi
+> LCAieDEiLCAiZGYiXSwgWyJzdGF0aXN0aWNzIiwgIngxIiwgInBfdmFsdWUiXSwgWyJzdGF0aXN0a
+> WNzIiwgIngyIiwgInZhbHVlIl0sIFsic3RhdGlzdGljcyIsICJ4MiIsICJkZiJdLCBbInN0YXRpc3
+> RpY3MiLCAieDIiLCAicF92YWx1ZSJdXSwgImRpc3RyaWJ1dGlvbnMiOiB7IkludGVyY2VwdCI6ICJ
+> 0IiwgIngxIjogInQiLCAieDIiOiAidCJ9LCAiaW5kZXgiOiAxfQ== stata "`wb_result_comma
+> nds'"
+
+zsh:1: command not found: independent_missing_python_bridge
+
+. confirm file "`wb_result_commands'"
+file /var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T//St30923.000002 not
+    found
+r(601);
+
+end of do-file
+r(601);

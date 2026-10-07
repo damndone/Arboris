@@ -1,0 +1,52 @@
+. do analysis.do 
+
+. * Workbench 1.8.11
+. * project: script
+. * run: 20261005_091811_675151_95c6f12b
+. * lineage_hash: 44cdd1794406cf58e7845d729b4a21bf1c8ddacba382ef059f60da06f836b
+> 26d
+. * Coverage
+. * step_76b2427e32344554a37924aa | data.cleaning | native | 
+. * step_eca26cfbad39adff69c00721 | data.subset | native | 
+. * step_226b4b10776b3612293e8e34 | data.feature_recipe | native | 
+. * step_5bb28f6498e4698e7347d1d5 | data.cleaning | native | 
+. * step_59722572b3c11a55aa32ba09 | model.ols | native | 
+. * step_522468aadb113d7b603dca9b | postestimation.wald | native | 
+. version 18
+
+. set more off
+
+. set type double
+
+. capture program drop wb_repost
+
+. program define wb_repost, eclass
+  1.     args beta covariance
+  2.     ereturn repost b=`beta' V=`covariance', rename
+  3. end
+
+. capture program drop wb_sha
+
+. program define wb_sha
+  1.     args filename expected
+  2.     tempfile digestfile
+  3.     shell shasum -a 256 "`filename'" > "`digestfile'"
+  4.     tempname fh
+  5.     file open `fh' using "`digestfile'", read text
+  6.     file read `fh' line
+  7.     file close `fh'
+  8.     if substr("`line'",1,64) != "`expected'" {
+  9.         display as error "SHA256 mismatch"
+ 10.         exit 9
+ 11.     }
+ 12. end
+
+. 
+. wb_sha "source_1ce21051b81091ccc6d9f8b2.dta" "1ce21051b81091ccc6d9f8b22102b15
+> 60bc1b11924f2076b1e94db0b3b002e2f"
+
+SHA256 mismatch
+r(9);
+
+end of do-file
+r(9);

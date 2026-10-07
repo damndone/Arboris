@@ -1,0 +1,39 @@
+Related retained evidence: tests/fixtures/script_export/v1811_statistical_adapters/related_83309277be
+Local script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/related_83309277be/oracle-k6hykm7a
+FLocal script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/related_83309277be/oracle-7t55ogk7
+FLocal script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/related_83309277be/oracle-4w7q1kg5
+FLocal script output: /Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/related_83309277be/oracle-2zvwjr0h
+F
+=================================== FAILURES ===================================
+_____________ test_supplied_fpc_cannot_be_silently_dropped[stata] ______________
+tests/test_script_export_survey_oracles.py:71: in test_supplied_fpc_cannot_be_silently_dropped
+    with pytest.raises(ScriptExportRefusal) as caught:renderer()(plan,language,require_native=True)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE ScriptExportRefusal
+_______________ test_supplied_fpc_cannot_be_silently_dropped[r] ________________
+tests/test_script_export_survey_oracles.py:71: in test_supplied_fpc_cannot_be_silently_dropped
+    with pytest.raises(ScriptExportRefusal) as caught:renderer()(plan,language,require_native=True)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE ScriptExportRefusal
+_____________ test_supplied_fpc_cannot_be_silently_dropped[python] _____________
+tests/test_script_export_survey_oracles.py:71: in test_supplied_fpc_cannot_be_silently_dropped
+    with pytest.raises(ScriptExportRefusal) as caught:renderer()(plan,language,require_native=True)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE ScriptExportRefusal
+________________ test_fpc_frozen_engine_difference_is_persisted ________________
+tests/test_script_export_survey_oracles.py:134: in test_fpc_frozen_engine_difference_is_persisted
+    assert plain==with_fpc
+E   AssertionError: assert {'nobs': 80, ...ution': 't'}}} == {'nobs': 80, ...ution': 't'}}}
+E     
+E     Omitting 2 identical items, use -vv to show
+E     Differing items:
+E     {'std_errors': {'Intercept': 1.5955241455226616, 'x1': 0.17732404110690134, 'x2': 0.08888234469730581}} != {'std_errors': {'Intercept': 1.5923298997852287, 'x1': 0.17696903766553093, 'x2': 0.0887044018868011}}
+E     {'statistics': {'Intercept': {'value': 2.9161022645752492, 'p_value': 0.026766795825847126, 'df': 6, 'distribution': '...stribution': 't'}, 'x2': {'value': -4.545838874371921, 'p_value': 0.003909008379856854, 'df': 6, 'distribution': 't'}}} != {'statistics': {'Intercept': {'value': 2.9219520242448973, 'p_va...
+E     
+E     ...Full output truncated (2 lines hidden), use '-vv' to show
+=========================== short test summary info ============================
+FAILED tests/test_script_export_survey_oracles.py::test_supplied_fpc_cannot_be_silently_dropped[stata]
+FAILED tests/test_script_export_survey_oracles.py::test_supplied_fpc_cannot_be_silently_dropped[r]
+FAILED tests/test_script_export_survey_oracles.py::test_supplied_fpc_cannot_be_silently_dropped[python]
+FAILED tests/test_script_export_survey_oracles.py::test_fpc_frozen_engine_difference_is_persisted
+4 failed, 78 deselected in 1.20s

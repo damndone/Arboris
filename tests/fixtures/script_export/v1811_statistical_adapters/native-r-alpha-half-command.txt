@@ -1,0 +1,165 @@
+$r_version
+[1] "R version 4.6.0 (2026-04-24)"
+
+$platform
+[1] "aarch64-apple-darwin24.6.0"
+
+$packages
+$packages$MASS
+[1] "7.3.65"
+
+$packages$car
+[1] "3.1.5"
+
+$packages$lmtest
+[1] "0.9.40"
+
+$packages$marginaleffects
+[1] "1.0.0"
+
+$packages$jsonlite
+[1] "2.0.0"
+
+
+Deviance = 320.5603 Iterations - 1
+Deviance = 316.7335 Iterations - 2
+Deviance = 316.7128 Iterations - 3
+Deviance = 316.7128 Iterations - 4
+Deviance = 316.7128 Iterations - 5
+Deviance = 316.7128 Iterations - 6
+Deviance = 316.7128 Iterations - 7
+Deviance = 316.7128 Iterations - 8
+Deviance = 316.7128 Iterations - 9
+Deviance = 316.7128 Iterations - 10
+Deviance = 316.7128 Iterations - 11
+Deviance = 316.7128 Iterations - 12
+Deviance = 316.7128 Iterations - 13
+Deviance = 351.6567 Iterations - 1
+Deviance = 348.815 Iterations - 2
+Deviance = 348.8045 Iterations - 3
+Deviance = 348.8045 Iterations - 4
+Deviance = 348.8045 Iterations - 5
+Deviance = 348.8045 Iterations - 6
+Deviance = 348.8045 Iterations - 7
+Deviance = 348.8045 Iterations - 8
+Deviance = 348.8045 Iterations - 9
+Deviance = 348.8045 Iterations - 10
+Deviance = 348.8045 Iterations - 11
+Deviance = 348.8045 Iterations - 12
+Deviance = 348.8045 Iterations - 13
+Deviance = 348.8045 Iterations - 14
+Deviance = 348.8045 Iterations - 15
+$params
+$params$`(Intercept)`
+[1] 0.5294191
+
+$params$x1
+[1] 0.3808453
+
+$params$x2
+[1] -0.2980652
+
+$params$x3
+[1] -0.1083325
+
+
+$wald_joint
+$wald_joint$distribution
+[1] "chi2"
+
+$wald_joint$statistic
+[1] 65.56605
+
+$wald_joint$df_num
+[1] 2
+
+$wald_joint$p_value
+[1] 5.787801e-15
+
+
+$wald_shifted
+$wald_shifted$distribution
+[1] "chi2"
+
+$wald_shifted$statistic
+[1] 14.66286
+
+$wald_shifted$df_num
+[1] 1
+
+$wald_shifted$p_value
+[1] 0.0001285544
+
+
+$lincom
+$lincom$estimate
+[1] -0.715285
+
+$lincom$std_error
+[1] 0.1254654
+
+
+$nlcom
+$nlcom$estimate
+[1] -1.277725
+
+$nlcom$std_error
+[1] 0.3132925
+
+
+$lr_drop_x2_x3
+$lr_drop_x2_x3$statistic
+[1] 32.09169
+
+$lr_drop_x2_x3$df
+[1] 2
+
+$lr_drop_x2_x3$p_value
+[1] 1.074927e-07
+
+$lr_drop_x2_x3$loglik_full
+[1] -504.066
+
+$lr_drop_x2_x3$loglik_restricted
+[1] -520.1119
+
+
+$margins
+$margins$average
+$margins$average$x1
+$margins$average$x1$estimate
+[1] 0.6563673
+
+$margins$average$x1$std_error
+[1] 0.1233528
+
+
+$margins$average$x2
+$margins$average$x2$estimate
+[1] -0.5137
+
+$margins$average$x2$std_error
+[1] 0.1047288
+
+
+
+$margins$at_means
+$margins$at_means$x1
+$margins$at_means$x1$estimate
+[1] 0.5746074
+
+$margins$at_means$x1$std_error
+[1] 0.09460541
+
+
+$margins$at_means$x2
+$margins$at_means$x2$estimate
+[1] -0.4497113
+
+$margins$at_means$x2$std_error
+[1] 0.0823697
+
+
+
+
+Native R fixed-alpha five-operation oracle saved

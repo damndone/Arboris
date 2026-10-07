@@ -1,0 +1,244 @@
+{
+  "scope": "FRESH_PUBLIC_COMPLETED_OWNER_OFFLINE_ANSWER_SEAMS_NOT_PROVIDER_LIVE",
+  "root": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-898/repair-fresh-public-owner0/confirmed-public",
+  "source": "20261004_214648_975464_10b3b03d",
+  "result_run_id": "20261004_214650_466787_1472e44c",
+  "fixture_path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-898/repair-fresh-public-owner0/repair-fresh-confirm-evidence.json",
+  "fixture_sha256": "72a9ecd79390c54e73e7a73aeec603fd506638b3ab28f2bcc12a93a3e7156e4b",
+  "controls": [
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-898/test_repair_real_completed_pub0/repair-real-owner-record.json",
+      "sha256": "187b82fd2dab037e706cdc9a2cb36b2dc4d0b4ef5e940119cebe5fec478789ad",
+      "attack": null,
+      "all_checks_passed": true,
+      "checks": [
+        {
+          "check": "reply",
+          "passed": true,
+          "detail": "stop"
+        },
+        {
+          "check": "language",
+          "passed": true,
+          "detail": "zh"
+        },
+        {
+          "check": "executed",
+          "passed": true,
+          "detail": "True"
+        },
+        {
+          "check": "confirmed_operations_completed",
+          "passed": true,
+          "detail": "['completed']"
+        },
+        {
+          "check": "no_fabricated_numbers",
+          "passed": true,
+          "detail": "[]"
+        },
+        {
+          "check": "current_confirmation_identity",
+          "passed": true
+        },
+        {
+          "check": "native_oracle",
+          "passed": true
+        },
+        {
+          "check": "result_answer_provenance",
+          "passed": true
+        },
+        {
+          "check": "requested_native_numbers_in_answer",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-898/test_repair_real_completed_pub1/repair-real-owner-record.json",
+      "sha256": "c76ebebc9aeadce65efb5aad073d304336b1c2008b75821402ef7d0417ce5a7b",
+      "attack": "wrong_field",
+      "all_checks_passed": false,
+      "checks": [
+        {
+          "check": "reply",
+          "passed": true,
+          "detail": "stop"
+        },
+        {
+          "check": "language",
+          "passed": true,
+          "detail": "zh"
+        },
+        {
+          "check": "executed",
+          "passed": true,
+          "detail": "True"
+        },
+        {
+          "check": "confirmed_operations_completed",
+          "passed": true,
+          "detail": "['completed']"
+        },
+        {
+          "check": "no_fabricated_numbers",
+          "passed": true,
+          "detail": "[]"
+        },
+        {
+          "check": "current_confirmation_identity",
+          "passed": true
+        },
+        {
+          "check": "native_oracle",
+          "passed": true
+        },
+        {
+          "check": "result_answer_provenance",
+          "passed": true
+        },
+        {
+          "check": "requested_native_numbers_in_answer",
+          "passed": false
+        }
+      ]
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-898/test_repair_real_completed_pub2/repair-real-owner-record.json",
+      "sha256": "8bc4e31a5bbd10eb7a75c3b77d5b89c7711d75c9246f2a046bda6cafb013a8ce",
+      "attack": "wrong_sign",
+      "all_checks_passed": false,
+      "checks": [
+        {
+          "check": "reply",
+          "passed": true,
+          "detail": "stop"
+        },
+        {
+          "check": "language",
+          "passed": true,
+          "detail": "zh"
+        },
+        {
+          "check": "executed",
+          "passed": true,
+          "detail": "True"
+        },
+        {
+          "check": "confirmed_operations_completed",
+          "passed": true,
+          "detail": "['completed']"
+        },
+        {
+          "check": "no_fabricated_numbers",
+          "passed": true,
+          "detail": "[]"
+        },
+        {
+          "check": "current_confirmation_identity",
+          "passed": true
+        },
+        {
+          "check": "native_oracle",
+          "passed": true
+        },
+        {
+          "check": "result_answer_provenance",
+          "passed": true
+        },
+        {
+          "check": "requested_native_numbers_in_answer",
+          "passed": false
+        }
+      ]
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-898/test_repair_real_completed_pub3/repair-real-owner-record.json",
+      "sha256": "6bd341e87962ac83350e1ae1aa01390af597f13523a56bc64d7daf59ed77f7cc",
+      "attack": "wrong_tool_owner",
+      "all_checks_passed": false,
+      "checks": [
+        {
+          "check": "reply",
+          "passed": true,
+          "detail": "stop"
+        },
+        {
+          "check": "language",
+          "passed": true,
+          "detail": "zh"
+        },
+        {
+          "check": "executed",
+          "passed": true,
+          "detail": "True"
+        },
+        {
+          "check": "confirmed_operations_completed",
+          "passed": true,
+          "detail": "['completed']"
+        },
+        {
+          "check": "no_fabricated_numbers",
+          "passed": true,
+          "detail": "[]"
+        },
+        {
+          "check": "current_confirmation_identity",
+          "passed": true
+        },
+        {
+          "check": "native_oracle",
+          "passed": true
+        },
+        {
+          "check": "result_answer_provenance",
+          "passed": false
+        },
+        {
+          "check": "requested_native_numbers_in_answer",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-898/test_repair_real_completed_pub4/repair-real-owner-record.json",
+      "sha256": "1167256e680dc2380595c78006a3682a8c6295c6de373662865615dba35f037b",
+      "attack": "wrong_confirmation",
+      "all_checks_passed": false,
+      "checks": [
+        {
+          "check": "reply",
+          "passed": false,
+          "detail": "durable confirmation current identity mismatch: proposal_id"
+        },
+        {
+          "check": "language",
+          "passed": false,
+          "detail": "unknown"
+        },
+        {
+          "check": "executed",
+          "passed": false,
+          "detail": "False"
+        },
+        {
+          "check": "confirmed_operations_completed",
+          "passed": true,
+          "detail": "['completed']"
+        },
+        {
+          "check": "no_fabricated_numbers",
+          "passed": true,
+          "detail": "[]"
+        },
+        {
+          "check": "current_confirmation_identity",
+          "passed": false,
+          "detail": "durable confirmation current identity mismatch: proposal_id"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,114 @@
+* Workbench 1.8.11
+* project: fpc
+* run: lonely_census
+* lineage_hash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+* Coverage
+* model | model.ols | native_with_equivalence_note | Full single-stage linearization design including supplied FPC and domain; coefficient and joint-test df preserve the executed Workbench convention.
+version 18
+set more off
+set type double
+capture program drop wb_repost
+program define wb_repost, eclass
+    args beta covariance
+    ereturn repost b=`beta' V=`covariance', rename
+end
+capture program drop wb_sha
+program define wb_sha
+    args filename expected
+    tempfile digestfile
+    shell shasum -a 256 "`filename'" > "`digestfile'"
+    tempname fh
+    file open `fh' using "`digestfile'", read text
+    file read `fh' line
+    file close `fh'
+    if substr("`line'",1,64) != "`expected'" {
+        display as error "SHA256 mismatch"
+        exit 9
+    }
+end
+
+wb_sha "data.csv" "5454925d4e077ef8a5e59cfa02e7583b8b5f54e81b4796eb03283abfaa3a7e8e"
+frame create wb_src0
+frame change wb_src0
+import delimited using "data.csv", varnames(1) delimiters(",") encoding("UTF-8") asdouble clear case(preserve)
+frame copy wb_src0 wb_model_data1
+frame change wb_model_data1
+drop if missing(y) | missing(x1) | missing(x2)
+assert !missing(certainty_fpc) & certainty_fpc >= 0
+quietly summarize certainty_fpc, meanonly
+scalar wb_fpc_fraction = (r(max)<=1)
+if !wb_fpc_fraction assert certainty_fpc>1 & certainty_fpc==floor(certainty_fpc)
+tempvar wb_fpc_order wb_fpc_stratum wb_fpc_psu wb_fpc_tag wb_fpc_n
+generate long `wb_fpc_order' = _n
+egen long `wb_fpc_stratum' = group(stratum)
+egen long `wb_fpc_psu' = group(`wb_fpc_stratum' psu)
+egen byte `wb_fpc_tag' = tag(`wb_fpc_stratum' `wb_fpc_psu')
+bysort `wb_fpc_stratum': egen long `wb_fpc_n' = total(`wb_fpc_tag')
+bysort `wb_fpc_stratum': assert certainty_fpc==certainty_fpc[1]
+if !wb_fpc_fraction assert certainty_fpc>=`wb_fpc_n'
+sort `wb_fpc_order'
+svyset psu [pw=weight], strata(stratum) fpc(certainty_fpc) singleunit(missing)
+svy: regress y x1 x2
+assert e(df_r) > 0
+matrix wb_survey_v = e(V)
+mata: assert(!hasmissing(st_matrix("wb_survey_v")))
+estimates store wb_model1
+generate long wb_sample_row = _n
+generate byte wb_sample1 = e(sample)
+scalar wb_number_0 = _b[_cons]
+scalar wb_number_1 = _b[x1]
+scalar wb_number_2 = _b[x2]
+scalar wb_number_3 = _se[_cons]
+scalar wb_number_4 = _se[x1]
+scalar wb_number_5 = _se[x2]
+scalar wb_number_6 = e(N)
+capture confirm scalar e(df_r)
+if _rc exit 9
+scalar wb_number_7 = (_b[_cons]/_se[_cons])
+scalar wb_number_8 = 2*ttail(e(df_r),abs((_b[_cons]/_se[_cons])))
+scalar wb_number_9 = e(df_r)
+capture confirm scalar e(df_r)
+if _rc exit 9
+scalar wb_number_10 = (_b[x1]/_se[x1])
+scalar wb_number_11 = 2*ttail(e(df_r),abs((_b[x1]/_se[x1])))
+scalar wb_number_12 = e(df_r)
+capture confirm scalar e(df_r)
+if _rc exit 9
+scalar wb_number_13 = (_b[x2]/_se[x2])
+scalar wb_number_14 = 2*ttail(e(df_r),abs((_b[x2]/_se[x2])))
+scalar wb_number_15 = e(df_r)
+file open wb_numbers using "numeric_actual.tsv", write text replace
+file write wb_numbers %21.17g (wb_number_0) _n
+file write wb_numbers %21.17g (wb_number_1) _n
+file write wb_numbers %21.17g (wb_number_2) _n
+file write wb_numbers %21.17g (wb_number_3) _n
+file write wb_numbers %21.17g (wb_number_4) _n
+file write wb_numbers %21.17g (wb_number_5) _n
+file write wb_numbers %21.17g (wb_number_6) _n
+file write wb_numbers %21.17g (wb_number_7) _n
+file write wb_numbers %21.17g (wb_number_8) _n
+file write wb_numbers %21.17g (wb_number_9) _n
+file write wb_numbers %21.17g (wb_number_10) _n
+file write wb_numbers %21.17g (wb_number_11) _n
+file write wb_numbers %21.17g (wb_number_12) _n
+file write wb_numbers %21.17g (wb_number_13) _n
+file write wb_numbers %21.17g (wb_number_14) _n
+file write wb_numbers %21.17g (wb_number_15) _n
+file close wb_numbers
+* Closing self-checks
+assert !missing(wb_number_0) & abs(wb_number_0-(4.767273406190168)) <= 1e-08+0*abs(4.767273406190168)
+assert !missing(wb_number_1) & abs(wb_number_1-(1.4497508730783055)) <= 1e-08+0*abs(1.4497508730783055)
+assert !missing(wb_number_2) & abs(wb_number_2-(-0.3932150269716509)) <= 1e-08+0*abs(-0.3932150269716509)
+assert !missing(wb_number_3) & abs(wb_number_3-(1.6023580455582087)) <= 1e-06+0*abs(1.6023580455582087)
+assert !missing(wb_number_4) & abs(wb_number_4-(0.19039549323983382)) <= 1e-06+0*abs(0.19039549323983382)
+assert !missing(wb_number_5) & abs(wb_number_5-(0.0772979676980629)) <= 1e-06+0*abs(0.0772979676980629)
+assert !missing(wb_number_6) & abs(wb_number_6-(75)) <= 0.0+0.0*abs(75)
+assert !missing(wb_number_7) & abs(wb_number_7-(2.9751611504090567)) <= 1e-08+1e-06*abs(2.9751611504090567)
+assert !missing(wb_number_8) & abs(wb_number_8-(0.02065603572372509)) <= 0+1e-05*abs(0.02065603572372509)
+assert !missing(wb_number_9) & abs(wb_number_9-(7)) <= 0.0+0.0*abs(7)
+assert !missing(wb_number_10) & abs(wb_number_10-(7.6144180117336635)) <= 1e-08+1e-06*abs(7.6144180117336635)
+assert !missing(wb_number_11) & abs(wb_number_11-(0.00012477645384923564)) <= 0+1e-05*abs(0.00012477645384923564)
+assert !missing(wb_number_12) & abs(wb_number_12-(7)) <= 0.0+0.0*abs(7)
+assert !missing(wb_number_13) & abs(wb_number_13-(-5.0870034320644235)) <= 1e-08+1e-06*abs(-5.0870034320644235)
+assert !missing(wb_number_14) & abs(wb_number_14-(0.0014199052469754407)) <= 0+1e-05*abs(0.0014199052469754407)
+assert !missing(wb_number_15) & abs(wb_number_15-(7)) <= 0.0+0.0*abs(7)

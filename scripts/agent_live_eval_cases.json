@@ -310,5 +310,209 @@
       "no_data_change": true,
       "proposal": true
     }
+  },
+  {
+    "id": "v1811_iv_2sls",
+    "fixture": "iv_2sls",
+    "request": "基于当前模型重新拟合以下完整参数，保持同一数据集和样本，不改变标准误或处理定义。请生成 model.rerun 方案，等待我确认：{\"model_type\": \"iv_2sls\", \"y\": \"y\", \"x\": [\"x1\"], \"model_options\": {}, \"iv_endog\": [\"xe\"], \"iv_instruments\": [\"z\"], \"covariance\": \"robust\"} model_options 必须保持原样；已有设计与协方差字段从当前模型继承，不要额外塞进 model_options。",
+    "followup": "请读取当前已完成的结果模型，报告 x1、xe 的实际估计值；仅报告下方声明的数值字段，并说明诊断警告，引用当前 run_id/model_id 或工具 evidence_ref，不要引用先前方案的回答。",
+    "expected": "verified public rerun completed, exact executed parameters, registered native-comparison result, then grounded answer in result session",
+    "checks": {
+      "executed": true,
+      "language": "zh",
+      "no_fabricated_numbers": true
+    }
+  },
+  {
+    "id": "v1811_glm_binomial",
+    "fixture": "glm:binomial",
+    "request": "基于当前模型重新拟合以下完整参数，保持同一数据集和样本，不改变标准误或处理定义。请生成 model.rerun 方案，等待我确认：{\"model_type\": \"glm:binomial\", \"y\": \"y\", \"x\": [\"x1\", \"x2\"], \"model_options\": {}} model_options 必须保持原样；已有设计与协方差字段从当前模型继承，不要额外塞进 model_options。",
+    "followup": "请读取当前已完成的结果模型，报告 x1、x2 的实际估计值；仅报告下方声明的数值字段，并说明诊断警告，引用当前 run_id/model_id 或工具 evidence_ref，不要引用先前方案的回答。",
+    "expected": "verified public rerun completed, exact executed parameters, registered native-comparison result, then grounded answer in result session",
+    "checks": {
+      "executed": true,
+      "language": "zh",
+      "no_fabricated_numbers": true
+    }
+  },
+  {
+    "id": "v1811_glm_poisson",
+    "fixture": "glm:poisson",
+    "request": "基于当前模型重新拟合以下完整参数，保持同一数据集和样本，不改变标准误或处理定义。请生成 model.rerun 方案，等待我确认：{\"model_type\": \"glm:poisson\", \"y\": \"y\", \"x\": [\"x1\", \"x2\"], \"model_options\": {}} model_options 必须保持原样；已有设计与协方差字段从当前模型继承，不要额外塞进 model_options。",
+    "followup": "请读取当前已完成的结果模型，报告 x1、x2 的实际估计值；仅报告下方声明的数值字段，并说明诊断警告，引用当前 run_id/model_id 或工具 evidence_ref，不要引用先前方案的回答。",
+    "expected": "verified public rerun completed, exact executed parameters, registered native-comparison result, then grounded answer in result session",
+    "checks": {
+      "executed": true,
+      "language": "zh",
+      "no_fabricated_numbers": true
+    }
+  },
+  {
+    "id": "v1811_glm_negative_binomial",
+    "fixture": "glm:negative_binomial",
+    "request": "基于当前模型重新拟合以下完整参数，保持同一数据集和样本，不改变标准误或处理定义。请生成 model.rerun 方案，等待我确认：{\"model_type\": \"glm:negative_binomial\", \"y\": \"y\", \"x\": [\"x1\", \"x2\"], \"model_options\": {\"alpha\": 1.0}} model_options 必须保持原样；已有设计与协方差字段从当前模型继承，不要额外塞进 model_options。",
+    "followup": "请读取当前已完成的结果模型，报告 x1、x2 的实际估计值；仅报告下方声明的数值字段，并说明诊断警告，引用当前 run_id/model_id 或工具 evidence_ref，不要引用先前方案的回答。",
+    "expected": "verified public rerun completed, exact executed parameters, registered native-comparison result, then grounded answer in result session",
+    "checks": {
+      "executed": true,
+      "language": "zh",
+      "no_fabricated_numbers": true
+    }
+  },
+  {
+    "id": "v1811_panel_ols",
+    "fixture": "panel_ols",
+    "request": "基于当前模型重新拟合以下完整参数，保持同一数据集和样本，不改变标准误或处理定义。请生成 model.rerun 方案，等待我确认：{\"model_type\": \"panel_ols\", \"y\": \"y\", \"x\": [\"x1\", \"x2\"], \"model_options\": {}, \"entity_col\": \"g\", \"time_col\": \"time\", \"covariance\": \"clustered\"} model_options 必须保持原样；已有设计与协方差字段从当前模型继承，不要额外塞进 model_options。",
+    "followup": "请读取当前已完成的结果模型，报告 x1、x2 的实际估计值；仅报告下方声明的数值字段，并说明诊断警告，引用当前 run_id/model_id 或工具 evidence_ref，不要引用先前方案的回答。",
+    "expected": "verified public rerun completed, exact executed parameters, registered native-comparison result, then grounded answer in result session",
+    "checks": {
+      "executed": true,
+      "language": "zh",
+      "no_fabricated_numbers": true
+    }
+  },
+  {
+    "id": "v1811_did",
+    "fixture": "did",
+    "request": "基于当前模型重新拟合以下完整参数，保持同一数据集和样本，不改变标准误或处理定义。请生成 model.rerun 方案，等待我确认：{\"model_type\": \"did\", \"y\": \"y\", \"x\": [\"x1\"], \"model_options\": {}, \"entity_col\": \"g\", \"time_col\": \"time\", \"covariance\": \"clustered\", \"did_mode\": \"cohort\", \"did_cohort_col\": \"first_treat\"} model_options 必须保持原样；已有设计与协方差字段从当前模型继承，不要额外塞进 model_options。",
+    "followup": "请读取当前已完成的结果模型，报告 _did_D、x1 的实际估计值；仅报告下方声明的数值字段，并说明诊断警告，引用当前 run_id/model_id 或工具 evidence_ref，不要引用先前方案的回答。",
+    "expected": "verified public rerun completed, exact executed parameters, registered native-comparison result, then grounded answer in result session",
+    "checks": {
+      "executed": true,
+      "language": "zh",
+      "no_fabricated_numbers": true
+    }
+  },
+  {
+    "id": "v1811_linear_mixed_effects",
+    "fixture": "linear_mixed_effects",
+    "request": "基于当前模型重新拟合以下完整参数，保持同一数据集和样本，不改变标准误或处理定义。请生成 model.rerun 方案，等待我确认：{\"model_type\": \"linear_mixed_effects\", \"y\": \"y\", \"x\": [\"x\"], \"model_options\": {\"subject_id\": \"g\", \"time\": \"time\", \"group\": \"arm\", \"fit_method\": \"reml\", \"random_slope\": false}} model_options 必须保持原样；已有设计与协方差字段从当前模型继承，不要额外塞进 model_options。",
+    "followup": "请读取当前已完成的结果模型，报告处理组×时间交互项（group_time_interaction）的实际估计值与标准误；仅报告下方声明的数值字段，并说明诊断警告，引用当前 run_id/model_id 或工具 evidence_ref，不要引用先前方案的回答。",
+    "expected": "verified public rerun completed, exact executed parameters, registered native-comparison result, then grounded answer in result session",
+    "checks": {
+      "executed": true,
+      "language": "zh",
+      "no_fabricated_numbers": true
+    }
+  },
+  {
+    "id": "v1811_probit",
+    "fixture": "probit",
+    "request": "基于当前模型重新拟合以下完整参数，保持同一数据集和样本，不改变标准误或处理定义。请生成 model.rerun 方案，等待我确认：{\"model_type\": \"probit\", \"y\": \"yb\", \"x\": [\"x1\", \"x2\", \"x3\"], \"model_options\": {}} model_options 必须保持原样；已有设计与协方差字段从当前模型继承，不要额外塞进 model_options。",
+    "followup": "请读取当前已完成的结果模型，报告 x1、x2、x3 的实际估计值；仅报告下方声明的数值字段，并说明诊断警告，引用当前 run_id/model_id 或工具 evidence_ref，不要引用先前方案的回答。",
+    "expected": "verified public rerun completed, exact executed parameters, registered native-comparison result, then grounded answer in result session",
+    "checks": {
+      "executed": true,
+      "language": "zh",
+      "no_fabricated_numbers": true
+    }
+  },
+  {
+    "id": "v1811_poisson",
+    "fixture": "poisson",
+    "request": "基于当前模型重新拟合以下完整参数，保持同一数据集和样本，不改变标准误或处理定义。请生成 model.rerun 方案，等待我确认：{\"model_type\": \"poisson\", \"y\": \"yc\", \"x\": [\"x1\", \"x2\", \"x3\"], \"model_options\": {}} model_options 必须保持原样；已有设计与协方差字段从当前模型继承，不要额外塞进 model_options。",
+    "followup": "请读取当前已完成的结果模型，报告 x1、x2、x3 的实际估计值；仅报告下方声明的数值字段，并说明诊断警告，引用当前 run_id/model_id 或工具 evidence_ref，不要引用先前方案的回答。",
+    "expected": "verified public rerun completed, exact executed parameters, registered native-comparison result, then grounded answer in result session",
+    "checks": {
+      "executed": true,
+      "language": "zh",
+      "no_fabricated_numbers": true
+    }
+  },
+  {
+    "id": "v1811_negative_binomial",
+    "fixture": "negative_binomial",
+    "request": "基于当前模型重新拟合以下完整参数，保持同一数据集和样本，不改变标准误或处理定义。请生成 model.rerun 方案，等待我确认：{\"model_type\": \"negative_binomial\", \"y\": \"ynb\", \"x\": [\"x1\", \"x2\", \"x3\"], \"model_options\": {\"dispersion\": \"mean\"}} model_options 必须保持原样；已有设计与协方差字段从当前模型继承，不要额外塞进 model_options。",
+    "followup": "请读取当前已完成的结果模型，报告 x1 和 alpha（辅助参数，不是普通系数）的实际估计值；仅报告下方声明的数值字段，并说明诊断警告，引用当前 run_id/model_id 或工具 evidence_ref，不要引用先前方案的回答。",
+    "expected": "verified public rerun completed, exact executed parameters, registered native-comparison result, then grounded answer in result session",
+    "checks": {
+      "executed": true,
+      "language": "zh",
+      "no_fabricated_numbers": true
+    }
+  },
+  {
+    "id": "v1811_ordinal_logit",
+    "fixture": "ordinal_logit",
+    "request": "基于当前模型重新拟合以下完整参数，保持同一数据集和样本，不改变标准误或处理定义。请生成 model.rerun 方案，等待我确认：{\"model_type\": \"ordinal_logit\", \"y\": \"rating\", \"x\": [\"x1\", \"x2\", \"grp\"], \"model_options\": {\"outcome_order\": [\"low\", \"mid\", \"high\"], \"link\": \"logit\"}} model_options 必须保持原样；已有设计与协方差字段从当前模型继承，不要额外塞进 model_options。",
+    "followup": "请读取当前已完成的结果模型，报告 x1、x2、grp 的实际估计值；仅报告下方声明的数值字段，并说明诊断警告，引用当前 run_id/model_id 或工具 evidence_ref，不要引用先前方案的回答。",
+    "expected": "verified public rerun completed, exact executed parameters, registered native-comparison result, then grounded answer in result session",
+    "checks": {
+      "executed": true,
+      "language": "zh",
+      "no_fabricated_numbers": true
+    }
+  },
+  {
+    "id": "v1811_multinomial_logit",
+    "fixture": "multinomial_logit",
+    "request": "基于当前模型重新拟合以下完整参数，保持同一数据集和样本，不改变标准误或处理定义。请生成 model.rerun 方案，等待我确认：{\"model_type\": \"multinomial_logit\", \"y\": \"choice\", \"x\": [\"x1\", \"x2\", \"grp\"], \"model_options\": {\"base_category\": \"a\"}} model_options 必须保持原样；已有设计与协方差字段从当前模型继承，不要额外塞进 model_options。",
+    "followup": "请读取当前已完成的结果模型，报告 b:x1、c:x1，相对 a 的实际估计值；仅报告下方声明的数值字段，并说明诊断警告，引用当前 run_id/model_id 或工具 evidence_ref，不要引用先前方案的回答。",
+    "expected": "verified public rerun completed, exact executed parameters, registered native-comparison result, then grounded answer in result session",
+    "checks": {
+      "executed": true,
+      "language": "zh",
+      "no_fabricated_numbers": true
+    }
+  },
+  {
+    "id": "v1811_quantile_regression",
+    "fixture": "quantile_regression",
+    "request": "基于当前模型重新拟合以下完整参数，保持同一数据集和样本，不改变标准误或处理定义。请生成 model.rerun 方案，等待我确认：{\"model_type\": \"quantile_regression\", \"y\": \"y\", \"x\": [\"x1\", \"x2\", \"grp\"], \"model_options\": {\"quantiles\": [0.25, 0.5, 0.75], \"bootstrap_reps\": 0}} model_options 必须保持原样；已有设计与协方差字段从当前模型继承，不要额外塞进 model_options。",
+    "followup": "请读取当前已完成的结果模型，报告 tau=.25、.5、.75 各自的 x1 斜率 的实际估计值；仅报告下方声明的数值字段，并说明诊断警告，引用当前 run_id/model_id 或工具 evidence_ref，不要引用先前方案的回答。",
+    "expected": "verified public rerun completed, exact executed parameters, registered native-comparison result, then grounded answer in result session",
+    "checks": {
+      "executed": true,
+      "language": "zh",
+      "no_fabricated_numbers": true
+    }
+  },
+  {
+    "id": "v1811_survival_cox",
+    "fixture": "survival_cox",
+    "request": "基于当前模型重新拟合以下完整参数，保持同一数据集和样本，不改变标准误或处理定义。请生成 model.rerun 方案，等待我确认：{\"model_type\": \"survival_cox\", \"y\": \"duration\", \"x\": [\"x1\", \"x2\", \"grp\"], \"model_options\": {\"event_column\": \"event\", \"ties\": \"efron\"}} model_options 必须保持原样；已有设计与协方差字段从当前模型继承，不要额外塞进 model_options。",
+    "followup": "请读取当前已完成的结果模型，报告 x1、x2、grp 的 log hazard 系数 的实际估计值；仅报告下方声明的数值字段，并说明诊断警告，引用当前 run_id/model_id 或工具 evidence_ref，不要引用先前方案的回答。",
+    "expected": "verified public rerun completed, exact executed parameters, registered native-comparison result, then grounded answer in result session",
+    "checks": {
+      "executed": true,
+      "language": "zh",
+      "no_fabricated_numbers": true
+    }
+  },
+  {
+    "id": "v1811_cs_did",
+    "fixture": "cs_did",
+    "request": "基于当前模型重新拟合以下完整参数，保持同一数据集和样本，不改变标准误或处理定义。请生成 model.rerun 方案，等待我确认：{\"model_type\": \"cs_did\", \"y\": \"y\", \"x\": [\"x1\"], \"model_options\": {}, \"entity_col\": \"unit\", \"time_col\": \"period\", \"did_mode\": \"cohort\", \"did_cohort_col\": \"first_treat\", \"cs_control_group\": \"never\", \"cs_est_method\": \"dr\", \"cs_base_period\": \"varying\", \"cs_anticipation\": 0} model_options 必须保持原样；已有设计与协方差字段从当前模型继承，不要额外塞进 model_options。",
+    "followup": "请读取当前已完成的结果模型，报告 总体 ATT 的实际估计值；仅报告下方声明的数值字段，并说明诊断警告，引用当前 run_id/model_id 或工具 evidence_ref，不要引用先前方案的回答。",
+    "expected": "verified public rerun completed, exact executed parameters, registered native-comparison result, then grounded answer in result session",
+    "checks": {
+      "executed": true,
+      "language": "zh",
+      "no_fabricated_numbers": true
+    }
+  },
+  {
+    "id": "v1811_sa_did",
+    "fixture": "sa_did",
+    "request": "基于当前模型重新拟合以下完整参数，保持同一数据集和样本，不改变标准误或处理定义。请生成 model.rerun 方案，等待我确认：{\"model_type\": \"sa_did\", \"y\": \"y\", \"x\": [], \"model_options\": {}, \"entity_col\": \"id\", \"time_col\": \"year\", \"did_mode\": \"cohort\", \"did_cohort_col\": \"cohort\"} model_options 必须保持原样；已有设计与协方差字段从当前模型继承，不要额外塞进 model_options。",
+    "followup": "请读取当前已完成的结果模型，报告 总体 ATT 的实际估计值；仅报告下方声明的数值字段，并说明诊断警告，引用当前 run_id/model_id 或工具 evidence_ref，不要引用先前方案的回答。",
+    "expected": "verified public rerun completed, exact executed parameters, registered native-comparison result, then grounded answer in result session",
+    "checks": {
+      "executed": true,
+      "language": "zh",
+      "no_fabricated_numbers": true
+    }
+  },
+  {
+    "id": "v1811_dcdh",
+    "fixture": "dcdh",
+    "request": "基于当前模型重新拟合以下完整参数，保持同一数据集和样本，不改变标准误或处理定义。请生成 model.rerun 方案，等待我确认：{\"model_type\": \"dcdh\", \"y\": \"y\", \"x\": [], \"model_options\": {}, \"entity_col\": \"id\", \"time_col\": \"year\", \"did_treatment_path\": \"d\"} model_options 必须保持原样；已有设计与协方差字段从当前模型继承，不要额外塞进 model_options。",
+    "followup": "请读取当前已完成的 dCDH dynamic 结果，报告下方声明路径所指定的实际动态效应与标准误；引用当前 run_id 的已登记 artifact/evidence_ref，保留声明中的 artifact 文件名。同时只用文字说明总体 ATT 的定义：Workbench 实验性的按 switcher 加权 horizon 平均，与 DYN 的 Av_tot_eff 不同；不另报其数值。",
+    "expected": "verified public rerun completed, exact executed parameters, registered native-comparison result, then grounded answer in result session",
+    "checks": {
+      "executed": true,
+      "language": "zh",
+      "no_fabricated_numbers": true
+    }
   }
 ]

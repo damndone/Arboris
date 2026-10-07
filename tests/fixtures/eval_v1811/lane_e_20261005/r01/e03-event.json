@@ -1,0 +1,191 @@
+{
+  "native": {
+    "b_evt_m5": -0.10540499445982383,
+    "s_evt_m5": 0.32002228090947743,
+    "b_evt_m4": 0.07001726833482,
+    "s_evt_m4": 0.3568053209289961,
+    "b_evt_m3": -0.09627786745870663,
+    "s_evt_m3": 0.27828245806116486,
+    "b_evt_m2": 0.17572437213057907,
+    "s_evt_m2": 0.3207286120564505,
+    "b_evt_p0": 0.6001496930624985,
+    "s_evt_p0": 0.3066955247509296,
+    "b_evt_p1": 0.7188846073337047,
+    "s_evt_p1": 0.26005363677521404,
+    "b_evt_p2": 1.1143378394944186,
+    "s_evt_p2": 0.27280698960290223,
+    "b_evt_p3": 1.033248713209821,
+    "s_evt_p3": 0.36899023989661545,
+    "b_evt_p4": 1.2338926887901784,
+    "s_evt_p4": 0.4058000229264783,
+    "F": 0.19185303170321671,
+    "df": 4.0,
+    "den": 59.0,
+    "p": 0.9417329561068509
+  },
+  "actual": {
+    "att": {
+      "estimate": 0.6821289937316858,
+      "std_error": 0.16366845074908956,
+      "pvalue": 0.000102,
+      "ci": [
+        0.3546291802438904,
+        1.0096288072194812
+      ],
+      "spec": "twfe",
+      "covariance": "clustered"
+    },
+    "event_study": {
+      "event_time": [
+        -5,
+        -4,
+        -3,
+        -2,
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "coef": [
+        -0.10540499445982136,
+        0.07001726833482168,
+        -0.09627786745870491,
+        0.17572437213057995,
+        0.6001496930624995,
+        0.7188846073337072,
+        1.1143378394944203,
+        1.0332487132098231,
+        1.2338926887901775
+      ],
+      "se": [
+        0.3200222809094776,
+        0.35680532092899525,
+        0.2782824580611647,
+        0.3207286120564492,
+        0.3066955247509277,
+        0.26005363677521115,
+        0.27280698960289784,
+        0.36899023989661245,
+        0.40580002292647366
+      ],
+      "ci_lower": [
+        -0.745768099444951,
+        -0.6439485297213986,
+        -0.6531197798421374,
+        -0.46605209821503973,
+        -0.013546634444462469,
+        0.19851848209146472,
+        0.5684523141888479,
+        0.29490094861702076,
+        0.42188871848619103
+      ],
+      "ci_upper": [
+        0.5349581105253084,
+        0.783983066391042,
+        0.4605640449247276,
+        0.8175008424761996,
+        1.2138460205694614,
+        1.2392507325759496,
+        1.6602233647999927,
+        1.7715964778026256,
+        2.045896659094164
+      ],
+      "ref_period": -1,
+      "covariance": "clustered",
+      "cluster_variable": "g",
+      "n_clusters": 60,
+      "inference_distribution": "t",
+      "effective_df": 59,
+      "pre_period_terms": [
+        "_evt_m5",
+        "_evt_m4",
+        "_evt_m3",
+        "_evt_m2"
+      ],
+      "pre_period_estimates": [
+        -0.10540499445982136,
+        0.07001726833482168,
+        -0.09627786745870491,
+        0.17572437213057995
+      ],
+      "pre_period_covariance": [
+        [
+          0.10241426027850459,
+          0.03859752046739646,
+          0.054062041658194365,
+          0.0375315601774379
+        ],
+        [
+          0.03859752046739611,
+          0.1273100370432433,
+          0.025436994077069907,
+          0.06856900246009712
+        ],
+        [
+          0.05406204165819471,
+          0.02543699407706969,
+          0.07744112646456387,
+          0.035468973224370925
+        ],
+        [
+          0.03753156017743733,
+          0.06856900246009764,
+          0.03546897322437102,
+          0.10286684259165631
+        ]
+      ],
+      "applicable": true
+    },
+    "parallel_trends": {
+      "test": "joint_pre_leads_f",
+      "statistic": 0.19185303170321352,
+      "pvalue": 0.941733,
+      "n_pre_leads": 4,
+      "verdict": "not_rejected",
+      "df_num": 4,
+      "df_den": 59,
+      "distribution": "F",
+      "message": "Pre-trend leads jointly insignificant (p >= 0.05); parallel trends not rejected."
+    },
+    "goodman_bacon": {
+      "components": [
+        {
+          "type": "treated_vs_untreated",
+          "weight": 0.3571428571428572,
+          "estimate": 0.9457875939999997
+        },
+        {
+          "type": "treated_vs_untreated",
+          "weight": 0.35714285714285715,
+          "estimate": 0.7529293689333336
+        },
+        {
+          "type": "earlier_vs_later",
+          "weight": 0.14285714285714285,
+          "estimate": 0.5843959516666664
+        },
+        {
+          "type": "later_vs_earlier",
+          "weight": 0.14285714285714285,
+          "estimate": 0.21554724699999994
+        }
+      ],
+      "weighted_avg": 0.7209622294285715,
+      "forbidden_weight": 0.14285714285714285,
+      "message": "14% of the TWFE estimate comes from 'forbidden' later-vs-earlier comparisons (already-treated units as controls); under staggered adoption the TWFE estimate may be biased.",
+      "applicable": true
+    },
+    "spec": {
+      "entity": "g",
+      "time": "time",
+      "cohort": "_did_cohort",
+      "n_treated_units": 40,
+      "n_never_treated": 20,
+      "staggered": true,
+      "mode": "cohort"
+    },
+    "interpretation_restriction": "Staggered adoption detected. The TWFE estimate mixes good and 'forbidden' comparisons (Goodman-Bacon weight 14%). For staggered designs prefer a modern estimator \u2014 see Layer 2 (Callaway-Sant'Anna)."
+  },
+  "run": "/private/tmp/v1811-evaluation-8d8a2fd4c7d44af693b267e6d893d16f-r01/test_event_study_final_leads_f0/event/runs/20261005_091804_843207_f009ae48"
+}

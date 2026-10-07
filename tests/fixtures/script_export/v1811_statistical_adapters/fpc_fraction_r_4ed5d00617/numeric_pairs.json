@@ -1,0 +1,146 @@
+[
+  {
+    "expected": 4.652711573943111,
+    "abs": 1e-08,
+    "rel": 0.0,
+    "label": "model:coefficients",
+    "actual": 4.652711573943111,
+    "difference": 0.0,
+    "allowed": 1e-08
+  },
+  {
+    "expected": 1.475820771771979,
+    "abs": 1e-08,
+    "rel": 0.0,
+    "label": "model:coefficients",
+    "actual": 1.475820771771979,
+    "difference": 0.0,
+    "allowed": 1e-08
+  },
+  {
+    "expected": -0.40404481777033774,
+    "abs": 1e-08,
+    "rel": 0.0,
+    "label": "model:coefficients",
+    "actual": -0.40404481777033774,
+    "difference": 0.0,
+    "allowed": 1e-08
+  },
+  {
+    "expected": 1.4239755174977637,
+    "abs": 1e-06,
+    "rel": 0.0,
+    "label": "model:std_errors",
+    "actual": 1.4239755174977637,
+    "difference": 0.0,
+    "allowed": 1e-06
+  },
+  {
+    "expected": 0.15965092243394755,
+    "abs": 1e-06,
+    "rel": 0.0,
+    "label": "model:std_errors",
+    "actual": 0.15965092243394755,
+    "difference": 0.0,
+    "allowed": 1e-06
+  },
+  {
+    "expected": 0.08102111538748384,
+    "abs": 1e-06,
+    "rel": 0.0,
+    "label": "model:std_errors",
+    "actual": 0.08102111538748384,
+    "difference": 0.0,
+    "allowed": 1e-06
+  },
+  {
+    "expected": 80.0,
+    "abs": 0.0,
+    "rel": 0.0,
+    "label": "model:nobs",
+    "actual": 80.0,
+    "difference": 0.0,
+    "allowed": 0.0
+  },
+  {
+    "expected": 3.267409809207213,
+    "abs": 1e-08,
+    "rel": 1e-06,
+    "label": "model:statistics.value",
+    "actual": 3.267409809207213,
+    "difference": 0.0,
+    "allowed": 3.2774098092072127e-06
+  },
+  {
+    "expected": 0.011400267373995018,
+    "abs": 0.0,
+    "rel": 1e-05,
+    "label": "model:statistics.p_value",
+    "actual": 0.011400267373995018,
+    "difference": 0.0,
+    "allowed": 1.1400267373995019e-07
+  },
+  {
+    "expected": 8.0,
+    "abs": 0.0,
+    "rel": 0.0,
+    "label": "model:statistics.df",
+    "actual": 8.0,
+    "difference": 0.0,
+    "allowed": 0.0
+  },
+  {
+    "expected": 9.244047884424663,
+    "abs": 1e-08,
+    "rel": 1e-06,
+    "label": "model:statistics.value",
+    "actual": 9.244047884424663,
+    "difference": 0.0,
+    "allowed": 9.254047884424663e-06
+  },
+  {
+    "expected": 1.5215872409348348e-05,
+    "abs": 0.0,
+    "rel": 1e-05,
+    "label": "model:statistics.p_value",
+    "actual": 1.5215872409348348e-05,
+    "difference": 0.0,
+    "allowed": 1.521587240934835e-10
+  },
+  {
+    "expected": 8.0,
+    "abs": 0.0,
+    "rel": 0.0,
+    "label": "model:statistics.df",
+    "actual": 8.0,
+    "difference": 0.0,
+    "allowed": 0.0
+  },
+  {
+    "expected": -4.986907620784923,
+    "abs": 1e-08,
+    "rel": 1e-06,
+    "label": "model:statistics.value",
+    "actual": -4.986907620784923,
+    "difference": 0.0,
+    "allowed": 4.996907620784922e-06
+  },
+  {
+    "expected": 0.0010701997269799582,
+    "abs": 0.0,
+    "rel": 1e-05,
+    "label": "model:statistics.p_value",
+    "actual": 0.0010701997269799582,
+    "difference": 0.0,
+    "allowed": 1.0701997269799583e-08
+  },
+  {
+    "expected": 8.0,
+    "abs": 0.0,
+    "rel": 0.0,
+    "label": "model:statistics.df",
+    "actual": 8.0,
+    "difference": 0.0,
+    "allowed": 0.0
+  }
+]

@@ -1,0 +1,294 @@
+$coefficients
+[1] "0.554012805943493"    "0.32366193973084384"  "-0.17094556009046105"
+
+$std_error
+[1] "0.030415829299483509" "0.030235503909753277" "0.03056524208842349" 
+
+$score
+[1] "1.0409451078885468e-12"  "8.1001871876651421e-13" 
+[3] "-1.6875389974302379e-13"
+
+$iterations
+[1] 12
+
+$converged
+[1] TRUE
+
+$epsilon
+[1] "9.9999999999999998e-17"
+
+/Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/genmod/generalized_linear_model.py:1923: FutureWarning: The bic value is computed using the deviance formula. After 0.13 this will change to the log-likelihood based formula. This change has no impact on the relative rank of models compared using BIC. You can directly access the log-likelihood version using the `bic_llf` attribute. You can suppress this message by calling statsmodels.genmod.generalized_linear_model.SET_USE_BIC_LLF with True to get the LLF-based version now or False to retainthe deviance version.
+  warnings.warn(
+/Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/base/model.py:595: HessianInversionWarning: Inverting hessian failed, no bse or cov_params available
+  warnings.warn('Inverting hessian failed, no bse or cov_params '
+/Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/base/model.py:607: ConvergenceWarning: Maximum Likelihood optimization failed to converge. Check mle_retvals
+  warnings.warn("Maximum Likelihood optimization failed to "
+/Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/genmod/generalized_linear_model.py:1923: FutureWarning: The bic value is computed using the deviance formula. After 0.13 this will change to the log-likelihood based formula. This change has no impact on the relative rank of models compared using BIC. You can directly access the log-likelihood version using the `bic_llf` attribute. You can suppress this message by calling statsmodels.genmod.generalized_linear_model.SET_USE_BIC_LLF with True to get the LLF-based version now or False to retainthe deviance version.
+  warnings.warn(
+/Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/genmod/generalized_linear_model.py:1923: FutureWarning: The bic value is computed using the deviance formula. After 0.13 this will change to the log-likelihood based formula. This change has no impact on the relative rank of models compared using BIC. You can directly access the log-likelihood version using the `bic_llf` attribute. You can suppress this message by calling statsmodels.genmod.generalized_linear_model.SET_USE_BIC_LLF with True to get the LLF-based version now or False to retainthe deviance version.
+  warnings.warn(
+{
+  "nb2": {
+    "beta": [
+      0.38636443172056784,
+      0.37879429805878007,
+      -0.19864200777322277
+    ],
+    "se": [
+      0.0343664739492729,
+      0.034751519774094464,
+      0.03510461797875411
+    ],
+    "ll": -2007.5082891629145,
+    "covariance": [
+      [
+        0.0011810545317060528,
+        -0.00021137319642358809,
+        0.00010280581383411862,
+        -3.0283450586246263e-06
+      ],
+      [
+        -0.00021137319642358806,
+        0.0012076681266092787,
+        1.3871391859568651e-05,
+        1.4838602233665739e-05
+      ],
+      [
+        0.00010280581383411862,
+        1.3871391859568651e-05,
+        0.0012323342034342663,
+        3.3904485477706456e-07
+      ],
+      [
+        -3.0283450586246267e-06,
+        1.483860223366574e-05,
+        3.3904485477706456e-07,
+        0.0038666102386016622
+      ]
+    ],
+    "convergence": {
+      "converged": true,
+      "iterations": 11,
+      "tolerance": 1e-08,
+      "criterion": "maximum absolute natural-parameter score per observation (beta and ancillary)",
+      "natural_mean_score_max": 7.936723072794628e-09
+    },
+    "max_beta_abs_error_stata": 6.6532003795138905e-09,
+    "max_se_relative_error_stata": 1.6741300346012622e-08,
+    "natural_score": [
+      8.218463197096071e-06,
+      5.399887932355796e-07,
+      -9.28737335925689e-08,
+      -9.524067687353554e-06
+    ],
+    "information_eigenvalues": [
+      258.6184799717005,
+      701.0248054694835,
+      807.4228900058907,
+      1046.0513772325398
+    ],
+    "ancillary": [
+      {
+        "name": "lnalpha",
+        "estimate": -0.3841795573745957,
+        "std_error": 0.0913087211369594,
+        "conf_low": -0.5631413622774473,
+        "conf_high": -0.2052177524717441,
+        "scale": "log"
+      },
+      {
+        "name": "alpha",
+        "estimate": 0.6810091359881993,
+        "std_error": 0.062182073289668155,
+        "conf_low": 0.5694175046845744,
+        "conf_high": 0.8144699442569796,
+        "scale": "natural"
+      }
+    ],
+    "overdispersion": {
+      "statistic": 381.12688017019263,
+      "df": 1,
+      "p_value": 3.536654808021698e-85,
+      "distribution": "chibar2(01)",
+      "restricted_model": "poisson",
+      "log_likelihood_restricted": -2198.071729248011
+    }
+  },
+  "nb1": {
+    "beta": [
+      0.4269437848106901,
+      0.349441861867247,
+      -0.16051477207474898
+    ],
+    "se": [
+      0.030150250590380574,
+      0.027795953434381654,
+      0.026566569277574982
+    ],
+    "ll": -2529.4275230328135,
+    "covariance": [
+      [
+        0.0009090376106627442,
+        -0.0002481310826574493,
+        0.0001138847164934366,
+        0.0008979338709481256
+      ],
+      [
+        -0.00024813108265744926,
+        0.0007726150273263132,
+        -3.487990617693277e-05,
+        -0.00023977524682859715
+      ],
+      [
+        0.00011388471649343658,
+        -3.4879906176932776e-05,
+        0.000705782603180191,
+        8.699977193416799e-05
+      ],
+      [
+        0.0008979338709481256,
+        -0.0002397752468285971,
+        8.699977193416797e-05,
+        0.008132208993547458
+      ]
+    ],
+    "convergence": {
+      "converged": true,
+      "iterations": 11,
+      "tolerance": 1e-08,
+      "criterion": "maximum absolute natural-parameter score per observation (beta and ancillary)",
+      "natural_mean_score_max": 5.321954634022556e-09
+    },
+    "max_beta_abs_error_stata": 4.773879236363854e-09,
+    "max_se_relative_error_stata": 5.302771333148826e-09,
+    "natural_score": [
+      7.982931951033834e-06,
+      3.1966501090607835e-07,
+      -1.0587675625117754e-07,
+      -2.85333249694375e-06
+    ],
+    "information_eigenvalues": [
+      121.16589192757098,
+      972.77946783813,
+      1447.2364850661406,
+      1826.3430700541994
+    ],
+    "ancillary": [
+      {
+        "name": "lndelta",
+        "estimate": -0.005608975720298626,
+        "std_error": 0.0906859929998805,
+        "conf_low": -0.18335025590231585,
+        "conf_high": 0.17213230446171862,
+        "scale": "log"
+      },
+      {
+        "name": "delta",
+        "estimate": 0.9944067252149127,
+        "std_error": 0.09017876132187366,
+        "conf_low": 0.8324765248509843,
+        "conf_high": 1.1878349786856186,
+        "scale": "natural"
+      }
+    ],
+    "overdispersion": {
+      "statistic": 364.66657365230094,
+      "df": 1,
+      "p_value": 1.3565595781015045e-81,
+      "distribution": "chibar2(01)",
+      "restricted_model": "poisson",
+      "log_likelihood_restricted": -2711.760809858964
+    }
+  },
+  "fixed": {
+    "beta": [
+      0.3865369283080683,
+      0.3779426773537426,
+      -0.19867403481029067
+    ],
+    "se": [
+      0.03208454424965371,
+      0.03217595738957018,
+      0.03243674864983293
+    ],
+    "ll": -2012.7059915349842,
+    "covariance": [
+      [
+        0.001029417979707987,
+        -0.0002085546204385332,
+        0.00010251302224881881
+      ],
+      [
+        -0.0002085546204385331,
+        0.0010352922339354358,
+        9.759547163187495e-06
+      ],
+      [
+        0.00010251302224881886,
+        9.759547163187481e-06,
+        0.0010521426629724387
+      ]
+    ],
+    "convergence": {
+      "converged": true,
+      "iterations": 10,
+      "tolerance": 1e-12,
+      "criterion": "absolute parameter change"
+    },
+    "max_beta_abs_error_stata": 1.7041923427996153e-14,
+    "max_se_relative_error_stata": 3.774758283725532e-15
+  },
+  "boundary_mean": {
+    "status": "explicit_failure",
+    "error": "NB_INFERENCE_UNCERTIFIED: regular interior inference is unavailable; maximum absolute natural-parameter score per observation=0.010249274019403664 exceeds tolerance=1e-08. Optimizer log-coordinate stopping does not certify this point."
+  },
+  "boundary_constant": {
+    "status": "explicit_failure",
+    "error": "NB_INFERENCE_UNCERTIFIED: regular interior inference is unavailable; maximum absolute natural-parameter score per observation=0.013047503308911673 exceeds tolerance=1e-08. Optimizer log-coordinate stopping does not certify this point."
+  },
+  "fractional_fixed": {
+    "beta": [
+      0.554012805943494,
+      0.3236619397308465,
+      -0.1709455600904584
+    ],
+    "se": [
+      0.030417146259706165,
+      0.03052283044564355,
+      0.030967194708885346
+    ],
+    "ll": -2099.695127550683,
+    "max_beta_abs_error": 6.050715484207103e-15,
+    "max_se_relative_error": 1.9984014443252818e-15,
+    "information_matrix": "observed",
+    "convergence": {
+      "converged": true,
+      "iterations": 10,
+      "tolerance": 1e-12,
+      "criterion": "absolute parameter change"
+    }
+  },
+  "fractional_glm": {
+    "beta": [
+      0.554012805943494,
+      0.3236619397308465,
+      -0.1709455600904584
+    ],
+    "se": [
+      0.0304158292994835,
+      0.03023550390975323,
+      0.03056524208842346
+    ],
+    "ll": -2099.695127550683,
+    "max_beta_abs_error": 2.6645352591003757e-15,
+    "max_se_relative_error": 1.4432899320127035e-15,
+    "information_matrix": "expected",
+    "convergence": {
+      "converged": true,
+      "iterations": 10,
+      "tolerance": 1e-12,
+      "criterion": "absolute parameter change"
+    }
+  },
+  "production_sha256": "fdc8df1bf72cf076bba958483666ac4a6b4666a44fcaa3f8c7ed63566dcf9c95"
+}

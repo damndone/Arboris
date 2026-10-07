@@ -10,6 +10,8 @@ answered on different data.
 from __future__ import annotations
 
 from collections.abc import Mapping
+import io
+import json
 from pathlib import Path
 from typing import Any
 
@@ -39,7 +41,9 @@ def _dataset_path(run_root: Path) -> Path:
 
 
 def _outcome(run_root: Path) -> str:
-    summary = read_json(run_root / "diagnostic_summary.json")
+    from .comparison_data import _bound_bytes
+
+    summary = json.loads(_bound_bytes(run_root, run_root / "diagnostic_summary.json"))
     identity = summary.get("model_identity") if isinstance(summary, Mapping) else None
     outcome = identity.get("y_variable") if isinstance(identity, Mapping) else None
     if not isinstance(outcome, str) or not outcome:
@@ -61,7 +65,9 @@ def estimation_design(run_root: Path, kernel: Mapping[str, Any]) -> dict[str, np
             "the model does not record its estimation sample, so the data for marginal effects "
             "cannot be verified",
         )
-    frame = pd.read_parquet(_dataset_path(run_root))
+    from .comparison_data import _bound_bytes
+
+    frame = pd.read_parquet(io.BytesIO(_bound_bytes(run_root, _dataset_path(run_root))))
     names = list(kernel["param_names"])
     regressors = [name for name in names if name not in INTERCEPT_NAMES]
     not_columns = [name for name in regressors if name not in frame.columns]

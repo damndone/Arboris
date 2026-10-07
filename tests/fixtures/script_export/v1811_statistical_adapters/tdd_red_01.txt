@@ -1,0 +1,274 @@
+FFFFFFFFFFFFFFFFFFFFFFFFFFF                                              [100%]
+=================================== FAILURES ===================================
+____ test_approved_single_stage_fpc_is_executed_natively[population-stata] _____
+tests/test_script_export_v1811_statistical_adapters.py:89: in test_approved_single_stage_fpc_is_executed_natively
+    native_run(plan, language, path, monkeypatch)
+tests/test_script_export_v1811_statistical_adapters.py:42: in native_run
+    exported = export_script(plan, language, require_native=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/render.py:49: in export_script
+    raise ScriptExportRefusal('NOT_FULLY_NATIVE','Native export unavailable for: '+reasons,steps=blocked)
+E   workbench.script_export.plan.ScriptExportRefusal: Native export unavailable for: model: FPC is supplied, but the frozen Workbench linearization engine does not apply FPC; native FPC would change the executed covariance.
+______ test_approved_single_stage_fpc_is_executed_natively[population-r] _______
+tests/test_script_export_v1811_statistical_adapters.py:89: in test_approved_single_stage_fpc_is_executed_natively
+    native_run(plan, language, path, monkeypatch)
+tests/test_script_export_v1811_statistical_adapters.py:42: in native_run
+    exported = export_script(plan, language, require_native=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/render.py:49: in export_script
+    raise ScriptExportRefusal('NOT_FULLY_NATIVE','Native export unavailable for: '+reasons,steps=blocked)
+E   workbench.script_export.plan.ScriptExportRefusal: Native export unavailable for: model: FPC is supplied, but the frozen Workbench linearization engine does not apply FPC; native FPC would change the executed covariance.
+____ test_approved_single_stage_fpc_is_executed_natively[population-python] ____
+tests/test_script_export_v1811_statistical_adapters.py:89: in test_approved_single_stage_fpc_is_executed_natively
+    native_run(plan, language, path, monkeypatch)
+tests/test_script_export_v1811_statistical_adapters.py:42: in native_run
+    exported = export_script(plan, language, require_native=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/render.py:49: in export_script
+    raise ScriptExportRefusal('NOT_FULLY_NATIVE','Native export unavailable for: '+reasons,steps=blocked)
+E   workbench.script_export.plan.ScriptExportRefusal: Native export unavailable for: model: FPC is supplied, but the frozen Workbench linearization engine does not apply FPC; native FPC would change the executed covariance.
+_____ test_approved_single_stage_fpc_is_executed_natively[fraction-stata] ______
+tests/test_script_export_v1811_statistical_adapters.py:89: in test_approved_single_stage_fpc_is_executed_natively
+    native_run(plan, language, path, monkeypatch)
+tests/test_script_export_v1811_statistical_adapters.py:42: in native_run
+    exported = export_script(plan, language, require_native=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/render.py:49: in export_script
+    raise ScriptExportRefusal('NOT_FULLY_NATIVE','Native export unavailable for: '+reasons,steps=blocked)
+E   workbench.script_export.plan.ScriptExportRefusal: Native export unavailable for: model: FPC is supplied, but the frozen Workbench linearization engine does not apply FPC; native FPC would change the executed covariance.
+_______ test_approved_single_stage_fpc_is_executed_natively[fraction-r] ________
+tests/test_script_export_v1811_statistical_adapters.py:89: in test_approved_single_stage_fpc_is_executed_natively
+    native_run(plan, language, path, monkeypatch)
+tests/test_script_export_v1811_statistical_adapters.py:42: in native_run
+    exported = export_script(plan, language, require_native=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/render.py:49: in export_script
+    raise ScriptExportRefusal('NOT_FULLY_NATIVE','Native export unavailable for: '+reasons,steps=blocked)
+E   workbench.script_export.plan.ScriptExportRefusal: Native export unavailable for: model: FPC is supplied, but the frozen Workbench linearization engine does not apply FPC; native FPC would change the executed covariance.
+_____ test_approved_single_stage_fpc_is_executed_natively[fraction-python] _____
+tests/test_script_export_v1811_statistical_adapters.py:89: in test_approved_single_stage_fpc_is_executed_natively
+    native_run(plan, language, path, monkeypatch)
+tests/test_script_export_v1811_statistical_adapters.py:42: in native_run
+    exported = export_script(plan, language, require_native=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/render.py:49: in export_script
+    raise ScriptExportRefusal('NOT_FULLY_NATIVE','Native export unavailable for: '+reasons,steps=blocked)
+E   workbench.script_export.plan.ScriptExportRefusal: Native export unavailable for: model: FPC is supplied, but the frozen Workbench linearization engine does not apply FPC; native FPC would change the executed covariance.
+___ test_approved_single_stage_fpc_is_executed_natively[subpopulation-stata] ___
+tests/test_script_export_v1811_statistical_adapters.py:89: in test_approved_single_stage_fpc_is_executed_natively
+    native_run(plan, language, path, monkeypatch)
+tests/test_script_export_v1811_statistical_adapters.py:42: in native_run
+    exported = export_script(plan, language, require_native=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/render.py:49: in export_script
+    raise ScriptExportRefusal('NOT_FULLY_NATIVE','Native export unavailable for: '+reasons,steps=blocked)
+E   workbench.script_export.plan.ScriptExportRefusal: Native export unavailable for: model: FPC is supplied, but the frozen Workbench linearization engine does not apply FPC; native FPC would change the executed covariance.
+_____ test_approved_single_stage_fpc_is_executed_natively[subpopulation-r] _____
+tests/test_script_export_v1811_statistical_adapters.py:89: in test_approved_single_stage_fpc_is_executed_natively
+    native_run(plan, language, path, monkeypatch)
+tests/test_script_export_v1811_statistical_adapters.py:42: in native_run
+    exported = export_script(plan, language, require_native=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/render.py:49: in export_script
+    raise ScriptExportRefusal('NOT_FULLY_NATIVE','Native export unavailable for: '+reasons,steps=blocked)
+E   workbench.script_export.plan.ScriptExportRefusal: Native export unavailable for: model: FPC is supplied, but the frozen Workbench linearization engine does not apply FPC; native FPC would change the executed covariance.
+__ test_approved_single_stage_fpc_is_executed_natively[subpopulation-python] ___
+tests/test_script_export_v1811_statistical_adapters.py:89: in test_approved_single_stage_fpc_is_executed_natively
+    native_run(plan, language, path, monkeypatch)
+tests/test_script_export_v1811_statistical_adapters.py:42: in native_run
+    exported = export_script(plan, language, require_native=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/render.py:49: in export_script
+    raise ScriptExportRefusal('NOT_FULLY_NATIVE','Native export unavailable for: '+reasons,steps=blocked)
+E   workbench.script_export.plan.ScriptExportRefusal: Native export unavailable for: model: FPC is supplied, but the frozen Workbench linearization engine does not apply FPC; native FPC would change the executed covariance.
+___ test_approved_single_stage_fpc_is_executed_natively[lonely_census-stata] ___
+tests/test_script_export_v1811_statistical_adapters.py:89: in test_approved_single_stage_fpc_is_executed_natively
+    native_run(plan, language, path, monkeypatch)
+tests/test_script_export_v1811_statistical_adapters.py:42: in native_run
+    exported = export_script(plan, language, require_native=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/render.py:49: in export_script
+    raise ScriptExportRefusal('NOT_FULLY_NATIVE','Native export unavailable for: '+reasons,steps=blocked)
+E   workbench.script_export.plan.ScriptExportRefusal: Native export unavailable for: model: FPC is supplied, but the frozen Workbench linearization engine does not apply FPC; native FPC would change the executed covariance.
+_____ test_approved_single_stage_fpc_is_executed_natively[lonely_census-r] _____
+tests/test_script_export_v1811_statistical_adapters.py:89: in test_approved_single_stage_fpc_is_executed_natively
+    native_run(plan, language, path, monkeypatch)
+tests/test_script_export_v1811_statistical_adapters.py:42: in native_run
+    exported = export_script(plan, language, require_native=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/render.py:49: in export_script
+    raise ScriptExportRefusal('NOT_FULLY_NATIVE','Native export unavailable for: '+reasons,steps=blocked)
+E   workbench.script_export.plan.ScriptExportRefusal: Native export unavailable for: model: FPC is supplied, but the frozen Workbench linearization engine does not apply FPC; native FPC would change the executed covariance.
+__ test_approved_single_stage_fpc_is_executed_natively[lonely_census-python] ___
+tests/test_script_export_v1811_statistical_adapters.py:89: in test_approved_single_stage_fpc_is_executed_natively
+    native_run(plan, language, path, monkeypatch)
+tests/test_script_export_v1811_statistical_adapters.py:42: in native_run
+    exported = export_script(plan, language, require_native=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/render.py:49: in export_script
+    raise ScriptExportRefusal('NOT_FULLY_NATIVE','Native export unavailable for: '+reasons,steps=blocked)
+E   workbench.script_export.plan.ScriptExportRefusal: Native export unavailable for: model: FPC is supplied, but the frozen Workbench linearization engine does not apply FPC; native FPC would change the executed covariance.
+______ test_approved_single_stage_fpc_is_executed_natively[no_psu-stata] _______
+tests/test_script_export_v1811_statistical_adapters.py:89: in test_approved_single_stage_fpc_is_executed_natively
+    native_run(plan, language, path, monkeypatch)
+tests/test_script_export_v1811_statistical_adapters.py:42: in native_run
+    exported = export_script(plan, language, require_native=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/render.py:49: in export_script
+    raise ScriptExportRefusal('NOT_FULLY_NATIVE','Native export unavailable for: '+reasons,steps=blocked)
+E   workbench.script_export.plan.ScriptExportRefusal: Native export unavailable for: model: FPC is supplied, but the frozen Workbench linearization engine does not apply FPC; native FPC would change the executed covariance.
+________ test_approved_single_stage_fpc_is_executed_natively[no_psu-r] _________
+tests/test_script_export_v1811_statistical_adapters.py:89: in test_approved_single_stage_fpc_is_executed_natively
+    native_run(plan, language, path, monkeypatch)
+tests/test_script_export_v1811_statistical_adapters.py:42: in native_run
+    exported = export_script(plan, language, require_native=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/render.py:49: in export_script
+    raise ScriptExportRefusal('NOT_FULLY_NATIVE','Native export unavailable for: '+reasons,steps=blocked)
+E   workbench.script_export.plan.ScriptExportRefusal: Native export unavailable for: model: FPC is supplied, but the frozen Workbench linearization engine does not apply FPC; native FPC would change the executed covariance.
+______ test_approved_single_stage_fpc_is_executed_natively[no_psu-python] ______
+tests/test_script_export_v1811_statistical_adapters.py:89: in test_approved_single_stage_fpc_is_executed_natively
+    native_run(plan, language, path, monkeypatch)
+tests/test_script_export_v1811_statistical_adapters.py:42: in native_run
+    exported = export_script(plan, language, require_native=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/render.py:49: in export_script
+    raise ScriptExportRefusal('NOT_FULLY_NATIVE','Native export unavailable for: '+reasons,steps=blocked)
+E   workbench.script_export.plan.ScriptExportRefusal: Native export unavailable for: model: FPC is supplied, but the frozen Workbench linearization engine does not apply FPC; native FPC would change the executed covariance.
+_____ test_approved_single_stage_fpc_is_executed_natively[no_strata-stata] _____
+tests/test_script_export_v1811_statistical_adapters.py:89: in test_approved_single_stage_fpc_is_executed_natively
+    native_run(plan, language, path, monkeypatch)
+tests/test_script_export_v1811_statistical_adapters.py:42: in native_run
+    exported = export_script(plan, language, require_native=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/render.py:49: in export_script
+    raise ScriptExportRefusal('NOT_FULLY_NATIVE','Native export unavailable for: '+reasons,steps=blocked)
+E   workbench.script_export.plan.ScriptExportRefusal: Native export unavailable for: model: FPC is supplied, but the frozen Workbench linearization engine does not apply FPC; native FPC would change the executed covariance.
+_______ test_approved_single_stage_fpc_is_executed_natively[no_strata-r] _______
+tests/test_script_export_v1811_statistical_adapters.py:89: in test_approved_single_stage_fpc_is_executed_natively
+    native_run(plan, language, path, monkeypatch)
+tests/test_script_export_v1811_statistical_adapters.py:42: in native_run
+    exported = export_script(plan, language, require_native=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/render.py:49: in export_script
+    raise ScriptExportRefusal('NOT_FULLY_NATIVE','Native export unavailable for: '+reasons,steps=blocked)
+E   workbench.script_export.plan.ScriptExportRefusal: Native export unavailable for: model: FPC is supplied, but the frozen Workbench linearization engine does not apply FPC; native FPC would change the executed covariance.
+____ test_approved_single_stage_fpc_is_executed_natively[no_strata-python] _____
+tests/test_script_export_v1811_statistical_adapters.py:89: in test_approved_single_stage_fpc_is_executed_natively
+    native_run(plan, language, path, monkeypatch)
+tests/test_script_export_v1811_statistical_adapters.py:42: in native_run
+    exported = export_script(plan, language, require_native=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/render.py:49: in export_script
+    raise ScriptExportRefusal('NOT_FULLY_NATIVE','Native export unavailable for: '+reasons,steps=blocked)
+E   workbench.script_export.plan.ScriptExportRefusal: Native export unavailable for: model: FPC is supplied, but the frozen Workbench linearization engine does not apply FPC; native FPC would change the executed covariance.
+___ test_approved_single_stage_fpc_is_executed_natively[zero_fraction-stata] ___
+tests/test_script_export_v1811_statistical_adapters.py:89: in test_approved_single_stage_fpc_is_executed_natively
+    native_run(plan, language, path, monkeypatch)
+tests/test_script_export_v1811_statistical_adapters.py:42: in native_run
+    exported = export_script(plan, language, require_native=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/render.py:49: in export_script
+    raise ScriptExportRefusal('NOT_FULLY_NATIVE','Native export unavailable for: '+reasons,steps=blocked)
+E   workbench.script_export.plan.ScriptExportRefusal: Native export unavailable for: model: FPC is supplied, but the frozen Workbench linearization engine does not apply FPC; native FPC would change the executed covariance.
+_____ test_approved_single_stage_fpc_is_executed_natively[zero_fraction-r] _____
+tests/test_script_export_v1811_statistical_adapters.py:89: in test_approved_single_stage_fpc_is_executed_natively
+    native_run(plan, language, path, monkeypatch)
+tests/test_script_export_v1811_statistical_adapters.py:42: in native_run
+    exported = export_script(plan, language, require_native=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/render.py:49: in export_script
+    raise ScriptExportRefusal('NOT_FULLY_NATIVE','Native export unavailable for: '+reasons,steps=blocked)
+E   workbench.script_export.plan.ScriptExportRefusal: Native export unavailable for: model: FPC is supplied, but the frozen Workbench linearization engine does not apply FPC; native FPC would change the executed covariance.
+__ test_approved_single_stage_fpc_is_executed_natively[zero_fraction-python] ___
+tests/test_script_export_v1811_statistical_adapters.py:89: in test_approved_single_stage_fpc_is_executed_natively
+    native_run(plan, language, path, monkeypatch)
+tests/test_script_export_v1811_statistical_adapters.py:42: in native_run
+    exported = export_script(plan, language, require_native=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/render.py:49: in export_script
+    raise ScriptExportRefusal('NOT_FULLY_NATIVE','Native export unavailable for: '+reasons,steps=blocked)
+E   workbench.script_export.plan.ScriptExportRefusal: Native export unavailable for: model: FPC is supplied, but the frozen Workbench linearization engine does not apply FPC; native FPC would change the executed covariance.
+_ test_fixed_alpha_glm_nb_final_eim_model_matches_approved_oracle[False-stata] _
+tests/test_script_export_v1811_statistical_adapters.py:113: in test_fixed_alpha_glm_nb_final_eim_model_matches_approved_oracle
+    native_run(plan, language, path, monkeypatch)
+tests/test_script_export_v1811_statistical_adapters.py:42: in native_run
+    exported = export_script(plan, language, require_native=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/render.py:49: in export_script
+    raise ScriptExportRefusal('NOT_FULLY_NATIVE','Native export unavailable for: '+reasons,steps=blocked)
+E   workbench.script_export.plan.ScriptExportRefusal: Native export unavailable for: full: Fixed-alpha GLM negative-binomial export is not validated in this release.
+___ test_fixed_alpha_glm_nb_final_eim_model_matches_approved_oracle[False-r] ___
+tests/test_script_export_v1811_statistical_adapters.py:113: in test_fixed_alpha_glm_nb_final_eim_model_matches_approved_oracle
+    native_run(plan, language, path, monkeypatch)
+tests/test_script_export_v1811_statistical_adapters.py:42: in native_run
+    exported = export_script(plan, language, require_native=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/render.py:49: in export_script
+    raise ScriptExportRefusal('NOT_FULLY_NATIVE','Native export unavailable for: '+reasons,steps=blocked)
+E   workbench.script_export.plan.ScriptExportRefusal: Native export unavailable for: full: Fixed-alpha GLM negative-binomial export is not validated in this release.
+_ test_fixed_alpha_glm_nb_final_eim_model_matches_approved_oracle[False-python] _
+tests/test_script_export_v1811_statistical_adapters.py:113: in test_fixed_alpha_glm_nb_final_eim_model_matches_approved_oracle
+    native_run(plan, language, path, monkeypatch)
+tests/test_script_export_v1811_statistical_adapters.py:42: in native_run
+    exported = export_script(plan, language, require_native=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/render.py:49: in export_script
+    raise ScriptExportRefusal('NOT_FULLY_NATIVE','Native export unavailable for: '+reasons,steps=blocked)
+E   workbench.script_export.plan.ScriptExportRefusal: Native export unavailable for: full: Fixed-alpha GLM negative-binomial export is not validated in this release.
+_ test_fixed_alpha_glm_nb_final_eim_model_matches_approved_oracle[True-stata] __
+tests/test_script_export_v1811_statistical_adapters.py:113: in test_fixed_alpha_glm_nb_final_eim_model_matches_approved_oracle
+    native_run(plan, language, path, monkeypatch)
+tests/test_script_export_v1811_statistical_adapters.py:42: in native_run
+    exported = export_script(plan, language, require_native=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/render.py:49: in export_script
+    raise ScriptExportRefusal('NOT_FULLY_NATIVE','Native export unavailable for: '+reasons,steps=blocked)
+E   workbench.script_export.plan.ScriptExportRefusal: Native export unavailable for: full: Only binomial and Poisson GLM families are validated for native export.
+___ test_fixed_alpha_glm_nb_final_eim_model_matches_approved_oracle[True-r] ____
+tests/test_script_export_v1811_statistical_adapters.py:113: in test_fixed_alpha_glm_nb_final_eim_model_matches_approved_oracle
+    native_run(plan, language, path, monkeypatch)
+tests/test_script_export_v1811_statistical_adapters.py:42: in native_run
+    exported = export_script(plan, language, require_native=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/render.py:49: in export_script
+    raise ScriptExportRefusal('NOT_FULLY_NATIVE','Native export unavailable for: '+reasons,steps=blocked)
+E   workbench.script_export.plan.ScriptExportRefusal: Native export unavailable for: full: Only binomial and Poisson GLM families are validated for native export.
+_ test_fixed_alpha_glm_nb_final_eim_model_matches_approved_oracle[True-python] _
+tests/test_script_export_v1811_statistical_adapters.py:113: in test_fixed_alpha_glm_nb_final_eim_model_matches_approved_oracle
+    native_run(plan, language, path, monkeypatch)
+tests/test_script_export_v1811_statistical_adapters.py:42: in native_run
+    exported = export_script(plan, language, require_native=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/render.py:49: in export_script
+    raise ScriptExportRefusal('NOT_FULLY_NATIVE','Native export unavailable for: '+reasons,steps=blocked)
+E   workbench.script_export.plan.ScriptExportRefusal: Native export unavailable for: full: Only binomial and Poisson GLM families are validated for native export.
+=========================== short test summary info ============================
+FAILED tests/test_script_export_v1811_statistical_adapters.py::test_approved_single_stage_fpc_is_executed_natively[population-stata]
+FAILED tests/test_script_export_v1811_statistical_adapters.py::test_approved_single_stage_fpc_is_executed_natively[population-r]
+FAILED tests/test_script_export_v1811_statistical_adapters.py::test_approved_single_stage_fpc_is_executed_natively[population-python]
+FAILED tests/test_script_export_v1811_statistical_adapters.py::test_approved_single_stage_fpc_is_executed_natively[fraction-stata]
+FAILED tests/test_script_export_v1811_statistical_adapters.py::test_approved_single_stage_fpc_is_executed_natively[fraction-r]
+FAILED tests/test_script_export_v1811_statistical_adapters.py::test_approved_single_stage_fpc_is_executed_natively[fraction-python]
+FAILED tests/test_script_export_v1811_statistical_adapters.py::test_approved_single_stage_fpc_is_executed_natively[subpopulation-stata]
+FAILED tests/test_script_export_v1811_statistical_adapters.py::test_approved_single_stage_fpc_is_executed_natively[subpopulation-r]
+FAILED tests/test_script_export_v1811_statistical_adapters.py::test_approved_single_stage_fpc_is_executed_natively[subpopulation-python]
+FAILED tests/test_script_export_v1811_statistical_adapters.py::test_approved_single_stage_fpc_is_executed_natively[lonely_census-stata]
+FAILED tests/test_script_export_v1811_statistical_adapters.py::test_approved_single_stage_fpc_is_executed_natively[lonely_census-r]
+FAILED tests/test_script_export_v1811_statistical_adapters.py::test_approved_single_stage_fpc_is_executed_natively[lonely_census-python]
+FAILED tests/test_script_export_v1811_statistical_adapters.py::test_approved_single_stage_fpc_is_executed_natively[no_psu-stata]
+FAILED tests/test_script_export_v1811_statistical_adapters.py::test_approved_single_stage_fpc_is_executed_natively[no_psu-r]
+FAILED tests/test_script_export_v1811_statistical_adapters.py::test_approved_single_stage_fpc_is_executed_natively[no_psu-python]
+FAILED tests/test_script_export_v1811_statistical_adapters.py::test_approved_single_stage_fpc_is_executed_natively[no_strata-stata]
+FAILED tests/test_script_export_v1811_statistical_adapters.py::test_approved_single_stage_fpc_is_executed_natively[no_strata-r]
+FAILED tests/test_script_export_v1811_statistical_adapters.py::test_approved_single_stage_fpc_is_executed_natively[no_strata-python]
+FAILED tests/test_script_export_v1811_statistical_adapters.py::test_approved_single_stage_fpc_is_executed_natively[zero_fraction-stata]
+FAILED tests/test_script_export_v1811_statistical_adapters.py::test_approved_single_stage_fpc_is_executed_natively[zero_fraction-r]
+FAILED tests/test_script_export_v1811_statistical_adapters.py::test_approved_single_stage_fpc_is_executed_natively[zero_fraction-python]
+FAILED tests/test_script_export_v1811_statistical_adapters.py::test_fixed_alpha_glm_nb_final_eim_model_matches_approved_oracle[False-stata]
+FAILED tests/test_script_export_v1811_statistical_adapters.py::test_fixed_alpha_glm_nb_final_eim_model_matches_approved_oracle[False-r]
+FAILED tests/test_script_export_v1811_statistical_adapters.py::test_fixed_alpha_glm_nb_final_eim_model_matches_approved_oracle[False-python]
+FAILED tests/test_script_export_v1811_statistical_adapters.py::test_fixed_alpha_glm_nb_final_eim_model_matches_approved_oracle[True-stata]
+FAILED tests/test_script_export_v1811_statistical_adapters.py::test_fixed_alpha_glm_nb_final_eim_model_matches_approved_oracle[True-r]
+FAILED tests/test_script_export_v1811_statistical_adapters.py::test_fixed_alpha_glm_nb_final_eim_model_matches_approved_oracle[True-python]
+27 failed, 8 deselected in 1.97s

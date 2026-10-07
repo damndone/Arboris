@@ -1,0 +1,36 @@
+{
+  "owner": "/private/tmp/v1811-evaluation-8d8a2fd4c7d44af693b267e6d893d16f-r01/e04-native0/public-post/runs/20261005_091807_115397_a5e99ccc",
+  "expected": {
+    "estimate": 1.4058352988479101,
+    "std_error": 0.041532449984931157,
+    "p_value": 3.743845469836754e-251,
+    "ci": [
+      1.324433192687734,
+      1.4872374050080863
+    ]
+  },
+  "actual": {
+    "schema_version": "workbench.postestimation.result/v1",
+    "model_run_id": "20261005_091807_115397_a5e99ccc",
+    "operation": "nlcom",
+    "model_id": "glm_1",
+    "model_type": "glm:poisson",
+    "covariance_estimator": "nonrobust",
+    "nobs": 850,
+    "df_method": "asymptotic",
+    "n_clusters": null,
+    "expression": "exp(x1)",
+    "estimate": 1.40583529884791,
+    "std_error": 0.04153244998524338,
+    "statistic": 33.849081846782646,
+    "distribution": "z",
+    "df": null,
+    "p_value": 3.743845502112066e-251,
+    "level": 0.95,
+    "ci": [
+      1.3244331926871218,
+      1.487237405008698
+    ],
+    "warnings": []
+  }
+}

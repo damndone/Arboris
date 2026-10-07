@@ -1,0 +1,24 @@
+{
+  "oracle": {
+    "beta": [
+      0.2432774645471762,
+      0.320913430096451,
+      -0.16506965062314202
+    ],
+    "se": [
+      0.02926425431922254,
+      0.028922596274984086,
+      0.028879554033097485
+    ],
+    "n": 1800,
+    "score": 2.383278759528669e-16
+  },
+  "command": [
+    "Rscript",
+    "--vanilla",
+    "/private/tmp/v1811-evaluation-8d8a2fd4c7d44af693b267e6d893d16f-r01/test_fixed_glm_expected_inform0/e02-fixed-glm.R",
+    "/Users/jiayuanren/\u9879\u76ee\u89c4\u5212/.worktrees/codex-v1811-evaluation/tests/fixtures/eval_v1811/lane_e_20261005/r01/glm-fixed.csv",
+    "/private/tmp/v1811-evaluation-8d8a2fd4c7d44af693b267e6d893d16f-r01/test_fixed_glm_expected_inform0/e02-fixed-glm-oracle.json"
+  ],
+  "exit": 0
+}

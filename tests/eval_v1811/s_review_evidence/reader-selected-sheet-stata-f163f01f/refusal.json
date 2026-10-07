@@ -1,0 +1,5 @@
+{
+  "code": "UNSUPPORTED_READ_OPTIONS",
+  "message": "Reader options require an explicit supported translation",
+  "steps": []
+}

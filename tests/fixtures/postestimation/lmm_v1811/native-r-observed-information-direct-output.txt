@@ -1,0 +1,42 @@
+$rho
+                 1 
+1.3438515638602688 
+
+$sigma2
+[1] 0.36246132166731571
+
+$profile_sigma2
+[1] 0.36246132166731632
+
+$score
+[1] -1.1124856045025480e-12  6.8611446973725424e-13 -3.1071183843815655e-12
+[4] -1.0389733398878421e-12 -3.0140028492029380e-13  1.3183274916173104e-08
+
+$loglik
+[1] -401.77958252689962
+
+$gls_reconstruction_max_abs
+[1] 1.1102230246251565e-16
+
+R version 4.6.0 (2026-04-24)
+Platform: aarch64-apple-darwin24.6.0
+Running under: macOS Sequoia 15.1
+
+Matrix products: default
+BLAS:   /opt/homebrew/Cellar/openblas/0.3.33/lib/libopenblasp-r0.3.33.dylib 
+LAPACK: /opt/homebrew/Cellar/r/4.6.0/lib/R/lib/libRlapack.dylib;  LAPACK version 3.12.1
+
+locale:
+[1] en_US.UTF-8/en_US.UTF-8/en_US.UTF-8/C/en_US.UTF-8/en_US.UTF-8
+
+time zone: America/New_York
+tzcode source: internal
+
+attached base packages:
+[1] stats     graphics  grDevices utils     datasets  methods   base     
+
+other attached packages:
+[1] jsonlite_2.0.0
+
+loaded via a namespace (and not attached):
+[1] compiler_4.6.0

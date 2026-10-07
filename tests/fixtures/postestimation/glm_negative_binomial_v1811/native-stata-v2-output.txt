@@ -1,0 +1,86 @@
+Traceback (most recent call last):
+  File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-final-oracles/tests/fixtures/postestimation/glm_negative_binomial_v1811/generate_native.py", line 49, in <module>
+    reference=run(stata_output,"\n".join(lines))
+  File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-final-oracles/tests/stata_oracle.py", line 64, in run
+    raise RuntimeError(f"Stata failed:\n{log[-3000:]}")
+RuntimeError: Stata failed:
+file write wbout "ma_x2_est" _tab %24.17g (nb_ma_b[1,2]) _n
+
+. file write wbout "ma_x2_se" _tab %24.17g (sqrt(nb_ma_v[2,2])) _n
+
+. margins, dydx(x1 x2) atmeans
+
+Conditional marginal effects                               Number of obs = 300
+Model VCE: EIM
+
+Expression: Predicted mean ynb, predict()
+dy/dx wrt:  x1 x2
+At: x1 = .0235377 (mean)
+    x2 = .0484558 (mean)
+    x3 = 1.039823 (mean)
+
+------------------------------------------------------------------------------
+             |            Delta-method
+             |      dy/dx   std. err.      z    P>|z|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+          x1 |   .5730412   .1167857     4.91   0.000     .3441454    .8019371
+          x2 |  -.4370024   .1008076    -4.34   0.000    -.6345817    -.239423
+------------------------------------------------------------------------------
+
+. matrix nb_mm_b=r(b)
+
+. matrix nb_mm_v=r(V)
+
+. file write wbout "mm_x1_est" _tab %24.17g (nb_mm_b[1,1]) _n
+
+. file write wbout "mm_x1_se" _tab %24.17g (sqrt(nb_mm_v[1,1])) _n
+
+. file write wbout "mm_x2_est" _tab %24.17g (nb_mm_b[1,2]) _n
+
+. file write wbout "mm_x2_se" _tab %24.17g (sqrt(nb_mm_v[2,2])) _n
+
+. glm ynb x1, family(nbinomial 1) link(log) irls vce(eim) scale(1) iterate(1000
+> ) ltolerance(1e-14)
+
+Iteration 1:  Deviance =    268.61
+Iteration 2:  Deviance =   262.743
+Iteration 3:  Deviance =  262.6896
+Iteration 4:  Deviance =  262.6896
+Iteration 5:  Deviance =  262.6896
+Iteration 6:  Deviance =  262.6896
+Iteration 7:  Deviance =  262.6896
+Iteration 8:  Deviance =  262.6896
+Iteration 9:  Deviance =  262.6896
+Iteration 10: Deviance =  262.6896
+Iteration 11: Deviance =  262.6896
+
+Generalized linear models                         Number of obs   =        300
+Optimization     : MQL Fisher scoring             Residual df     =        298
+                   (IRLS EIM)                     Scale parameter =          1
+Deviance         =  262.6896378                   (1/df) Deviance =   .8815089
+Pearson          =  261.2849493                   (1/df) Pearson  =   .8767951
+
+Variance function: V(u) = u+(1)u^2                [Neg. Binomial]
+Link function    : g(u) = ln(u)                   [Log]
+
+                                                  BIC             =  -1437.038
+
+------------------------------------------------------------------------------
+             |                 EIM
+         ynb | Coefficient  std. err.      z    P>|z|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+          x1 |     .40099   .0749167     5.35   0.000      .254156    .5478239
+       _cons |   .4616506   .0749764     6.16   0.000     .3146995    .6086016
+------------------------------------------------------------------------------
+
+. file write wbout "ll_restricted" _tab %24.17g (e(ll)) _n
+
+. estimates store restricted
+
+. lrtest full restricted
+model full does not contain scalar e(ll)
+r(498);
+
+end of do-file
+r(498);
+

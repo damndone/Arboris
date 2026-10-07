@@ -1,0 +1,9 @@
+{
+  "command": [
+    "/Users/jiayuanren/\u9879\u76ee\u89c4\u5212/.venv/bin/python",
+    "analysis.py"
+  ],
+  "os_exit": 1,
+  "normalized_exit": 1,
+  "script_sha256": "fc4e6fde4175ec7b3cb4893047a4abbca62ea5ffe1c99bb6f51bbabfdb80d00f"
+}

@@ -1,0 +1,46 @@
+{
+  "candidate": "995d224dccaca73764113fe62b1d82f9ae473b3d",
+  "supplier_sha256": "2277b52d3cb9e9f55063a3a33fba44eb06d4af87cd45abd47662ea0380d5eb53",
+  "preserved_old_artifacts": 625,
+  "old_manifest_sha256": "858f516baa5a68460284d1791ae0e0e0b59322ea3db0d763c366f5474e079c27",
+  "production_hashes": {
+    "backend/workbench/script_export/plan.py": "5cc33431693692348eab881d722145f081cf28f0dbf9011e2a752f5159636294",
+    "backend/workbench/script_export/render.py": "010b4899b3b8bdb428932411ff98a4245cac3c43330b1a1c1ac297c2ee3a348f",
+    "backend/workbench/script_export/__init__.py": "ac80f52d70646b14e5266fe1b2dacacb500e075d6b795e2a53bf3aa1bb66a39b",
+    "backend/workbench/script_export/runtime.py": "3c07d6f3e9b7dad666664388fe4325fc03f54efc04396f32299e9c2b33909624",
+    "backend/workbench/script_export/result_runtime.py": "81facfe88723dfeb661fd2965b5ecf7dc1b0bec691830f59cde9d889b211f352",
+    "backend/workbench/script_export/result_snapshot.py": "2277b52d3cb9e9f55063a3a33fba44eb06d4af87cd45abd47662ea0380d5eb53",
+    "backend/workbench/script_export/syntax.py": "c54fc021b4a71da96f95e4c1ca7a37593f59c10cde5b65a9917fae1a845f7649",
+    "backend/workbench/script_export/exporters/survey.py": "3567cd0ad94efdb2fe6651cfec650adcf08d88494de0c82f60d0ca0c55d7ce8e",
+    "backend/workbench/script_export/exporters/models.py": "02ceabdd1a62d9d28b8c4ca4ab3c658e893729f48d762f637d6614611df8c648",
+    "backend/workbench/script_export/exporters/__init__.py": "082bfde468a26b24483f91fdc9139052049577885ac303a01a8c5774706c6a74",
+    "backend/workbench/script_export/exporters/postestimation.py": "68fb0e402a1edd149972a062794db16d4223d3b8480516af55bdd75e25f03e6c",
+    "backend/workbench/script_export/exporters/data.py": "08f201db47e6e64e904c5e7930026234d19476c0a1b3c1590eeef261ff18a546"
+  },
+  "locked_files": [
+    {
+      "path": "docs/superpowers/specs/2026-10-04-v1.8.11-lane-contracts.md",
+      "sha256": "14ac3849647e10cee38e2adfc1ed5002375f8c24f49c0dee35eb007e91fc6049"
+    },
+    {
+      "path": "backend/workbench/script_export/plan.py",
+      "sha256": "5cc33431693692348eab881d722145f081cf28f0dbf9011e2a752f5159636294"
+    },
+    {
+      "path": "backend/workbench/script_export/__init__.py",
+      "sha256": "ac80f52d70646b14e5266fe1b2dacacb500e075d6b795e2a53bf3aa1bb66a39b"
+    },
+    {
+      "path": "tests/test_script_export_plan_contract.py",
+      "sha256": "aae591553800460b6ef2b0948a344f7f6e41e774684aae0e26f936e1b2f864ba"
+    },
+    {
+      "path": "tests/fixtures/script_export/basic/plan.json",
+      "sha256": "10651da29e9bdcaf215a4c20dab1cac0ec267c60a477b503c9845bc47d0aeda5"
+    }
+  ],
+  "runner_ast_sha256": {
+    "6f0f87c6d8241a93d81e2c34f8ef8e9408a907b3": "5825846b0dca3155de3f0d0b526f711b2169fa28af9e7c0a18f335800f04ae5f",
+    "995d224dccaca73764113fe62b1d82f9ae473b3d": "5825846b0dca3155de3f0d0b526f711b2169fa28af9e7c0a18f335800f04ae5f"
+  }
+}

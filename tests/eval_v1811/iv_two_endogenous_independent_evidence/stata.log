@@ -1,0 +1,216 @@
+
+  ___  ____  ____  ____  ____ ®
+ /__    /   ____/   /   ____/      18.0
+___/   /   /___/   /   /___/       MP—Parallel Edition
+
+ Statistics and Data Science       Copyright 1985-2023 StataCorp LLC
+                                   StataCorp
+                                   4905 Lakeway Drive
+                                   College Station, Texas 77845 USA
+                                   800-STATA-PC        https://www.stata.com
+                                   979-696-4600        stata@stata.com
+
+Stata license: Single-user 2-core  perpetual
+Serial number: [REDACTED]
+  Licensed to: [REDACTED]
+               
+
+Notes:
+      1. Stata is running in batch mode.
+      2. Unicode is supported; see help unicode_advice.
+      3. More than 2 billion observations are allowed; see help obs_advice.
+      4. Maximum number of variables is set to 5,000 but can be increased;
+          see help set_maxvar.
+
+
+Running /Applications/Stata/profile.do ...
+command window is unrecognized
+r(199);
+
+. do independent_iv.do 
+
+. version 18
+
+. set more off
+
+. file open wbout using "wb_results.tsv", write replace
+(file wb_results.tsv not found)
+
+. import delimited using "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-iv-
+> oracles/tests/fixtures/postestimation/iv_two_endogenous_v1811/data.csv", asdo
+> uble clear case(preserve)
+(encoding automatically selected: ISO-8859-2)
+(6 vars, 650 obs)
+
+. ivregress 2sls y x1 (xe1 xe2 = z1 z2), vce(robust)
+
+Instrumental variables 2SLS regression            Number of obs   =        650
+                                                  Wald chi2(3)    =     130.06
+                                                  Prob > chi2     =     0.0000
+                                                  R-squared       =     0.4840
+                                                  Root MSE        =     1.1745
+
+------------------------------------------------------------------------------
+             |               Robust
+           y | Coefficient  std. err.      z    P>|z|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+         xe1 |   .3280277   .0596812     5.50   0.000     .2110548    .4450007
+         xe2 |  -.2403545   .0484783    -4.96   0.000    -.3353701   -.1453388
+          x1 |   .3405204   .0594635     5.73   0.000     .2239742    .4570666
+       _cons |   .7251294   .0468769    15.47   0.000     .6332523    .8170064
+------------------------------------------------------------------------------
+Endogenous: xe1 xe2
+Exogenous:  x1 z1 z2
+
+. file write wbout "endogenous" _tab `"`e(endog)'"' _n
+
+. file write wbout "exogenous_and_instruments" _tab `"`e(exog)'"' _n
+
+. file write wbout "exogenous_regressors" _tab `"`e(exogr)'"' _n
+
+. file write wbout "small_option" _tab `"`e(small)'"' _n
+
+. file write wbout "vce" _tab `"`e(vce)'"' _n
+
+. file write wbout "nobs" _tab %24.17g (e(N)) _n
+
+. file write wbout "nominal_residual_df" _tab %24.17g (e(N)-colsof(e(b))) _n
+
+. file write wbout "b_Intercept" _tab %24.17g (_b[_cons]) _n
+
+. file write wbout "se_Intercept" _tab %24.17g (_se[_cons]) _n
+
+. file write wbout "p_Intercept" _tab %24.17g (2*normal(-abs(_b[_cons]/_se[_con
+> s]))) _n
+
+. file write wbout "cov_Intercept_Intercept" _tab %24.17g (el(e(V),colnumb(e(V)
+> ,"_cons"),colnumb(e(V),"_cons"))) _n
+
+. file write wbout "cov_Intercept_x1" _tab %24.17g (el(e(V),colnumb(e(V),"_cons
+> "),colnumb(e(V),"x1"))) _n
+
+. file write wbout "cov_Intercept_xe1" _tab %24.17g (el(e(V),colnumb(e(V),"_con
+> s"),colnumb(e(V),"xe1"))) _n
+
+. file write wbout "cov_Intercept_xe2" _tab %24.17g (el(e(V),colnumb(e(V),"_con
+> s"),colnumb(e(V),"xe2"))) _n
+
+. file write wbout "b_x1" _tab %24.17g (_b[x1]) _n
+
+. file write wbout "se_x1" _tab %24.17g (_se[x1]) _n
+
+. file write wbout "p_x1" _tab %24.17g (2*normal(-abs(_b[x1]/_se[x1]))) _n
+
+. file write wbout "cov_x1_Intercept" _tab %24.17g (el(e(V),colnumb(e(V),"x1"),
+> colnumb(e(V),"_cons"))) _n
+
+. file write wbout "cov_x1_x1" _tab %24.17g (el(e(V),colnumb(e(V),"x1"),colnumb
+> (e(V),"x1"))) _n
+
+. file write wbout "cov_x1_xe1" _tab %24.17g (el(e(V),colnumb(e(V),"x1"),colnum
+> b(e(V),"xe1"))) _n
+
+. file write wbout "cov_x1_xe2" _tab %24.17g (el(e(V),colnumb(e(V),"x1"),colnum
+> b(e(V),"xe2"))) _n
+
+. file write wbout "b_xe1" _tab %24.17g (_b[xe1]) _n
+
+. file write wbout "se_xe1" _tab %24.17g (_se[xe1]) _n
+
+. file write wbout "p_xe1" _tab %24.17g (2*normal(-abs(_b[xe1]/_se[xe1]))) _n
+
+. file write wbout "cov_xe1_Intercept" _tab %24.17g (el(e(V),colnumb(e(V),"xe1"
+> ),colnumb(e(V),"_cons"))) _n
+
+. file write wbout "cov_xe1_x1" _tab %24.17g (el(e(V),colnumb(e(V),"xe1"),colnu
+> mb(e(V),"x1"))) _n
+
+. file write wbout "cov_xe1_xe1" _tab %24.17g (el(e(V),colnumb(e(V),"xe1"),coln
+> umb(e(V),"xe1"))) _n
+
+. file write wbout "cov_xe1_xe2" _tab %24.17g (el(e(V),colnumb(e(V),"xe1"),coln
+> umb(e(V),"xe2"))) _n
+
+. file write wbout "b_xe2" _tab %24.17g (_b[xe2]) _n
+
+. file write wbout "se_xe2" _tab %24.17g (_se[xe2]) _n
+
+. file write wbout "p_xe2" _tab %24.17g (2*normal(-abs(_b[xe2]/_se[xe2]))) _n
+
+. file write wbout "cov_xe2_Intercept" _tab %24.17g (el(e(V),colnumb(e(V),"xe2"
+> ),colnumb(e(V),"_cons"))) _n
+
+. file write wbout "cov_xe2_x1" _tab %24.17g (el(e(V),colnumb(e(V),"xe2"),colnu
+> mb(e(V),"x1"))) _n
+
+. file write wbout "cov_xe2_xe1" _tab %24.17g (el(e(V),colnumb(e(V),"xe2"),coln
+> umb(e(V),"xe1"))) _n
+
+. file write wbout "cov_xe2_xe2" _tab %24.17g (el(e(V),colnumb(e(V),"xe2"),coln
+> umb(e(V),"xe2"))) _n
+
+. test xe1 xe2
+
+ ( 1)  xe1 = 0
+ ( 2)  xe2 = 0
+
+           chi2(  2) =   52.97
+         Prob > chi2 =    0.0000
+
+. file write wbout "wald_statistic" _tab %24.17g (r(chi2)) _n
+
+. file write wbout "wald_df" _tab %24.17g (r(df)) _n
+
+. file write wbout "wald_p" _tab %24.17g (r(p)) _n
+
+. ivregress 2sls y x1 (xe1 xe2 = z1 z2), vce(robust) small
+
+Instrumental variables 2SLS regression            Number of obs   =        650
+                                                  F(  3,   646)   =      43.09
+                                                  Prob > F        =     0.0000
+                                                  R-squared       =     0.4840
+                                                  Adj R-squared   =     0.4816
+                                                  Root MSE        =     1.1781
+
+------------------------------------------------------------------------------
+             |               Robust
+           y | Coefficient  std. err.      t    P>|t|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+         xe1 |   .3280277   .0598657     5.48   0.000     .2104729    .4455825
+         xe2 |  -.2403545   .0486281    -4.94   0.000    -.3358427   -.1448662
+          x1 |   .3405204   .0596473     5.71   0.000     .2233945    .4576463
+       _cons |   .7251294   .0470218    15.42   0.000     .6327953    .8174634
+------------------------------------------------------------------------------
+Endogenous: xe1 xe2
+Exogenous:  x1 z1 z2
+
+. file write wbout "control_small_option" _tab `"`e(small)'"' _n
+
+. file write wbout "control_df_resid" _tab %24.17g (e(df_r)) _n
+
+. file write wbout "control_se_Intercept" _tab %24.17g (_se[_cons]) _n
+
+. file write wbout "control_se_x1" _tab %24.17g (_se[x1]) _n
+
+. file write wbout "control_se_xe1" _tab %24.17g (_se[xe1]) _n
+
+. file write wbout "control_se_xe2" _tab %24.17g (_se[xe2]) _n
+
+. test xe1 xe2
+
+ ( 1)  xe1 = 0
+ ( 2)  xe2 = 0
+
+       F(  2,   646) =   26.32
+            Prob > F =    0.0000
+
+. file write wbout "control_wald_F" _tab %24.17g (r(F)) _n
+
+. file write wbout "control_wald_p" _tab %24.17g (r(p)) _n
+
+. file write wbout "control_wald_df_den" _tab %24.17g (r(df_r)) _n
+
+. file close wbout
+
+. 
+end of do-file

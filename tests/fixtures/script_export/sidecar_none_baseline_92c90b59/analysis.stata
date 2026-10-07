@@ -1,0 +1,124 @@
+* Workbench 1.8.11
+* project: fixture-project
+* run: fixture-run
+* lineage_hash: 0000000000000000000000000000000000000000000000000000000000000000
+* Coverage
+* step:subset | data.subset | native | 
+* step:recode | data.recode | native | 
+* step:ols | model.ols | native | 
+* step:wald | postestimation.wald | native | 
+version 18
+set more off
+set type double
+capture program drop wb_repost
+program define wb_repost, eclass
+    args beta covariance
+    ereturn repost b=`beta' V=`covariance', rename
+end
+capture program drop wb_sha
+program define wb_sha
+    args filename expected
+    tempfile digestfile
+    shell shasum -a 256 "`filename'" > "`digestfile'"
+    tempname fh
+    file open `fh' using "`digestfile'", read text
+    file read `fh' line
+    file close `fh'
+    if substr("`line'",1,64) != "`expected'" {
+        display as error "SHA256 mismatch"
+        exit 9
+    }
+end
+
+wb_sha "data.csv" "dc82ffc5e7649b9ff9886d1c55818a10888175a1f783648d8638a4a38a677094"
+frame create wb_src0
+frame change wb_src0
+import delimited using "data.csv", varnames(1) delimiters(",") encoding("UTF-8") asdouble clear case(preserve)
+frame copy wb_src0 wb1
+frame change wb1
+keep if (!missing(age) & ((age >= 25) & (age <= 55)))
+keep id firm age educ region wage
+order id firm age educ region wage
+scalar wb_number_0 = _N
+unab wb_columns: _all
+scalar wb_check_1 = (`"`wb_columns'"' == "id firm age educ region wage")
+frame copy wb1 wb2
+frame change wb2
+tempvar wb_assigned
+generate byte `wb_assigned' = 0
+generate double age_group = .
+replace age_group = 1 if (!`wb_assigned') & ((!missing(age) & ((age >= 25) & (age <= 39))))
+replace `wb_assigned' = 1 if (!`wb_assigned') & ((!missing(age) & ((age >= 25) & (age <= 39))))
+replace age_group = 2 if (!`wb_assigned') & ((!missing(age) & ((age >= 40) & (age <= 55))))
+replace `wb_assigned' = 1 if (!`wb_assigned') & ((!missing(age) & ((age >= 40) & (age <= 55))))
+assert `wb_assigned' | !(!missing(age))
+drop `wb_assigned'
+scalar wb_number_2 = _N
+unab wb_columns: _all
+scalar wb_check_3 = (`"`wb_columns'"' == "id firm age educ region wage age_group")
+frame copy wb2 wb_model_data3
+frame change wb_model_data3
+tempvar wb_category_3_0
+egen long `wb_category_3_0' = group(region)
+regress wage educ age age_group ib1.`wb_category_3_0', vce(cluster firm)
+estimates store wb_model3
+generate long wb_sample_row = _n
+generate byte wb_sample3 = e(sample)
+scalar wb_number_4 = _b[_cons]
+quietly summarize `wb_category_3_0' if region == "north"
+local wb_level = r(min)
+scalar wb_number_5 = _b[`wb_level'.`wb_category_3_0']
+quietly summarize `wb_category_3_0' if region == "south"
+local wb_level = r(min)
+scalar wb_number_6 = _b[`wb_level'.`wb_category_3_0']
+quietly summarize `wb_category_3_0' if region == "west"
+local wb_level = r(min)
+scalar wb_number_7 = _b[`wb_level'.`wb_category_3_0']
+scalar wb_number_8 = _b[educ]
+scalar wb_number_9 = _b[age]
+scalar wb_number_10 = _b[age_group]
+scalar wb_number_11 = _se[_cons]
+quietly summarize `wb_category_3_0' if region == "north"
+local wb_level = r(min)
+scalar wb_number_12 = _se[`wb_level'.`wb_category_3_0']
+quietly summarize `wb_category_3_0' if region == "south"
+local wb_level = r(min)
+scalar wb_number_13 = _se[`wb_level'.`wb_category_3_0']
+quietly summarize `wb_category_3_0' if region == "west"
+local wb_level = r(min)
+scalar wb_number_14 = _se[`wb_level'.`wb_category_3_0']
+scalar wb_number_15 = _se[educ]
+scalar wb_number_16 = _se[age]
+scalar wb_number_17 = _se[age_group]
+scalar wb_number_18 = e(N)
+frame change wb_model_data3
+estimates restore wb_model3
+test ((1*_b[educ]) = 0) ((1*_b[age]) = 0)
+scalar wb_number_19 = r(F)
+scalar wb_number_20 = r(p)
+scalar wb_number_21 = r(df)
+scalar wb_number_22 = r(df_r)
+* Closing self-checks
+assert !missing(wb_number_0) & abs(wb_number_0-(374)) <= 0.0+0.0*abs(374)
+assert wb_check_1 == 1
+assert !missing(wb_number_2) & abs(wb_number_2-(374)) <= 0.0+0.0*abs(374)
+assert wb_check_3 == 1
+assert !missing(wb_number_4) & abs(wb_number_4-(1.476111525279607)) <= 1e-08+1e-06*abs(1.476111525279607)
+assert !missing(wb_number_5) & abs(wb_number_5-(-0.12117350337143339)) <= 1e-08+1e-06*abs(-0.12117350337143339)
+assert !missing(wb_number_6) & abs(wb_number_6-(-0.2094250433328843)) <= 1e-08+1e-06*abs(-0.2094250433328843)
+assert !missing(wb_number_7) & abs(wb_number_7-(-0.16099337563024796)) <= 1e-08+1e-06*abs(-0.16099337563024796)
+assert !missing(wb_number_8) & abs(wb_number_8-(0.08130065224244855)) <= 1e-08+1e-06*abs(0.08130065224244855)
+assert !missing(wb_number_9) & abs(wb_number_9-(0.0040281644255432455)) <= 1e-08+1e-06*abs(0.0040281644255432455)
+assert !missing(wb_number_10) & abs(wb_number_10-(0.021759128365677213)) <= 1e-08+1e-06*abs(0.021759128365677213)
+assert !missing(wb_number_11) & abs(wb_number_11-(0.22734577137866313)) <= 1e-08+1e-05*abs(0.22734577137866313)
+assert !missing(wb_number_12) & abs(wb_number_12-(0.09529187132344039)) <= 1e-08+1e-05*abs(0.09529187132344039)
+assert !missing(wb_number_13) & abs(wb_number_13-(0.08892559053438566)) <= 1e-08+1e-05*abs(0.08892559053438566)
+assert !missing(wb_number_14) & abs(wb_number_14-(0.08935301328837976)) <= 1e-08+1e-05*abs(0.08935301328837976)
+assert !missing(wb_number_15) & abs(wb_number_15-(0.007800058781949661)) <= 1e-08+1e-05*abs(0.007800058781949661)
+assert !missing(wb_number_16) & abs(wb_number_16-(0.006937600305070096)) <= 1e-08+1e-05*abs(0.006937600305070096)
+assert !missing(wb_number_17) & abs(wb_number_17-(0.11050990245307929)) <= 1e-08+1e-05*abs(0.11050990245307929)
+assert !missing(wb_number_18) & abs(wb_number_18-(368)) <= 0.0+0.0*abs(368)
+assert !missing(wb_number_19) & abs(wb_number_19-(54.741006828302886)) <= 1e-08+1e-05*abs(54.741006828302886)
+assert !missing(wb_number_20) & abs(wb_number_20-(4.765624154540682e-12)) <= 1e-06+0.0*abs(4.765624154540682e-12)
+assert !missing(wb_number_21) & abs(wb_number_21-(2)) <= 0.0+0.0*abs(2)
+assert !missing(wb_number_22) & abs(wb_number_22-(39.0)) <= 0.0+0.0*abs(39.0)

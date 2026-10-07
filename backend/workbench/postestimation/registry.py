@@ -14,7 +14,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from .core import PostestimationRefusal, lincom, lr_test, nlcom, wald_test
+from .core import PostestimationRefusal, _require_interface, lincom, lr_test, nlcom, wald_test
 from .margins import marginal_effects
 
 ORACLE_FIXTURE = "tests/fixtures/postestimation/oracle.json"
@@ -28,6 +28,8 @@ class OperationSpec:
     run: Callable[..., dict[str, Any]]
     #: Whether the operation also reads the estimation sample (from lineage).
     needs_estimation_data: bool = False
+    #: Kernel interfaces it reads besides the coefficients and covariance.
+    requires: tuple[str, ...] = ()
 
 
 def _run_wald(kernels: Sequence[Mapping[str, Any]], spec: Mapping[str, Any], context: Mapping[str, Any]) -> dict[str, Any]:
@@ -60,7 +62,7 @@ OPERATIONS: Mapping[str, OperationSpec] = {
     "wald": OperationSpec("wald", 1, _run_wald),
     "lincom": OperationSpec("lincom", 1, _run_lincom),
     "nlcom": OperationSpec("nlcom", 1, _run_nlcom),
-    "lr": OperationSpec("lr", 2, _run_lr),
+    "lr": OperationSpec("lr", 2, _run_lr, requires=("loglik",)),
     "margins": OperationSpec("margins", 1, _run_margins, needs_estimation_data=True),
 }
 
@@ -98,6 +100,33 @@ VALIDATED: Mapping[tuple[str, str], tuple[str, ...]] = {
     ("ordinal_logit", "lincom"): ("ordinal_logit.lincom",),
     ("multinomial_logit", "wald"): ("multinomial_logit.wald_joint",),
     ("multinomial_logit", "lincom"): ("multinomial_logit.lincom",),
+    # Tight IRLS plus final-point EIM now matches the R logit/Poisson references.
+    **{
+        (family, operation): tuple(f"{prefix}.{case}" for case in cases)
+        for family, prefix in (("glm:binomial", "glm_binomial"), ("glm:poisson", "glm_poisson"),
+                               ("glm:negative_binomial", "glm_negative_binomial"))
+        for operation, cases in (("wald", ("wald_joint", "wald_shifted")),
+            ("lincom", ("lincom",)), ("nlcom", ("nlcom",)),
+            ("lr", ("lr_drop_x2_x3",)), ("margins", ("margins",)))
+    },
+    # v1.8.11: 2SLS against Stata's ivregress (no LR: 2SLS has no likelihood).
+    ("iv_2sls", "wald"): ("iv_2sls.wald_joint", "iv_2sls.wald_shifted"),
+    ("iv_2sls", "lincom"): ("iv_2sls.lincom",),
+    ("iv_2sls", "nlcom"): ("iv_2sls.nlcom",),
+    # v1.8.11: fixed-effects panel and TWFE DID, clustered by entity, against
+    # Stata's xtreg, fe vce(cluster): F(q, G - 1) and t(G - 1).
+    **{
+        (family, operation): tuple(f"{family}.{case}" for case in cases)
+        for family in ("panel_ols", "did")
+        for operation, cases in (("wald", ("wald_joint", "wald_shifted")), ("lincom", ("lincom",)), ("nlcom", ("nlcom",)))
+    },
+    # v1.8.11: LMM fixed effects on the GLS covariance, against lme4 vcov() and
+    # Stata mixed (REML and ML, random intercept and slope). No LR (REML
+    # likelihoods do not compare fixed-effect designs; ML LR is unchecked) and
+    # no margins (no agreed prediction target for random effects).
+    ("linear_mixed_effects", "wald"): ("linear_mixed_effects.wald_joint", "linear_mixed_effects.wald_shifted"),
+    ("linear_mixed_effects", "lincom"): ("linear_mixed_effects.lincom",),
+    ("linear_mixed_effects", "nlcom"): ("linear_mixed_effects.nlcom",),
 }
 
 
@@ -141,6 +170,11 @@ def run_operation(
         raise PostestimationRefusal(
             "WRONG_MODEL_COUNT", f"{operation} compares {spec_def.kernels} model(s), got {len(kernels)}"
         )
+    # A model that cannot support the operation at all (2SLS has no
+    # likelihood) is told so, rather than that a check is still missing.
+    for kernel in kernels:
+        for interface in spec_def.requires:
+            _require_interface(kernel, interface, operation)
     for kernel in kernels:
         require_validated(str(kernel.get("model_type")), operation)
     if spec_def.needs_estimation_data and not (context or {}).get("design"):

@@ -1,0 +1,3 @@
+Error in results[["continuous"]][["beta"]][["category"]] : 
+  subscript out of bounds
+Execution halted

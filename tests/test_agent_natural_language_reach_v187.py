@@ -171,7 +171,9 @@ def test_a_plan_declaring_a_design_runs_and_produces_design_standard_errors(tmp_
 
     fixtures = Path(__file__).parent / "fixtures" / "survey"
     frame = pd.read_csv(fixtures / "design.csv")
-    oracle = json.loads((fixtures / "oracle.json").read_text())["linearization"]
+    # The run declares survey_fpc_col, so R must apply the FPC too (oracle.json's
+    # linearization omits it; see generate_fpc_oracle.R).
+    oracle = json.loads((fixtures / "oracle_fpc.json").read_text())["linearization_fpc"]
 
     plan = [
         {

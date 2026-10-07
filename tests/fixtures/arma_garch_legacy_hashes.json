@@ -1,0 +1,59 @@
+{
+  "baseline_commit": "f7c6ba5b",
+  "configuration_fixture": "run_family/20260722_043812_924307_874cc62b/run_inputs.json",
+  "source_description": "Synthetic 120 business days from 2025-01-01; default_rng(181106).integers(20,80).astype(float); no original VIX data in repository fixture.",
+  "contract_hash": "37a1c7fc48ee144ec01fff85ca992f52b88abba1bebe5ecec8d8a1cfb2bfaefb",
+  "split_hash": "34579e2c7f27cac7b00da898c6eb18522e529b96e5b70eae4409b56666069b74",
+  "binding_hash": "c52d4c778fe472b2c264c3d72e58d9b49ebce1f4ff19cef23989ebfbce3ea3b1",
+  "analysis_contract": {
+    "pack_id": "time_series.arma_garch",
+    "contract_version": "1.0",
+    "dataset_ref": "upload:VIXCLS.csv",
+    "time_column": "observation_date",
+    "value_column": "VIXCLS",
+    "time_index_semantics": "business_or_trading_observations",
+    "transform": "log_return_pct",
+    "transform_confirmed": true,
+    "analysis_goal": "balanced",
+    "selection_mode": "manual",
+    "arma": {
+      "p": 1,
+      "q": 1,
+      "constant_mode": "exclude",
+      "auto_max_p": 3,
+      "auto_max_q": 3,
+      "auto_max_total_order": 4
+    },
+    "variance": {
+      "model": "garch",
+      "arch_p": null,
+      "garch_p": 1,
+      "garch_q": 1,
+      "auto_arch_max_p": 10,
+      "include_garch_1_1": true
+    },
+    "estimation_strategy": "sequential",
+    "innovation_distribution": "normal",
+    "missing_value_policy": "drop_missing_confirmed",
+    "validation": {
+      "method": "expanding_window_one_step",
+      "validation_n": 20,
+      "refit_every": 1,
+      "selection_repeated_during_validation": false
+    },
+    "forecast": {
+      "horizon": 1,
+      "interval_level": 0.95,
+      "lower_quantile": 0.05
+    },
+    "random_seed": 20260720
+  },
+  "sample": {
+    "source_n": 120,
+    "effective_n": 119,
+    "training_n": 99,
+    "validation_n": 20,
+    "selection_data_role": "training_only",
+    "validation_data_role": "independent_evaluation_after_selection"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "command": [
+    "/Users/jiayuanren/\u9879\u76ee\u89c4\u5212/.venv/bin/python",
+    "/Users/jiayuanren/\u9879\u76ee\u89c4\u5212/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py",
+    "/Users/jiayuanren/\u9879\u76ee\u89c4\u5212/.venv/bin/python",
+    "-m",
+    "pytest",
+    "-q",
+    "-s",
+    "tests/eval_v1811/s_review_recheck_sidecars.py",
+    "--tb=short"
+  ],
+  "exit": 0,
+  "output": "tests/eval_v1811/s_review_recheck_evidence/pytest-c5726267.txt"
+}

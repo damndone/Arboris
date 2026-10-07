@@ -1,0 +1,28 @@
+{
+  "operation": "wald",
+  "model_id": "model",
+  "model_type": "ols",
+  "covariance_estimator": "survey_design_linearization",
+  "nobs": 80,
+  "df_method": "design_minus_p",
+  "n_clusters": null,
+  "constraints": [
+    {
+      "terms": {
+        "x1": 1.0
+      },
+      "value": 0.2
+    },
+    {
+      "terms": {
+        "x2": 1.0
+      },
+      "value": 0.0
+    }
+  ],
+  "distribution": "F",
+  "statistic": 101.3403708088648,
+  "df_num": 2,
+  "df_den": 6.0,
+  "p_value": 2.3768766090400888e-05
+}

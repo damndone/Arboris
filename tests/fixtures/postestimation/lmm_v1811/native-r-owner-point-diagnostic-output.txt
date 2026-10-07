@@ -1,0 +1,45 @@
+$rho
+[1] 1.3438636376042832
+
+$native_rho
+[1] 1.3438515638602688
+
+$score
+[1] -2.3033872978267280e-13 -1.2252060094823023e-13 -1.4800488594546210e-12
+[4] -5.6849558839978826e-13  2.5484284997231887e-13 -1.2838668829218136e-04
+
+$score_divided_by_n
+[1] -6.3982980495186886e-16 -3.4033500263397288e-16 -4.1112468318183919e-15
+[4] -1.5791544122216341e-15  7.0789680547866355e-16 -3.5662968970050379e-07
+
+$loglik
+[1] -401.77958252767473
+
+$unexplained_covariance_max_abs
+[1] 1.2490009027033011e-16
+
+$unexplained_covariance_max_relative
+[1] 7.1539440159745388e-15
+
+R version 4.6.0 (2026-04-24)
+Platform: aarch64-apple-darwin24.6.0
+Running under: macOS Sequoia 15.1
+
+Matrix products: default
+BLAS:   /opt/homebrew/Cellar/openblas/0.3.33/lib/libopenblasp-r0.3.33.dylib 
+LAPACK: /opt/homebrew/Cellar/r/4.6.0/lib/R/lib/libRlapack.dylib;  LAPACK version 3.12.1
+
+locale:
+[1] en_US.UTF-8/en_US.UTF-8/en_US.UTF-8/C/en_US.UTF-8/en_US.UTF-8
+
+time zone: America/New_York
+tzcode source: internal
+
+attached base packages:
+[1] stats     graphics  grDevices utils     datasets  methods   base     
+
+other attached packages:
+[1] jsonlite_2.0.0
+
+loaded via a namespace (and not attached):
+[1] compiler_4.6.0

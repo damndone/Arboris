@@ -402,6 +402,17 @@ def _survey_design_facts(run_root: Path) -> list[str]:
             f"(strata = {design.get('strata_column')}, PSU = {design.get('psu_column')})",
             _design_df_fact(design),
         ]
+        if isinstance(design.get("fpc"), dict):
+            fpc = design["fpc"]
+            facts.append(f"Finite population correction: single-stage {fpc.get('units')} "
+                         f"from {fpc.get('column')}; each stratum uses its full-design sampling fraction.")
+            for row in fpc.get("strata", []):
+                facts.append(
+                    f"FPC stratum {row['stratum']}: {row['sampled_psus']} sampled PSUs; "
+                    f"sampling fraction {row['sampling_fraction']:.6g}; "
+                    f"variance factor {row['variance_factor']:.6g}"
+                    + (f"; population PSUs {row['population_psus']}" if "population_psus" in row else "")
+                )
         deff = design.get("design_effect")
         n_eff = design.get("effective_sample_size")
         if deff is not None and n_eff is not None:
@@ -452,6 +463,8 @@ def _design_summary(design: Any) -> str:
         "t df={1} ({0})".format(*recorded_df_convention(design)),
     ]
     deff = design.get("design_effect")
+    if isinstance(design.get("fpc"), dict):
+        parts.append(f"FPC={design['fpc'].get('column')} ({design['fpc'].get('units')}, single-stage)")
     if deff is not None:
         parts.append(f"DEFF={float(deff):.2f}")
     return "; ".join(parts)

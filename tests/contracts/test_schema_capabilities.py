@@ -47,6 +47,7 @@ SCHEMA: dict = {
                                 "required": {"type": "boolean"},
                                 "value": {},
                                 "options": {"type": "array"},
+                                "evaluation_modes": {"type": "array", "items": {"type": "string"}},
                             },
                             "additionalProperties": False,
                         },

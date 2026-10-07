@@ -37,6 +37,10 @@ def build_design_from_artifacts(frame: pd.DataFrame, artifacts: dict) -> SurveyD
     strata = str(artifacts.get("_survey_strata_col") or "").strip()
     psu = str(artifacts.get("_survey_psu_col") or "").strip()
     weight = str(artifacts.get("_sampling_weight") or "").strip()
+    fpc_column = artifacts.get("_survey_fpc_col")
+    if fpc_column is not None and not isinstance(fpc_column, str):
+        raise SurveyEngineError("SURVEY_FPC_COLUMN_INVALID", "FPC requires one column name, without type coercion")
+    fpc_column = (fpc_column or "").strip() or None
     if not weight:
         return None
     if not (strata or psu):
@@ -59,12 +63,31 @@ def build_design_from_artifacts(frame: pd.DataFrame, artifacts: dict) -> SurveyD
         weight=weight,
         strata=strata or None,
         psu=psu or None,
-        fpc=str(artifacts.get("_survey_fpc_col") or "").strip() or None,
+        fpc=fpc_column,
         lonely_psu=str(artifacts.get("_survey_lonely_psu") or "").strip() or "fail",
         subpop=str(artifacts.get("_survey_subpop") or "").strip() or None,
         replicate_type=str(artifacts.get("_survey_replicate_type") or "").strip() or None,
         replicate_weight_columns=replicate_columns,
     )
+
+
+def fpc_summary(design: SurveyDesign) -> dict | None:
+    """Persist the validated, full-design single-stage correction definition."""
+    if design.fpc is None:
+        return None
+    fractions = design._fpc_fractions()
+    fraction_units = bool((design.frame[design.fpc] <= 1).all())
+    strata = []
+    for stratum, count in design.psu_counts().items():
+        fraction = fractions[str(stratum)]
+        row = {"stratum": str(stratum), "sampled_psus": int(count),
+               "sampling_fraction": fraction, "variance_factor": 1-fraction}
+        if not fraction_units:
+            row["population_psus"] = float(design.frame.loc[
+                design._stratum_key == stratum, design.fpc].iloc[0])
+        strata.append(row)
+    return {"column": design.fpc, "units": "sampling_fraction" if fraction_units
+            else "population_psu_count", "strata": strata}
 
 
 def glm_estimator_spec(

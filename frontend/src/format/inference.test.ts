@@ -24,6 +24,32 @@ describe("describeInference", () => {
       .toBe("Standard errors: Design-based (linearization) · Inference: t(6), design df minus parameters plus one, R survey");
   });
 
+  it("names the cluster variable for a panel fit clustered by entity (v1.8.11 default)", () => {
+    expect(describeInference({
+      entity_col: "firm",
+      covariance_evidence: {
+        covariance: "clustered", cluster_variable: "firm", cluster_entity: true, cluster_count: 50,
+        effective_df: 49, inference_distribution: "t", inference_version: "workbench.inference.v2",
+      },
+    })).toBe("Standard errors: Cluster-robust (CR1) · Clusters: 50 (by firm) · Inference: t(49)");
+  });
+
+  it("marks a panel result from before v1.8.11 as unclustered and legacy", () => {
+    expect(describeInference({
+      entity_col: "firm",
+      covariance_evidence: { covariance: "robust", cluster_variable: null, cluster_entity: false, cluster_count: null },
+    })).toBe("Standard errors: Heteroskedasticity-robust, not clustered (legacy result; rerun to cluster by entity)");
+  });
+
+  it("says a chosen robust panel fit is not clustered", () => {
+    expect(describeInference({
+      entity_col: "firm",
+      covariance_evidence: {
+        covariance: "robust", cluster_entity: false, inference_distribution: "z", inference_version: "workbench.inference.v2",
+      },
+    })).toBe("Standard errors: Heteroskedasticity-robust, not clustered · Inference: z");
+  });
+
   it("names HC1 and t(N - K) for robust OLS", () => {
     expect(describeInference({
       inference_config: { covariance: "robust", effective_df: 296, inference_distribution: "t", inference_version: "v2" },

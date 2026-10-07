@@ -27,6 +27,9 @@ EVIDENCE_KINDS = frozenset(
         "label",
         "labels",
         "positive_int",
+        "number",
+        "boolean",
+        "numeric_records",
         "numeric_list",
         "numeric_map",
         "numeric_fields",
@@ -95,6 +98,8 @@ class ResultEnvelopeDeclaration:
     #: family's prediction needs more than the coefficients and the regressors
     #: (an exposure, thresholds, several equations) and is not declared yet.
     inverse_link: str | None = None
+    #: Owner-defined fixed likelihood settings that must match for nested LR.
+    likelihood_definition_fields: tuple[str, ...] = ()
     #: What the estimator is (§3.1 of the v1.8.10 design): its outcome, its
     #: estimation method and its design. Checks, post-estimation and
     #: combinators match on these, never on the family's name.
@@ -147,6 +152,24 @@ def _aggregated_effects(family: str) -> ResultEnvelopeDeclaration:
 _ORDINAL_DIAGNOSTICS = "model_results/diagnostics_ordinal_logit_1.json"
 _MULTINOMIAL_DIAGNOSTICS = "model_results/diagnostics_multinomial_logit_1.json"
 
+_DISPERSION_PACKET_KEYS = ("dispersion", "alpha_estimated", "alpha_fixed_value",
+    "ancillary_parameters", "overdispersion_test", "information_matrix", "warnings")
+
+
+def _count_inference(family: str, *, inverse_link: str | None = None) -> ResultEnvelopeDeclaration:
+    return ResultEnvelopeDeclaration(family=family, result_shape="coefficient_intervals",
+        inverse_link=inverse_link, report_packet_keys=_DISPERSION_PACKET_KEYS,
+        likelihood_definition_fields=("dispersion", "alpha_estimated", "alpha_fixed_value"), fields=(
+            _field("dispersion", "label"), _field("alpha_estimated", "boolean"),
+            _field("alpha_fixed_value", "number"), _field("information_matrix", "label"),
+            _field("warnings", "numeric_records", limit=16, fields=(), string_fields=("code", "message")),
+            _field("ancillary_parameters", "numeric_records", limit=4,
+                fields=("estimate", "std_error", "conf_low", "conf_high"), string_fields=("name", "scale")),
+            _field("overdispersion_test", "numeric_fields",
+                fields=("statistic", "df", "p_value", "log_likelihood_restricted"),
+                string_fields=("distribution", "restricted_model")),
+        ))
+
 _DECLARATIONS: tuple[ResultEnvelopeDeclaration, ...] = (
     _core("ols", "coefficient_intervals", "ols_robust", "ols_clustered", "ols_hac", inverse_link="identity"),
     _core("logit", inverse_link="logit"),
@@ -155,10 +178,10 @@ _DECLARATIONS: tuple[ResultEnvelopeDeclaration, ...] = (
     # A rate model predicts with its exposure, which the coefficients alone do
     # not carry; its prediction is not declared until the exposure is.
     _core("poisson_rate"),
-    _core("negative_binomial"),
-    _core("glm:binomial", "coefficient_intervals", "glm"),
-    _core("glm:poisson"),
-    _core("glm:negative_binomial"),
+    _count_inference("negative_binomial", inverse_link="log"),
+    _core("glm:binomial", "coefficient_intervals", "glm", inverse_link="logit"),
+    _core("glm:poisson", inverse_link="log"),
+    _count_inference("glm:negative_binomial", inverse_link="log"),
     _core("iv_2sls"),
     _core("panel_ols"),
     _core("did"),

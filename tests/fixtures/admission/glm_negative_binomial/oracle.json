@@ -1,0 +1,26 @@
+{
+  "meta": {
+    "generator": "tests/fixtures/admission/glm_negative_binomial/generate_oracle.R",
+    "r_version": "R version 4.6.0 (2026-04-24)",
+    "seed": 20261003,
+    "n": 450,
+    "epsilon": 1e-08,
+    "verification_level": "negative-binomial log GLM with alpha=1 fixed (theta=1); dispersion=1; glm.nb would estimate a different model"
+  },
+  "inference": {
+    "covariance_estimator": "nonrobust",
+    "df_method": "asymptotic",
+    "reference_distribution": "z",
+    "df_resid": 447
+  },
+  "coefficients": {
+    "Intercept": 0.421004806491937,
+    "x1": 0.378988576606836,
+    "x2": -0.229305872140697
+  },
+  "std_error": {
+    "Intercept": 0.0619237585798245,
+    "x1": 0.0642314345883351,
+    "x2": 0.0613453191328153
+  }
+}

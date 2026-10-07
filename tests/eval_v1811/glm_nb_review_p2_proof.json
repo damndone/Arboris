@@ -1,0 +1,221 @@
+{
+  "reviewed_tip": "06e3c798b4758a2c32fae2c30708641d54b15642",
+  "pre_remediation_tip": "87f964311115117f08b790a6247645ad23e1ff80",
+  "baseline": "01fb0752bce129c8d8848c021eca776dadccb515",
+  "records": [
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/native-stata/oracle.log",
+      "raw_copy": "local/v1811-glm-nb-raw-logs/20261004-p2/native-stata/oracle.log",
+      "raw_sha256": "withheld-raw-sha256-3cfdda7b1c3d1a591b771d80",
+      "redacted_sha256": "fa9d08bb2449a3a231ab61183b69a1d994359015b7721b5b5c1fd70cc9dc9517",
+      "payload_sha256": "7c14df077b77ac219d0969968c009e2958d87f895e4e746d8983263b5fdcfad1",
+      "raw_equals_before_git": true,
+      "raw_ignored_and_untracked": true,
+      "raw_mode_0600": true,
+      "exact_header_only_redaction": true,
+      "changed_lines": [
+        14,
+        15
+      ],
+      "payload_byte_identical": true,
+      "manifest_hashes_match": true,
+      "manifest_line_numbers_match": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/native-stata-v2/oracle.log",
+      "raw_copy": "local/v1811-glm-nb-raw-logs/20261004-p2/native-stata-v2/oracle.log",
+      "raw_sha256": "withheld-raw-sha256-35ce77961cfa8f718bb9e0fc",
+      "redacted_sha256": "7e08b2cd6fe46459265036b2ee5306bd013994a99c554a8755e2e869385ea6a5",
+      "payload_sha256": "cb1b2b1e634c26617df95db4bcf396c7e5fe1fba817a41ab463a5fe105ecc420",
+      "raw_equals_before_git": true,
+      "raw_ignored_and_untracked": true,
+      "raw_mode_0600": true,
+      "exact_header_only_redaction": true,
+      "changed_lines": [
+        14,
+        15
+      ],
+      "payload_byte_identical": true,
+      "manifest_hashes_match": true,
+      "manifest_line_numbers_match": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/native-stata-v3/oracle.log",
+      "raw_copy": "local/v1811-glm-nb-raw-logs/20261004-p2/native-stata-v3/oracle.log",
+      "raw_sha256": "withheld-raw-sha256-8f2674a57033a466f0950535",
+      "redacted_sha256": "b7b4381206172c51ee64dbadc3984a423c6e1e1880c16d5c1c25b34fe6b813bb",
+      "payload_sha256": "0714932cb91615420b1c171c83194e45092461bc9706695541b9f2078273b13e",
+      "raw_equals_before_git": true,
+      "raw_ignored_and_untracked": true,
+      "raw_mode_0600": true,
+      "exact_header_only_redaction": true,
+      "changed_lines": [
+        14,
+        15
+      ],
+      "payload_byte_identical": true,
+      "manifest_hashes_match": true,
+      "manifest_line_numbers_match": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/native-output.txt",
+      "raw_copy": "local/v1811-glm-nb-raw-logs/20261004-p2/native-output.txt",
+      "raw_sha256": "withheld-raw-sha256-2e5505fde4ea386cfe8b1a33",
+      "redacted_sha256": "7b38d87f9d6b0e75849e93974a4dd7e9bbabdc5f4fec3c027bdc2942f1f66a97",
+      "payload_sha256": "f8efbe6c130f336072a32705fe10ff5cce791fcb443a8f427e98d93a71df0150",
+      "raw_equals_before_git": true,
+      "raw_ignored_and_untracked": true,
+      "raw_mode_0600": true,
+      "exact_header_only_redaction": true,
+      "changed_lines": [
+        185,
+        186
+      ],
+      "payload_byte_identical": true,
+      "manifest_hashes_match": true,
+      "manifest_line_numbers_match": true
+    }
+  ],
+  "changed_header_lines_total": 8,
+  "added_tracked_texts_scanned": 50,
+  "private_field_value_hits": [],
+  "unredacted_header_hits": [],
+  "unchanged_statistical_assets": [
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/native-stata-v2-output.txt",
+      "unchanged": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/generate_native.py",
+      "unchanged": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/generate_oracle.R",
+      "unchanged": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/owner-final-green.txt",
+      "unchanged": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/numeric-diff.md",
+      "unchanged": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/tdd-red.txt",
+      "unchanged": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/capture_owner.py",
+      "unchanged": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/owner-evidence.json",
+      "unchanged": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/native-stata-v3-output.txt",
+      "unchanged": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/owner-capture-output.txt",
+      "unchanged": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/owner-first-green.txt",
+      "unchanged": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/native-r/oracle.json",
+      "unchanged": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/native-stata/wb_results.tsv",
+      "unchanged": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/native-stata/oracle.do",
+      "unchanged": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/native-stata-v2/wb_results.tsv",
+      "unchanged": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/native-stata-v2/oracle.do",
+      "unchanged": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/native-stata-v3/wb_results.tsv",
+      "unchanged": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/native-stata-v3/reference.json",
+      "unchanged": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/native-stata-v3/oracle.do",
+      "unchanged": true
+    }
+  ],
+  "existing_author_functions_ast_unchanged": true,
+  "protected": [
+    {
+      "path": "tests/fixtures/postestimation/data.csv",
+      "baseline_identical": true,
+      "sha256": "2e1b92f07632a8c88d047074f77cd6e5f9552b4f932f7d6ed2499161a0bf3084",
+      "manifest_matches": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/oracle.json",
+      "baseline_identical": true,
+      "sha256": "d80dbc69f91648cbd17443f89deaf21df63296f1296a6d674c3ef9e135b9302c",
+      "manifest_matches": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/generate_oracle.R",
+      "baseline_identical": true,
+      "sha256": "82b35d95a30650daf85de157c93eed380ddcb151557e64cf3ac5b9f0d4d459ef",
+      "manifest_matches": true
+    },
+    {
+      "path": "backend/workbench/econometrics/count_models.py",
+      "baseline_identical": true,
+      "sha256": "143b75513c18d4a5aa0a20ea08b61169f65d1a358a533ee0d497c768cff7dd50",
+      "manifest_matches": true
+    },
+    {
+      "path": "backend/workbench/econometrics/runner.py",
+      "baseline_identical": true,
+      "sha256": "ebcb7948da81fcf9af203017f58c88c962c55844d4800a79b07c1782d7f36b41",
+      "manifest_matches": true
+    },
+    {
+      "path": "backend/workbench/contracts/model/inference_kernel.py",
+      "baseline_identical": true,
+      "sha256": "be94249889597607e00c62e330f14ea311b1434b23d43dfcb584fac32cf2b431",
+      "manifest_matches": true
+    },
+    {
+      "path": "backend/workbench/postestimation/core.py",
+      "baseline_identical": true,
+      "sha256": "c83b5759142abc3443e1c8f14b29f9bb4334d96d4070990ebb8c2f4c1af80f9e",
+      "manifest_matches": true
+    },
+    {
+      "path": "backend/workbench/postestimation/margins.py",
+      "baseline_identical": true,
+      "sha256": "9cf29e9fd1fe4198f300ed346b462a4e718a0447cab80c2d45f17827a29b0bb7",
+      "manifest_matches": true
+    },
+    {
+      "path": "docs/superpowers/handoffs/2026-10-04-v1.8.11-final-oracle-interface-freeze.md",
+      "baseline_identical": true,
+      "sha256": "53bb2b5ad6448f13615bc5746119ded5299328e9f7f23f792cfb4e429d9b7f27",
+      "manifest_matches": true
+    }
+  ],
+  "original_independent_evidence_hashes_unchanged": true,
+  "current_manifest_asset_hashes_match": true,
+  "current_manifest_asset_count": 29
+}

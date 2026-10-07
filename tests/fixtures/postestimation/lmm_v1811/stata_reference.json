@@ -1,0 +1,46 @@
+{
+  "meta": {
+    "generator": "tests/fixtures/postestimation/lmm_v1811/stata_reference.do",
+    "data": "tests/fixtures/admission/linear_mixed_effects/data.csv",
+    "data_sha256": "f971e489477c8c912580aa09b2f0327334f0e12a2f9d5313a5e95f9ccf333828",
+    "command": "mixed y i.armn##c.time x || g:, reml (default vce(oim))",
+    "environment": "Stata 18 MP, born 07 Jun 2023",
+    "converged": true,
+    "loglik": -401.7795825269129,
+    "note": "Numbers only; the Stata batch log is not retained because it carries the license header."
+  },
+  "params": {
+    "(Intercept)": 1.0157906002186237,
+    "armb": 0.3339553772671908,
+    "time": 0.282961128236309,
+    "armb:time": 0.21719901882280396,
+    "x": 0.5494339814411754
+  },
+  "std_error": {
+    "(Intercept)": 0.15023337047116112,
+    "armb": 0.21248701370463804,
+    "time": 0.026286772373411805,
+    "armb:time": 0.037184907783502266,
+    "x": 0.03619011390773983
+  },
+  "wald_joint": {
+    "distribution": "chi2",
+    "statistic": 337.0835593631447,
+    "df_num": 2,
+    "p_value": 6.35674974275849e-74
+  },
+  "wald_shifted": {
+    "distribution": "chi2",
+    "statistic": 824.6428137112794,
+    "df_num": 1,
+    "p_value": 2.3679378292249e-181
+  },
+  "lincom": {
+    "estimate": 0.8818290911186597,
+    "std_error": 0.07772562620930029
+  },
+  "nlcom": {
+    "estimate": 0.515004782729486,
+    "std_error": 0.057833416524059704
+  }
+}

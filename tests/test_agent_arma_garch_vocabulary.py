@@ -91,7 +91,9 @@ def test_base_contract_is_valid_so_the_negative_cases_prove_something() -> None:
 
 
 def test_every_declared_path_exists_in_the_frozen_contract() -> None:
-    frozen = ArmaGarchAnalysisContract.from_dict(_merged(MANUAL_GARCH)).to_dict()
+    frozen = ArmaGarchAnalysisContract.from_dict(
+        _merged(MANUAL_GARCH, {"validation": {"evaluation_mode": "classical_replication"}})
+    ).to_dict()
     for path in _vocabulary_fields():
         _resolve(frozen, path)
 
@@ -136,7 +138,7 @@ def test_independently_settable_enum_values_are_all_accepted(path: str) -> None:
     section, _, leaf = path.rpartition(".")
     for value in _vocabulary_fields()[path]["enum"]:
         patch = {section: {leaf: value}} if section else {path: value}
-        frozen = ArmaGarchAnalysisContract.from_dict(_merged(MANUAL_GARCH, patch))
+        frozen = ArmaGarchAnalysisContract.from_dict(_merged(MANUAL_GARCH, {"estimation_strategy": "sequential"}, patch))
         assert _resolve(frozen.to_dict(), path) == value
 
 
@@ -291,3 +293,20 @@ def test_the_statistical_labelling_invariants_are_all_published() -> None:
     assert "parameter uncertainty" in claims
     assert "composite information criterion" in claims
     assert "joint likelihood" in claims
+
+
+def test_classical_scope_is_reachable_with_an_executable_refit_constraint() -> None:
+    fields = _vocabulary_fields()
+    assert fields["validation.evaluation_mode"]["enum"] == [
+        "train_validation", "classical_replication",
+    ]
+    rule = next(item for item in _cross_field_rules()
+                if item["rule_id"] == "classical_replication_requires_every_refit")
+    with pytest.raises(ArmaGarchContractError, match="refit_every must be 1"):
+        ArmaGarchAnalysisContract.from_dict(_merged(rule["violation_example"]))
+    frozen = ArmaGarchAnalysisContract.from_dict(_merged({
+        "validation": {"evaluation_mode": "classical_replication", "refit_every": 1},
+    }))
+    assert frozen.validation.evaluation_mode == "classical_replication"
+    assert any("retrospective" in item for item in
+               build_arma_garch_option_vocabulary()["prohibited_claims"])

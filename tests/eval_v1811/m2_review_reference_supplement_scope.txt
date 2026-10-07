@@ -1,0 +1,8 @@
+{
+  "baseline": "edeba374247bd9e4d608a68e87def84883315cdc",
+  "tip": "768948b1c83fca666df665ece0104127eaa48ab2",
+  "original_assets_preserved": 80,
+  "producer_changed_paths": 21,
+  "production_unchanged": true,
+  "all_scope_manifest_hashes_verified": true
+}

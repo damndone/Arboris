@@ -1,0 +1,25 @@
+.F.F
+=================================== FAILURES ===================================
+_________ test_extreme_finite_alpha_cannot_publish_partial_numbers[r] __________
+../codex-v1811-script-adapters-review/tests/eval_v1811/script_statistical_adapters_review_probe.py:217: in test_extreme_finite_alpha_cannot_publish_partial_numbers
+    assert code != 0, "An extreme alpha published a completed model"
+E   AssertionError: An extreme alpha published a completed model
+E   assert 0 != 0
+_____________ test_large_alpha_completed_owner_is_reproduced_in_r ______________
+../codex-v1811-script-adapters-review/tests/eval_v1811/script_statistical_adapters_review_probe.py:238: in test_large_alpha_completed_owner_is_reproduced_in_r
+    assert code==0,output
+E   AssertionError: Error in wb_check(checks[[1]], 0.419841617114052, 1e-08, 0, "model:coefficients") : 
+E       model:coefficients -1.01719577316426 != 0.419841617114052
+E     Execution halted
+E     
+E   assert 1 == 0
+=============================== warnings summary ===============================
+tests/eval_v1811/script_statistical_adapters_review_probe.py::test_large_alpha_completed_owner_is_reproduced_in_r
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/genmod/generalized_linear_model.py:1923: FutureWarning: The bic value is computed using the deviance formula. After 0.13 this will change to the log-likelihood based formula. This change has no impact on the relative rank of models compared using BIC. You can directly access the log-likelihood version using the `bic_llf` attribute. You can suppress this message by calling statsmodels.genmod.generalized_linear_model.SET_USE_BIC_LLF with True to get the LLF-based version now or False to retainthe deviance version.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED ../codex-v1811-script-adapters-review/tests/eval_v1811/script_statistical_adapters_review_probe.py::test_extreme_finite_alpha_cannot_publish_partial_numbers[r]
+FAILED ../codex-v1811-script-adapters-review/tests/eval_v1811/script_statistical_adapters_review_probe.py::test_large_alpha_completed_owner_is_reproduced_in_r
+2 failed, 2 passed, 24 deselected, 1 warning in 2.89s

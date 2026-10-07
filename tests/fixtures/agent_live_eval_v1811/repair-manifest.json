@@ -1,0 +1,457 @@
+{
+  "schema_version": 1,
+  "review_repair": "live-harness-3P2-20261004",
+  "baseline": "a41e21653fc058606986a08549ace030fd9c265d",
+  "original_functional_baseline": "485ce4fcd20a9b20d15d6916d8510754b7b74834",
+  "independent_review_tip": "89e4d5c950df9993b78bd3fbd3f69cae8bf33d19",
+  "worktree": "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-live-harness",
+  "branch": "codex/v1811-live-harness",
+  "original_red_script_sha256": "89102b49bb92b74617bb71cc768f86bd551fdcbe960b0636406569d2723ba5fb",
+  "review_test": {
+    "path": "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-live-harness-review/tests/eval_v1811/live_harness_review_actual_red.py",
+    "sha256": "7f2c7c28b310c2d703189a1cc9e8f1049666a9d448c03a35a8b0184b95b60736",
+    "unchanged_from_review_tip": true
+  },
+  "candidate_files": {
+    "scripts/agent_live_eval.py": "9ce01ad7f00cc1cc46a356a0af1c1478a3a67395f1e6f6dd5c2a34fb7a91531d",
+    "scripts/agent_live_eval_cases.json": "088d4e0b21650e3c7a77fba1c388f4fbba4eb3760f0e429181aef9b7a1b70a4e",
+    "scripts/agent_live_eval_fixtures_v1811.json": "846457fc3ea51cfba946de9b814e9db916d011bab756db22c6f6484b1c7870d7",
+    "tests/test_agent_live_eval_v1811_harness.py": "7ef30941e356d68567b9af124de8eea81e814b289c1004b6a2729ef5d3fffdcc",
+    "docs/superpowers/handoffs/2026-10-04-v1811-agent-live-eval-report.md": "63305e4d3ac2a43945cdf925074d0ba4280df23b5fe7a292b566fd98557536fa"
+  },
+  "commands": [
+    {
+      "output": "tests/fixtures/agent_live_eval_v1811/repair-original-red.txt",
+      "sha256": "0caa62a78f248d6aa9e146fc7d17619f8d609fb797c69e47c7c3a28382f49edf",
+      "exit_code": 1,
+      "result": "4 FAIL",
+      "command": "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend V1811_HARNESS_UNDER_REVIEW=/Users/jiayuanren/项目规划/.worktrees/codex-v1811-live-harness/scripts/agent_live_eval.py V1811_PUBLIC_CONFIRM_EVIDENCE=/Users/jiayuanren/项目规划/.worktrees/codex-v1811-live-harness-review/tests/fixtures/live_harness_independent_review_public/real-confirm-evidence.json V1811_REVIEW_ATTACK_OUT=/Users/jiayuanren/项目规划/.worktrees/codex-v1811-live-harness/tests/fixtures/agent_live_eval_v1811/repair-original-red-records .venv/bin/python /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py .venv/bin/python -m pytest /Users/jiayuanren/项目规划/.worktrees/codex-v1811-live-harness-review/tests/eval_v1811/live_harness_review_actual_red.py -q",
+      "scope": "a41 original RED"
+    },
+    {
+      "output": "tests/fixtures/agent_live_eval_v1811/repair-contract-red.txt",
+      "sha256": "49f7fa8c6fbde0c553d9663fa25f0733c921d1e2e217f66a14320c9c3c980072",
+      "exit_code": 1,
+      "result": "27 FAIL",
+      "command": "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py .venv/bin/python -m pytest tests/test_agent_live_eval_v1811_harness.py -q -k repair",
+      "scope": "a41 original helper-contract RED"
+    },
+    {
+      "output": "tests/fixtures/agent_live_eval_v1811/repair-contract-green-first.txt",
+      "sha256": "df831a87f491d5436e24f5926fe22ae8576a130380750a04ba7ac2840b95bdba",
+      "exit_code": 0,
+      "result": "28 PASS",
+      "command": "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py .venv/bin/python -m pytest tests/test_agent_live_eval_v1811_harness.py -q -k 'repair or family_followup'",
+      "scope": "intermediate candidate"
+    },
+    {
+      "output": "tests/fixtures/agent_live_eval_v1811/repair-real-owner-first.txt",
+      "sha256": "cd29b47378ccc7d3afb6ac25e25ad1ec69caaeaa7ffba6d34366237e9d08a6a9",
+      "exit_code": 0,
+      "result": "32 PASS",
+      "command": "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py .venv/bin/python -m pytest tests/test_agent_live_eval_v1811_harness.py -q -k repair",
+      "scope": "intermediate retained-owner controls"
+    },
+    {
+      "output": "tests/fixtures/agent_live_eval_v1811/repair-original-green.txt",
+      "sha256": "38d960aef2c44392032d9a24401ba4f6f2b895cd9cacc2f8b7a15ff3374c2fdb",
+      "exit_code": 0,
+      "result": "4 PASS",
+      "command": "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend V1811_HARNESS_UNDER_REVIEW=/Users/jiayuanren/项目规划/.worktrees/codex-v1811-live-harness/scripts/agent_live_eval.py V1811_PUBLIC_CONFIRM_EVIDENCE=/Users/jiayuanren/项目规划/.worktrees/codex-v1811-live-harness-review/tests/fixtures/live_harness_independent_review_public/real-confirm-evidence.json V1811_REVIEW_ATTACK_OUT=/Users/jiayuanren/项目规划/.worktrees/codex-v1811-live-harness/tests/fixtures/agent_live_eval_v1811/repair-original-green-records .venv/bin/python /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py .venv/bin/python -m pytest /Users/jiayuanren/项目规划/.worktrees/codex-v1811-live-harness-review/tests/eval_v1811/live_harness_review_actual_red.py -q",
+      "scope": "intermediate candidate"
+    },
+    {
+      "output": "tests/fixtures/agent_live_eval_v1811/repair-final-focused.txt",
+      "sha256": "95f66f82f3b0e1c742f813779ae1c2536f1c80a58f6332a724ded2009c3e667b",
+      "exit_code": 0,
+      "result": "82 PASS",
+      "command": "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py .venv/bin/python -m pytest tests/test_agent_live_eval_v1811_harness.py -q",
+      "scope": "intermediate candidate before path-token probes"
+    },
+    {
+      "output": "tests/fixtures/agent_live_eval_v1811/repair-path-types-red.txt",
+      "sha256": "905412e6052054d5e8cf59258b6857cc2a98fb58ecda5db0f079c19ec1011ae3",
+      "exit_code": 1,
+      "result": "2 FAIL",
+      "command": "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py .venv/bin/python -m pytest tests/test_agent_live_eval_v1811_harness.py::test_repair_answer_path_tokens_require_exact_types -q",
+      "scope": "functional path-token RED"
+    },
+    {
+      "output": "tests/fixtures/agent_live_eval_v1811/repair-final-green.txt",
+      "sha256": "6df7b2c29e31a1705517a6942bef2963c2cee900a7309367ff679d58252d8c46",
+      "exit_code": 0,
+      "result": "84 PASS",
+      "command": "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py .venv/bin/python -m pytest tests/test_agent_live_eval_v1811_harness.py -q",
+      "scope": "intermediate retained-owner controls"
+    },
+    {
+      "output": "tests/fixtures/agent_live_eval_v1811/repair-fresh-final-green.txt",
+      "sha256": "21baa5193fa36a1e9467dc72aefd411be559564fb267fc26b505f56a42f14377",
+      "exit_code": 0,
+      "result": "84 PASS; 29.27s",
+      "command": "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py .venv/bin/python -m pytest tests/test_agent_live_eval_v1811_harness.py -q",
+      "scope": "FINAL candidate fresh owner"
+    },
+    {
+      "output": "tests/fixtures/agent_live_eval_v1811/repair-reviewed-final-green.txt",
+      "sha256": "7099d8294d0cdd4dc78d7cec76354ae60dd8e2e68ca5bd9ba1963e2d3d2846e5",
+      "exit_code": 0,
+      "result": "4 PASS; 1.71s",
+      "command": "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend V1811_HARNESS_UNDER_REVIEW=/Users/jiayuanren/项目规划/.worktrees/codex-v1811-live-harness/scripts/agent_live_eval.py V1811_PUBLIC_CONFIRM_EVIDENCE=/Users/jiayuanren/项目规划/.worktrees/codex-v1811-live-harness-review/tests/fixtures/live_harness_independent_review_public/real-confirm-evidence.json V1811_REVIEW_ATTACK_OUT=/Users/jiayuanren/项目规划/.worktrees/codex-v1811-live-harness/tests/fixtures/agent_live_eval_v1811/repair-reviewed-final-green-records .venv/bin/python /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py .venv/bin/python -m pytest /Users/jiayuanren/项目规划/.worktrees/codex-v1811-live-harness-review/tests/eval_v1811/live_harness_review_actual_red.py -q",
+      "scope": "FINAL candidate original immutable reviewer"
+    },
+    {
+      "output": "tests/fixtures/agent_live_eval_v1811/repair-tsc.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "exit_code": 0,
+      "result": "exit 0",
+      "command": "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py frontend/node_modules/.bin/tsc --noEmit -p frontend/tsconfig.json",
+      "scope": "FINAL candidate"
+    }
+  ],
+  "repair_evidence_files": {
+    "tests/fixtures/agent_live_eval_v1811/repair-contract-green-first.txt": "df831a87f491d5436e24f5926fe22ae8576a130380750a04ba7ac2840b95bdba",
+    "tests/fixtures/agent_live_eval_v1811/repair-contract-red.txt": "49f7fa8c6fbde0c553d9663fa25f0733c921d1e2e217f66a14320c9c3c980072",
+    "tests/fixtures/agent_live_eval_v1811/repair-final-focused.txt": "95f66f82f3b0e1c742f813779ae1c2536f1c80a58f6332a724ded2009c3e667b",
+    "tests/fixtures/agent_live_eval_v1811/repair-final-green.txt": "6df7b2c29e31a1705517a6942bef2963c2cee900a7309367ff679d58252d8c46",
+    "tests/fixtures/agent_live_eval_v1811/repair-fresh-final-green.txt": "21baa5193fa36a1e9467dc72aefd411be559564fb267fc26b505f56a42f14377",
+    "tests/fixtures/agent_live_eval_v1811/repair-fresh-public-summary.json": "d7833b7e840321eb22d2c9a09bd4f1847df5c9d6594f755afb7ae9a62d8bc6df",
+    "tests/fixtures/agent_live_eval_v1811/repair-original-green.txt": "38d960aef2c44392032d9a24401ba4f6f2b895cd9cacc2f8b7a15ff3374c2fdb",
+    "tests/fixtures/agent_live_eval_v1811/repair-original-red.txt": "0caa62a78f248d6aa9e146fc7d17619f8d609fb797c69e47c7c3a28382f49edf",
+    "tests/fixtures/agent_live_eval_v1811/repair-path-types-red.txt": "905412e6052054d5e8cf59258b6857cc2a98fb58ecda5db0f079c19ec1011ae3",
+    "tests/fixtures/agent_live_eval_v1811/repair-real-owner-first.txt": "cd29b47378ccc7d3afb6ac25e25ad1ec69caaeaa7ffba6d34366237e9d08a6a9",
+    "tests/fixtures/agent_live_eval_v1811/repair-real-public-owner.json": "4f1066e627179554b242b3d235821cf61aca46fb049343f75635f61b3c8f527a",
+    "tests/fixtures/agent_live_eval_v1811/repair-reviewed-final-green.txt": "7099d8294d0cdd4dc78d7cec76354ae60dd8e2e68ca5bd9ba1963e2d3d2846e5",
+    "tests/fixtures/agent_live_eval_v1811/repair-tsc.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "retained_evidence": [
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-898/repair-fresh-public-owner0/repair-fresh-confirm-evidence.json",
+      "sha256": "72a9ecd79390c54e73e7a73aeec603fd506638b3ab28f2bcc12a93a3e7156e4b"
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-898/test_public_family_fixture_own0/public-fixture-evidence.json",
+      "sha256": "efc7483b3162039708ee4fe5afd7caaffd891940fda9e4a1101f213e31e5cbc8"
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-898/test_public_family_fixture_own1/public-fixture-evidence.json",
+      "sha256": "973e32ee4f883d62f199017488e6e9ad6f8c0fdaf1cec50a2e5f747623333ade"
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-898/test_public_family_fixture_own10/public-fixture-evidence.json",
+      "sha256": "9609f1f63b60d8b718d9992909accfae61535668217d037a7e5a8fa6b2d2ab0c"
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-898/test_public_family_fixture_own11/public-fixture-evidence.json",
+      "sha256": "1aed2980a35d496a184ed1783e58952fde1e8a609fe26b3decefcaa273b0d650"
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-898/test_public_family_fixture_own12/public-fixture-evidence.json",
+      "sha256": "e46eb91e238df41a8b933a628fc02b5f410f7f4dff0bbb2ae080cf8606ba2bb9"
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-898/test_public_family_fixture_own13/public-fixture-evidence.json",
+      "sha256": "5bef7f580ba13f380fd60da7131bdf1746abe996735c5e3a6eece2af50b0eb3f"
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-898/test_public_family_fixture_own14/public-fixture-evidence.json",
+      "sha256": "e6202a39e2edccaf49406b7a9b047f32430b1f0bc03d596bd38722e1844930b4"
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-898/test_public_family_fixture_own15/public-fixture-evidence.json",
+      "sha256": "d9eac28e0a6e72e2ac6e9b430d1b5a0ef2ba3d3be3d4bd9972ddd89c8879073f"
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-898/test_public_family_fixture_own16/public-fixture-evidence.json",
+      "sha256": "1d7d7d5fd8c53101a52176234b0ddc222cf8d72ebcbf9d02792798e5cfd36715"
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-898/test_public_family_fixture_own2/public-fixture-evidence.json",
+      "sha256": "81cf44bc53495bad56b376d3d5fdf3351ad595465c3d21a175bfc5904bf0ae14"
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-898/test_public_family_fixture_own3/public-fixture-evidence.json",
+      "sha256": "15ba638581c5ce541697a0774bbb4cdba3494f9bedf586bbb8a881d693d29a36"
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-898/test_public_family_fixture_own4/public-fixture-evidence.json",
+      "sha256": "99235029e20bf81e2a64683b0b5a779629941dc4caf37f5c66c1054282707892"
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-898/test_public_family_fixture_own5/public-fixture-evidence.json",
+      "sha256": "e8c29e6f2d1ac7a3c9b80252a108e33f33dab66f280cfa362d3233439be8dcff"
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-898/test_public_family_fixture_own6/lmm-blocker.json",
+      "sha256": "6a3e6a79bb89b0cab4391a3323185f88398a1d147ac85e0c6e51b2cdcbcda68c"
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-898/test_public_family_fixture_own7/public-fixture-evidence.json",
+      "sha256": "6d6098d173f1eeaf78e98526b6998f550ce820f2af0f3fe7f6be85e4ddfb6c29"
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-898/test_public_family_fixture_own8/public-fixture-evidence.json",
+      "sha256": "d3325f8c6aeb54cd39a0189f441e5d007ce2659af8748b0b406e06f2150baead"
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-898/test_public_family_fixture_own9/public-fixture-evidence.json",
+      "sha256": "9ea784488a91e966fffa458a6e3ab99acc1cdebbf9c2a7f1b5b26d414f1d04ba"
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-898/test_real_public_confirmation_0/public-confirmation-evidence.json",
+      "sha256": "a11adb7f9f21a61289dcf76e963ebe8c052a522836d3c8851bdbe6009285f74c"
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-898/test_repair_real_completed_pub0/repair-real-owner-record.json",
+      "sha256": "187b82fd2dab037e706cdc9a2cb36b2dc4d0b4ef5e940119cebe5fec478789ad"
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-898/test_repair_real_completed_pub1/repair-real-owner-record.json",
+      "sha256": "c76ebebc9aeadce65efb5aad073d304336b1c2008b75821402ef7d0417ce5a7b"
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-898/test_repair_real_completed_pub2/repair-real-owner-record.json",
+      "sha256": "8bc4e31a5bbd10eb7a75c3b77d5b89c7711d75c9246f2a046bda6cafb013a8ce"
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-898/test_repair_real_completed_pub3/repair-real-owner-record.json",
+      "sha256": "6bd341e87962ac83350e1ae1aa01390af597f13523a56bc64d7daf59ed77f7cc"
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-898/test_repair_real_completed_pub4/repair-real-owner-record.json",
+      "sha256": "1167256e680dc2380595c78006a3682a8c6295c6de373662865615dba35f037b"
+    }
+  ],
+  "protected_native_references_and_data": [
+    {
+      "path": "tests/fixtures/admission/iv_2sls/data.csv",
+      "sha256": "880c3b4ff039e86d358f9d1c804dd729bcaeafe2bd33075f3649902c629c7a2f",
+      "baseline_sha256": "880c3b4ff039e86d358f9d1c804dd729bcaeafe2bd33075f3649902c629c7a2f"
+    },
+    {
+      "path": "tests/fixtures/admission/iv_2sls/oracle.json",
+      "sha256": "0691f282ded15fcf2e6fa0e03b7911d4032bd036ecc4686d1dcedaf10799af75",
+      "baseline_sha256": "0691f282ded15fcf2e6fa0e03b7911d4032bd036ecc4686d1dcedaf10799af75"
+    },
+    {
+      "path": "tests/fixtures/admission/glm_binomial/data.csv",
+      "sha256": "ab6719fcec6c408c47dff6d3ca93d27f01ed43124697c0478f487455db6a88b0",
+      "baseline_sha256": "ab6719fcec6c408c47dff6d3ca93d27f01ed43124697c0478f487455db6a88b0"
+    },
+    {
+      "path": "tests/fixtures/admission/glm_binomial/oracle.json",
+      "sha256": "33c948ae25bc1ea80b80d22edcdc65d830af2b4b15141abe6bc22b14f6357e2d",
+      "baseline_sha256": "33c948ae25bc1ea80b80d22edcdc65d830af2b4b15141abe6bc22b14f6357e2d"
+    },
+    {
+      "path": "tests/fixtures/admission/glm_poisson/data.csv",
+      "sha256": "214027c9911853bb988276a7611ff079670d3b44ca95345b4a35a7737d790126",
+      "baseline_sha256": "214027c9911853bb988276a7611ff079670d3b44ca95345b4a35a7737d790126"
+    },
+    {
+      "path": "tests/fixtures/admission/glm_poisson/oracle.json",
+      "sha256": "10454ba9e1d08809e1d81f2f562da942042920abee1dfd15c09cb793c75156d4",
+      "baseline_sha256": "10454ba9e1d08809e1d81f2f562da942042920abee1dfd15c09cb793c75156d4"
+    },
+    {
+      "path": "tests/fixtures/admission/glm_negative_binomial/data.csv",
+      "sha256": "33bf1067bdf7f7ca7f1bf7fb34c16fc167d9318b482f60aae8febd402b084711",
+      "baseline_sha256": "33bf1067bdf7f7ca7f1bf7fb34c16fc167d9318b482f60aae8febd402b084711"
+    },
+    {
+      "path": "tests/fixtures/count_models/integration-strict-v1811/glm-negative-binomial-v1811-oracle.json",
+      "sha256": "8edac87c50fe78ed186f75297abae9de4f11c0d0f848d120620c1b3705cb0c6c",
+      "baseline_sha256": "8edac87c50fe78ed186f75297abae9de4f11c0d0f848d120620c1b3705cb0c6c"
+    },
+    {
+      "path": "tests/fixtures/admission/panel_ols/data.csv",
+      "sha256": "b03b366bfd8cb184868689b8a979711c0f2a13b946d282a2bad59ccc5871a9ee",
+      "baseline_sha256": "b03b366bfd8cb184868689b8a979711c0f2a13b946d282a2bad59ccc5871a9ee"
+    },
+    {
+      "path": "tests/fixtures/panel_cluster/oracle.json",
+      "sha256": "5762c67bc879535d6ad880028fe255fccef9048b4d0c35de06321712a39a331e",
+      "baseline_sha256": "5762c67bc879535d6ad880028fe255fccef9048b4d0c35de06321712a39a331e"
+    },
+    {
+      "path": "tests/fixtures/panel_cluster/staggered.csv",
+      "sha256": "480b5a87a735761be6ccb0260e56a631ce34c1f9245de6a7a50bb072379471dc",
+      "baseline_sha256": "480b5a87a735761be6ccb0260e56a631ce34c1f9245de6a7a50bb072379471dc"
+    },
+    {
+      "path": "tests/fixtures/admission/linear_mixed_effects/data.csv",
+      "sha256": "f971e489477c8c912580aa09b2f0327334f0e12a2f9d5313a5e95f9ccf333828",
+      "baseline_sha256": "f971e489477c8c912580aa09b2f0327334f0e12a2f9d5313a5e95f9ccf333828"
+    },
+    {
+      "path": "tests/fixtures/admission/linear_mixed_effects/oracle.json",
+      "sha256": "82471ced411e0b571015c05c265c376194cf0360936311e3d00e309e867bf9c5",
+      "baseline_sha256": "82471ced411e0b571015c05c265c376194cf0360936311e3d00e309e867bf9c5"
+    },
+    {
+      "path": "tests/fixtures/postestimation/data.csv",
+      "sha256": "2e1b92f07632a8c88d047074f77cd6e5f9552b4f932f7d6ed2499161a0bf3084",
+      "baseline_sha256": "2e1b92f07632a8c88d047074f77cd6e5f9552b4f932f7d6ed2499161a0bf3084"
+    },
+    {
+      "path": "tests/fixtures/postestimation/oracle.json",
+      "sha256": "d80dbc69f91648cbd17443f89deaf21df63296f1296a6d674c3ef9e135b9302c",
+      "baseline_sha256": "d80dbc69f91648cbd17443f89deaf21df63296f1296a6d674c3ef9e135b9302c"
+    },
+    {
+      "path": "tests/fixtures/count_models/integration-strict-v1811/native-reference/nb2-postestimation-reference.json",
+      "sha256": "ea67d3316222edf8a36b99c93bd8f1e5f00c0bef3677712f537d4369941d80d9",
+      "baseline_sha256": "ea67d3316222edf8a36b99c93bd8f1e5f00c0bef3677712f537d4369941d80d9"
+    },
+    {
+      "path": "tests/fixtures/v186_families/families.csv",
+      "sha256": "cb8172fbd6c7a4b70a5c524df660480c1e98529ccbe3bfdd10b30748ffa35ad8",
+      "baseline_sha256": "cb8172fbd6c7a4b70a5c524df660480c1e98529ccbe3bfdd10b30748ffa35ad8"
+    },
+    {
+      "path": "tests/fixtures/v186_families/oracle.json",
+      "sha256": "30dbea51f144a42a18340ac62e3f283b8ac62a708f0f54993b5547af2ef183fb",
+      "baseline_sha256": "30dbea51f144a42a18340ac62e3f283b8ac62a708f0f54993b5547af2ef183fb"
+    },
+    {
+      "path": "tests/fixtures/cs_did/panel.csv",
+      "sha256": "3e929df973399a5015a658306830ce9ef0d08dc551dd14556940f3377ed0f268",
+      "baseline_sha256": "3e929df973399a5015a658306830ce9ef0d08dc551dd14556940f3377ed0f268"
+    },
+    {
+      "path": "tests/fixtures/cs_did/aggte.json",
+      "sha256": "d835af04b0d372aa002a107d598d7da3a056a86a6285cadcfe695d772b790b7c",
+      "baseline_sha256": "d835af04b0d372aa002a107d598d7da3a056a86a6285cadcfe695d772b790b7c"
+    },
+    {
+      "path": "tests/fixtures/sa_did/panel_balanced.csv",
+      "sha256": "cd4a9dae122f0d3d905841471801bd041e053da1d36f7ecac2144abcb60d0add",
+      "baseline_sha256": "cd4a9dae122f0d3d905841471801bd041e053da1d36f7ecac2144abcb60d0add"
+    },
+    {
+      "path": "tests/fixtures/sa_did/sunab_balanced.json",
+      "sha256": "346c45a4dafa934df1bd0ead22be46efc6413507831cb3f00de0adc5fd910e0b",
+      "baseline_sha256": "346c45a4dafa934df1bd0ead22be46efc6413507831cb3f00de0adc5fd910e0b"
+    },
+    {
+      "path": "tests/fixtures/dcdh/panel_nonabsorbing.csv",
+      "sha256": "12dbc956c84a9e22d3b449c49df5acbcd32ba8de2e427587b7d2dd81a3762960",
+      "baseline_sha256": "12dbc956c84a9e22d3b449c49df5acbcd32ba8de2e427587b7d2dd81a3762960"
+    },
+    {
+      "path": "tests/fixtures/dcdh/dyn_nonabsorbing.json",
+      "sha256": "bcb348d317971461531ccee5e1ba1d3009a839f9da607c00cbab2a39ee25dcd1",
+      "baseline_sha256": "bcb348d317971461531ccee5e1ba1d3009a839f9da607c00cbab2a39ee25dcd1"
+    }
+  ],
+  "immutable_old_owned_evidence": [
+    {
+      "path": "tests/fixtures/agent_live_eval_v1811/complete-first.txt",
+      "sha256": "98c2db3c465935eea222e1378cacb953b398f175655781d77614ec5920988fe5",
+      "a41_sha256": "98c2db3c465935eea222e1378cacb953b398f175655781d77614ec5920988fe5"
+    },
+    {
+      "path": "tests/fixtures/agent_live_eval_v1811/edge-red.txt",
+      "sha256": "bee01fe86dcff74cff6b9aed6b55a0fe9eaf151e4403e81554d451c3cbc38b4b",
+      "a41_sha256": "bee01fe86dcff74cff6b9aed6b55a0fe9eaf151e4403e81554d451c3cbc38b4b"
+    },
+    {
+      "path": "tests/fixtures/agent_live_eval_v1811/final-focused.txt",
+      "sha256": "02bce22cab5344279a63ec1d27fb41f1285209e7919eee9d64e94fc341afd464",
+      "a41_sha256": "02bce22cab5344279a63ec1d27fb41f1285209e7919eee9d64e94fc341afd464"
+    },
+    {
+      "path": "tests/fixtures/agent_live_eval_v1811/final-green.txt",
+      "sha256": "2e635d15b8a31674be79e9af868e98895428f0c78582f27706a4276f012ce29a",
+      "a41_sha256": "2e635d15b8a31674be79e9af868e98895428f0c78582f27706a4276f012ce29a"
+    },
+    {
+      "path": "tests/fixtures/agent_live_eval_v1811/lineage-red.txt",
+      "sha256": "b7e1562feb1aa96212e9d10adf699a4e62389fa1d3c20c4125492353943ebccb",
+      "a41_sha256": "b7e1562feb1aa96212e9d10adf699a4e62389fa1d3c20c4125492353943ebccb"
+    },
+    {
+      "path": "tests/fixtures/agent_live_eval_v1811/manifest.json",
+      "sha256": "951cd67732f56d4ba769286ae8bf0ec7bd01a130c0fe1ffba74de7eac395091f",
+      "a41_sha256": "951cd67732f56d4ba769286ae8bf0ec7bd01a130c0fe1ffba74de7eac395091f"
+    },
+    {
+      "path": "tests/fixtures/agent_live_eval_v1811/owner-input-summary.json",
+      "sha256": "2401517bcac7fe5975dadb43e5cbd3e7231b13c4b44e9c4317ce15614c7cf0c9",
+      "a41_sha256": "2401517bcac7fe5975dadb43e5cbd3e7231b13c4b44e9c4317ce15614c7cf0c9"
+    },
+    {
+      "path": "tests/fixtures/agent_live_eval_v1811/packets-red.txt",
+      "sha256": "18e69abf833b6d76d5cda4bbaec311f3a3db491ffad4e3a6a8f2fdb7a0b61ce2",
+      "a41_sha256": "18e69abf833b6d76d5cda4bbaec311f3a3db491ffad4e3a6a8f2fdb7a0b61ce2"
+    },
+    {
+      "path": "tests/fixtures/agent_live_eval_v1811/protocol-green.txt",
+      "sha256": "3f55a12e5c7afa0cadbc20715d9b818393d8c18cc5c8aaa4e36d72567cd5efe0",
+      "a41_sha256": "3f55a12e5c7afa0cadbc20715d9b818393d8c18cc5c8aaa4e36d72567cd5efe0"
+    },
+    {
+      "path": "tests/fixtures/agent_live_eval_v1811/protocol-red.txt",
+      "sha256": "411a22b1783a5b9d397060ba261f7da07699894188e299a0ef25773f20477c21",
+      "a41_sha256": "411a22b1783a5b9d397060ba261f7da07699894188e299a0ef25773f20477c21"
+    },
+    {
+      "path": "tests/fixtures/agent_live_eval_v1811/public-confirm-initialized.txt",
+      "sha256": "938ea26a8a5b3bd31910b370f09a6238ce5e707256764b13a10b76f5b13e0567",
+      "a41_sha256": "938ea26a8a5b3bd31910b370f09a6238ce5e707256764b13a10b76f5b13e0567"
+    },
+    {
+      "path": "tests/fixtures/agent_live_eval_v1811/public-confirm-recheck.txt",
+      "sha256": "a0062527ab75825d34b96725c79ce9c7bbb1f57063cbe9338e78e657a411ff47",
+      "a41_sha256": "a0062527ab75825d34b96725c79ce9c7bbb1f57063cbe9338e78e657a411ff47"
+    },
+    {
+      "path": "tests/fixtures/agent_live_eval_v1811/public-fixtures-first.txt",
+      "sha256": "a945ee9381f2b247fa5fe4854421cddfcadcebb5c87272c86eac9a2a90a59d3b",
+      "a41_sha256": "a945ee9381f2b247fa5fe4854421cddfcadcebb5c87272c86eac9a2a90a59d3b"
+    },
+    {
+      "path": "tests/fixtures/agent_live_eval_v1811/public-fixtures-recheck.txt",
+      "sha256": "46bedfe40cc49d6e7f0b28fc56147a79979630da2dd201b08a15784a9b0c7d6a",
+      "a41_sha256": "46bedfe40cc49d6e7f0b28fc56147a79979630da2dd201b08a15784a9b0c7d6a"
+    },
+    {
+      "path": "tests/fixtures/agent_live_eval_v1811/public-native-summary.json",
+      "sha256": "f31c8b77a6b3a6498ed15337957220fb0259a6e555c01fbb139a0abeea53d6ce",
+      "a41_sha256": "f31c8b77a6b3a6498ed15337957220fb0259a6e555c01fbb139a0abeea53d6ce"
+    },
+    {
+      "path": "tests/fixtures/agent_live_eval_v1811/selection-green.txt",
+      "sha256": "80aac6b12398d3501faa5711e551cb31d624d3e32994128e1d2a25398af86fa1",
+      "a41_sha256": "80aac6b12398d3501faa5711e551cb31d624d3e32994128e1d2a25398af86fa1"
+    },
+    {
+      "path": "tests/fixtures/agent_live_eval_v1811/selection-red.txt",
+      "sha256": "f8a293f4c81963fbe567368a4b35855833c28009b662e4e207d7a120c7ca05f1",
+      "a41_sha256": "f8a293f4c81963fbe567368a4b35855833c28009b662e4e207d7a120c7ca05f1"
+    },
+    {
+      "path": "tests/fixtures/agent_live_eval_v1811/tsc.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "a41_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "preservation": {
+    "original_case_objects": 37,
+    "all_case_fields_except_new17_followup_unchanged": true,
+    "all_17_packet_fields_except_answer_indices_unchanged": true,
+    "native_comparisons_and_tolerances_unchanged": true,
+    "native_comparison_fields_declared": 70,
+    "lmm_fields_blocked_not_live": 2
+  },
+  "limitations": [
+    "NO_PROVIDER_CALLS",
+    "NO_LIVE_ADMISSION",
+    "LMM_HOST_CANARY_BLOCKED",
+    "dCDH overall Av_tot_eff remains a different estimand",
+    "GENESIS_MULTISTEP_NOT_COVERED_BY_NEW17",
+    "ORIGINAL37_FREE_TEXT_SCORING_UNCHANGED",
+    "INDEPENDENT_RECHECK_PENDING"
+  ],
+  "commit_identity": "Final repair commit is returned separately; candidate bytes pinned above to avoid a self-referential manifest."
+}

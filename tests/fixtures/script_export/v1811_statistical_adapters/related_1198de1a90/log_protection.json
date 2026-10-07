@@ -1,0 +1,66 @@
+[
+  {
+    "log": "oracle-tbb2m5gu/analysis.log",
+    "ignored_raw": "local/v1811-script-statistical-adapters/related_1198de1a90/oracle-tbb2m5gu/analysis.log",
+    "raw_sha256": "withheld-raw-sha256-0d3d6deaf2d97ce99977f8e7",
+    "redacted_sha256": "42d77129a1807406deb5bd6fc00f03320c4d41db435d556905d6283612c69f4e",
+    "outside_header_values_byte_identical": true,
+    "raw_mode": "0600"
+  },
+  {
+    "log": "oracle-fzy2gyn2/analysis.log",
+    "ignored_raw": "local/v1811-script-statistical-adapters/related_1198de1a90/oracle-fzy2gyn2/analysis.log",
+    "raw_sha256": "withheld-raw-sha256-cf9fa27aae2318c4d8f7d039",
+    "redacted_sha256": "50d60c321435f0b3924a4cd3807682d38b76f13bfcb37bc097a3d310626c8350",
+    "outside_header_values_byte_identical": true,
+    "raw_mode": "0600"
+  },
+  {
+    "log": "oracle-z21c1iij/analysis.log",
+    "ignored_raw": "local/v1811-script-statistical-adapters/related_1198de1a90/oracle-z21c1iij/analysis.log",
+    "raw_sha256": "withheld-raw-sha256-578a29f16654afacdd595c4c",
+    "redacted_sha256": "760571751ebf0300bc6680b8d117ae10e27a3b7aa154fe25bef683c226b50f35",
+    "outside_header_values_byte_identical": true,
+    "raw_mode": "0600"
+  },
+  {
+    "log": "oracle-2v1cfw2o/analysis.log",
+    "ignored_raw": "local/v1811-script-statistical-adapters/related_1198de1a90/oracle-2v1cfw2o/analysis.log",
+    "raw_sha256": "withheld-raw-sha256-20e0fcd2c8f41ff25e9a21f9",
+    "redacted_sha256": "77cce1b0e9a52905e5ca8972ee95fcbd6993892d1e64a858c71acf4afa3d0275",
+    "outside_header_values_byte_identical": true,
+    "raw_mode": "0600"
+  },
+  {
+    "log": "oracle-mu1h0zx1/analysis.log",
+    "ignored_raw": "local/v1811-script-statistical-adapters/related_1198de1a90/oracle-mu1h0zx1/analysis.log",
+    "raw_sha256": "withheld-raw-sha256-6c288db19cd315c6ad8c573d",
+    "redacted_sha256": "012571e581f6ca3d4edc5be1024e1e0bf73337209ea5df56de3b2a4337b9be1a",
+    "outside_header_values_byte_identical": true,
+    "raw_mode": "0600"
+  },
+  {
+    "log": "oracle-jhrg0tqf/analysis.log",
+    "ignored_raw": "local/v1811-script-statistical-adapters/related_1198de1a90/oracle-jhrg0tqf/analysis.log",
+    "raw_sha256": "withheld-raw-sha256-213c8b0ede707e3c6d80406a",
+    "redacted_sha256": "d8fae91eb09ad6c3af93a038aa17092c5be50f93b7c930b9e2bb9ea765b4f478",
+    "outside_header_values_byte_identical": true,
+    "raw_mode": "0600"
+  },
+  {
+    "log": "oracle-419pm0n7/analysis.log",
+    "ignored_raw": "local/v1811-script-statistical-adapters/related_1198de1a90/oracle-419pm0n7/analysis.log",
+    "raw_sha256": "withheld-raw-sha256-386b64e97b19ca4ba85c6562",
+    "redacted_sha256": "eca0e89584bee17ebb0d50e7d4560f167f305f4f11addbef77aa39b935a2f645",
+    "outside_header_values_byte_identical": true,
+    "raw_mode": "0600"
+  },
+  {
+    "log": "oracle-llrb7mn1/analysis.log",
+    "ignored_raw": "local/v1811-script-statistical-adapters/related_1198de1a90/oracle-llrb7mn1/analysis.log",
+    "raw_sha256": "withheld-raw-sha256-136ae63c5f2adb41e69497ed",
+    "redacted_sha256": "f4b3c4be4e0abf64c4741f6522c1020dd52b05d23e8b1922930821b64d2ca563",
+    "outside_header_values_byte_identical": true,
+    "raw_mode": "0600"
+  }
+]

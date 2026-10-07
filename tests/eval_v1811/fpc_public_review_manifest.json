@@ -1,0 +1,415 @@
+{
+  "baseline": "699e378749e8d629aa8230ff6ef7ea7269a4f6bb",
+  "reviewed_functional_tip": "9a42c15959d444b259ed2d490cb1b9257c69adcb",
+  "observed_head_at_green": "308579330b4714806854fdfdd0b38dc772561b60",
+  "worktree": "/Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11",
+  "production": [
+    {
+      "path": "backend/workbench/survey/adapters.py",
+      "tip_sha256": "a0f133197fccfbd741c0ace9e6f1c7a92ea1c68272a78116b5d9a382eac8873a",
+      "current_sha256": "a0f133197fccfbd741c0ace9e6f1c7a92ea1c68272a78116b5d9a382eac8873a",
+      "unchanged_since_tip": true
+    },
+    {
+      "path": "backend/workbench/survey/engine.py",
+      "tip_sha256": "cca739df8fa01b5e4fc35d07356411a23bc70e2f87fc0b73adec9c96ab3034a2",
+      "current_sha256": "cca739df8fa01b5e4fc35d07356411a23bc70e2f87fc0b73adec9c96ab3034a2",
+      "unchanged_since_tip": true
+    },
+    {
+      "path": "backend/workbench/survey/design.py",
+      "tip_sha256": "d3de7acefb85ce73adca6a41ea4a5917f51cda1c311cc332ba0b3c7e764d93d4",
+      "current_sha256": "d3de7acefb85ce73adca6a41ea4a5917f51cda1c311cc332ba0b3c7e764d93d4",
+      "unchanged_since_tip": true
+    },
+    {
+      "path": "backend/workbench/engine/stages/estimation.py",
+      "tip_sha256": "b82a87035fa78ceb98c37795fba07c0226e35488f3808c446fe5cd6514d33ac9",
+      "current_sha256": "b82a87035fa78ceb98c37795fba07c0226e35488f3808c446fe5cd6514d33ac9",
+      "unchanged_since_tip": true
+    },
+    {
+      "path": "backend/workbench/agent/context_tools.py",
+      "tip_sha256": "e259d173836d8319e7372794f053b2a0dc81a1d049bbdf21a657775b7bf40c6a",
+      "current_sha256": "e259d173836d8319e7372794f053b2a0dc81a1d049bbdf21a657775b7bf40c6a",
+      "unchanged_since_tip": true
+    },
+    {
+      "path": "backend/workbench/report_view_model.py",
+      "tip_sha256": "84c6bb9e919460fc7c4f45195f60ffdb6a7518b85a47a9a270c8380a2b670dc7",
+      "current_sha256": "84c6bb9e919460fc7c4f45195f60ffdb6a7518b85a47a9a270c8380a2b670dc7",
+      "unchanged_since_tip": true
+    }
+  ],
+  "native_reference_assets": [
+    {
+      "path": "tests/fixtures/survey_fpc_v1811/design.csv",
+      "sha256": "d6c3244395f440ef24f0b303518793e44019118314c84e3554a96e142389e478",
+      "unchanged_since_baseline": true
+    },
+    {
+      "path": "tests/fixtures/survey_fpc_v1811/subpop.csv",
+      "sha256": "0ec3a86f23b75610577d5f0951a189cf36ebb6836323d614078f73ae72b0b1e2",
+      "unchanged_since_baseline": true
+    },
+    {
+      "path": "tests/fixtures/survey_fpc_v1811/oracle_reference.json",
+      "sha256": "bf70ff45fc6522ff7fdb514cd6a00cf5b7754b0d9417cf672d32af8437c3f662",
+      "unchanged_since_baseline": true
+    },
+    {
+      "path": "tests/fixtures/survey_fpc_v1811/stata_reference.json",
+      "sha256": "bdf30c0b1f7da60e7a13577088ddb923f611f033068a62d7a0ecac126b5b0111",
+      "unchanged_since_baseline": true
+    },
+    {
+      "path": "tests/eval_v1811/fpc_review_evidence_1494cff4/r_reproduced.json",
+      "sha256": "bf70ff45fc6522ff7fdb514cd6a00cf5b7754b0d9417cf672d32af8437c3f662",
+      "unchanged_since_baseline": true
+    },
+    {
+      "path": "tests/eval_v1811/fpc_review_evidence_1494cff4/stata_reproduced.json",
+      "sha256": "faa941865dcdf41f57da0be4b7288290f20b12b9ef495a04cd1e80f2b11bffec",
+      "unchanged_since_baseline": true
+    },
+    {
+      "path": "tests/eval_v1811/fpc_review_evidence_1494cff4/stata/fpc_review_oracle.do",
+      "sha256": "a4924afb283950c21217156fbfcd03b585825460d3ab6c19ea283fd406123edd",
+      "unchanged_since_baseline": true
+    }
+  ],
+  "review_evidence": [
+    {
+      "path": "tests/eval_v1811/fpc_public_review_adversarial.py",
+      "sha256": "1e7b6509a49b24740005188c7c3be84098b797e99b7ccea3d8e69a06394cc307"
+    },
+    {
+      "path": "tests/eval_v1811/fpc_public_review_first_source.py",
+      "sha256": "f43238b87f9c8e80619a8ef4fa0d2d70ff1e568c6012169323fe5d4390028dae"
+    },
+    {
+      "path": "tests/eval_v1811/fpc_public_review_first.txt",
+      "sha256": "2cda6670659c873d0169a9f06fbe810e8512c9afd33c07088614c5947986b6bd"
+    },
+    {
+      "path": "tests/eval_v1811/fpc_public_review_green.txt",
+      "sha256": "c4afd396f8111fb844f89e6bdc4ff97ecc506690a220bce25cc9f450e44fddeb"
+    },
+    {
+      "path": "docs/superpowers/handoffs/2026-10-04-v1.8.11-survey-fpc-public-independent-review.md",
+      "sha256": "b7eb71739cc0cb206d7d09f0f9bac20c1db748ebafca6ac755bdf947c081b331"
+    },
+    {
+      "path": "tests/eval_v1811/fpc_public_review_consumers.py",
+      "sha256": "b61b3f41e957db4cab57f269a378eb4fad7dea4e89f73c377c2dda433d889b8c"
+    },
+    {
+      "path": "tests/eval_v1811/fpc_public_review_consumers_first_source.py",
+      "sha256": "141c40615a3341e02dcb637464daa5d4b708ed125cd3d891bbe8c1bdb74017d4"
+    },
+    {
+      "path": "tests/eval_v1811/fpc_public_review_consumers_red.txt",
+      "sha256": "2468e6bf2322635c4b291f71ec3ddb60f65066927d74906cdae1f74392abe03f"
+    },
+    {
+      "path": "tests/eval_v1811/fpc_public_review_consumers_snapshot_red.txt",
+      "sha256": "2c56f4484bbb504f9ca82861cf7c123e373c41864bf6e6073aa8616735b7cbbf"
+    }
+  ],
+  "commands": [
+    {
+      "command": "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py .venv/bin/python -m pytest tests/eval_v1811/fpc_public_review_adversarial.py -q -s",
+      "output": "tests/eval_v1811/fpc_public_review_first.txt",
+      "exit_code": 1,
+      "result": "5 failed,18 passed; own expected failure-return-form error; retained original source"
+    },
+    {
+      "command": "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py .venv/bin/python -m pytest tests/eval_v1811/fpc_public_review_adversarial.py -q -s",
+      "output": "tests/eval_v1811/fpc_public_review_green.txt",
+      "exit_code": 0,
+      "result": "23 passed in 15.66s"
+    },
+    {
+      "command": "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py .venv/bin/python -m pytest tests/eval_v1811/fpc_public_review_consumers.py -q -s",
+      "output": "tests/eval_v1811/fpc_public_review_consumers_red.txt",
+      "exit_code": 1,
+      "result": "1 failed,1 passed in12.25s; live source with Root dirty diagnostics changes; not original-tip GREEN"
+    },
+    {
+      "command": "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py .venv/bin/python -m pytest tests/eval_v1811/fpc_public_review_consumers.py -q -s",
+      "output": "tests/eval_v1811/fpc_public_review_consumers_snapshot_red.txt",
+      "exit_code": 1,
+      "result": "2 failed in12.06s; runtime Git9a DiagnosticsStage.run snapshot binds reviewed warning transport"
+    }
+  ],
+  "retained_run_assets": [
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-769/test_public_covariance_and_ful0/review/runs/20261004_201730_634245_8fd90cb7/model_results/ols_1.json",
+      "sha256": "1fc758e45927eddbf917103f186970d85b4674e1526b8bf38b2e2c97ea62088b",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-769/test_public_covariance_and_ful0/review/runs/20261004_201730_634245_8fd90cb7/errors.json",
+      "sha256": "939fcb8961903df649c4f84d7bca71b0ad647689322b47373aa599d7e8121963",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-769/test_public_covariance_and_ful0/review/runs/20261004_201730_634245_8fd90cb7/run_inputs.json",
+      "sha256": "545234f3b4773a2fde115d5ebecdc58f206cab54e3c48f62f3b474a2a3459189",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-769/test_public_covariance_and_ful1/review/runs/20261004_201731_307832_ac41aa5c/model_results/ols_1.json",
+      "sha256": "e7b2ef30823105c533f3ff71d1b800c4c7e30dd4f877681bf13feda143f0dac5",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-769/test_public_covariance_and_ful1/review/runs/20261004_201731_307832_ac41aa5c/errors.json",
+      "sha256": "fa4c4061ee0f26c150b7d01d8c3ac61ca4d69c7e95fb11e2a8999de5d401fddd",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-769/test_public_covariance_and_ful1/review/runs/20261004_201731_307832_ac41aa5c/run_inputs.json",
+      "sha256": "62197290dcdd110c6cf1c48b954b5795680b0621def470583f69d9e3c8aecd5b",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-769/test_public_covariance_and_ful2/review/runs/20261004_201731_901372_bbfe62f0/model_results/ols_1.json",
+      "sha256": "d8fbe142aca87da30b4192d0ae59e1144799c9b43e619f2bf98e28174f361935",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-769/test_public_covariance_and_ful2/review/runs/20261004_201731_901372_bbfe62f0/errors.json",
+      "sha256": "0da598ae96bb5f709d633a80325df5674189e57ae00e7d53af6326f4689c14b1",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-769/test_public_covariance_and_ful2/review/runs/20261004_201731_901372_bbfe62f0/run_inputs.json",
+      "sha256": "65ce8c7d34155b7777292f0315689f4e0faec123e68dc8abf81ee6521490d47a",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-769/test_public_covariance_and_ful3/review/runs/20261004_201732_299315_16b1355c/model_results/ols_1.json",
+      "sha256": "b4fa6f00e3760a5cb3cd4e7336bfbcae9b7039c672a56e13ea0b327b7c953bf9",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-769/test_public_covariance_and_ful3/review/runs/20261004_201732_299315_16b1355c/errors.json",
+      "sha256": "cee85765c35168cab88672869c2e56658c4495206f41661be41e4bf9c75fed43",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-769/test_public_covariance_and_ful3/review/runs/20261004_201732_299315_16b1355c/run_inputs.json",
+      "sha256": "5a6d8e3ff6d9d5b41ad39c8cdfa5fceabc3b8d523d43ea21b10586150c513a3b",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-769/test_no_fpc_public_packet_and_0/current/review/runs/20261004_201732_672161_4b01b9ca/model_results/ols_1.json",
+      "sha256": "3089249c1761de5339324bc26a55cf24812f638b1bbbf835d07c1b184dbb1a59",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-769/test_no_fpc_public_packet_and_0/current/review/runs/20261004_201732_672161_4b01b9ca/errors.json",
+      "sha256": "c01aed98c2c9b81ac5ffaba949d8ba5474a767d8e5fc71a87ad023d9fc856211",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-769/test_no_fpc_public_packet_and_0/current/review/runs/20261004_201732_672161_4b01b9ca/run_inputs.json",
+      "sha256": "456729b41a26625dee8b09189bc51687d407afc7486b13b9485c8e1a58c580ed",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-769/test_no_fpc_public_packet_and_0/baseline/review/runs/20261004_201733_365989_9a070acc/model_results/ols_1.json",
+      "sha256": "3089249c1761de5339324bc26a55cf24812f638b1bbbf835d07c1b184dbb1a59",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-769/test_no_fpc_public_packet_and_0/baseline/review/runs/20261004_201733_365989_9a070acc/errors.json",
+      "sha256": "d01c33f86a7aee20d27adb6501ca130ad1a7cc84098f99503a7b0636da49e4e9",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-769/test_no_fpc_public_packet_and_0/baseline/review/runs/20261004_201733_365989_9a070acc/run_inputs.json",
+      "sha256": "456729b41a26625dee8b09189bc51687d407afc7486b13b9485c8e1a58c580ed",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-769/test_no_fpc_public_packet_and_1/current/review/runs/20261004_201733_986054_b5d98b14/model_results/ols_1.json",
+      "sha256": "bfbb537deb6e47bc91dde76b146bee2100f126ae5de8767f0b9dbf782b873a18",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-769/test_no_fpc_public_packet_and_1/current/review/runs/20261004_201733_986054_b5d98b14/errors.json",
+      "sha256": "d19bbc94386400580c651f59cb0c54775fc312bd210244e38bf7177d03a14802",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-769/test_no_fpc_public_packet_and_1/current/review/runs/20261004_201733_986054_b5d98b14/run_inputs.json",
+      "sha256": "1b3488af8f3b3c2b9475899a5e853627e23341452a9ad0361fcddecd4272fe73",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-769/test_no_fpc_public_packet_and_1/baseline/review/runs/20261004_201734_393092_a65390a0/model_results/ols_1.json",
+      "sha256": "bfbb537deb6e47bc91dde76b146bee2100f126ae5de8767f0b9dbf782b873a18",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-769/test_no_fpc_public_packet_and_1/baseline/review/runs/20261004_201734_393092_a65390a0/errors.json",
+      "sha256": "774cafaf30b12004df2e95030e565ba713443815f8f31fec6cd2317d917797dc",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-769/test_no_fpc_public_packet_and_1/baseline/review/runs/20261004_201734_393092_a65390a0/run_inputs.json",
+      "sha256": "1b3488af8f3b3c2b9475899a5e853627e23341452a9ad0361fcddecd4272fe73",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-769/test_census_public_kernel_and_0/projects/review/runs/20261004_201734_781839_2bd59c8c/model_results/ols_1.json",
+      "sha256": "a5d91df65a6af937012af64f70c3db6c39214a459015d9f28ce63116a48a1db5",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-769/test_census_public_kernel_and_0/projects/review/runs/20261004_201734_781839_2bd59c8c/errors.json",
+      "sha256": "c5b61325748a12b4f55281f535890a76585fc137624b50e40b69b6ada3d094f8",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-769/test_census_public_kernel_and_0/projects/review/runs/20261004_201734_781839_2bd59c8c/run_inputs.json",
+      "sha256": "7b0c5cddd53566579b825a8005655faca95aede5ea323579ee13006d8218b050",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-769/test_public_covariance_and_ful0/review/runs/20261004_201730_634245_8fd90cb7/model_results/inference_kernels/ols_1.json",
+      "sha256": "80260c2b2abe1658a0b9df8155c73734003d415e7b44918fe8277da1ec0caa5b",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-769/test_public_covariance_and_ful1/review/runs/20261004_201731_307832_ac41aa5c/model_results/inference_kernels/ols_1.json",
+      "sha256": "80260c2b2abe1658a0b9df8155c73734003d415e7b44918fe8277da1ec0caa5b",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-769/test_public_covariance_and_ful2/review/runs/20261004_201731_901372_bbfe62f0/model_results/inference_kernels/ols_1.json",
+      "sha256": "02dc0b1b2a2d02924b4235b8a19bec6cef66ed390770858c5111f34a3b2e5575",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-769/test_public_covariance_and_ful3/review/runs/20261004_201732_299315_16b1355c/model_results/inference_kernels/ols_1.json",
+      "sha256": "02dc0b1b2a2d02924b4235b8a19bec6cef66ed390770858c5111f34a3b2e5575",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-769/test_no_fpc_public_packet_and_0/current/review/runs/20261004_201732_672161_4b01b9ca/model_results/inference_kernels/ols_1.json",
+      "sha256": "978601209072bad42f37813830157c69afde5841144c6d745f05b4351094bf4a",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-769/test_no_fpc_public_packet_and_0/baseline/review/runs/20261004_201733_365989_9a070acc/model_results/inference_kernels/ols_1.json",
+      "sha256": "978601209072bad42f37813830157c69afde5841144c6d745f05b4351094bf4a",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-769/test_no_fpc_public_packet_and_1/current/review/runs/20261004_201733_986054_b5d98b14/model_results/inference_kernels/ols_1.json",
+      "sha256": "6dbfda4ad6c807f56077dbcf2fb39581cd005cfd3babe22e6401a22da386aa81",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-769/test_no_fpc_public_packet_and_1/baseline/review/runs/20261004_201734_393092_a65390a0/model_results/inference_kernels/ols_1.json",
+      "sha256": "6dbfda4ad6c807f56077dbcf2fb39581cd005cfd3babe22e6401a22da386aa81",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-769/test_census_public_kernel_and_0/projects/review/runs/20261004_201734_781839_2bd59c8c/model_results/inference_kernels/ols_1.json",
+      "sha256": "b5efd9f2b2160025109880a46faea9255d2c9921dcccb73979b5866ec4737b76",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-772/test_report_retains_each_full_0/review/runs/20261004_201918_431400_e02b7003/model_results/ols_1.json",
+      "sha256": "1fc758e45927eddbf917103f186970d85b4674e1526b8bf38b2e2c97ea62088b",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-772/test_report_retains_each_full_0/review/runs/20261004_201918_431400_e02b7003/errors.json",
+      "sha256": "22afa831eac8e7ab3ba76afc3101dbc814c09bc2a30ffa7fdc48249b6b314e30",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-772/test_report_retains_each_full_0/review/runs/20261004_201918_431400_e02b7003/run_inputs.json",
+      "sha256": "545234f3b4773a2fde115d5ebecdc58f206cab54e3c48f62f3b474a2a3459189",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-772/test_report_retains_each_full_0/review/runs/20261004_201918_431400_e02b7003/model_results/inference_kernels/ols_1.json",
+      "sha256": "80260c2b2abe1658a0b9df8155c73734003d415e7b44918fe8277da1ec0caa5b",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-772/test_census_owner_warning_is_a0/projects/review/runs/20261004_201928_759941_5ee0d9e7/model_results/ols_1.json",
+      "sha256": "a5d91df65a6af937012af64f70c3db6c39214a459015d9f28ce63116a48a1db5",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-772/test_census_owner_warning_is_a0/projects/review/runs/20261004_201928_759941_5ee0d9e7/errors.json",
+      "sha256": "9d9462c3c5ee073eb1d81bfc7db9d06baf3303c25174b4e313af28ab36f0f5b9",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-772/test_census_owner_warning_is_a0/projects/review/runs/20261004_201928_759941_5ee0d9e7/run_inputs.json",
+      "sha256": "7b0c5cddd53566579b825a8005655faca95aede5ea323579ee13006d8218b050",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-772/test_census_owner_warning_is_a0/projects/review/runs/20261004_201928_759941_5ee0d9e7/model_results/inference_kernels/ols_1.json",
+      "sha256": "b5efd9f2b2160025109880a46faea9255d2c9921dcccb73979b5866ec4737b76",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-774/test_report_retains_each_full_0/review/runs/20261004_202019_023119_fc82291c/model_results/ols_1.json",
+      "sha256": "1fc758e45927eddbf917103f186970d85b4674e1526b8bf38b2e2c97ea62088b",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-774/test_report_retains_each_full_0/review/runs/20261004_202019_023119_fc82291c/errors.json",
+      "sha256": "7428dd699dd63e295cc8d9fc16cf4da88ba7d32cbb0dd8e6941e9897998cb356",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-774/test_report_retains_each_full_0/review/runs/20261004_202019_023119_fc82291c/run_inputs.json",
+      "sha256": "545234f3b4773a2fde115d5ebecdc58f206cab54e3c48f62f3b474a2a3459189",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-774/test_report_retains_each_full_0/review/runs/20261004_202019_023119_fc82291c/model_results/inference_kernels/ols_1.json",
+      "sha256": "80260c2b2abe1658a0b9df8155c73734003d415e7b44918fe8277da1ec0caa5b",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-774/test_census_owner_warning_is_a0/projects/review/runs/20261004_202029_331956_cc7374c1/model_results/ols_1.json",
+      "sha256": "a5d91df65a6af937012af64f70c3db6c39214a459015d9f28ce63116a48a1db5",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-774/test_census_owner_warning_is_a0/projects/review/runs/20261004_202029_331956_cc7374c1/errors.json",
+      "sha256": "822b6e2944958bcc505ecd773a1729cd0f9b9c537cee8b896c1eec4e756a5b9a",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-774/test_census_owner_warning_is_a0/projects/review/runs/20261004_202029_331956_cc7374c1/run_inputs.json",
+      "sha256": "7b0c5cddd53566579b825a8005655faca95aede5ea323579ee13006d8218b050",
+      "retained_local_only": true
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-774/test_census_owner_warning_is_a0/projects/review/runs/20261004_202029_331956_cc7374c1/model_results/inference_kernels/ols_1.json",
+      "sha256": "b5efd9f2b2160025109880a46faea9255d2c9921dcccb73979b5866ec4737b76",
+      "retained_local_only": true
+    }
+  ],
+  "scope": "Independent public FPC targeted review, not browser/export/full gate",
+  "reviewed_diagnostics_snapshot": {
+    "path": "backend/workbench/engine/stages/diagnostics.py",
+    "commit": "9a42c15959d444b259ed2d490cb1b9257c69adcb",
+    "sha256": "a6cbbdbadd6aa52595cbbd2901a46bded932b772ec8eccb789cae58028b21fa2",
+    "live_owner_edits_excluded": true
+  },
+  "conclusion": "23 validated numeric/entry nodes PASS; 2 public-consumer P2 remain at reviewed tip; not browser/export/full-gate acceptance"
+}

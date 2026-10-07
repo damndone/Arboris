@@ -79,6 +79,11 @@ describe("buildEstimatedEquation", () => {
     expect(equationLhs("poisson_robust", "visits")).toBe("log(E[visits])");
     expect(equationLhs("ols_robust", "wage")).toBe("wage");
   });
+
+  it("uses the count mean link for negative binomial instead of binary logit", () => {
+    expect(equationLhs("negative_binomial", "visits")).toBe("log(E[visits])");
+    expect(equationLhs("glm:negative_binomial", "visits")).toBe("log(E[visits])");
+  });
 });
 
 describe("EstimatedEquationSection", () => {
@@ -168,5 +173,23 @@ describe("EstimatedEquationSection", () => {
 
     await waitFor(() => expect(api.fetchRunDetail).toHaveBeenCalled());
     expect(screen.queryByTestId("estimated-equation-section")).toBeNull();
+  });
+
+  it("shows the exact owner packet's auxiliary inference alongside its beta equation", async () => {
+    vi.spyOn(window, "location", "get").mockReturnValue({
+      ...window.location, search: "?project_root=/proj",
+    } as Location);
+    vi.spyOn(api, "fetchRunDetail").mockResolvedValue({
+      run_id: "run-1", status: "completed", y: "visits",
+      model_results: [{...olsResult(), model_type: "negative_binomial", dispersion: "mean",
+        alpha_estimated: true, information_matrix: "observed",
+        ancillary_parameters: [{name:"alpha",scale:"natural",estimate:.8,std_error:.1,conf_low:.6,conf_high:1.}],
+        overdispersion_test: {statistic:25,df:1,p_value:.0001,distribution:"chibar2(01)",restricted_model:"poisson"}}],
+    } as unknown as api.RunDetail);
+    renderSection();
+    await waitFor(() => expect(screen.getByRole("region", {name:"Dispersion inference"})).toBeInTheDocument());
+    expect(screen.getByTestId("estimated-equation")).toHaveTextContent("log(E[visits])");
+    expect(screen.getByText("alpha")).toBeInTheDocument();
+    expect(screen.getByText(/Poisson boundary LR/)).toHaveTextContent("chibar2(01)");
   });
 });

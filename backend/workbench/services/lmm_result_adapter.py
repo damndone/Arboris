@@ -15,7 +15,7 @@ from typing import Any, NoReturn
 
 from workbench.canonical import sha256_canonical
 from workbench.contracts.common.envelope import ContractError, PacketEnvelope
-from workbench.contracts.model.linear_mixed_effects import LmmDiagnostic
+from workbench.contracts.model.linear_mixed_effects import LMM_READABLE_ESTIMATOR_VERSIONS, LmmDiagnostic
 from workbench.services.pinned_run_directory import PinnedRunDirectory, PinnedRunError
 
 
@@ -446,7 +446,6 @@ def _parse_lmm_result_payload_v1(value: object) -> dict[str, object]:
         _fail_payload()
     literal_fields = {
         "contract_version": "1.0",
-        "estimator_version": "statsmodels_mixedlm_v1",
         "model_id": "linear_mixed_effects_1",
         "model_type": "linear_mixed_effects",
         "engine": "statsmodels",
@@ -454,6 +453,8 @@ def _parse_lmm_result_payload_v1(value: object) -> dict[str, object]:
         "primary_target_id": "group_time_interaction",
     }
     if any(payload[field] != expected for field, expected in literal_fields.items()):
+        _fail_payload()
+    if payload["estimator_version"] not in LMM_READABLE_ESTIMATOR_VERSIONS:
         _fail_payload()
     if type(payload["fit_method"]) is not str or payload["fit_method"] not in {
         "reml",

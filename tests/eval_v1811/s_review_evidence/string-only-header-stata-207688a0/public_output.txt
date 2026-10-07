@@ -1,0 +1,61 @@
+. do analysis.do 
+
+. * Workbench 1.8.11
+. * project: review
+. * run: string-only-header
+. * lineage_hash: 4444444444444444444444444444444444444444444444444444444444444
+> 444
+. * Coverage
+. * result | data.subset | native | 
+. version 18
+
+. set more off
+
+. set type double
+
+. capture program drop wb_repost
+
+. program define wb_repost, eclass
+  1.     args beta covariance
+  2.     ereturn repost b=`beta' V=`covariance', rename
+  3. end
+
+. capture program drop wb_sha
+
+. program define wb_sha
+  1.     args filename expected
+  2.     tempfile digestfile
+  3.     shell shasum -a 256 "`filename'" > "`digestfile'"
+  4.     tempname fh
+  5.     file open `fh' using "`digestfile'", read text
+  6.     file read `fh' line
+  7.     file close `fh'
+  8.     if substr("`line'",1,64) != "`expected'" {
+  9.         display as error "SHA256 mismatch"
+ 10.         exit 9
+ 11.     }
+ 12. end
+
+. 
+. wb_sha "data.csv" "2f14ef63766bcce5bfaa54bc6e45b0619a8a1a7e97928f06a5aa025a8b
+> 31736f"
+
+
+. frame create wb_src0
+
+. frame change wb_src0
+
+. import delimited using "data.csv", asdouble clear case(preserve)
+(encoding automatically selected: ISO-8859-2)
+(1 var, 4 obs)
+
+. frame copy wb_src0 wb1
+
+. frame change wb1
+
+. keep x
+variable x not found
+r(111);
+
+end of do-file
+r(111);

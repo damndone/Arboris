@@ -1,0 +1,44 @@
+FF
+=================================== FAILURES ===================================
+_ test_real_ancillary_named_covariate_remains_available_for_fixed_glm_post[alpha] _
+
+tmp_path = PosixPath('/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-802/test_real_ancillary_named_cova0')
+name = 'alpha'
+
+    @pytest.mark.parametrize('name',['alpha','lnalpha'])
+    def test_real_ancillary_named_covariate_remains_available_for_fixed_glm_post(tmp_path,name):
+        # Only the CSV header changes: original numerical values remain byte-identical.
+        first, body = DATA.read_bytes().split(b'\n',1)
+>       names = first.decode().split(','); assert names.count('x3')==1
+                                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       assert 0 == 1
+E        +  where 0 = <built-in method count of list object at 0x122b22d00>('x3')
+E        +    where <built-in method count of list object at 0x122b22d00> = ['"y"', '"yb"', '"yc"', '"ynb"', '"x1"', '"x2"', ...].count
+
+tests/eval_v1811/glm_nb_public_review_named_regressors.py:20: AssertionError
+_ test_real_ancillary_named_covariate_remains_available_for_fixed_glm_post[lnalpha] _
+
+tmp_path = PosixPath('/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-802/test_real_ancillary_named_cova1')
+name = 'lnalpha'
+
+    @pytest.mark.parametrize('name',['alpha','lnalpha'])
+    def test_real_ancillary_named_covariate_remains_available_for_fixed_glm_post(tmp_path,name):
+        # Only the CSV header changes: original numerical values remain byte-identical.
+        first, body = DATA.read_bytes().split(b'\n',1)
+>       names = first.decode().split(','); assert names.count('x3')==1
+                                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       assert 0 == 1
+E        +  where 0 = <built-in method count of list object at 0x175b5c300>('x3')
+E        +    where <built-in method count of list object at 0x175b5c300> = ['"y"', '"yb"', '"yc"', '"ynb"', '"x1"', '"x2"', ...].count
+
+tests/eval_v1811/glm_nb_public_review_named_regressors.py:20: AssertionError
+=============================== warnings summary ===============================
+../../.venv/lib/python3.14/site-packages/fastapi/testclient.py:1
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/eval_v1811/glm_nb_public_review_named_regressors.py::test_real_ancillary_named_covariate_remains_available_for_fixed_glm_post[alpha]
+FAILED tests/eval_v1811/glm_nb_public_review_named_regressors.py::test_real_ancillary_named_covariate_remains_available_for_fixed_glm_post[lnalpha]
+2 failed, 1 warning in 1.25s

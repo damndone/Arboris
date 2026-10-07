@@ -1,0 +1,15 @@
+Warning message:
+In system2("python3", c(shQuote(wb_result_bridge), shQuote(base),  :
+  running command ''python3' '/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T//RtmpbsgHQn/file76565601410f.py' '/Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_recheck_evidence/sidecars/literal-null-r-03dd0468' eyJyZWZlcmVuY2UiOiB7ImZpbGVuYW1lIjogInBvc3RfcmVzdWx0Lmpzb24iLCAic2hhMjU2IjogIjA2NTg4Nzg2MTUxMGY5Yjg5MGQ1MzY2Mjk4M2M5MmQyNDlkMDA2YTJkOTg3NmNkMjgxZmRiODY2ZDlhOWE0Y2QiLCAic2NoZW1hX3ZlcnNpb24iOiAxfSwgImJpbmRpbmciOiB7InByb2plY3RfaWQiOiAic2lkZWNhciIsICJydW5faWQiOiAiZXhlY3V0ZWQiLCAibGluZWFnZV9oYXNoIjogImZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmYiLCAic3RlcF9pZCI6ICJwb3N0IiwgImtpbmQiOiAicG9zdGVzdGltYXRpb24iLCAib3BlcmF0aW9uIjogInBvc3Rlc3RpbWF0aW9uLndhbGQiLCAicGFyYW1ldGVyc19zaGEyNTYiOiAiZWFlMGMyYzIzNmQyNmRlMWQ2ZjQ4ZDk2MmNlZjU3N2UyMzYwOWJmZGFmNmFiZTJjMjQ5NWUzMGUxYjcyZjhjZSIsICJpbnB1dHMiOiBbImNvbXBsZXRlZCJdLCAibW9kZWxzIjogWyJjb21wbGV0ZWQiXX0sICJxdWVyaWVzIjogW1sic3RhdGlzdGljcyIsICJ0ZXN0IiwgInZhbHVlIl0sIFsic3RhdGlzdGlj [... truncated]
+Error: Traceback (most recent call last):
+  File "/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T//RtmpbsgHQn/file76565601410f.py", line 11, in <module>
+    values = read_result_snapshot(Path(sys.argv[1]), reference, expected_binding=configuration['binding'])
+  File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/backend/workbench/script_export/result_snapshot.py", line 187, in read_result_snapshot
+    return validate_result_snapshot(_strict_json(raw), expected_binding=expected_binding)
+  File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/backend/workbench/script_export/result_snapshot.py", line 144, in validate_result_snapshot
+    _text(entry["distribution"], "statistic.distribution")
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/backend/workbench/script_export/result_snapshot.py", line 35, in _text
+    raise ContractError(f"{field} must be a nonempty text identity")
+workbench.contracts.c
+Execution halted

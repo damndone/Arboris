@@ -25,7 +25,7 @@ FIXTURES = Path(__file__).parent / "fixtures" / "survey"
 ORACLE = json.loads((FIXTURES / "oracle.json").read_text())
 JOINT = [{"terms": {"x1": 1.0}, "value": 0.0}, {"terms": {"x2": 1.0}, "value": 0.0}]
 DESIGN = {"sampling_weight": "weight", "survey_strata_col": "stratum", "survey_psu_col": "psu",
-          "survey_fpc_col": "fpc"}
+          }  # This unchanged R oracle is a design without FPC; FPC has its own native suite.
 
 
 def _run(tmp_path: Path, **extra) -> Path:
@@ -81,11 +81,12 @@ def test_the_r_convention_reproduces_r_survey(tmp_path: Path) -> None:
 
 
 def test_the_agent_reads_the_design_inference_not_the_pre_design_fit(tmp_path: Path) -> None:
-    """The fitted object's covariance evidence still says HC1, t(N - K)."""
+    """Since v1.8.11 the packet records the design inference that replaced the
+    fitted object's HC1, t(N - K) = 77, so no reader can show the earlier one."""
     from workbench.agent.context_tools import _bounded_inference
 
     packet = read_json(_run(tmp_path / "c") / "model_results" / "ols_1.json")
-    assert packet["covariance_evidence"]["effective_df"] == 77  # unchanged, fingerprinted
+    assert packet["covariance_evidence"]["effective_df"] == 8
     assert _bounded_inference(packet) == {
         "covariance": "survey_design", "covariance_estimator": "survey_design_linearization",
         "inference_distribution": "t", "effective_df": 8, "df_method": "design", "legacy_asymptotic": False,

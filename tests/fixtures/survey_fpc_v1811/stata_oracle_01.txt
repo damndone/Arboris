@@ -1,0 +1,1 @@
+Wrote /Users/jiayuanren/项目规划/.worktrees/codex-v1811-fpc/tests/fixtures/survey_fpc_v1811/stata_reference.json with 10 cases; all batch assets retained

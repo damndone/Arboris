@@ -18,6 +18,7 @@ Every tool the Agent can call, and the class of content its result contains. The
 |---|---|
 | `calculate` | `workbench_state` |
 | `decline_notebook_plan` | `workbench_state` |
+| `export_analysis_script` | `workbench_state` |
 | `export_dataset` | `metadata` |
 | `inspect_analysis_loop_context` | `model_result` |
 | `inspect_artifact_preview` | `aggregate` |

@@ -9,7 +9,7 @@ export interface DecisionCardProps {
 }
 
 export function DecisionCard({ dp, expanded, onToggle }: DecisionCardProps) {
-  const display = getDPDisplay(dp.decision_id);
+  const display = getDPDisplay(dp.decision_id, dp);
   const params = dp.reason?.chosen_params ?? {};
   const selected = display.displaySelected(dp.selected);
   const why = display.whyShort(params);

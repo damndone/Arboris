@@ -42,6 +42,8 @@ from ...contracts.model.arma_garch import (
 # -- so a prohibition living only there was never read, and it duly reported the
 # 5% conditional quantile as 95% VaR.
 LABELLING_INVARIANTS: tuple[str, ...] = (
+    "Classical replication fits and diagnoses the full sample; tail rolling "
+    "metrics are retrospective, never independent validation.",
     "Never call the lower conditional quantile a Value-at-Risk figure, and "
     "never state that the two are equivalent. It is a plug-in conditional "
     "quantile of the modelled series; VaR is a loss figure over a stated "
@@ -51,6 +53,8 @@ LABELLING_INVARIANTS: tuple[str, ...] = (
     "Never report a composite information criterion across the mean and "
     "variance stages of a sequential fit.",
     "Never describe a sequential two-stage fit as a joint likelihood.",
+    "Never omit diagnostic warnings when describing a manual fit; name the "
+    "test and lag, and distinguish unavailable p-values from passed tests.",
 )
 
 
@@ -150,7 +154,10 @@ def _fields() -> list[dict[str, Any]]:
             "selection_mode",
             type_="string",
             enum=_choices(ArmaGarchAnalysisContract, "selection_mode"),
-            description="auto searches orders; manual fixes them. See cross_field_rules.",
+            description=(
+                "auto searches orders with residual gates; manual fixes orders and "
+                "retains diagnostic warnings. Invalid or unconverged fits still block."
+            ),
         ),
         _field(
             "arma.p",
@@ -243,7 +250,7 @@ def _fields() -> list[dict[str, Any]]:
             enum=_choices(ArmaGarchAnalysisContract, "estimation_strategy"),
             description=(
                 "sequential fits the mean then volatility on its residuals; joint "
-                "fits both together but requires arma.q = 0."
+                "fits both together; MA terms require normal innovations. Auto search keeps the existing order-based strategy; manual MA orders default to joint."
             ),
         ),
         _field(
@@ -263,6 +270,12 @@ def _fields() -> list[dict[str, Any]]:
             ),
         ),
         _field(
+            "validation.evaluation_mode",
+            type_="string",
+            enum=_choices(ValidationOptions, "evaluation_mode"),
+            description="train_validation: training-only fit; classical_replication: full-sample fit and diagnostics, prefix-only tail refits.",
+        ),
+        _field(
             "validation.method",
             type_="string",
             enum=_choices(ValidationOptions, "method"),
@@ -275,14 +288,14 @@ def _fields() -> list[dict[str, Any]]:
             minimum=1,
             description=(
                 "Held-out observations at the end of the series. Frozen before "
-                "candidate selection: an independent evaluation, not a tuning set."
+                "candidate selection. Independent only in train_validation; classic tail evaluation is retrospective."
             ),
         ),
         _field(
             "validation.refit_every",
             type_="integer",
             minimum=1,
-            description="Refit cadence in observations along the rolling origin.",
+            description="Refit cadence along the rolling origin; classical_replication requires 1.",
         ),
         _field(
             "validation.selection_repeated_during_validation",
@@ -340,6 +353,14 @@ def _cross_field_rules() -> list[dict[str, Any]]:
 
     return [
         {
+            "rule_id": "classical_replication_requires_every_refit",
+            "requirement": "classical_replication requires validation.refit_every = 1.",
+            "violation_code": "INVALID_ORDER",
+            "violation_example": {
+                "validation": {"evaluation_mode": "classical_replication", "refit_every": 2},
+            },
+        },
+        {
             "rule_id": "auto_mode_forbids_fixed_orders",
             "requirement": (
                 "selection_mode auto: arma.p/q null, variance.model auto, all "
@@ -377,14 +398,15 @@ def _cross_field_rules() -> list[dict[str, Any]]:
             },
         },
         {
-            "rule_id": "joint_estimation_excludes_ma_terms",
+            "rule_id": "joint_ma_requires_normal_innovations",
             "requirement": (
-                "joint requires arma.q = 0; use sequential to keep an MA term."
+                "Joint estimation with arma.q > 0 requires normal innovations; manual MA orders with auto strategy resolve to joint."
             ),
-            "violation_code": "UNSUPPORTED_JOINT_ARMA_GARCH",
+            "violation_code": "UNSUPPORTED_JOINT_DISTRIBUTION",
             "violation_example": {
                 "selection_mode": "manual",
                 "estimation_strategy": "joint",
+                "innovation_distribution": "student_t",
                 "arma": {"p": 1, "q": 1},
                 "variance": {"model": "garch", "arch_p": None, "garch_p": 1, "garch_q": 1},
             },

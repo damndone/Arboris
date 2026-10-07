@@ -24,6 +24,7 @@ import { useResolvedNodeOperationContext } from "../NodeOperationContextProvider
 import { useProjectRootOptional } from "../../../workbench/ProjectRootContext";
 import { fetchRunDetail, type ModelResult, type CoefficientRecord } from "../../../api";
 import type { GraphViewNode, HeadSetNode } from "../../api/graphViewTypes";
+import {CountModelResultCard} from "../../../runResult/CountModelResultCard";
 
 const INTERCEPT_TERMS = new Set(["intercept", "(intercept)", "const", "constant", "1"]);
 
@@ -48,6 +49,7 @@ function termTooltip(term: string, c: CoefficientRecord): string {
  *  dropped — a logit equation is NOT `y = …`). */
 export function equationLhs(modelType: string | undefined, y: string): string {
   const t = (modelType ?? "").toLowerCase();
+  if (t.includes("negative_binomial") || t.includes("negbin")) return `log(E[${y}])`;
   if (t.includes("logit") || t.includes("binomial")) return `logit(P(${y}=1))`;
   if (t.includes("probit")) return `probit(P(${y}=1))`;
   if (t.includes("poisson") || t.includes("negbin")) return `log(E[${y}])`;
@@ -135,11 +137,13 @@ export function EstimatedEquationSection({ node }: { node: GraphViewNode }) {
   const modelId = modelIdOf(node);
 
   const [equation, setEquation] = useState<EstimatedEquation | null>(null);
+  const [ownerResult, setOwnerResult] = useState<ModelResult | null>(null);
 
   useEffect(() => {
     if (!projectRoot || !ownerRunId) return undefined;
     let cancelled = false;
     setEquation(null);
+    setOwnerResult(null);
     fetchRunDetail(projectRoot, ownerRunId)
       .then((detail) => {
         if (cancelled) return;
@@ -147,6 +151,7 @@ export function EstimatedEquationSection({ node }: { node: GraphViewNode }) {
           (r) => r.model_id === modelId,
         );
         setEquation(match ? buildEstimatedEquation(match, detail.y ?? "y") : null);
+        setOwnerResult(match ?? null);
       })
       .catch(() => {
         /* no results, no equation — the spec section still renders */
@@ -207,6 +212,7 @@ export function EstimatedEquationSection({ node }: { node: GraphViewNode }) {
           {equation.meta} · se/p per term on hover; full table in the Table view
         </div>
       )}
+      {ownerResult && <CountModelResultCard model={ownerResult}/>}
     </section>
   );
 }

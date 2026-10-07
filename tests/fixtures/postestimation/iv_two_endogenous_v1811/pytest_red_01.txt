@@ -1,0 +1,10 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+____________________ test_both_native_oracles_are_required _____________________
+tests/test_iv_two_endogenous_v1811_reference.py:29: in test_both_native_oracles_are_required
+    assert not missing, f"Frozen two-endogenous native references missing: {missing}"
+E   AssertionError: Frozen two-endogenous native references missing: ['r_reference.json', 'stata_reference.json']
+E   assert not ['r_reference.json', 'stata_reference.json']
+=========================== short test summary info ============================
+FAILED tests/test_iv_two_endogenous_v1811_reference.py::test_both_native_oracles_are_required
+1 failed in 1.82s

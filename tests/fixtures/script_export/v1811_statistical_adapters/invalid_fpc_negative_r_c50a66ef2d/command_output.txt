@@ -1,0 +1,2 @@
+Error: all(wb_fpc >= 0) is not TRUE
+Execution halted

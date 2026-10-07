@@ -1,0 +1,134 @@
+{
+  "environment": "Stata 18 MP, born 07 Jun 2023",
+  "generator": "tests/fixtures/postestimation/lmm_v1811/generate_gls_reference.do",
+  "definition": "mixed default vce(oim); fixed-effect covariance as reported by e(V)",
+  "note": "Numbers only; the Stata batch log carries the license header and is not retained.",
+  "random_intercept_reml": {
+    "params": {
+      "(Intercept)": 1.0157906002186243,
+      "armb": 0.3339553772671907,
+      "time": 0.28296112823630926,
+      "armb:time": 0.21719901882280374,
+      "x": 0.5494339814411751
+    },
+    "std_error": {
+      "(Intercept)": 0.15023337047116148,
+      "armb": 0.21248701370463866,
+      "time": 0.026286772373411767,
+      "armb:time": 0.037184907783502225,
+      "x": 0.036190113907739796
+    },
+    "converged": true,
+    "loglik": -401.7795825269128,
+    "wald_joint": {
+      "statistic": 337.08355936314535
+    },
+    "wald_shifted": {
+      "statistic": 824.6428137112808
+    },
+    "lincom": {
+      "estimate": 0.8818290911186595,
+      "std_error": 0.07772562620930022
+    },
+    "nlcom": {
+      "estimate": 0.5150047827294868,
+      "std_error": 0.05783341652380158
+    }
+  },
+  "random_intercept_ml": {
+    "params": {
+      "(Intercept)": 1.0157887939329968,
+      "armb": 0.3339516891310051,
+      "time": 0.2829617569288964,
+      "armb:time": 0.21720014883982816,
+      "x": 0.5494635524662943
+    },
+    "std_error": {
+      "(Intercept)": 0.14802174035176763,
+      "armb": 0.20935940101441747,
+      "time": 0.026156229696919078,
+      "armb:time": 0.03700023720676661,
+      "x": 0.035998019200335366
+    },
+    "converged": true,
+    "loglik": -391.7485475164455,
+    "wald_joint": {
+      "statistic": 340.64169054087654
+    },
+    "wald_shifted": {
+      "statistic": 833.3018941738488
+    },
+    "lincom": {
+      "estimate": 0.8818888618614851,
+      "std_error": 0.07731610321782639
+    },
+    "nlcom": {
+      "estimate": 0.5149782103995953,
+      "std_error": 0.05753589545065488
+    }
+  },
+  "random_slope_reml": {
+    "params": {
+      "(Intercept)": 0.9796222909356247,
+      "armb": 0.8220778805620763,
+      "time": 0.2560802184370433,
+      "armb:time": 0.2906103479173985,
+      "x": 0.4998356121882936
+    },
+    "std_error": {
+      "(Intercept)": 0.19599924069200295,
+      "armb": 0.27712141482320457,
+      "time": 0.06109461658644203,
+      "armb:time": 0.08639697686152278,
+      "x": 0.03537108469106337
+    },
+    "converged": true,
+    "loglik": -467.9662881649599,
+    "wald_joint": {
+      "statistic": 218.43732570084438
+    },
+    "wald_shifted": {
+      "statistic": 307.7926921031225
+    },
+    "lincom": {
+      "estimate": 0.7557514428136305,
+      "std_error": 0.09301929413148319
+    },
+    "nlcom": {
+      "estimate": 0.5123288781203831,
+      "std_error": 0.12783201788995718
+    }
+  },
+  "random_slope_ml": {
+    "params": {
+      "(Intercept)": 0.979589363275475,
+      "armb": 0.8221051475102947,
+      "time": 0.2560840186954016,
+      "armb:time": 0.290608992922713,
+      "x": 0.49961032486977397
+    },
+    "std_error": {
+      "(Intercept)": 0.19263956052924727,
+      "armb": 0.27236942662380126,
+      "time": 0.06004712285028735,
+      "armb:time": 0.08491555542316183,
+      "x": 0.035255018028869545
+    },
+    "converged": true,
+    "loglik": -460.3174861090911,
+    "wald_joint": {
+      "statistic": 220.23299013513918
+    },
+    "wald_shifted": {
+      "statistic": 316.19587559220463
+    },
+    "lincom": {
+      "estimate": 0.7553046684349496,
+      "std_error": 0.09215995676205392
+    },
+    "nlcom": {
+      "estimate": 0.5125675070108914,
+      "std_error": 0.12585492692472752
+    }
+  }
+}

@@ -188,7 +188,9 @@ def test_a_rerun_override_actually_produces_a_design_run(tmp_path):
     from workbench.projects import create_project
 
     fixtures = Path(__file__).parent / "fixtures" / "survey"
-    oracle = json.loads((fixtures / "oracle.json").read_text())["linearization"]
+    # The run declares survey_fpc_col, so R must apply the FPC too (oracle.json's
+    # linearization omits it; see generate_fpc_oracle.R).
+    oracle = json.loads((fixtures / "oracle_fpc.json").read_text())["linearization_fpc"]
 
     project = create_project(tmp_path, "agent_reach")
     source = project.root / "design.csv"

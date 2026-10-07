@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { LlmProviderEditor } from "./LlmProviderEditor";
 import {
   createLlmProvider,
+  discoverLlmProviderModels,
   probeLlmProvider,
   refreshLlmProviderModels,
   updateLlmProvider,
@@ -13,6 +14,7 @@ import type { LlmProvider } from "./llmTypes";
 vi.mock("./llmApi", () => ({
   activateLlmProvider: vi.fn(),
   createLlmProvider: vi.fn(),
+  discoverLlmProviderModels: vi.fn(),
   deleteLlmProvider: vi.fn(),
   fetchLlmProviders: vi.fn(),
   probeLlmProvider: vi.fn(),
@@ -48,6 +50,10 @@ describe("LlmProviderEditor", () => {
     vi.mocked(createLlmProvider).mockResolvedValue(savedProvider);
     vi.mocked(updateLlmProvider).mockResolvedValue(savedProvider);
     vi.mocked(probeLlmProvider).mockResolvedValue(provider);
+    vi.mocked(discoverLlmProviderModels).mockResolvedValue({
+      models: [{ display_name: "deepseek-flash", request_model: "deepseek-flash", context_window_tokens: null, supports_1m: false }],
+      message: "Models discovered",
+    });
     vi.mocked(refreshLlmProviderModels).mockResolvedValue({
       ...provider,
       model: "gpt-4.1",
@@ -152,24 +158,67 @@ describe("LlmProviderEditor", () => {
     expect(screen.getByLabelText(/default model/i)).toHaveValue("");
   });
 
-  it("offers explicit DeepSeek V4 Flash/Pro mappings and includes them when saved", async () => {
+  it("refreshes actual DeepSeek mappings without versioned built-in presets", async () => {
     const deepSeekProvider = { ...provider, id: "deepseek", name: "DeepSeek", base_url: "https://api.deepseek.com" };
     render(<LlmProviderEditor provider={deepSeekProvider} onSaved={vi.fn()} onBack={vi.fn()} />);
 
-    fireEvent.click(screen.getByTestId("add-deepseek-v4-models"));
-    expect(screen.getByTestId("llm-provider-model-row-deepseek-v4-flash")).toBeInTheDocument();
-    expect(screen.getByTestId("llm-provider-model-row-deepseek-v4-pro")).toBeInTheDocument();
+    expect(screen.queryByTestId("add-deepseek-v4-models")).not.toBeInTheDocument();
+    vi.mocked(refreshLlmProviderModels).mockResolvedValueOnce({
+      ...deepSeekProvider,
+      models: [{ display_name: "deepseek-flash", request_model: "deepseek-flash", context_window_tokens: null, supports_1m: false }],
+    });
+    fireEvent.click(screen.getByRole("button", { name: /refresh models/i }));
+    expect(await screen.findByTestId("llm-provider-model-row-deepseek-flash")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /save/i }));
     await waitFor(() => expect(updateLlmProvider).toHaveBeenCalledWith(
       "deepseek",
       expect.objectContaining({
         models: expect.arrayContaining([
-          expect.objectContaining({ request_model: "deepseek-v4-flash" }),
-          expect.objectContaining({ request_model: "deepseek-v4-pro" }),
+          expect.objectContaining({ request_model: "deepseek-flash" }),
         ]),
       }),
     ));
+  });
+
+  it("discovers a new provider before saving while leaving the default model to the user", async () => {
+    render(<LlmProviderEditor onSaved={vi.fn()} onBack={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("base url"), { target: { value: "https://api.deepseek.com" } });
+    fireEvent.change(screen.getByLabelText("api key"), { target: { value: "draft-secret" } });
+    fireEvent.blur(screen.getByLabelText("api key"));
+    expect(await screen.findByTestId("llm-provider-model-row-deepseek-flash")).toBeInTheDocument();
+    expect(discoverLlmProviderModels).toHaveBeenCalledWith({
+      base_url: "https://api.deepseek.com", api_key: "draft-secret", timeout_s: 60,
+    });
+    expect(screen.getByLabelText("default model")).toHaveValue("");
+    expect(screen.getByLabelText("default model")).toHaveAttribute("list", "llm-discovered-models");
+    expect(createLlmProvider).not.toHaveBeenCalled();
+  });
+
+  it("keeps manual input available when model discovery fails", async () => {
+    vi.mocked(discoverLlmProviderModels).mockRejectedValueOnce(new Error("Network unavailable"));
+    render(<LlmProviderEditor onSaved={vi.fn()} onBack={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("base url"), { target: { value: "https://provider.example" } });
+    fireEvent.change(screen.getByLabelText("api key"), { target: { value: "draft-secret" } });
+    fireEvent.change(screen.getByLabelText("default model"), { target: { value: "my-manual-model" } });
+    fireEvent.click(screen.getByRole("button", { name: /refresh models/i }));
+    expect(await screen.findByText(/Unable to fetch models; enter a model manually/)).toBeInTheDocument();
+    expect(screen.getByLabelText("default model")).toHaveValue("my-manual-model");
+    expect(screen.getByTestId("llm-provider-config-preview")).not.toHaveTextContent("draft-secret");
+  });
+
+  it("ignores discovery responses for credentials edited while the request was pending", async () => {
+    let resolve: (value: Awaited<ReturnType<typeof discoverLlmProviderModels>>) => void = () => undefined;
+    vi.mocked(discoverLlmProviderModels).mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    render(<LlmProviderEditor onSaved={vi.fn()} onBack={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("base url"), { target: { value: "https://old.example" } });
+    fireEvent.change(screen.getByLabelText("api key"), { target: { value: "draft-secret" } });
+    fireEvent.click(screen.getByRole("button", { name: /refresh models/i }));
+    await waitFor(() => expect(discoverLlmProviderModels).toHaveBeenCalled());
+    fireEvent.change(screen.getByLabelText("base url"), { target: { value: "https://new.example" } });
+    resolve({ models: [{ display_name: "old-model", request_model: "old-model", context_window_tokens: null, supports_1m: false }], message: "Models discovered" });
+    await waitFor(() => expect(screen.getByRole("button", { name: /refresh models/i })).not.toBeDisabled());
+    expect(screen.queryByTestId("llm-provider-model-row-old-model")).not.toBeInTheDocument();
   });
 
   it("allows model mappings to be added and removed", () => {

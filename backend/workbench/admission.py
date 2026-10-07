@@ -48,6 +48,13 @@ def _r(fixture: str, test: str) -> Oracle:
     return Oracle("r_oracle", fixture, test)
 
 
+def _admission(family: str) -> Oracle:
+    """Codex work order B: coefficients and standard errors against R."""
+    return _r(f"tests/fixtures/admission/{family}/oracle.json", f"tests/test_admission_oracle_{family}.py")
+
+
+#: v1.8.11: panel and DID clustered by entity, against Stata's xtreg, fe vce(cluster).
+_PANEL_STATA = Oracle("stata_oracle", "tests/fixtures/panel_cluster/oracle.json", "tests/test_panel_cluster_inference.py")
 _POSTEST = _r("tests/fixtures/postestimation/oracle.json", "tests/test_postestimation_registry.py")
 _V186 = _r("tests/fixtures/v186_families/oracle.json", "tests/test_v186_families_external_oracle_v187.py")
 
@@ -58,39 +65,53 @@ ADMISSION_EVIDENCE: Mapping[str, Mapping[str, tuple[Any, ...]]] = {
         "live_eval": ("read_coef", "explain", "heterosk", "square_term", "region_dummies"),
     },
     "logit": {"oracle": (_POSTEST,), "live_eval": ("logit_union", "filter_logit")},
-    "probit": {"oracle": (_POSTEST,), "live_eval": ()},
-    "poisson": {"oracle": (_POSTEST,), "live_eval": ()},
-    "negative_binomial": {"oracle": (_POSTEST,), "live_eval": ()},
+    "probit": {"oracle": (_POSTEST,), "live_eval": ('v1811_probit',)},
+    "poisson": {"oracle": (_POSTEST,), "live_eval": ('v1811_poisson',)},
+    "negative_binomial": {"oracle": (_POSTEST,), "live_eval": ('v1811_negative_binomial',)},
     "anova": {
         "oracle": (_r("tests/fixtures/anova/oracle.json", "tests/test_anova_ancova_v187.py"),),
         "live_eval": ("inj_value_label",),
     },
-    "ordinal_logit": {"oracle": (_V186, _POSTEST), "live_eval": ()},
-    "multinomial_logit": {"oracle": (_V186, _POSTEST), "live_eval": ()},
-    "quantile_regression": {"oracle": (_V186,), "live_eval": ()},
-    "survival_cox": {"oracle": (_V186,), "live_eval": ()},
-    "cs_did": {"oracle": (_r("tests/fixtures/cs_did/aggte.json", "tests/test_cs_did_oracle.py"),), "live_eval": ()},
-    "sa_did": {"oracle": (_r("tests/fixtures/sa_did/generate_oracle.R", "tests/test_sa_attgt.py"),), "live_eval": ()},
-    "dcdh": {"oracle": (_r("tests/fixtures/dcdh/generate_oracle.R", "tests/test_dcdh_oracle_metadata.py"),), "live_eval": ()},
-    "iv_2sls": {"oracle": (), "live_eval": ()},
-    "panel_ols": {"oracle": (), "live_eval": ()},
-    "did": {"oracle": (), "live_eval": ()},
-    "linear_mixed_effects": {"oracle": (), "live_eval": ()},
-    "glm:binomial": {"oracle": (), "live_eval": ()},
-    "glm:poisson": {"oracle": (), "live_eval": ()},
-    "glm:negative_binomial": {"oracle": (), "live_eval": ()},
+    "ordinal_logit": {"oracle": (_V186, _POSTEST), "live_eval": ('v1811_ordinal_logit',)},
+    "multinomial_logit": {"oracle": (_V186, _POSTEST), "live_eval": ('v1811_multinomial_logit',)},
+    "quantile_regression": {"oracle": (_V186,), "live_eval": ('v1811_quantile_regression',)},
+    "survival_cox": {"oracle": (_V186,), "live_eval": ('v1811_survival_cox',)},
+    "cs_did": {"oracle": (_r("tests/fixtures/cs_did/aggte.json", "tests/test_cs_did_oracle.py"),), "live_eval": ('v1811_cs_did',)},
+    "sa_did": {"oracle": (_r("tests/fixtures/sa_did/generate_oracle.R", "tests/test_sa_attgt.py"),), "live_eval": ('v1811_sa_did',)},
+    "dcdh": {"oracle": (_r("tests/fixtures/dcdh/generate_oracle.R", "tests/test_dcdh_oracle_metadata.py"),), "live_eval": ('v1811_dcdh',)},
+    "iv_2sls": {
+        "oracle": (
+            _admission("iv_2sls"),
+            Oracle("stata_oracle", "tests/fixtures/postestimation/iv_2sls/oracle.json",
+                   "tests/test_postestimation_registry.py"),
+        ),
+        "live_eval": ('v1811_iv_2sls',),
+    },
+    "panel_ols": {"oracle": (_admission("panel_ols"), _PANEL_STATA), "live_eval": ('v1811_panel_ols',)},
+    "did": {"oracle": (_admission("did"), _PANEL_STATA), "live_eval": ('v1811_did',)},
+    "linear_mixed_effects": {
+        "oracle": (
+            _admission("linear_mixed_effects"),
+            _r("tests/fixtures/admission/linear_mixed_effects/variance_oracle.json",
+               "tests/test_admission_oracle_linear_mixed_effects.py"),
+            _r("tests/fixtures/postestimation/lmm_v1811/gls_reference_r.json",
+               "tests/test_lmm_postestimation_v1811_reference.py"),
+        ),
+        "live_eval": ('v1811_linear_mixed_effects',),
+    },
+    "glm:binomial": {"oracle": (_admission("glm_binomial"),), "live_eval": ('v1811_glm_binomial',)},
+    "glm:poisson": {"oracle": (_admission("glm_poisson"),), "live_eval": ('v1811_glm_poisson',)},
+    "glm:negative_binomial": {
+        "oracle": (_r("tests/fixtures/count_models/integration-strict-v1811/glm-negative-binomial-v1811-oracle.json",
+                      "tests/test_admission_oracle_glm_negative_binomial.py"),
+                   _r("tests/fixtures/postestimation/glm_negative_binomial_v1811/native-r/oracle.json",
+                      "tests/test_glm_nb_public_postestimation.py")),
+        "live_eval": ('v1811_glm_negative_binomial',),
+    },
 }
 
 #: family -> item -> the version planned to supply it.
-PLANNED: Mapping[str, Mapping[str, str]] = {
-    **{family: {"live_eval": "v1.8.11"} for family in (
-        "probit", "poisson", "negative_binomial", "ordinal_logit", "multinomial_logit",
-        "quantile_regression", "survival_cox", "cs_did", "sa_did", "dcdh",
-    )},
-    **{family: {"oracle": "v1.8.11", "live_eval": "v1.8.11"} for family in (
-        "iv_2sls", "panel_ols", "did", "linear_mixed_effects", "glm:binomial", "glm:poisson", "glm:negative_binomial",
-    )},
-}
+PLANNED: Mapping[str, Mapping[str, str]] = {}
 
 
 def _repo(root: Path, relative: str) -> bool:

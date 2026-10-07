@@ -122,6 +122,9 @@ def estimate_with_design(
     replicate_type: str | None = None,
     df_convention: str = "design",
 ) -> DesignEstimate:
+    if method == "replicate" and design.fpc is not None:
+        raise SurveyEngineError("SURVEY_FPC_REPLICATE_UNSUPPORTED",
+                               "FPC cannot be combined with the replicate variance channel")
     if df_convention not in DF_CONVENTIONS:
         raise SurveyEngineError(
             "SURVEY_DF_CONVENTION_INVALID",

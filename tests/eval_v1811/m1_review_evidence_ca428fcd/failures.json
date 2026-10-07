@@ -1,0 +1,134 @@
+[
+  {
+    "case": "arma22_garch22",
+    "vce": "opg",
+    "field": "residual",
+    "error": "\nNot equal to tolerance rtol=0.001, atol=0.0001\n\nMismatched elements: 3 / 2500 (0.12%)\nMismatch at indices:\n [1726]: 0.0011539539460387357 (ACTUAL), 0.0010291810940801 (DESIRED)\n [2047]: -0.016473638894202308 (ACTUAL), -0.0163299100249203 (DESIRED)\n [2342]: -0.006058575364229084 (ACTUAL), -0.0058489939245487 (DESIRED)\nMax absolute difference among violations: 0.00020958\nMax relative difference among violations: 0.12123508\n ACTUAL: array([ 1.715372, -1.982232, -0.159541, ..., -0.216726,  0.399291,\n       -0.287309], shape=(2500,))\n DESIRED: array([ 1.715388, -1.982305, -0.159424, ..., -0.216692,  0.399305,\n       -0.287306], shape=(2500,))"
+  },
+  {
+    "case": "arma22_garch22",
+    "vce": "opg",
+    "field": "variance",
+    "error": "\nNot equal to tolerance rtol=0.001, atol=0.0001\n\nMismatched elements: 1901 / 2500 (76%)\nFirst 5 mismatches are at indices:\n [1]: 1.214748565630423 (ACTUAL), 1.217700463186538 (DESIRED)\n [2]: 1.6736228900572694 (ACTUAL), 1.678141156708274 (DESIRED)\n [3]: 1.4174158450647603 (ACTUAL), 1.412690659257667 (DESIRED)\n [4]: 0.9934966604420435 (ACTUAL), 0.9884429230846457 (DESIRED)\n [6]: 0.963231727681012 (ACTUAL), 0.9598749284531084 (DESIRED)\nMax absolute difference among violations: 0.04398488\nMax relative difference among violations: 0.03008377\n ACTUAL: array([0.946442, 1.214749, 1.673623, ..., 0.708838, 0.642697, 0.60369 ],\n      shape=(2500,))\n DESIRED: array([0.946496, 1.2177  , 1.678141, ..., 0.708832, 0.642338, 0.604198],\n      shape=(2500,))"
+  },
+  {
+    "case": "arma22_garch22",
+    "vce": "opg",
+    "field": "reported_ll_ic",
+    "checks": {
+      "ll_relative": 5.907448076253723e-06,
+      "aic_relative": 5.890134110094865e-06,
+      "bic_relative": 5.840288636827389e-06,
+      "parameter_absolute": 0.0220724928769342,
+      "se_relative": 0.07423758085658339,
+      "ci_absolute": 0.04777333936813427,
+      "presample_default_explicit_ll": 0.0,
+      "residual_max_absolute": 0.00022299630131961123,
+      "variance_max_absolute": 0.04398488157780944
+    }
+  },
+  {
+    "case": "arma22_garch22",
+    "vce": "opg",
+    "field": "reported_parameters_se_ci",
+    "checks": {
+      "ll_relative": 5.907448076253723e-06,
+      "aic_relative": 5.890134110094865e-06,
+      "bic_relative": 5.840288636827389e-06,
+      "parameter_absolute": 0.0220724928769342,
+      "se_relative": 0.07423758085658339,
+      "ci_absolute": 0.04777333936813427,
+      "presample_default_explicit_ll": 0.0,
+      "residual_max_absolute": 0.00022299630131961123,
+      "variance_max_absolute": 0.04398488157780944
+    }
+  },
+  {
+    "case": "arma22_garch22",
+    "vce": "oim",
+    "field": "residual",
+    "error": "\nNot equal to tolerance rtol=0.001, atol=0.0001\n\nMismatched elements: 3 / 2500 (0.12%)\nMismatch at indices:\n [1726]: 0.0011539539460387357 (ACTUAL), 0.0010291810940801 (DESIRED)\n [2047]: -0.016473638894202308 (ACTUAL), -0.0163299100249203 (DESIRED)\n [2342]: -0.006058575364229084 (ACTUAL), -0.0058489939245487 (DESIRED)\nMax absolute difference among violations: 0.00020958\nMax relative difference among violations: 0.12123508\n ACTUAL: array([ 1.715372, -1.982232, -0.159541, ..., -0.216726,  0.399291,\n       -0.287309], shape=(2500,))\n DESIRED: array([ 1.715388, -1.982305, -0.159424, ..., -0.216692,  0.399305,\n       -0.287306], shape=(2500,))"
+  },
+  {
+    "case": "arma22_garch22",
+    "vce": "oim",
+    "field": "variance",
+    "error": "\nNot equal to tolerance rtol=0.001, atol=0.0001\n\nMismatched elements: 1901 / 2500 (76%)\nFirst 5 mismatches are at indices:\n [1]: 1.214748565630423 (ACTUAL), 1.217700463186538 (DESIRED)\n [2]: 1.6736228900572694 (ACTUAL), 1.678141156708274 (DESIRED)\n [3]: 1.4174158450647603 (ACTUAL), 1.412690659257667 (DESIRED)\n [4]: 0.9934966604420435 (ACTUAL), 0.9884429230846457 (DESIRED)\n [6]: 0.963231727681012 (ACTUAL), 0.9598749284531084 (DESIRED)\nMax absolute difference among violations: 0.04398488\nMax relative difference among violations: 0.03008377\n ACTUAL: array([0.946442, 1.214749, 1.673623, ..., 0.708838, 0.642697, 0.60369 ],\n      shape=(2500,))\n DESIRED: array([0.946496, 1.2177  , 1.678141, ..., 0.708832, 0.642338, 0.604198],\n      shape=(2500,))"
+  },
+  {
+    "case": "arma22_garch22",
+    "vce": "oim",
+    "field": "reported_ll_ic",
+    "checks": {
+      "ll_relative": 5.907448076253723e-06,
+      "aic_relative": 5.890134110094865e-06,
+      "bic_relative": 5.840288636827389e-06,
+      "parameter_absolute": 0.0220724928769342,
+      "se_relative": 0.09120025124502984,
+      "ci_absolute": 0.041217479682193636,
+      "presample_default_explicit_ll": 0.0,
+      "residual_max_absolute": 0.00022299630131961123,
+      "variance_max_absolute": 0.04398488157780944
+    }
+  },
+  {
+    "case": "arma22_garch22",
+    "vce": "oim",
+    "field": "reported_parameters_se_ci",
+    "checks": {
+      "ll_relative": 5.907448076253723e-06,
+      "aic_relative": 5.890134110094865e-06,
+      "bic_relative": 5.840288636827389e-06,
+      "parameter_absolute": 0.0220724928769342,
+      "se_relative": 0.09120025124502984,
+      "ci_absolute": 0.041217479682193636,
+      "presample_default_explicit_ll": 0.0,
+      "residual_max_absolute": 0.00022299630131961123,
+      "variance_max_absolute": 0.04398488157780944
+    }
+  },
+  {
+    "case": "arma22_garch22",
+    "vce": "robust",
+    "field": "residual",
+    "error": "\nNot equal to tolerance rtol=0.001, atol=0.0001\n\nMismatched elements: 3 / 2500 (0.12%)\nMismatch at indices:\n [1726]: 0.0011539539460387357 (ACTUAL), 0.0010291810940801 (DESIRED)\n [2047]: -0.016473638894202308 (ACTUAL), -0.0163299100249203 (DESIRED)\n [2342]: -0.006058575364229084 (ACTUAL), -0.0058489939245487 (DESIRED)\nMax absolute difference among violations: 0.00020958\nMax relative difference among violations: 0.12123508\n ACTUAL: array([ 1.715372, -1.982232, -0.159541, ..., -0.216726,  0.399291,\n       -0.287309], shape=(2500,))\n DESIRED: array([ 1.715388, -1.982305, -0.159424, ..., -0.216692,  0.399305,\n       -0.287306], shape=(2500,))"
+  },
+  {
+    "case": "arma22_garch22",
+    "vce": "robust",
+    "field": "variance",
+    "error": "\nNot equal to tolerance rtol=0.001, atol=0.0001\n\nMismatched elements: 1901 / 2500 (76%)\nFirst 5 mismatches are at indices:\n [1]: 1.214748565630423 (ACTUAL), 1.217700463186538 (DESIRED)\n [2]: 1.6736228900572694 (ACTUAL), 1.678141156708274 (DESIRED)\n [3]: 1.4174158450647603 (ACTUAL), 1.412690659257667 (DESIRED)\n [4]: 0.9934966604420435 (ACTUAL), 0.9884429230846457 (DESIRED)\n [6]: 0.963231727681012 (ACTUAL), 0.9598749284531084 (DESIRED)\nMax absolute difference among violations: 0.04398488\nMax relative difference among violations: 0.03008377\n ACTUAL: array([0.946442, 1.214749, 1.673623, ..., 0.708838, 0.642697, 0.60369 ],\n      shape=(2500,))\n DESIRED: array([0.946496, 1.2177  , 1.678141, ..., 0.708832, 0.642338, 0.604198],\n      shape=(2500,))"
+  },
+  {
+    "case": "arma22_garch22",
+    "vce": "robust",
+    "field": "reported_ll_ic",
+    "checks": {
+      "ll_relative": 5.907448076253723e-06,
+      "aic_relative": 5.890134110094865e-06,
+      "bic_relative": 5.840288636827389e-06,
+      "parameter_absolute": 0.0220724928769342,
+      "se_relative": 0.11466596248434979,
+      "ci_absolute": 0.040451931343946396,
+      "presample_default_explicit_ll": 0.0,
+      "residual_max_absolute": 0.00022299630131961123,
+      "variance_max_absolute": 0.04398488157780944
+    }
+  },
+  {
+    "case": "arma22_garch22",
+    "vce": "robust",
+    "field": "reported_parameters_se_ci",
+    "checks": {
+      "ll_relative": 5.907448076253723e-06,
+      "aic_relative": 5.890134110094865e-06,
+      "bic_relative": 5.840288636827389e-06,
+      "parameter_absolute": 0.0220724928769342,
+      "se_relative": 0.11466596248434979,
+      "ci_absolute": 0.040451931343946396,
+      "presample_default_explicit_ll": 0.0,
+      "residual_max_absolute": 0.00022299630131961123,
+      "variance_max_absolute": 0.04398488157780944
+    }
+  }
+]

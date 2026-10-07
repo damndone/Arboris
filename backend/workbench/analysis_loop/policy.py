@@ -14,6 +14,14 @@ from typing import Any, Mapping
 import numpy as np
 
 
+def _cluster_count_caution() -> int:
+    from ..checks.fit_checks import CLUSTER_COUNT
+
+    return int(CLUSTER_COUNT.threshold("caution_below"))
+
+
+_CLUSTER_COUNT_CAUTION = _cluster_count_caution()
+
 _EXPECTED_POLICY_VALUES: dict[str, Any] = {
     "allowed_model": "ols",
     "allowed_covariance": "clustered",
@@ -23,7 +31,8 @@ _EXPECTED_POLICY_VALUES: dict[str, Any] = {
     "reject_mixed_object": True,
     "reject_null_or_nan": True,
     "hard_min_cluster_count": 2,
-    "warning_cluster_count_below": 30,
+    # Read from the check library, the one source of this threshold (v1.8.11).
+    "warning_cluster_count_below": _CLUSTER_COUNT_CAUTION,
     "one_way_only": True,
     "allow_singleton_clusters": True,
     "all_singleton_clusters": "warning",

@@ -1,0 +1,7 @@
+Traceback (most recent call last):
+  File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_recheck_evidence/sidecars/source_bytes-python-d918fb25/analysis.py", line 33, in <module>
+    data['source'] = wb_read('data.csv', '5f8d0cc66fc9efdfd08e6a06640ea410d58671fe93ac5cac2ad90d6aa68de937', 'csv', {'sep': ',', 'encoding': 'utf-8', 'header': 0})
+                     ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_recheck_evidence/sidecars/source_bytes-python-d918fb25/analysis.py", line 24, in wb_read
+    raise AssertionError('SHA256 mismatch: ' + name)
+AssertionError: SHA256 mismatch: data.csv

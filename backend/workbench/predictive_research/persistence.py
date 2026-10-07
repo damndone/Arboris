@@ -14,6 +14,7 @@ from uuid import uuid4
 
 from .. import __version__
 from ..domain import ArtifactRecord
+from ..artifact_index import locked_owner_index
 from .schema import PayloadContractError, default_v1_prediction_registry
 from .contracts import ContractError
 
@@ -206,18 +207,19 @@ class PredictionPersistenceAdmission:
             or validated.get("schema_version") != contract["schema_version"]
         ):
             raise PayloadContractError("ARTIFACT_PAYLOAD_CONTRACT_MISMATCH", "record contract does not match packet")
-        index = self._read_json(("artifacts_index.json",))
-        if not isinstance(index, dict) or not isinstance(index.get("artifacts"), list):
-            raise PayloadContractError("ARTIFACT_INDEX_INVALID", "artifacts_index.json has no artifact list")
-        record = ArtifactRecord(
-            artifact_id=artifact_id,
-            path="/".join(_safe_part(part) for part in relative_parts),
-            artifact_type=artifact_type,
-            step=step,
-            sha256=sha256,
-            inputs=inputs,
-            code_version=__version__,
-            payload_contract=contract,
-        )
-        index["artifacts"].append(record.to_dict())
-        self._atomic_write(("artifacts_index.json",), _json_bytes(index))
+        with locked_owner_index(self._require_open()):
+            index = self._read_json(("artifacts_index.json",))
+            if not isinstance(index, dict) or not isinstance(index.get("artifacts"), list):
+                raise PayloadContractError("ARTIFACT_INDEX_INVALID", "artifacts_index.json has no artifact list")
+            record = ArtifactRecord(
+                artifact_id=artifact_id,
+                path="/".join(_safe_part(part) for part in relative_parts),
+                artifact_type=artifact_type,
+                step=step,
+                sha256=sha256,
+                inputs=inputs,
+                code_version=__version__,
+                payload_contract=contract,
+            )
+            index["artifacts"].append(record.to_dict())
+            self._atomic_write(("artifacts_index.json",), _json_bytes(index))

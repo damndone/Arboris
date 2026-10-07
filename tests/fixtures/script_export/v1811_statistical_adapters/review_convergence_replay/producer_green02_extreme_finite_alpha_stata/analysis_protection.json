@@ -1,0 +1,7 @@
+{
+  "raw_sha256": "withheld-raw-sha256-256382dbf665646536f5c56d",
+  "redacted_sha256": "750a98a6c99547b71d1ef8eb746b9da2f01e8ec2590061e79708bb71b78bc775",
+  "ignored_raw": "local/script-statistical-adapters-review/producer_green02_extreme_finite_alpha_stata/analysis.log",
+  "raw_mode": "0600",
+  "outside_header_values_byte_identical": true
+}

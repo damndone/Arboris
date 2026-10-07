@@ -1,0 +1,15 @@
+........................................................................ [ 87%]
+..........                                                               [100%]
+=============================== warnings summary ===============================
+../../.venv/lib/python3.14/site-packages/fastapi/testclient.py:1
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+tests/test_agent_live_eval_v1811_harness.py::test_public_family_fixture_owner_and_native_fields[glm:binomial]
+tests/test_agent_live_eval_v1811_harness.py::test_public_family_fixture_owner_and_native_fields[glm:poisson]
+tests/test_agent_live_eval_v1811_harness.py::test_public_family_fixture_owner_and_native_fields[glm:negative_binomial]
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/genmod/generalized_linear_model.py:1923: FutureWarning: The bic value is computed using the deviance formula. After 0.13 this will change to the log-likelihood based formula. This change has no impact on the relative rank of models compared using BIC. You can directly access the log-likelihood version using the `bic_llf` attribute. You can suppress this message by calling statsmodels.genmod.generalized_linear_model.SET_USE_BIC_LLF with True to get the LLF-based version now or False to retainthe deviance version.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+82 passed, 4 warnings in 25.38s

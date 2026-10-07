@@ -1,0 +1,38 @@
+{
+  "owner": "/private/tmp/v1811-evaluation-8d8a2fd4c7d44af693b267e6d893d16f-r01/e04-native0/public-post/runs/20261005_091806_626686_9694b325",
+  "expected": {
+    "statistic": 32.68555270747073,
+    "df_num": 2,
+    "p_value": 7.987712234794955e-08
+  },
+  "actual": {
+    "schema_version": "workbench.postestimation.result/v1",
+    "model_run_id": "20261005_091806_626686_9694b325",
+    "operation": "wald",
+    "model_id": "glm_1",
+    "model_type": "glm:binomial",
+    "covariance_estimator": "nonrobust",
+    "nobs": 850,
+    "df_method": "asymptotic",
+    "n_clusters": null,
+    "constraints": [
+      {
+        "terms": {
+          "x1": 1.0
+        },
+        "value": 0.0
+      },
+      {
+        "terms": {
+          "x2": 1.0
+        },
+        "value": 0.0
+      }
+    ],
+    "distribution": "chi2",
+    "statistic": 32.68555270747074,
+    "df_num": 2,
+    "df_den": null,
+    "p_value": 7.987712234794901e-08
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "raw_sha256": "withheld-raw-sha256-142bf7f36acad5270f99b5b5",
+  "redacted_sha256": "979a65a9ff5fea2e3142fb3548762dc0d55b2b662501fea79212853e8b952202",
+  "ignored_raw": "local/v1811-script-statistical-adapters/fpc_subpopulation_stata_34de94c359/analysis.log",
+  "outside_header_values_byte_identical": true,
+  "raw_mode": "0600"
+}

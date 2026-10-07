@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "project_id": "weighted",
+  "run_id": "analysis_robust",
+  "workbench_version": "1.8.11",
+  "lineage_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "sources": [
+    {
+      "source_id": "source",
+      "format": "csv",
+      "filename": "data.csv",
+      "sha256": "0f643fba418a92bc7a08befa218425056e866314340e1148775107241af4e143",
+      "read_options": {}
+    }
+  ],
+  "steps": [
+    {
+      "step_id": "weighted",
+      "kind": "model",
+      "operation": "model.ols",
+      "label": "",
+      "parameters": {
+        "model_type": "ols",
+        "y": "y",
+        "x": [
+          "x",
+          "z"
+        ],
+        "categorical_x": [],
+        "covariance": "robust",
+        "cluster": null,
+        "hac_lags": null,
+        "weights": {
+          "kind": "analysis",
+          "column": "aw"
+        },
+        "entity": null,
+        "time": null,
+        "model_options": {}
+      },
+      "inputs": [
+        "source"
+      ],
+      "output_dataset": null,
+      "expected": {
+        "nobs": 350,
+        "coefficients": {
+          "Intercept": 1.085282749557345,
+          "x": 0.6071313851092202,
+          "z": -0.2043614817840667
+        },
+        "std_errors": {
+          "Intercept": 0.05381710188201347,
+          "x": 0.047990782329352236,
+          "z": 0.05265012682205399
+        },
+        "statistics": {
+          "Intercept": {
+            "value": 20.166131426710358,
+            "p_value": 2.0907927325230813e-60,
+            "df": 347.0,
+            "distribution": "t"
+          },
+          "x": {
+            "value": 12.650999955420295,
+            "p_value": 1.9970260538258507e-30,
+            "df": 347.0,
+            "distribution": "t"
+          },
+          "z": {
+            "value": -3.8815002758638015,
+            "p_value": 0.00012425511795765678,
+            "df": 347.0,
+            "distribution": "t"
+          }
+        }
+      },
+      "tolerances": {},
+      "seed": null,
+      "snapshot": null
+    }
+  ]
+}

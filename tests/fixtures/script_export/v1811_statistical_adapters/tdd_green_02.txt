@@ -1,0 +1,322 @@
+Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_population_stata_8c789bed15 stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_population_r_74a7fedf46 r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_population_python_2d5b4cab35 python
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_fraction_stata_8f2c861d14 stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_fraction_r_a152a00761 r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_fraction_python_40de45fa11 python
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_subpopulation_stata_299c49ede3 stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_subpopulation_r_b20299e028 r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_subpopulation_python_50fa63c140 python
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_lonely_census_stata_2779042327 stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_lonely_census_r_e8e5d9f662 r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_lonely_census_python_ebc243d3e0 python
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_no_psu_stata_8603bee1a8 stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_no_psu_r_1fd3084e10 r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_no_psu_python_731305124d python
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_no_strata_stata_76eec8812c stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_no_strata_r_eb2616773f r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_no_strata_python_1e64850477 python
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_zero_fraction_stata_be3abd41ce stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_zero_fraction_r_61ec59330f r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_zero_fraction_python_57871d47ad python
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_stata_False_acd9a05bf8 stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_r_False_e09f5fdc65 r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_python_False_fe4e70bcc5 python
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_stata_True_f66c13d787 stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_r_True_85a204d13a r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_python_True_e4fd069cf6 python
+.............FFFFFFFFFFFF..................Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_alpha_half_stata_a5e33f3b68 stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_alpha_half_r_4f9a9695ac r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_alpha_half_python_e876626a88 python
+......
+=================================== FAILURES ===================================
+_ test_fixed_alpha_glm_nb_five_operation_consumer_gate_is_truthful[lincom-1.0-stata] _
+tests/test_script_export_v1811_statistical_adapters.py:160: in test_fixed_alpha_glm_nb_five_operation_consumer_gate_is_truthful
+    plan, operation = post_plan(plan, reference, case)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_script_export_v1811_statistical_adapters.py:149: in post_plan
+    steps.append(ScriptStep(case, "postestimation", "postestimation."+operation, {**spec, "models": models},
+<string>:14: in __init__
+    ???
+backend/workbench/script_export/plan.py:129: in __post_init__
+    object.__setattr__(self, name, freeze_json(getattr(self, name), f"step.{name}"))
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/contracts/common/envelope.py:52: in freeze_json
+    frozen[key] = freeze_json(item, f"{path}.{key}")
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/contracts/common/envelope.py:52: in freeze_json
+    frozen[key] = freeze_json(item, f"{path}.{key}")
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/contracts/common/envelope.py:52: in freeze_json
+    frozen[key] = freeze_json(item, f"{path}.{key}")
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/contracts/common/envelope.py:56: in freeze_json
+    raise ContractError(
+E   workbench.contracts.common.envelope.ContractError: step.expected.statistics.test.p_value contains unsupported JSON-compatible leaf float64
+_ test_fixed_alpha_glm_nb_five_operation_consumer_gate_is_truthful[lincom-1.0-r] _
+tests/test_script_export_v1811_statistical_adapters.py:160: in test_fixed_alpha_glm_nb_five_operation_consumer_gate_is_truthful
+    plan, operation = post_plan(plan, reference, case)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_script_export_v1811_statistical_adapters.py:149: in post_plan
+    steps.append(ScriptStep(case, "postestimation", "postestimation."+operation, {**spec, "models": models},
+<string>:14: in __init__
+    ???
+backend/workbench/script_export/plan.py:129: in __post_init__
+    object.__setattr__(self, name, freeze_json(getattr(self, name), f"step.{name}"))
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/contracts/common/envelope.py:52: in freeze_json
+    frozen[key] = freeze_json(item, f"{path}.{key}")
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/contracts/common/envelope.py:52: in freeze_json
+    frozen[key] = freeze_json(item, f"{path}.{key}")
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/contracts/common/envelope.py:52: in freeze_json
+    frozen[key] = freeze_json(item, f"{path}.{key}")
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/contracts/common/envelope.py:56: in freeze_json
+    raise ContractError(
+E   workbench.contracts.common.envelope.ContractError: step.expected.statistics.test.p_value contains unsupported JSON-compatible leaf float64
+_ test_fixed_alpha_glm_nb_five_operation_consumer_gate_is_truthful[lincom-1.0-python] _
+tests/test_script_export_v1811_statistical_adapters.py:160: in test_fixed_alpha_glm_nb_five_operation_consumer_gate_is_truthful
+    plan, operation = post_plan(plan, reference, case)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_script_export_v1811_statistical_adapters.py:149: in post_plan
+    steps.append(ScriptStep(case, "postestimation", "postestimation."+operation, {**spec, "models": models},
+<string>:14: in __init__
+    ???
+backend/workbench/script_export/plan.py:129: in __post_init__
+    object.__setattr__(self, name, freeze_json(getattr(self, name), f"step.{name}"))
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/contracts/common/envelope.py:52: in freeze_json
+    frozen[key] = freeze_json(item, f"{path}.{key}")
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/contracts/common/envelope.py:52: in freeze_json
+    frozen[key] = freeze_json(item, f"{path}.{key}")
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/contracts/common/envelope.py:52: in freeze_json
+    frozen[key] = freeze_json(item, f"{path}.{key}")
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/contracts/common/envelope.py:56: in freeze_json
+    raise ContractError(
+E   workbench.contracts.common.envelope.ContractError: step.expected.statistics.test.p_value contains unsupported JSON-compatible leaf float64
+_ test_fixed_alpha_glm_nb_five_operation_consumer_gate_is_truthful[lincom-0.5-stata] _
+tests/test_script_export_v1811_statistical_adapters.py:160: in test_fixed_alpha_glm_nb_five_operation_consumer_gate_is_truthful
+    plan, operation = post_plan(plan, reference, case)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_script_export_v1811_statistical_adapters.py:149: in post_plan
+    steps.append(ScriptStep(case, "postestimation", "postestimation."+operation, {**spec, "models": models},
+<string>:14: in __init__
+    ???
+backend/workbench/script_export/plan.py:129: in __post_init__
+    object.__setattr__(self, name, freeze_json(getattr(self, name), f"step.{name}"))
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/contracts/common/envelope.py:52: in freeze_json
+    frozen[key] = freeze_json(item, f"{path}.{key}")
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/contracts/common/envelope.py:52: in freeze_json
+    frozen[key] = freeze_json(item, f"{path}.{key}")
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/contracts/common/envelope.py:52: in freeze_json
+    frozen[key] = freeze_json(item, f"{path}.{key}")
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/contracts/common/envelope.py:56: in freeze_json
+    raise ContractError(
+E   workbench.contracts.common.envelope.ContractError: step.expected.statistics.test.p_value contains unsupported JSON-compatible leaf float64
+_ test_fixed_alpha_glm_nb_five_operation_consumer_gate_is_truthful[lincom-0.5-r] _
+tests/test_script_export_v1811_statistical_adapters.py:160: in test_fixed_alpha_glm_nb_five_operation_consumer_gate_is_truthful
+    plan, operation = post_plan(plan, reference, case)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_script_export_v1811_statistical_adapters.py:149: in post_plan
+    steps.append(ScriptStep(case, "postestimation", "postestimation."+operation, {**spec, "models": models},
+<string>:14: in __init__
+    ???
+backend/workbench/script_export/plan.py:129: in __post_init__
+    object.__setattr__(self, name, freeze_json(getattr(self, name), f"step.{name}"))
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/contracts/common/envelope.py:52: in freeze_json
+    frozen[key] = freeze_json(item, f"{path}.{key}")
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/contracts/common/envelope.py:52: in freeze_json
+    frozen[key] = freeze_json(item, f"{path}.{key}")
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/contracts/common/envelope.py:52: in freeze_json
+    frozen[key] = freeze_json(item, f"{path}.{key}")
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/contracts/common/envelope.py:56: in freeze_json
+    raise ContractError(
+E   workbench.contracts.common.envelope.ContractError: step.expected.statistics.test.p_value contains unsupported JSON-compatible leaf float64
+_ test_fixed_alpha_glm_nb_five_operation_consumer_gate_is_truthful[lincom-0.5-python] _
+tests/test_script_export_v1811_statistical_adapters.py:160: in test_fixed_alpha_glm_nb_five_operation_consumer_gate_is_truthful
+    plan, operation = post_plan(plan, reference, case)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_script_export_v1811_statistical_adapters.py:149: in post_plan
+    steps.append(ScriptStep(case, "postestimation", "postestimation."+operation, {**spec, "models": models},
+<string>:14: in __init__
+    ???
+backend/workbench/script_export/plan.py:129: in __post_init__
+    object.__setattr__(self, name, freeze_json(getattr(self, name), f"step.{name}"))
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/contracts/common/envelope.py:52: in freeze_json
+    frozen[key] = freeze_json(item, f"{path}.{key}")
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/contracts/common/envelope.py:52: in freeze_json
+    frozen[key] = freeze_json(item, f"{path}.{key}")
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/contracts/common/envelope.py:52: in freeze_json
+    frozen[key] = freeze_json(item, f"{path}.{key}")
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/contracts/common/envelope.py:56: in freeze_json
+    raise ContractError(
+E   workbench.contracts.common.envelope.ContractError: step.expected.statistics.test.p_value contains unsupported JSON-compatible leaf float64
+_ test_fixed_alpha_glm_nb_five_operation_consumer_gate_is_truthful[nlcom-1.0-stata] _
+tests/test_script_export_v1811_statistical_adapters.py:160: in test_fixed_alpha_glm_nb_five_operation_consumer_gate_is_truthful
+    plan, operation = post_plan(plan, reference, case)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_script_export_v1811_statistical_adapters.py:149: in post_plan
+    steps.append(ScriptStep(case, "postestimation", "postestimation."+operation, {**spec, "models": models},
+<string>:14: in __init__
+    ???
+backend/workbench/script_export/plan.py:129: in __post_init__
+    object.__setattr__(self, name, freeze_json(getattr(self, name), f"step.{name}"))
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/contracts/common/envelope.py:52: in freeze_json
+    frozen[key] = freeze_json(item, f"{path}.{key}")
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/contracts/common/envelope.py:52: in freeze_json
+    frozen[key] = freeze_json(item, f"{path}.{key}")
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/contracts/common/envelope.py:52: in freeze_json
+    frozen[key] = freeze_json(item, f"{path}.{key}")
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/contracts/common/envelope.py:56: in freeze_json
+    raise ContractError(
+E   workbench.contracts.common.envelope.ContractError: step.expected.statistics.test.p_value contains unsupported JSON-compatible leaf float64
+_ test_fixed_alpha_glm_nb_five_operation_consumer_gate_is_truthful[nlcom-1.0-r] _
+tests/test_script_export_v1811_statistical_adapters.py:160: in test_fixed_alpha_glm_nb_five_operation_consumer_gate_is_truthful
+    plan, operation = post_plan(plan, reference, case)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_script_export_v1811_statistical_adapters.py:149: in post_plan
+    steps.append(ScriptStep(case, "postestimation", "postestimation."+operation, {**spec, "models": models},
+<string>:14: in __init__
+    ???
+backend/workbench/script_export/plan.py:129: in __post_init__
+    object.__setattr__(self, name, freeze_json(getattr(self, name), f"step.{name}"))
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/contracts/common/envelope.py:52: in freeze_json
+    frozen[key] = freeze_json(item, f"{path}.{key}")
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/contracts/common/envelope.py:52: in freeze_json
+    frozen[key] = freeze_json(item, f"{path}.{key}")
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/contracts/common/envelope.py:52: in freeze_json
+    frozen[key] = freeze_json(item, f"{path}.{key}")
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/contracts/common/envelope.py:56: in freeze_json
+    raise ContractError(
+E   workbench.contracts.common.envelope.ContractError: step.expected.statistics.test.p_value contains unsupported JSON-compatible leaf float64
+_ test_fixed_alpha_glm_nb_five_operation_consumer_gate_is_truthful[nlcom-1.0-python] _
+tests/test_script_export_v1811_statistical_adapters.py:160: in test_fixed_alpha_glm_nb_five_operation_consumer_gate_is_truthful
+    plan, operation = post_plan(plan, reference, case)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_script_export_v1811_statistical_adapters.py:149: in post_plan
+    steps.append(ScriptStep(case, "postestimation", "postestimation."+operation, {**spec, "models": models},
+<string>:14: in __init__
+    ???
+backend/workbench/script_export/plan.py:129: in __post_init__
+    object.__setattr__(self, name, freeze_json(getattr(self, name), f"step.{name}"))
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/contracts/common/envelope.py:52: in freeze_json
+    frozen[key] = freeze_json(item, f"{path}.{key}")
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/contracts/common/envelope.py:52: in freeze_json
+    frozen[key] = freeze_json(item, f"{path}.{key}")
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/contracts/common/envelope.py:52: in freeze_json
+    frozen[key] = freeze_json(item, f"{path}.{key}")
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/contracts/common/envelope.py:56: in freeze_json
+    raise ContractError(
+E   workbench.contracts.common.envelope.ContractError: step.expected.statistics.test.p_value contains unsupported JSON-compatible leaf float64
+_ test_fixed_alpha_glm_nb_five_operation_consumer_gate_is_truthful[nlcom-0.5-stata] _
+tests/test_script_export_v1811_statistical_adapters.py:160: in test_fixed_alpha_glm_nb_five_operation_consumer_gate_is_truthful
+    plan, operation = post_plan(plan, reference, case)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_script_export_v1811_statistical_adapters.py:149: in post_plan
+    steps.append(ScriptStep(case, "postestimation", "postestimation."+operation, {**spec, "models": models},
+<string>:14: in __init__
+    ???
+backend/workbench/script_export/plan.py:129: in __post_init__
+    object.__setattr__(self, name, freeze_json(getattr(self, name), f"step.{name}"))
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/contracts/common/envelope.py:52: in freeze_json
+    frozen[key] = freeze_json(item, f"{path}.{key}")
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/contracts/common/envelope.py:52: in freeze_json
+    frozen[key] = freeze_json(item, f"{path}.{key}")
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/contracts/common/envelope.py:52: in freeze_json
+    frozen[key] = freeze_json(item, f"{path}.{key}")
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/contracts/common/envelope.py:56: in freeze_json
+    raise ContractError(
+E   workbench.contracts.common.envelope.ContractError: step.expected.statistics.test.p_value contains unsupported JSON-compatible leaf float64
+_ test_fixed_alpha_glm_nb_five_operation_consumer_gate_is_truthful[nlcom-0.5-r] _
+tests/test_script_export_v1811_statistical_adapters.py:160: in test_fixed_alpha_glm_nb_five_operation_consumer_gate_is_truthful
+    plan, operation = post_plan(plan, reference, case)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_script_export_v1811_statistical_adapters.py:149: in post_plan
+    steps.append(ScriptStep(case, "postestimation", "postestimation."+operation, {**spec, "models": models},
+<string>:14: in __init__
+    ???
+backend/workbench/script_export/plan.py:129: in __post_init__
+    object.__setattr__(self, name, freeze_json(getattr(self, name), f"step.{name}"))
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/contracts/common/envelope.py:52: in freeze_json
+    frozen[key] = freeze_json(item, f"{path}.{key}")
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/contracts/common/envelope.py:52: in freeze_json
+    frozen[key] = freeze_json(item, f"{path}.{key}")
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/contracts/common/envelope.py:52: in freeze_json
+    frozen[key] = freeze_json(item, f"{path}.{key}")
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/contracts/common/envelope.py:56: in freeze_json
+    raise ContractError(
+E   workbench.contracts.common.envelope.ContractError: step.expected.statistics.test.p_value contains unsupported JSON-compatible leaf float64
+_ test_fixed_alpha_glm_nb_five_operation_consumer_gate_is_truthful[nlcom-0.5-python] _
+tests/test_script_export_v1811_statistical_adapters.py:160: in test_fixed_alpha_glm_nb_five_operation_consumer_gate_is_truthful
+    plan, operation = post_plan(plan, reference, case)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_script_export_v1811_statistical_adapters.py:149: in post_plan
+    steps.append(ScriptStep(case, "postestimation", "postestimation."+operation, {**spec, "models": models},
+<string>:14: in __init__
+    ???
+backend/workbench/script_export/plan.py:129: in __post_init__
+    object.__setattr__(self, name, freeze_json(getattr(self, name), f"step.{name}"))
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/contracts/common/envelope.py:52: in freeze_json
+    frozen[key] = freeze_json(item, f"{path}.{key}")
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/contracts/common/envelope.py:52: in freeze_json
+    frozen[key] = freeze_json(item, f"{path}.{key}")
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/contracts/common/envelope.py:52: in freeze_json
+    frozen[key] = freeze_json(item, f"{path}.{key}")
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/contracts/common/envelope.py:56: in freeze_json
+    raise ContractError(
+E   workbench.contracts.common.envelope.ContractError: step.expected.statistics.test.p_value contains unsupported JSON-compatible leaf float64
+=========================== short test summary info ============================
+FAILED tests/test_script_export_v1811_statistical_adapters.py::test_fixed_alpha_glm_nb_five_operation_consumer_gate_is_truthful[lincom-1.0-stata]
+FAILED tests/test_script_export_v1811_statistical_adapters.py::test_fixed_alpha_glm_nb_five_operation_consumer_gate_is_truthful[lincom-1.0-r]
+FAILED tests/test_script_export_v1811_statistical_adapters.py::test_fixed_alpha_glm_nb_five_operation_consumer_gate_is_truthful[lincom-1.0-python]
+FAILED tests/test_script_export_v1811_statistical_adapters.py::test_fixed_alpha_glm_nb_five_operation_consumer_gate_is_truthful[lincom-0.5-stata]
+FAILED tests/test_script_export_v1811_statistical_adapters.py::test_fixed_alpha_glm_nb_five_operation_consumer_gate_is_truthful[lincom-0.5-r]
+FAILED tests/test_script_export_v1811_statistical_adapters.py::test_fixed_alpha_glm_nb_five_operation_consumer_gate_is_truthful[lincom-0.5-python]
+FAILED tests/test_script_export_v1811_statistical_adapters.py::test_fixed_alpha_glm_nb_five_operation_consumer_gate_is_truthful[nlcom-1.0-stata]
+FAILED tests/test_script_export_v1811_statistical_adapters.py::test_fixed_alpha_glm_nb_five_operation_consumer_gate_is_truthful[nlcom-1.0-r]
+FAILED tests/test_script_export_v1811_statistical_adapters.py::test_fixed_alpha_glm_nb_five_operation_consumer_gate_is_truthful[nlcom-1.0-python]
+FAILED tests/test_script_export_v1811_statistical_adapters.py::test_fixed_alpha_glm_nb_five_operation_consumer_gate_is_truthful[nlcom-0.5-stata]
+FAILED tests/test_script_export_v1811_statistical_adapters.py::test_fixed_alpha_glm_nb_five_operation_consumer_gate_is_truthful[nlcom-0.5-r]
+FAILED tests/test_script_export_v1811_statistical_adapters.py::test_fixed_alpha_glm_nb_five_operation_consumer_gate_is_truthful[nlcom-0.5-python]
+12 failed, 65 passed in 22.84s

@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "project_id": "review",
+  "run_id": "numeric-category",
+  "workbench_version": "1.8.11",
+  "lineage_hash": "5555555555555555555555555555555555555555555555555555555555555555",
+  "sources": [
+    {
+      "source_id": "source",
+      "format": "csv",
+      "filename": "data.csv",
+      "sha256": "fa0eee67f28f532930ea73da2c4061309cead39a55c6a6c25d95fd89f917b105",
+      "read_options": {}
+    }
+  ],
+  "steps": [
+    {
+      "step_id": "model",
+      "kind": "model",
+      "operation": "model.ols",
+      "label": "",
+      "parameters": {
+        "model_type": "ols",
+        "y": "y",
+        "x": [
+          "x",
+          "category"
+        ],
+        "categorical_x": [
+          "category"
+        ],
+        "covariance": "unadjusted",
+        "weights": null,
+        "model_options": {}
+      },
+      "inputs": [
+        "source"
+      ],
+      "output_dataset": null,
+      "expected": {
+        "nobs": 240,
+        "coefficients": {
+          "Intercept": 1.2708994017897324,
+          "C(Q('category'))[T.2.0]": 0.7035527108942035,
+          "C(Q('category'))[T.3.0]": 1.5708783411633434,
+          "x": 0.3286601725683639
+        },
+        "std_errors": {
+          "Intercept": 0.10937400678256705,
+          "C(Q('category'))[T.2.0]": 0.1563678541895355,
+          "C(Q('category'))[T.3.0]": 0.1535480729297494,
+          "x": 0.0642479068074436
+        },
+        "statistics": {
+          "Intercept": {
+            "value": 11.619757190721288,
+            "p_value": 5.575649993018833e-25,
+            "df": 236.0,
+            "distribution": "t"
+          },
+          "C(Q('category'))[T.2.0]": {
+            "value": 4.499343644131729,
+            "p_value": 1.070297878290555e-05,
+            "df": 236.0,
+            "distribution": "t"
+          },
+          "C(Q('category'))[T.3.0]": {
+            "value": 10.230531137190138,
+            "p_value": 1.4335782806912002e-20,
+            "df": 236.0,
+            "distribution": "t"
+          },
+          "x": {
+            "value": 5.115500082413364,
+            "p_value": 6.477886934670725e-07,
+            "df": 236.0,
+            "distribution": "t"
+          }
+        }
+      },
+      "tolerances": {},
+      "seed": null,
+      "snapshot": null
+    }
+  ]
+}

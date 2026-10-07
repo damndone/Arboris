@@ -1,0 +1,298 @@
+
+Fontconfig error: No writable cache directories
+	/opt/homebrew/var/cache/fontconfig
+	/Users/jiayuanren/.cache/fontconfig
+	/Users/jiayuanren/.fontconfig
+FFFFF..........{"run_root": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-766/test_public_covariance_and_ful0/review/runs/20261004_201700_318272_695563e7", "options": {"survey_fpc_col": "population_fpc"}, "status": "completed"}
+.{"run_root": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-766/test_public_covariance_and_ful1/review/runs/20261004_201700_968272_aa73714f", "options": {"survey_fpc_col": "fraction_fpc"}, "status": "completed"}
+.{"run_root": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-766/test_public_covariance_and_ful2/review/runs/20261004_201701_575207_1b5d2166", "options": {"survey_fpc_col": "population_fpc", "survey_subpop": "subpop == 1"}, "status": "completed"}
+.{"run_root": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-766/test_public_covariance_and_ful3/review/runs/20261004_201701_964914_469e86ed", "options": {"survey_fpc_col": "fraction_fpc", "survey_subpop": "subpop == 1"}, "status": "completed"}
+.{"run_root": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-766/test_no_fpc_public_packet_and_0/current/review/runs/20261004_201702_335463_aa427b37", "options": {}, "status": "completed"}
+{"run_root": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-766/test_no_fpc_public_packet_and_0/baseline/review/runs/20261004_201703_041795_574289a0", "options": {}, "status": "completed"}
+.{"run_root": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-766/test_no_fpc_public_packet_and_1/current/review/runs/20261004_201703_663769_0b277cc9", "options": {"survey_subpop": "subpop == 1"}, "status": "completed"}
+{"run_root": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-766/test_no_fpc_public_packet_and_1/baseline/review/runs/20261004_201704_066322_98b8a955", "options": {"survey_subpop": "subpop == 1"}, "status": "completed"}
+.{"run_root": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-766/test_census_public_kernel_and_0/projects/review/runs/20261004_201704_458255_d2af7921", "options": {"survey_fpc_col": "review_census"}, "status": "completed"}
+{"census_public_warnings": [{"code": "SURVEY_ZERO_VARIANCE_INFERENCE_UNAVAILABLE", "message": "The finite population correction gives zero sampling variance; coefficient p-values with zero standard errors are unavailable."}], "shared_issues": {"schema_version": "legacy", "run_id": "20261004_201704_458255_d2af7921", "issues": [], "superseded_by": "diagnostic_summary.json"}}
+..
+=================================== FAILURES ===================================
+__________ test_workflow_does_not_silently_drop_nonstring_fpc[False] ___________
+
+tmp_path = PosixPath('/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-766/test_workflow_does_not_silentl0')
+column = False
+
+    @pytest.mark.parametrize('column', [False, 0, [], {}, ['population_fpc']])
+    def test_workflow_does_not_silently_drop_nonstring_fpc(tmp_path, column):
+>       outcome, root = public_run(tmp_path, survey_fpc_col=column)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/eval_v1811/fpc_public_review_adversarial.py:42: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/eval_v1811/fpc_public_review_adversarial.py:29: in public_run
+    outcome = run_workflow(project, [path], mode='auto', model_type='ols', y='y', x=['x1', 'x2'],
+backend/workbench/orchestrator/__init__.py:409: in run_workflow
+    return _run_workflow(
+backend/workbench/orchestrator/__init__.py:842: in _run_workflow
+    ctx = run_pipeline_traced(
+backend/workbench/lineage/incremental.py:122: in run_pipeline_traced
+    ctx = stage.run(ctx, env)
+          ^^^^^^^^^^^^^^^^^^^
+backend/workbench/engine/stages/estimation.py:1264: in run
+    fits = [handler.fit(ctx, env)]
+            ^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/engine/stages/estimation.py:626: in _fit_ols
+    _apply_survey_design_variance(ctx, "ols", primary)
+backend/workbench/engine/stages/estimation.py:674: in _apply_survey_design_variance
+    design = build_design_from_artifacts(frame, ctx.artifacts)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+frame =    stratum     psu  ...  zero_fpc  all_certainty_fpc
+0      h01  s01_p1  ...       0.0                1.0
+1      h01  ...  s08_p2  ...       0.0                1.0
+79     h08  s08_p2  ...       0.0                1.0
+
+[80 rows x 14 columns]
+artifacts = {'_input_files': [PosixPath('/Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/tests/fixtures/survey_fpc_v1811/desig...iction_cv_folds=5, prediction_sampling_method='', run_timeout_s=1800.0), '_sheet_name': None, '_transpose': False, ...}
+
+    def build_design_from_artifacts(frame: pd.DataFrame, artifacts: dict) -> SurveyDesign | None:
+        """Assemble a design from the declarations block 1 wired into ctx.
+    
+        Returns None when nothing was declared, which is what keeps every existing
+        run byte-identical: no declaration, no design, no change of path.
+        """
+        strata = str(artifacts.get("_survey_strata_col") or "").strip()
+        psu = str(artifacts.get("_survey_psu_col") or "").strip()
+        weight = str(artifacts.get("_sampling_weight") or "").strip()
+        fpc_column = artifacts.get("_survey_fpc_col")
+        if fpc_column is not None and not isinstance(fpc_column, str):
+>           raise SurveyEngineError("SURVEY_FPC_COLUMN_INVALID", "FPC requires one column name, without type coercion")
+E           workbench.survey.errors.SurveyEngineError: SURVEY_FPC_COLUMN_INVALID: FPC requires one column name, without type coercion
+
+backend/workbench/survey/adapters.py:42: SurveyEngineError
+------------------------------ Captured log call -------------------------------
+WARNING  matplotlib:__init__.py:577 /Users/jiayuanren/.matplotlib is not a writable directory
+WARNING  matplotlib:__init__.py:593 Matplotlib created a temporary cache directory at /var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/matplotlib-m6chpjgl because there was an issue with the default path ({configdir}); it is highly recommended to set the MPLCONFIGDIR environment variable to a writable directory, in particular to speed up the import of Matplotlib and to better support multiprocessing.
+WARNING  matplotlib.font_manager:font_manager.py:1249 Matplotlib is building the font cache; this may take a moment.
+____________ test_workflow_does_not_silently_drop_nonstring_fpc[0] _____________
+
+tmp_path = PosixPath('/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-766/test_workflow_does_not_silentl1')
+column = 0
+
+    @pytest.mark.parametrize('column', [False, 0, [], {}, ['population_fpc']])
+    def test_workflow_does_not_silently_drop_nonstring_fpc(tmp_path, column):
+>       outcome, root = public_run(tmp_path, survey_fpc_col=column)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/eval_v1811/fpc_public_review_adversarial.py:42: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/eval_v1811/fpc_public_review_adversarial.py:29: in public_run
+    outcome = run_workflow(project, [path], mode='auto', model_type='ols', y='y', x=['x1', 'x2'],
+backend/workbench/orchestrator/__init__.py:409: in run_workflow
+    return _run_workflow(
+backend/workbench/orchestrator/__init__.py:842: in _run_workflow
+    ctx = run_pipeline_traced(
+backend/workbench/lineage/incremental.py:122: in run_pipeline_traced
+    ctx = stage.run(ctx, env)
+          ^^^^^^^^^^^^^^^^^^^
+backend/workbench/engine/stages/estimation.py:1264: in run
+    fits = [handler.fit(ctx, env)]
+            ^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/engine/stages/estimation.py:626: in _fit_ols
+    _apply_survey_design_variance(ctx, "ols", primary)
+backend/workbench/engine/stages/estimation.py:674: in _apply_survey_design_variance
+    design = build_design_from_artifacts(frame, ctx.artifacts)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+frame =    stratum     psu  ...  zero_fpc  all_certainty_fpc
+0      h01  s01_p1  ...       0.0                1.0
+1      h01  ...  s08_p2  ...       0.0                1.0
+79     h08  s08_p2  ...       0.0                1.0
+
+[80 rows x 14 columns]
+artifacts = {'_input_files': [PosixPath('/Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/tests/fixtures/survey_fpc_v1811/desig...iction_cv_folds=5, prediction_sampling_method='', run_timeout_s=1800.0), '_sheet_name': None, '_transpose': False, ...}
+
+    def build_design_from_artifacts(frame: pd.DataFrame, artifacts: dict) -> SurveyDesign | None:
+        """Assemble a design from the declarations block 1 wired into ctx.
+    
+        Returns None when nothing was declared, which is what keeps every existing
+        run byte-identical: no declaration, no design, no change of path.
+        """
+        strata = str(artifacts.get("_survey_strata_col") or "").strip()
+        psu = str(artifacts.get("_survey_psu_col") or "").strip()
+        weight = str(artifacts.get("_sampling_weight") or "").strip()
+        fpc_column = artifacts.get("_survey_fpc_col")
+        if fpc_column is not None and not isinstance(fpc_column, str):
+>           raise SurveyEngineError("SURVEY_FPC_COLUMN_INVALID", "FPC requires one column name, without type coercion")
+E           workbench.survey.errors.SurveyEngineError: SURVEY_FPC_COLUMN_INVALID: FPC requires one column name, without type coercion
+
+backend/workbench/survey/adapters.py:42: SurveyEngineError
+_________ test_workflow_does_not_silently_drop_nonstring_fpc[column2] __________
+
+tmp_path = PosixPath('/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-766/test_workflow_does_not_silentl2')
+column = []
+
+    @pytest.mark.parametrize('column', [False, 0, [], {}, ['population_fpc']])
+    def test_workflow_does_not_silently_drop_nonstring_fpc(tmp_path, column):
+>       outcome, root = public_run(tmp_path, survey_fpc_col=column)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/eval_v1811/fpc_public_review_adversarial.py:42: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/eval_v1811/fpc_public_review_adversarial.py:29: in public_run
+    outcome = run_workflow(project, [path], mode='auto', model_type='ols', y='y', x=['x1', 'x2'],
+backend/workbench/orchestrator/__init__.py:409: in run_workflow
+    return _run_workflow(
+backend/workbench/orchestrator/__init__.py:842: in _run_workflow
+    ctx = run_pipeline_traced(
+backend/workbench/lineage/incremental.py:122: in run_pipeline_traced
+    ctx = stage.run(ctx, env)
+          ^^^^^^^^^^^^^^^^^^^
+backend/workbench/engine/stages/estimation.py:1264: in run
+    fits = [handler.fit(ctx, env)]
+            ^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/engine/stages/estimation.py:626: in _fit_ols
+    _apply_survey_design_variance(ctx, "ols", primary)
+backend/workbench/engine/stages/estimation.py:674: in _apply_survey_design_variance
+    design = build_design_from_artifacts(frame, ctx.artifacts)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+frame =    stratum     psu  ...  zero_fpc  all_certainty_fpc
+0      h01  s01_p1  ...       0.0                1.0
+1      h01  ...  s08_p2  ...       0.0                1.0
+79     h08  s08_p2  ...       0.0                1.0
+
+[80 rows x 14 columns]
+artifacts = {'_input_files': [PosixPath('/Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/tests/fixtures/survey_fpc_v1811/desig...iction_cv_folds=5, prediction_sampling_method='', run_timeout_s=1800.0), '_sheet_name': None, '_transpose': False, ...}
+
+    def build_design_from_artifacts(frame: pd.DataFrame, artifacts: dict) -> SurveyDesign | None:
+        """Assemble a design from the declarations block 1 wired into ctx.
+    
+        Returns None when nothing was declared, which is what keeps every existing
+        run byte-identical: no declaration, no design, no change of path.
+        """
+        strata = str(artifacts.get("_survey_strata_col") or "").strip()
+        psu = str(artifacts.get("_survey_psu_col") or "").strip()
+        weight = str(artifacts.get("_sampling_weight") or "").strip()
+        fpc_column = artifacts.get("_survey_fpc_col")
+        if fpc_column is not None and not isinstance(fpc_column, str):
+>           raise SurveyEngineError("SURVEY_FPC_COLUMN_INVALID", "FPC requires one column name, without type coercion")
+E           workbench.survey.errors.SurveyEngineError: SURVEY_FPC_COLUMN_INVALID: FPC requires one column name, without type coercion
+
+backend/workbench/survey/adapters.py:42: SurveyEngineError
+_________ test_workflow_does_not_silently_drop_nonstring_fpc[column3] __________
+
+tmp_path = PosixPath('/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-766/test_workflow_does_not_silentl3')
+column = {}
+
+    @pytest.mark.parametrize('column', [False, 0, [], {}, ['population_fpc']])
+    def test_workflow_does_not_silently_drop_nonstring_fpc(tmp_path, column):
+>       outcome, root = public_run(tmp_path, survey_fpc_col=column)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/eval_v1811/fpc_public_review_adversarial.py:42: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/eval_v1811/fpc_public_review_adversarial.py:29: in public_run
+    outcome = run_workflow(project, [path], mode='auto', model_type='ols', y='y', x=['x1', 'x2'],
+backend/workbench/orchestrator/__init__.py:409: in run_workflow
+    return _run_workflow(
+backend/workbench/orchestrator/__init__.py:842: in _run_workflow
+    ctx = run_pipeline_traced(
+backend/workbench/lineage/incremental.py:122: in run_pipeline_traced
+    ctx = stage.run(ctx, env)
+          ^^^^^^^^^^^^^^^^^^^
+backend/workbench/engine/stages/estimation.py:1264: in run
+    fits = [handler.fit(ctx, env)]
+            ^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/engine/stages/estimation.py:626: in _fit_ols
+    _apply_survey_design_variance(ctx, "ols", primary)
+backend/workbench/engine/stages/estimation.py:674: in _apply_survey_design_variance
+    design = build_design_from_artifacts(frame, ctx.artifacts)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+frame =    stratum     psu  ...  zero_fpc  all_certainty_fpc
+0      h01  s01_p1  ...       0.0                1.0
+1      h01  ...  s08_p2  ...       0.0                1.0
+79     h08  s08_p2  ...       0.0                1.0
+
+[80 rows x 14 columns]
+artifacts = {'_input_files': [PosixPath('/Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/tests/fixtures/survey_fpc_v1811/desig...iction_cv_folds=5, prediction_sampling_method='', run_timeout_s=1800.0), '_sheet_name': None, '_transpose': False, ...}
+
+    def build_design_from_artifacts(frame: pd.DataFrame, artifacts: dict) -> SurveyDesign | None:
+        """Assemble a design from the declarations block 1 wired into ctx.
+    
+        Returns None when nothing was declared, which is what keeps every existing
+        run byte-identical: no declaration, no design, no change of path.
+        """
+        strata = str(artifacts.get("_survey_strata_col") or "").strip()
+        psu = str(artifacts.get("_survey_psu_col") or "").strip()
+        weight = str(artifacts.get("_sampling_weight") or "").strip()
+        fpc_column = artifacts.get("_survey_fpc_col")
+        if fpc_column is not None and not isinstance(fpc_column, str):
+>           raise SurveyEngineError("SURVEY_FPC_COLUMN_INVALID", "FPC requires one column name, without type coercion")
+E           workbench.survey.errors.SurveyEngineError: SURVEY_FPC_COLUMN_INVALID: FPC requires one column name, without type coercion
+
+backend/workbench/survey/adapters.py:42: SurveyEngineError
+_________ test_workflow_does_not_silently_drop_nonstring_fpc[column4] __________
+
+tmp_path = PosixPath('/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-766/test_workflow_does_not_silentl4')
+column = ['population_fpc']
+
+    @pytest.mark.parametrize('column', [False, 0, [], {}, ['population_fpc']])
+    def test_workflow_does_not_silently_drop_nonstring_fpc(tmp_path, column):
+>       outcome, root = public_run(tmp_path, survey_fpc_col=column)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/eval_v1811/fpc_public_review_adversarial.py:42: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/eval_v1811/fpc_public_review_adversarial.py:29: in public_run
+    outcome = run_workflow(project, [path], mode='auto', model_type='ols', y='y', x=['x1', 'x2'],
+backend/workbench/orchestrator/__init__.py:409: in run_workflow
+    return _run_workflow(
+backend/workbench/orchestrator/__init__.py:842: in _run_workflow
+    ctx = run_pipeline_traced(
+backend/workbench/lineage/incremental.py:122: in run_pipeline_traced
+    ctx = stage.run(ctx, env)
+          ^^^^^^^^^^^^^^^^^^^
+backend/workbench/engine/stages/estimation.py:1264: in run
+    fits = [handler.fit(ctx, env)]
+            ^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/engine/stages/estimation.py:626: in _fit_ols
+    _apply_survey_design_variance(ctx, "ols", primary)
+backend/workbench/engine/stages/estimation.py:674: in _apply_survey_design_variance
+    design = build_design_from_artifacts(frame, ctx.artifacts)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+frame =    stratum     psu  ...  zero_fpc  all_certainty_fpc
+0      h01  s01_p1  ...       0.0                1.0
+1      h01  ...  s08_p2  ...       0.0                1.0
+79     h08  s08_p2  ...       0.0                1.0
+
+[80 rows x 14 columns]
+artifacts = {'_input_files': [PosixPath('/Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/tests/fixtures/survey_fpc_v1811/desig...iction_cv_folds=5, prediction_sampling_method='', run_timeout_s=1800.0), '_sheet_name': None, '_transpose': False, ...}
+
+    def build_design_from_artifacts(frame: pd.DataFrame, artifacts: dict) -> SurveyDesign | None:
+        """Assemble a design from the declarations block 1 wired into ctx.
+    
+        Returns None when nothing was declared, which is what keeps every existing
+        run byte-identical: no declaration, no design, no change of path.
+        """
+        strata = str(artifacts.get("_survey_strata_col") or "").strip()
+        psu = str(artifacts.get("_survey_psu_col") or "").strip()
+        weight = str(artifacts.get("_sampling_weight") or "").strip()
+        fpc_column = artifacts.get("_survey_fpc_col")
+        if fpc_column is not None and not isinstance(fpc_column, str):
+>           raise SurveyEngineError("SURVEY_FPC_COLUMN_INVALID", "FPC requires one column name, without type coercion")
+E           workbench.survey.errors.SurveyEngineError: SURVEY_FPC_COLUMN_INVALID: FPC requires one column name, without type coercion
+
+backend/workbench/survey/adapters.py:42: SurveyEngineError
+=========================== short test summary info ============================
+FAILED tests/eval_v1811/fpc_public_review_adversarial.py::test_workflow_does_not_silently_drop_nonstring_fpc[False]
+FAILED tests/eval_v1811/fpc_public_review_adversarial.py::test_workflow_does_not_silently_drop_nonstring_fpc[0]
+FAILED tests/eval_v1811/fpc_public_review_adversarial.py::test_workflow_does_not_silently_drop_nonstring_fpc[column2]
+FAILED tests/eval_v1811/fpc_public_review_adversarial.py::test_workflow_does_not_silently_drop_nonstring_fpc[column3]
+FAILED tests/eval_v1811/fpc_public_review_adversarial.py::test_workflow_does_not_silently_drop_nonstring_fpc[column4]
+5 failed, 18 passed in 16.16s

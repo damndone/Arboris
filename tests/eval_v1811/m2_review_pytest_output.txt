@@ -1,0 +1,87 @@
+..FFFF...............................                                    [100%]
+=================================== FAILURES ===================================
+_ test_count_glm_rejects_negative_support_before_returning_inference[negative_binomial] _
+
+family = 'negative_binomial'
+
+    @pytest.mark.parametrize("family", ["negative_binomial", "poisson"])
+    def test_count_glm_rejects_negative_support_before_returning_inference(family):
+        frame = pd.read_csv(ROOT/"tests/fixtures/count_models/reference-v3/nb2.csv").astype({"y":float})
+        frame.loc[0,"y"] = -1
+>       with pytest.raises(ValueError):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE ValueError
+
+tests/eval_v1811/m2_review_assertions.py:34: Failed
+_ test_count_glm_rejects_negative_support_before_returning_inference[poisson] __
+
+family = 'poisson'
+
+    @pytest.mark.parametrize("family", ["negative_binomial", "poisson"])
+    def test_count_glm_rejects_negative_support_before_returning_inference(family):
+        frame = pd.read_csv(ROOT/"tests/fixtures/count_models/reference-v3/nb2.csv").astype({"y":float})
+        frame.loc[0,"y"] = -1
+>       with pytest.raises(ValueError):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE ValueError
+
+tests/eval_v1811/m2_review_assertions.py:34: Failed
+_ test_uncertified_interior_ancillary_point_does_not_publish_regular_oim_inference[mean-0] _
+
+form = 'mean', index = 0
+
+    @pytest.mark.parametrize("form,index", [("mean",0),("constant",1)])
+    def test_uncertified_interior_ancillary_point_does_not_publish_regular_oim_inference(form,index):
+        row = EVIDENCE["probes"][f"boundary_{form}"]
+        # This checks regular inference at a strictly positive point, not a proposed
+        # boundary estimate. No alpha=0 fit is asserted or manufactured.
+        natural = row["result"]["ancillary_parameters"][1]
+        assert natural["estimate"] > 0
+        assert R["boundary"][index]["score_at_zero"] < -20
+        assert all(p["natural_score_fd"] < -20 for p in R["boundary"][index]["grid"])
+        if natural["std_error"] is not None:
+            # Production's reported mean-score tolerance cannot certify regular
+            # natural-parameter inference when its unscaled score is O(20).
+            n = row["result"]["nobs"]
+>           assert abs(row["natural_score"][-1])/n <= row["result"]["convergence"]["tolerance"]
+E           assert (20.49854803880733 / 2000) <= 1e-08
+E            +  where 20.49854803880733 = abs(-20.49854803880733)
+
+tests/eval_v1811/m2_review_assertions.py:51: AssertionError
+_ test_uncertified_interior_ancillary_point_does_not_publish_regular_oim_inference[constant-1] _
+
+form = 'constant', index = 1
+
+    @pytest.mark.parametrize("form,index", [("mean",0),("constant",1)])
+    def test_uncertified_interior_ancillary_point_does_not_publish_regular_oim_inference(form,index):
+        row = EVIDENCE["probes"][f"boundary_{form}"]
+        # This checks regular inference at a strictly positive point, not a proposed
+        # boundary estimate. No alpha=0 fit is asserted or manufactured.
+        natural = row["result"]["ancillary_parameters"][1]
+        assert natural["estimate"] > 0
+        assert R["boundary"][index]["score_at_zero"] < -20
+        assert all(p["natural_score_fd"] < -20 for p in R["boundary"][index]["grid"])
+        if natural["std_error"] is not None:
+            # Production's reported mean-score tolerance cannot certify regular
+            # natural-parameter inference when its unscaled score is O(20).
+            n = row["result"]["nobs"]
+>           assert abs(row["natural_score"][-1])/n <= row["result"]["convergence"]["tolerance"]
+E           assert (26.095006617823344 / 2000) <= 1e-08
+E            +  where 26.095006617823344 = abs(-26.095006617823344)
+
+tests/eval_v1811/m2_review_assertions.py:51: AssertionError
+=============================== warnings summary ===============================
+tests/eval_v1811/m2_review_assertions.py::test_count_glm_rejects_negative_support_before_returning_inference[negative_binomial]
+tests/eval_v1811/m2_review_assertions.py::test_count_glm_rejects_negative_support_before_returning_inference[poisson]
+tests/test_count_models_contract.py::test_fixed_alpha_uses_observed_information_and_has_no_estimation_claim
+tests/test_count_models_contract.py::test_glm_fixed_alpha_matches_r_expected_information
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/genmod/generalized_linear_model.py:1923: FutureWarning: The bic value is computed using the deviance formula. After 0.13 this will change to the log-likelihood based formula. This change has no impact on the relative rank of models compared using BIC. You can directly access the log-likelihood version using the `bic_llf` attribute. You can suppress this message by calling statsmodels.genmod.generalized_linear_model.SET_USE_BIC_LLF with True to get the LLF-based version now or False to retainthe deviance version.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/eval_v1811/m2_review_assertions.py::test_count_glm_rejects_negative_support_before_returning_inference[negative_binomial]
+FAILED tests/eval_v1811/m2_review_assertions.py::test_count_glm_rejects_negative_support_before_returning_inference[poisson]
+FAILED tests/eval_v1811/m2_review_assertions.py::test_uncertified_interior_ancillary_point_does_not_publish_regular_oim_inference[mean-0]
+FAILED tests/eval_v1811/m2_review_assertions.py::test_uncertified_interior_ancillary_point_does_not_publish_regular_oim_inference[constant-1]
+4 failed, 33 passed, 4 warnings in 1.41s

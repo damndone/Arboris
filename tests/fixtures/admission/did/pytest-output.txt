@@ -1,0 +1,24 @@
+
+Fontconfig error: No writable cache directories
+	/opt/homebrew/var/cache/fontconfig
+	/Users/jiayuanren/.cache/fontconfig
+	/Users/jiayuanren/.fontconfig
+first three coefficients and SE (Workbench / R): [('Intercept', 1.2487137902084555, 1.24871379020845, 0.07035461451086605, 0.0703546145108659), ('_did_D', 0.6678496814935979, 0.667849681493604, 0.19899290003359546, 0.198992900033596)]
+kernel settings: {'covariance_estimator': None, 'df_method': 'asymptotic', 'reference_distribution': 'z', 'df_resid': 198.0}
+max absolute differences: 6.106226635438361e-15 5.273559366969494e-16
+.F
+=================================== FAILURES ===================================
+___________ test_inference_kernel_declares_its_covariance_estimator ____________
+
+fitted = {'contract': 'workbench.inference_kernel.v1', 'model_id': 'did_1', 'model_type': 'did', 'param_names': ['Intercept', '_did_D'], ...}
+
+    def test_inference_kernel_declares_its_covariance_estimator(fitted):
+>       assert fitted["covariance_estimator"] is not None, (
+            "Admission settings cannot be bound from a null covariance_estimator", fitted)
+E       AssertionError: ('Admission settings cannot be bound from a null covariance_estimator', {'contract': 'workbench.inference_kernel.v1', 'model_id': 'did_1', 'model_type': 'did', 'param_names': ['Intercept', '_did_D'], ...})
+E       assert None is not None
+
+tests/test_admission_oracle_did.py:49: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_admission_oracle_did.py::test_inference_kernel_declares_its_covariance_estimator
+1 failed, 1 passed in 10.66s

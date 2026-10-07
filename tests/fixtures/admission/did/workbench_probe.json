@@ -1,0 +1,61 @@
+{
+  "request": {
+    "model_type": "did",
+    "y": "y",
+    "x": [],
+    "entity_col": "g",
+    "time_col": "time",
+    "did_mode": "cohort",
+    "did_cohort_col": "first_treat"
+  },
+  "status": "completed",
+  "errors": {
+    "schema_version": "legacy",
+    "run_id": "20261004_115338_536888_7246ced9",
+    "issues": [],
+    "superseded_by": "diagnostic_summary.json"
+  },
+  "kernel": {
+    "contract": "workbench.inference_kernel.v1",
+    "model_id": "did_1",
+    "model_type": "did",
+    "param_names": [
+      "Intercept",
+      "_did_D"
+    ],
+    "params": [
+      1.2487137902084555,
+      0.6678496814935979
+    ],
+    "vcov": [
+      [
+        0.004949771782972565,
+        -0.009899543565945135
+      ],
+      [
+        -0.009899543565945135,
+        0.03959817426378051
+      ]
+    ],
+    "vcov_param_names": [
+      "Intercept",
+      "_did_D"
+    ],
+    "vcov_scope": "full",
+    "reference_distribution": "z",
+    "df_resid": 198.0,
+    "df_method": "asymptotic",
+    "n_clusters": null,
+    "loglik": null,
+    "nobs": 400,
+    "covariance_estimator": null,
+    "estimation_sample_fingerprint": null,
+    "weights": "none",
+    "interfaces": [
+      "coef_vcov"
+    ],
+    "unavailable": {
+      "loglik": "The model did not provide a log-likelihood."
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "severity": "blocking",
+  "code": "JOINT_ARMA_GARCH_NOT_CONVERGED",
+  "message": "Iteration limit reached",
+  "evidence": {
+    "iterations": 1,
+    "optimizer": "SLSQP"
+  },
+  "impact": "The requested joint model cannot produce an accepted estimate.",
+  "recommended_actions": []
+}

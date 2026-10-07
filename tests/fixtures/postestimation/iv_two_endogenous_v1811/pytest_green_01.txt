@@ -1,0 +1,12 @@
+..
+Fontconfig error: No writable cache directories
+	/opt/homebrew/var/cache/fontconfig
+	/Users/jiayuanren/.cache/fontconfig
+	/Users/jiayuanren/.fontconfig
+Retained public IV run: /private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-763/iv-two-endogenous-v18110/oracle/runs/20261004_201418_362655_fff86de6
+r max coefficient/covariance error: 5.551115123125783e-16 8.239936510889834e-18
+.stata max coefficient/covariance error: 8.881784197001252e-16 8.673617379884035e-18
+.r joint endogenous Wald Workbench/native: {'operation': 'wald', 'model_id': 'iv_2sls_1', 'model_type': 'iv_2sls', 'covariance_estimator': 'robust', 'nobs': 650, 'df_method': 'asymptotic', 'n_clusters': None, 'constraints': [{'terms': {'xe1': 1.0}, 'value': 0.0}, {'terms': {'xe2': 1.0}, 'value': 0.0}], 'distribution': 'chi2', 'statistic': 52.966469476497096, 'df_num': 2, 'df_den': None, 'p_value': 3.1512095954357576e-12} {'distribution': 'chi2', 'statistic': 52.966469476497025, 'df_num': 2, 'df_den': None, 'p_value': 3.151209595435867e-12, 'constraints': ['xe1=0', 'xe2=0']}
+.stata joint endogenous Wald Workbench/native: {'operation': 'wald', 'model_id': 'iv_2sls_1', 'model_type': 'iv_2sls', 'covariance_estimator': 'robust', 'nobs': 650, 'df_method': 'asymptotic', 'n_clusters': None, 'constraints': [{'terms': {'xe1': 1.0}, 'value': 0.0}, {'terms': {'xe2': 1.0}, 'value': 0.0}], 'distribution': 'chi2', 'statistic': 52.966469476497096, 'df_num': 2, 'df_den': None, 'p_value': 3.1512095954357576e-12} {'distribution': 'chi2', 'statistic': 52.9664694764971, 'df_num': 2, 'df_den': None, 'p_value': 3.15120959543578e-12, 'constraints': ['xe1=0', 'xe2=0']}
+...
+8 passed in 11.43s

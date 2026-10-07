@@ -1,0 +1,7 @@
+{
+  "raw_sha256": "withheld-raw-sha256-017589ab56f855d61ed12f9a",
+  "redacted_sha256": "6dd9c10e47c04378c69993aecdf7bcd05eb62b111eb8119439eb39b3aa8486c3",
+  "ignored_raw": "local/v1811-script-statistical-adapters/glm_nb_primitives_1.0_stata_3cb9c2dbca/analysis.log",
+  "outside_header_values_byte_identical": true,
+  "raw_mode": "0600"
+}

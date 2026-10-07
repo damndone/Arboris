@@ -1,0 +1,339 @@
+{
+  "schema_version": 1,
+  "evaluation_id": "v1811-agent-live-harness-offline-production-20261004",
+  "baseline": "485ce4fcd20a9b20d15d6916d8510754b7b74834",
+  "branch": "codex/v1811-live-harness",
+  "worktree": "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-live-harness",
+  "candidate_files": {
+    "scripts/agent_live_eval.py": "89102b49bb92b74617bb71cc768f86bd551fdcbe960b0636406569d2723ba5fb",
+    "scripts/agent_live_eval_cases.json": "a3e318009221bbad6b2a6cce7b65a2d434588ee14178c721f38c193c98ad7c3d",
+    "scripts/agent_live_eval_fixtures_v1811.json": "91290390dd7cc89445a703efed113079fa5af607592b8d6ab4084fcf7c843889",
+    "tests/test_agent_live_eval_v1811_harness.py": "8de1671d6ef4ec84ede40a80525a55bae10282defa79f7cb2442eab01965a924"
+  },
+  "environment": {
+    "python": "3.14.6",
+    "platform": "Darwin",
+    "machine_arch": "arm64"
+  },
+  "commands": [
+    {
+      "output": "tests/fixtures/agent_live_eval_v1811/selection-red.txt",
+      "sha256": "f8a293f4c81963fbe567368a4b35855833c28009b662e4e207d7a120c7ca05f1",
+      "exit_code": 1,
+      "command": "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py .venv/bin/python -m pytest tests/test_agent_live_eval_v1811_harness.py -q",
+      "scope": "full new file for final-green; phase nodes recorded in report for earlier outputs"
+    },
+    {
+      "output": "tests/fixtures/agent_live_eval_v1811/selection-green.txt",
+      "sha256": "80aac6b12398d3501faa5711e551cb31d624d3e32994128e1d2a25398af86fa1",
+      "exit_code": 0,
+      "command": "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py .venv/bin/python -m pytest tests/test_agent_live_eval_v1811_harness.py -q",
+      "scope": "full new file for final-green; phase nodes recorded in report for earlier outputs"
+    },
+    {
+      "output": "tests/fixtures/agent_live_eval_v1811/protocol-red.txt",
+      "sha256": "411a22b1783a5b9d397060ba261f7da07699894188e299a0ef25773f20477c21",
+      "exit_code": 1,
+      "command": "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py .venv/bin/python -m pytest tests/test_agent_live_eval_v1811_harness.py -q",
+      "scope": "full new file for final-green; phase nodes recorded in report for earlier outputs"
+    },
+    {
+      "output": "tests/fixtures/agent_live_eval_v1811/protocol-green.txt",
+      "sha256": "3f55a12e5c7afa0cadbc20715d9b818393d8c18cc5c8aaa4e36d72567cd5efe0",
+      "exit_code": 0,
+      "command": "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py .venv/bin/python -m pytest tests/test_agent_live_eval_v1811_harness.py -q",
+      "scope": "full new file for final-green; phase nodes recorded in report for earlier outputs"
+    },
+    {
+      "output": "tests/fixtures/agent_live_eval_v1811/packets-red.txt",
+      "sha256": "18e69abf833b6d76d5cda4bbaec311f3a3db491ffad4e3a6a8f2fdb7a0b61ce2",
+      "exit_code": 1,
+      "command": "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py .venv/bin/python -m pytest tests/test_agent_live_eval_v1811_harness.py::test_legacy_37_unchanged_and_17_exact_bound_packets -q",
+      "scope": "full new file for final-green; phase nodes recorded in report for earlier outputs"
+    },
+    {
+      "output": "tests/fixtures/agent_live_eval_v1811/public-fixtures-first.txt",
+      "sha256": "a945ee9381f2b247fa5fe4854421cddfcadcebb5c87272c86eac9a2a90a59d3b",
+      "exit_code": 1,
+      "command": "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py .venv/bin/python -m pytest tests/test_agent_live_eval_v1811_harness.py::test_legacy_37_unchanged_and_17_exact_bound_packets tests/test_agent_live_eval_v1811_harness.py::test_public_family_fixture_owner_and_native_fields -q",
+      "scope": "full new file for final-green; phase nodes recorded in report for earlier outputs"
+    },
+    {
+      "output": "tests/fixtures/agent_live_eval_v1811/public-fixtures-recheck.txt",
+      "sha256": "46bedfe40cc49d6e7f0b28fc56147a79979630da2dd201b08a15784a9b0c7d6a",
+      "exit_code": 1,
+      "command": "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py .venv/bin/python -m pytest tests/test_agent_live_eval_v1811_harness.py::test_public_family_fixture_owner_and_native_fields -q",
+      "scope": "full new file for final-green; phase nodes recorded in report for earlier outputs"
+    },
+    {
+      "output": "tests/fixtures/agent_live_eval_v1811/complete-first.txt",
+      "sha256": "98c2db3c465935eea222e1378cacb953b398f175655781d77614ec5920988fe5",
+      "exit_code": 0,
+      "command": "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py .venv/bin/python -m pytest tests/test_agent_live_eval_v1811_harness.py -q",
+      "scope": "full new file for final-green; phase nodes recorded in report for earlier outputs"
+    },
+    {
+      "output": "tests/fixtures/agent_live_eval_v1811/final-focused.txt",
+      "sha256": "02bce22cab5344279a63ec1d27fb41f1285209e7919eee9d64e94fc341afd464",
+      "exit_code": 1,
+      "command": "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py .venv/bin/python -m pytest tests/test_agent_live_eval_v1811_harness.py -q",
+      "scope": "full new file for final-green; phase nodes recorded in report for earlier outputs"
+    },
+    {
+      "output": "tests/fixtures/agent_live_eval_v1811/public-confirm-recheck.txt",
+      "sha256": "a0062527ab75825d34b96725c79ce9c7bbb1f57063cbe9338e78e657a411ff47",
+      "exit_code": 1,
+      "command": "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py .venv/bin/python -m pytest tests/test_agent_live_eval_v1811_harness.py::test_real_public_confirmation_terminal_result_binding_without_llm -q",
+      "scope": "full new file for final-green; phase nodes recorded in report for earlier outputs"
+    },
+    {
+      "output": "tests/fixtures/agent_live_eval_v1811/public-confirm-initialized.txt",
+      "sha256": "938ea26a8a5b3bd31910b370f09a6238ce5e707256764b13a10b76f5b13e0567",
+      "exit_code": 0,
+      "command": "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py .venv/bin/python -m pytest tests/test_agent_live_eval_v1811_harness.py::test_real_public_confirmation_terminal_result_binding_without_llm -q",
+      "scope": "full new file for final-green; phase nodes recorded in report for earlier outputs"
+    },
+    {
+      "output": "tests/fixtures/agent_live_eval_v1811/edge-red.txt",
+      "sha256": "bee01fe86dcff74cff6b9aed6b55a0fe9eaf151e4403e81554d451c3cbc38b4b",
+      "exit_code": 1,
+      "command": "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py .venv/bin/python -m pytest tests/test_agent_live_eval_v1811_harness.py::test_existing_dangling_output_link_is_not_followed tests/test_agent_live_eval_v1811_harness.py::test_empty_catalog_is_failure_before_provider -q",
+      "scope": "full new file for final-green; phase nodes recorded in report for earlier outputs"
+    },
+    {
+      "output": "tests/fixtures/agent_live_eval_v1811/lineage-red.txt",
+      "sha256": "b7e1562feb1aa96212e9d10adf699a4e62389fa1d3c20c4125492353943ebccb",
+      "exit_code": 1,
+      "command": "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py .venv/bin/python -m pytest tests/test_agent_live_eval_v1811_harness.py::test_result_lineage_cannot_use_unrelated_completed_run -q",
+      "scope": "full new file for final-green; phase nodes recorded in report for earlier outputs"
+    },
+    {
+      "output": "tests/fixtures/agent_live_eval_v1811/final-green.txt",
+      "sha256": "2e635d15b8a31674be79e9af868e98895428f0c78582f27706a4276f012ce29a",
+      "exit_code": 0,
+      "command": "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py .venv/bin/python -m pytest tests/test_agent_live_eval_v1811_harness.py -q",
+      "scope": "full new file for final-green; phase nodes recorded in report for earlier outputs"
+    },
+    {
+      "output": "tests/fixtures/agent_live_eval_v1811/tsc.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "exit_code": 0,
+      "command": "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py frontend/node_modules/.bin/tsc --noEmit -p frontend/tsconfig.json",
+      "scope": "full new file for final-green; phase nodes recorded in report for earlier outputs"
+    }
+  ],
+  "protected_native_references_and_data": [
+    {
+      "path": "tests/fixtures/admission/iv_2sls/data.csv",
+      "sha256": "880c3b4ff039e86d358f9d1c804dd729bcaeafe2bd33075f3649902c629c7a2f",
+      "baseline_sha256": "880c3b4ff039e86d358f9d1c804dd729bcaeafe2bd33075f3649902c629c7a2f"
+    },
+    {
+      "path": "tests/fixtures/admission/iv_2sls/oracle.json",
+      "sha256": "0691f282ded15fcf2e6fa0e03b7911d4032bd036ecc4686d1dcedaf10799af75",
+      "baseline_sha256": "0691f282ded15fcf2e6fa0e03b7911d4032bd036ecc4686d1dcedaf10799af75"
+    },
+    {
+      "path": "tests/fixtures/admission/glm_binomial/data.csv",
+      "sha256": "ab6719fcec6c408c47dff6d3ca93d27f01ed43124697c0478f487455db6a88b0",
+      "baseline_sha256": "ab6719fcec6c408c47dff6d3ca93d27f01ed43124697c0478f487455db6a88b0"
+    },
+    {
+      "path": "tests/fixtures/admission/glm_binomial/oracle.json",
+      "sha256": "33c948ae25bc1ea80b80d22edcdc65d830af2b4b15141abe6bc22b14f6357e2d",
+      "baseline_sha256": "33c948ae25bc1ea80b80d22edcdc65d830af2b4b15141abe6bc22b14f6357e2d"
+    },
+    {
+      "path": "tests/fixtures/admission/glm_poisson/data.csv",
+      "sha256": "214027c9911853bb988276a7611ff079670d3b44ca95345b4a35a7737d790126",
+      "baseline_sha256": "214027c9911853bb988276a7611ff079670d3b44ca95345b4a35a7737d790126"
+    },
+    {
+      "path": "tests/fixtures/admission/glm_poisson/oracle.json",
+      "sha256": "10454ba9e1d08809e1d81f2f562da942042920abee1dfd15c09cb793c75156d4",
+      "baseline_sha256": "10454ba9e1d08809e1d81f2f562da942042920abee1dfd15c09cb793c75156d4"
+    },
+    {
+      "path": "tests/fixtures/admission/glm_negative_binomial/data.csv",
+      "sha256": "33bf1067bdf7f7ca7f1bf7fb34c16fc167d9318b482f60aae8febd402b084711",
+      "baseline_sha256": "33bf1067bdf7f7ca7f1bf7fb34c16fc167d9318b482f60aae8febd402b084711"
+    },
+    {
+      "path": "tests/fixtures/count_models/integration-strict-v1811/glm-negative-binomial-v1811-oracle.json",
+      "sha256": "8edac87c50fe78ed186f75297abae9de4f11c0d0f848d120620c1b3705cb0c6c",
+      "baseline_sha256": "8edac87c50fe78ed186f75297abae9de4f11c0d0f848d120620c1b3705cb0c6c"
+    },
+    {
+      "path": "tests/fixtures/admission/panel_ols/data.csv",
+      "sha256": "b03b366bfd8cb184868689b8a979711c0f2a13b946d282a2bad59ccc5871a9ee",
+      "baseline_sha256": "b03b366bfd8cb184868689b8a979711c0f2a13b946d282a2bad59ccc5871a9ee"
+    },
+    {
+      "path": "tests/fixtures/panel_cluster/oracle.json",
+      "sha256": "5762c67bc879535d6ad880028fe255fccef9048b4d0c35de06321712a39a331e",
+      "baseline_sha256": "5762c67bc879535d6ad880028fe255fccef9048b4d0c35de06321712a39a331e"
+    },
+    {
+      "path": "tests/fixtures/panel_cluster/staggered.csv",
+      "sha256": "480b5a87a735761be6ccb0260e56a631ce34c1f9245de6a7a50bb072379471dc",
+      "baseline_sha256": "480b5a87a735761be6ccb0260e56a631ce34c1f9245de6a7a50bb072379471dc"
+    },
+    {
+      "path": "tests/fixtures/admission/linear_mixed_effects/data.csv",
+      "sha256": "f971e489477c8c912580aa09b2f0327334f0e12a2f9d5313a5e95f9ccf333828",
+      "baseline_sha256": "f971e489477c8c912580aa09b2f0327334f0e12a2f9d5313a5e95f9ccf333828"
+    },
+    {
+      "path": "tests/fixtures/admission/linear_mixed_effects/oracle.json",
+      "sha256": "82471ced411e0b571015c05c265c376194cf0360936311e3d00e309e867bf9c5",
+      "baseline_sha256": "82471ced411e0b571015c05c265c376194cf0360936311e3d00e309e867bf9c5"
+    },
+    {
+      "path": "tests/fixtures/postestimation/data.csv",
+      "sha256": "2e1b92f07632a8c88d047074f77cd6e5f9552b4f932f7d6ed2499161a0bf3084",
+      "baseline_sha256": "2e1b92f07632a8c88d047074f77cd6e5f9552b4f932f7d6ed2499161a0bf3084"
+    },
+    {
+      "path": "tests/fixtures/postestimation/oracle.json",
+      "sha256": "d80dbc69f91648cbd17443f89deaf21df63296f1296a6d674c3ef9e135b9302c",
+      "baseline_sha256": "d80dbc69f91648cbd17443f89deaf21df63296f1296a6d674c3ef9e135b9302c"
+    },
+    {
+      "path": "tests/fixtures/count_models/integration-strict-v1811/native-reference/nb2-postestimation-reference.json",
+      "sha256": "ea67d3316222edf8a36b99c93bd8f1e5f00c0bef3677712f537d4369941d80d9",
+      "baseline_sha256": "ea67d3316222edf8a36b99c93bd8f1e5f00c0bef3677712f537d4369941d80d9"
+    },
+    {
+      "path": "tests/fixtures/v186_families/families.csv",
+      "sha256": "cb8172fbd6c7a4b70a5c524df660480c1e98529ccbe3bfdd10b30748ffa35ad8",
+      "baseline_sha256": "cb8172fbd6c7a4b70a5c524df660480c1e98529ccbe3bfdd10b30748ffa35ad8"
+    },
+    {
+      "path": "tests/fixtures/v186_families/oracle.json",
+      "sha256": "30dbea51f144a42a18340ac62e3f283b8ac62a708f0f54993b5547af2ef183fb",
+      "baseline_sha256": "30dbea51f144a42a18340ac62e3f283b8ac62a708f0f54993b5547af2ef183fb"
+    },
+    {
+      "path": "tests/fixtures/cs_did/panel.csv",
+      "sha256": "3e929df973399a5015a658306830ce9ef0d08dc551dd14556940f3377ed0f268",
+      "baseline_sha256": "3e929df973399a5015a658306830ce9ef0d08dc551dd14556940f3377ed0f268"
+    },
+    {
+      "path": "tests/fixtures/cs_did/aggte.json",
+      "sha256": "d835af04b0d372aa002a107d598d7da3a056a86a6285cadcfe695d772b790b7c",
+      "baseline_sha256": "d835af04b0d372aa002a107d598d7da3a056a86a6285cadcfe695d772b790b7c"
+    },
+    {
+      "path": "tests/fixtures/sa_did/panel_balanced.csv",
+      "sha256": "cd4a9dae122f0d3d905841471801bd041e053da1d36f7ecac2144abcb60d0add",
+      "baseline_sha256": "cd4a9dae122f0d3d905841471801bd041e053da1d36f7ecac2144abcb60d0add"
+    },
+    {
+      "path": "tests/fixtures/sa_did/sunab_balanced.json",
+      "sha256": "346c45a4dafa934df1bd0ead22be46efc6413507831cb3f00de0adc5fd910e0b",
+      "baseline_sha256": "346c45a4dafa934df1bd0ead22be46efc6413507831cb3f00de0adc5fd910e0b"
+    },
+    {
+      "path": "tests/fixtures/dcdh/panel_nonabsorbing.csv",
+      "sha256": "12dbc956c84a9e22d3b449c49df5acbcd32ba8de2e427587b7d2dd81a3762960",
+      "baseline_sha256": "12dbc956c84a9e22d3b449c49df5acbcd32ba8de2e427587b7d2dd81a3762960"
+    },
+    {
+      "path": "tests/fixtures/dcdh/dyn_nonabsorbing.json",
+      "sha256": "bcb348d317971461531ccee5e1ba1d3009a839f9da607c00cbab2a39ee25dcd1",
+      "baseline_sha256": "bcb348d317971461531ccee5e1ba1d3009a839f9da607c00cbab2a39ee25dcd1"
+    }
+  ],
+  "retained_evidence": [
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-859/test_public_family_fixture_own9/public-fixture-evidence.json",
+      "sha256": "8920b43fdafbdd75d73d64f1cdde09e860b22ff6856990e4d5695e7a0cf84a0d"
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-859/test_public_family_fixture_own12/public-fixture-evidence.json",
+      "sha256": "2667cbbe0a295d21de07687cde11cd2993ba853e98160cee1d3bc3d17768e843"
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-859/test_public_family_fixture_own15/public-fixture-evidence.json",
+      "sha256": "dae5f3ff26d6bf7966f8a291ac775789a4ec719ba4cee2062f22b609f2b48878"
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-859/test_public_family_fixture_own7/public-fixture-evidence.json",
+      "sha256": "9e274934b2b4fb50d5758bb665856dfd90d92ac3d88b9a080816315738c0eb78"
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-859/test_public_family_fixture_own0/public-fixture-evidence.json",
+      "sha256": "6fb19a2a77ce522d8a30c52b8b1a27a2a2be103963b0ce0dbffedcd7de943926"
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-859/test_public_family_fixture_own1/public-fixture-evidence.json",
+      "sha256": "31f15431c557e65dd454cdb9cac607de94592174477e731ed75ce0305b8c8e69"
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-859/test_public_family_fixture_own14/public-fixture-evidence.json",
+      "sha256": "d6db48099804a17ce46d6ea87229ff58dd76027a8b6261dbc514c325ca5c5172"
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-859/test_public_family_fixture_own13/public-fixture-evidence.json",
+      "sha256": "5aa270063a26f93bde92dae9aaa8fb8427273d6848d9de8f2e9d8dba5f511de6"
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-859/test_public_family_fixture_own8/public-fixture-evidence.json",
+      "sha256": "2a8026e7a404b81101c16936784f2a08763a15a4c28190f64316eb5bbfcb8296"
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-859/test_public_family_fixture_own16/public-fixture-evidence.json",
+      "sha256": "d5becb85e650df9a0f02096eaf795febcba5a5c24efc68b4abb8b5d003e088ca"
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-859/test_public_family_fixture_own11/public-fixture-evidence.json",
+      "sha256": "3a4542a0da68c5e3e31350973068b327cd9869704dac662b5d92a532ce5216ed"
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-859/test_public_family_fixture_own3/public-fixture-evidence.json",
+      "sha256": "25310e9f3d7e4245a419be3537f28f088f31add0b69e731c14e7270699759ef7"
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-859/test_public_family_fixture_own4/public-fixture-evidence.json",
+      "sha256": "c9a49435a3d9182f4b9742be4431346c6a294d552413b863fc343b1713933d10"
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-859/test_public_family_fixture_own5/public-fixture-evidence.json",
+      "sha256": "e1d4af5a3c833a0b5b98670c197ffa58410e243b7b43840aedb4c64695792979"
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-859/test_public_family_fixture_own2/public-fixture-evidence.json",
+      "sha256": "68ec8dc399234d0fa7b233feff1efa3539e296785978555537928022e38dd6ef"
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-859/test_public_family_fixture_own10/public-fixture-evidence.json",
+      "sha256": "5746e4bda8e64a077f9970374207af25a2a6dde4f3efb6c36ef0e8d30b9efec8"
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-859/test_public_family_fixture_own6/lmm-blocker.json",
+      "sha256": "6a3e6a79bb89b0cab4391a3323185f88398a1d147ac85e0c6e51b2cdcbcda68c"
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-859/test_real_public_confirmation_0/public-confirmation-evidence.json",
+      "sha256": "da264b5216a4aba66c195a229dfbe229ef8a143f5190795e61a09d32704fa348"
+    },
+    {
+      "path": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-859/test_real_public_confirmation_0/public-confirmation-attempt.json",
+      "sha256": "da264b5216a4aba66c195a229dfbe229ef8a143f5190795e61a09d32704fa348"
+    }
+  ],
+  "results": {
+    "offline_pytest": "46 PASS",
+    "typescript": "PASS",
+    "public_seed_native_fields": "16 families PASS in listed fields",
+    "lmm": "BLOCKED LMM_FROZEN_CONTAINMENT_REQUIRED, not numeric/live PASS",
+    "provider_live": "NOT RUN / NOT VERIFIED",
+    "genesis_and_multi_step": "NOT COVERED by new17 rerun protocol",
+    "independent_review": "PENDING",
+    "full_gate": "NOT RUN"
+  },
+  "owner_input_summary": {
+    "path": "tests/fixtures/agent_live_eval_v1811/owner-input-summary.json",
+    "sha256": "2401517bcac7fe5975dadb43e5cbd3e7231b13c4b44e9c4317ce15614c7cf0c9"
+  }
+}

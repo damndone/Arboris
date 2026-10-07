@@ -22,7 +22,7 @@ import functools
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, BinaryIO, Mapping
 
 import pandas as pd
 
@@ -58,17 +58,18 @@ def statistical_format(path: Path | str, suffix: str | None = None) -> str | Non
 # ---------------------------------------------------------------- reading
 
 
-def _read_native(path: Path, fmt: str, **kwargs: Any) -> tuple[pd.DataFrame, Any]:
+def _read_native(path: Path | BinaryIO, fmt: str, **kwargs: Any) -> tuple[pd.DataFrame, Any]:
     module = _pyreadstat()
+    source = str(path) if isinstance(path, (str, Path)) else path
     try:
         if fmt == "dta":
-            return module.read_dta(str(path), **kwargs)
-        return module.read_sav(str(path), user_missing=True, **kwargs)
+            return module.read_dta(source, **kwargs)
+        return module.read_sav(source, user_missing=True, **kwargs)
     except Exception as exc:
         name = type(exc).__name__
         if name in {"ReadstatError", "PyreadstatError"} or isinstance(exc, (OSError, UnicodeError)):
             raise StatisticalFileError(
-                f"{path.name} is not a readable {fmt.upper()} file ({exc})."
+                f"{getattr(path, 'name', 'Verified source')} is not a readable {fmt.upper()} file ({exc})."
             ) from exc
         raise
 
@@ -94,7 +95,7 @@ def _restore_numeric_columns(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def read_statistical(
-    path: Path, fmt: str, *, nrows: int | None = None, usecols: list[str] | None = None
+    path: Path | BinaryIO, fmt: str, *, nrows: int | None = None, usecols: list[str] | None = None
 ) -> pd.DataFrame:
     kwargs: dict[str, Any] = {"apply_value_formats": False}
     if nrows is not None:
@@ -178,7 +179,7 @@ def statistical_row_count(path: Path, fmt: str) -> int:
 
 
 def read_table(
-    path: Path,
+    path: Path | BinaryIO,
     *,
     suffix: str | None = None,
     nrows: int | None = None,
@@ -187,8 +188,9 @@ def read_table(
 ) -> pd.DataFrame:
     """Read any supported tabular file. ``nrows=0`` reads the header only."""
 
-    path = Path(path)
-    normalized = (suffix or path.suffix).lower()
+    if not hasattr(path, 'read'):
+        path = Path(path)
+    normalized = (suffix or getattr(path, 'suffix', '')).lower()
     fmt = STATISTICAL_FORMATS.get(normalized)
     if fmt is not None:
         return read_statistical(path, fmt, nrows=nrows, usecols=usecols)

@@ -1,0 +1,71 @@
+{
+  "worktree_baseline": "55ff38b551a113d12ab2be9ea6c9494c6d76ce26",
+  "integration_at_start": "5f8451b929ac51ba7ae9821e4a8a7f1adea642a8",
+  "owner_root": "/Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-lmm-host/runs/20261005_024643_550779_dbe309ee",
+  "owner_sha256": {
+    "model_results/inference_kernels/linear_mixed_effects_1.json": "8e0c420d91deeb2b55476fc6a6fa6fc9b842a4665eada494fd23882d77686782",
+    "run_inputs.json": "49490985c218280b9958447c49c59ff24add373e00b2cfe8a42c336b837de352",
+    "raw_snapshot/data.csv": "f971e489477c8c912580aa09b2f0327334f0e12a2f9d5313a5e95f9ccf333828",
+    "artifacts/model_results/linear_mixed_effects_1.result.json": "c1e2c07d43c3ba5b40d087b62c31d763ecbb6a7cbf0da6971e2ab5ac9e748a00",
+    "run_manifest.json": "e8c385c137d3e9297a19eef272392db28387d54a2e5051e02189d87e806fb0ed"
+  },
+  "source_fixture_sha256": "f971e489477c8c912580aa09b2f0327334f0e12a2f9d5313a5e95f9ccf333828",
+  "owner_refit": false,
+  "owner_rewrite_or_resign": false,
+  "public_canary_bypass": false,
+  "protected_sha256": {
+    "tests/fixtures/admission/linear_mixed_effects/data.csv": "f971e489477c8c912580aa09b2f0327334f0e12a2f9d5313a5e95f9ccf333828",
+    "tests/fixtures/admission/linear_mixed_effects/oracle.json": "82471ced411e0b571015c05c265c376194cf0360936311e3d00e309e867bf9c5",
+    "backend/workbench/postestimation/core.py": "c83b5759142abc3443e1c8f14b29f9bb4334d96d4070990ebb8c2f4c1af80f9e",
+    "backend/workbench/postestimation/margins.py": "9cf29e9fd1fe4198f300ed346b462a4e718a0447cab80c2d45f17827a29b0bb7",
+    "backend/workbench/contracts/model/inference_kernel.py": "6469a63d83ddedf1faa6c694718f56431ea87a419297625782a0a330f7f4a804"
+  },
+  "asset_sha256": {
+    "tests/fixtures/postestimation/lmm_v1811/r_reference.json": "c1776ac32863ece237f390d5125a9af755341ba54162113896dcd91645b06df2",
+    "tests/fixtures/postestimation/lmm_v1811/native-r-output.txt": "8a868091ba9c86ddb86e0ac31e8585333efdb3262bb575cbfdd85b56144471eb",
+    "tests/fixtures/postestimation/lmm_v1811/tdd-red.txt": "4acdecddd2c8c2aa480cd90214297f76571beb21652383dda2c064c4a61dfa29",
+    "tests/fixtures/postestimation/lmm_v1811/generate_reference.R": "c6b738cc205dafc3b5b0ef7694d3c76959686fe3c23caa26b96619b2413aae0a",
+    "tests/fixtures/postestimation/lmm_v1811/focused-final.txt": "2f56646fffe343506c46c27f7e7cad6d73c6431ea19c4e7e761e15e6d40c374f",
+    "tests/fixtures/postestimation/lmm_v1811/owner-comparison.json": "5e4e4f5a42e788d4c95c3c721dbb5ca8242ab76af18f13dde31df39aaed6a678",
+    "tests/test_lmm_postestimation_v1811_reference.py": "81b2a88a621187d4f1501ebfb6be7831486ddcd1fe22481798193761069b1f7f",
+    "tests/fixtures/postestimation/lmm_v1811/vcov-definition-source.txt": "e3740b83e3eb27510fc4c484edbad34f683a3dedb1b01cad3c63850512d1baca",
+    "tests/fixtures/postestimation/lmm_v1811/vcov-statsmodels-source.txt": "a523230ea8a368fbfdf120379c9e8d79504187ea7e7643a6dad9c503afb73da6",
+    "tests/fixtures/postestimation/lmm_v1811/vcov-differences.json": "f6067510d945d545d3259b170b023b2bd49f10990d5094e8e8da447c5c83f09e",
+    "tests/fixtures/postestimation/lmm_v1811/observed_information.R": "6b1c7eae49336a8c7b2bb00a7e093bddfb85e32c191c28dadb83a9209a39709f",
+    "tests/fixtures/postestimation/lmm_v1811/r_observed_information.json": "b41ad2210ac9a2adacb92b7c90777532200950b7fa1e86cf70a6c0debf089da8",
+    "tests/fixtures/postestimation/lmm_v1811/r_observed_information_comparison.json": "0a2d1fa9cd37d160cea8218a37e0dc1b139b4b7bdff44398675a199287b375ba",
+    "tests/fixtures/postestimation/lmm_v1811/native-r-observed-information-output.txt": "8cda088aaa7ecd8dc1a992a1e005429f6eb35b7e81459c54674914f3f88b37ad",
+    "tests/fixtures/postestimation/lmm_v1811/native-r-observed-information-direct-output.txt": "7bafa0001219d72df73e85824219781bb54b8229aa9242c22bdb02ccf2ddfb9a",
+    "tests/fixtures/postestimation/lmm_v1811/owner_point_diagnostic.R": "cb20cc0d221733970a8146cb2d745c67a1a478e2f753c4d49d9907ac2f816030",
+    "tests/fixtures/postestimation/lmm_v1811/owner_point_diagnostic.json": "5b5cab3b4e761f9330ee33df090c203f7a60f77254d1464f0c9fbcac472b3e80",
+    "tests/fixtures/postestimation/lmm_v1811/native-r-owner-point-diagnostic-output.txt": "637dadbc60b61490b94e28d1fe1e2a37113f2ab4d0ee80110fd66c9c22dae909"
+  },
+  "verification_status": "5 failed, 4 passed; native LMM postestimation does not match retained kernel at original tolerances",
+  "observed_information_followup": {
+    "status": "native analytic R evaluation complete; same joint construction documented; remaining owner covariance differences and no postestimation admission certification",
+    "fits_or_optimizations": 0,
+    "additional_pytest_rounds": 0,
+    "original_gls_reference_and_tolerances_preserved": true,
+    "queued_execution_stopped_before_native_start": true,
+    "direct_small_matrix_execution_count": 1,
+    "direct_exit_code": 0,
+    "direct_wall_time_seconds": 0.163411583,
+    "shared_lock_exemption": "Root explicitly classified this fixed-design small-matrix analytic R calculation as not heavy; first live was waiting on LLM network",
+    "max_gls_reconstruction_absolute_error": 1.1102230246251565e-16,
+    "minimum_raw_information_eigenvalue": 10.634785038300484,
+    "stationarity_certification_threshold_added": false,
+    "admission_certified": false,
+    "owner_point_diagnostic": {
+      "analytic_execution_count": 1,
+      "wall_time_seconds": 0.091744416,
+      "exit_code": 0,
+      "native_oracle_reset": false,
+      "unexplained_covariance_max_absolute": 1.249000902703301e-16,
+      "unexplained_covariance_max_relative": 7.153944015974539e-15,
+      "owner_rho_score": -0.00012838668829218136,
+      "owner_rho_score_divided_by_n": -3.566296897005038e-07,
+      "covariance_difference_explained": "Full beta+rho evaluation-point change; no isolated fixed-beta rho-only experiment",
+      "inference_certified": false
+    }
+  }
+}

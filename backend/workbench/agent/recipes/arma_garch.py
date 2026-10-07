@@ -343,6 +343,8 @@ def build_arma_garch_public_result_view(
     conditional = _object(artifacts.get("ts.conditional_series"))
     volatility = conditional.get("volatility")
     volatility_count = len(volatility) if isinstance(volatility, list) else 0
+    final_model_payload = _object(artifacts.get("ts.final_model"))
+    fit_key = "in_sample_fit" if "in_sample_fit" in final_model_payload else "validation_fit"
 
     return {
         "available": True,
@@ -365,11 +367,10 @@ def build_arma_garch_public_result_view(
             "volatility": omitted_volatility,
         },
         "model_result": {
-            "validation_fit": {
+            "fit_scope": final_model_payload.get("fit_scope"),
+            fit_key: {
                 key: value
-                for key, value in _object(
-                    _object(artifacts.get("ts.final_model")).get("validation_fit")
-                ).items()
+                for key, value in _object(final_model_payload.get(fit_key)).items()
                 if key
                 in {
                     "model_family",

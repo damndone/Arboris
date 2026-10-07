@@ -184,7 +184,13 @@ def build_diagnostic_summary(
         "coefficients_summary": {
             "interpretation_mode": "associational",
             "rows": coeff_rows,
-            "full_table_ref": f"model_results/{primary_result.get('model_id', 'model')}.json",
+            # A versioned result packet (the LMM recipe, which publishes its
+            # target estimand) is the only result file; never name a missing one.
+            "full_table_ref": (
+                f"artifacts/model_results/{primary_result.get('model_id', 'model')}.result.json"
+                if primary_result.get("primary_target_id")
+                else f"model_results/{primary_result.get('model_id', 'model')}.json"
+            ),
         },
         "model_quality": {
             "metrics": metrics,

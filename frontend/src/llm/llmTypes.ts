@@ -54,6 +54,17 @@ export interface ProviderUpsertInput {
   clear_api_key?: boolean;
 }
 
+export interface ModelsDiscoveryInput {
+  base_url: string;
+  api_key: string;
+  timeout_s?: number;
+}
+
+export interface ModelsDiscoveryResult {
+  models: LlmModel[];
+  message: string;
+}
+
 export interface LlmProviderPreset {
   name: string;
   baseUrl: string;

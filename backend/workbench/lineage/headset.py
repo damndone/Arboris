@@ -276,14 +276,16 @@ def build_headset(
                         pass
                 nodes[key] = view
                 presentation_created_at[key] = str(node.get("created_at") or "")
+                view["presentation_created_at"] = presentation_created_at[key]
             elif run_id not in nodes[key]["runs"]:
                 nodes[key]["runs"].append(run_id)
                 incoming_created_at = str(node.get("created_at") or "")
                 if incoming_created_at > presentation_created_at.get(key, ""):
-                    for field in ("display_label", "summary"):
+                    for field in ("display_label", "summary", "decision_points"):
                         if field in node:
                             nodes[key][field] = node[field]
                     presentation_created_at[key] = incoming_created_at
+                    nodes[key]["presentation_created_at"] = incoming_created_at
 
         for edge in graph.get("edges", {}).values():
             src = keymap.get(edge["source_id"])

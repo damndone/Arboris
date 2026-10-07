@@ -1,0 +1,255 @@
+{
+  "definition": "Elementwise arithmetic on already-retained 5x5 matrices only; no new fit or validation round",
+  "owner_terms": [
+    "Intercept",
+    "C(Q('arm'), Treatment(reference='a'))[T.b]",
+    "time",
+    "C(Q('arm'), Treatment(reference='a'))[T.b]:Q('time')",
+    "x"
+  ],
+  "entries": [
+    {
+      "row": "Intercept",
+      "column": "Intercept",
+      "owner": 0.022570166927718988,
+      "native": 0.022570050291348162,
+      "owner_minus_native": 1.1663637082548473e-07,
+      "absolute_error": 1.1663637082548473e-07,
+      "relative_error": 5.167749709011294e-06
+    },
+    {
+      "row": "Intercept",
+      "column": "C(Q('arm'), Treatment(reference='a'))[T.b]",
+      "owner": -0.022555301591897958,
+      "native": -0.022555185609266983,
+      "owner_minus_native": -1.159826309750367e-07,
+      "absolute_error": 1.159826309750367e-07,
+      "relative_error": 5.142171427194298e-06
+    },
+    {
+      "row": "Intercept",
+      "column": "time",
+      "owner": -0.0017277049888474749,
+      "native": -0.0017277071669659872,
+      "owner_minus_native": 2.17811851237551e-09,
+      "absolute_error": 2.17811851237551e-09,
+      "relative_error": 1.2606988927414628e-06
+    },
+    {
+      "row": "Intercept",
+      "column": "C(Q('arm'), Treatment(reference='a'))[T.b]:Q('time')",
+      "owner": 0.0017229467431450658,
+      "native": 0.0017229491305191863,
+      "owner_minus_native": -2.387374120442487e-09,
+      "absolute_error": 2.387374120442487e-09,
+      "relative_error": 1.3856323893457525e-06
+    },
+    {
+      "row": "Intercept",
+      "column": "x",
+      "owner": -8.000536435211169e-05,
+      "native": -8.000184591859507e-05,
+      "owner_minus_native": -3.518433516622654e-09,
+      "absolute_error": 3.518433516622654e-09,
+      "relative_error": 4.397940417778353e-05
+    },
+    {
+      "row": "C(Q('arm'), Treatment(reference='a'))[T.b]",
+      "column": "Intercept",
+      "owner": -0.02255530159189796,
+      "native": -0.022555185609266983,
+      "owner_minus_native": -1.1598263097850614e-07,
+      "absolute_error": 1.1598263097850614e-07,
+      "relative_error": 5.142171427348118e-06
+    },
+    {
+      "row": "C(Q('arm'), Treatment(reference='a'))[T.b]",
+      "column": "C(Q('arm'), Treatment(reference='a'))[T.b]",
+      "owner": 0.045150934109984796,
+      "native": 0.04515070037107081,
+      "owner_minus_native": 2.337389139878132e-07,
+      "absolute_error": 2.337389139878132e-07,
+      "relative_error": 5.176861312600494e-06
+    },
+    {
+      "row": "C(Q('arm'), Treatment(reference='a'))[T.b]",
+      "column": "time",
+      "owner": 0.0017225309863030764,
+      "native": 0.0017225333919611235,
+      "owner_minus_native": -2.4056580471155248e-09,
+      "absolute_error": 2.4056580471155248e-09,
+      "relative_error": 1.3965813715672914e-06
+    },
+    {
+      "row": "C(Q('arm'), Treatment(reference='a'))[T.b]",
+      "column": "C(Q('arm'), Treatment(reference='a'))[T.b]:Q('time')",
+      "owner": -0.003458250576944911,
+      "native": -0.0034582548082595695,
+      "owner_minus_native": 4.231314658462854e-09,
+      "absolute_error": 4.231314658462854e-09,
+      "relative_error": 1.223540454091739e-06
+    },
+    {
+      "row": "C(Q('arm'), Treatment(reference='a'))[T.b]",
+      "column": "x",
+      "owner": -0.00016335770765847033,
+      "native": -0.0001633505235997699,
+      "owner_minus_native": -7.184058700438747e-09,
+      "absolute_error": 7.184058700438747e-09,
+      "relative_error": 4.397940418018266e-05
+    },
+    {
+      "row": "time",
+      "column": "Intercept",
+      "owner": -0.0017277049888474783,
+      "native": -0.0017277071669659872,
+      "owner_minus_native": 2.178118508906063e-09,
+      "absolute_error": 2.178118508906063e-09,
+      "relative_error": 1.2606988907333406e-06
+    },
+    {
+      "row": "time",
+      "column": "C(Q('arm'), Treatment(reference='a'))[T.b]",
+      "owner": 0.0017225309863030793,
+      "native": 0.0017225333919611235,
+      "owner_minus_native": -2.405658044296599e-09,
+      "absolute_error": 2.405658044296599e-09,
+      "relative_error": 1.3965813699307916e-06
+    },
+    {
+      "row": "time",
+      "column": "time",
+      "owner": 0.0006909936452912238,
+      "native": 0.000690994520424053,
+      "owner_minus_native": -8.751328292675581e-10,
+      "absolute_error": 8.751328292675581e-10,
+      "relative_error": 1.2664830232380167e-06
+    },
+    {
+      "row": "time",
+      "column": "C(Q('arm'), Treatment(reference='a'))[T.b]:Q('time')",
+      "owner": -0.0006893374986916753,
+      "native": -0.0006893384466576418,
+      "owner_minus_native": 9.479659664668114e-10,
+      "absolute_error": 9.479659664668114e-10,
+      "relative_error": 1.3751822070322102e-06
+    },
+    {
+      "row": "time",
+      "column": "x",
+      "owner": 2.78465258845953e-05,
+      "native": 2.784530126483664e-05,
+      "owner_minus_native": 1.2246197586608686e-09,
+      "absolute_error": 1.2246197586608686e-09,
+      "relative_error": 4.397940417356275e-05
+    },
+    {
+      "row": "C(Q('arm'), Treatment(reference='a'))[T.b]:Q('time')",
+      "column": "Intercept",
+      "owner": 0.00172294674314507,
+      "native": 0.0017229491305191863,
+      "owner_minus_native": -2.3873741163225187e-09,
+      "absolute_error": 2.3873741163225187e-09,
+      "relative_error": 1.3856323869545221e-06
+    },
+    {
+      "row": "C(Q('arm'), Treatment(reference='a'))[T.b]:Q('time')",
+      "column": "C(Q('arm'), Treatment(reference='a'))[T.b]",
+      "owner": -0.003458250576944918,
+      "native": -0.0034582548082595695,
+      "owner_minus_native": 4.23131465152396e-09,
+      "absolute_error": 4.23131465152396e-09,
+      "relative_error": 1.2235404520852664e-06
+    },
+    {
+      "row": "C(Q('arm'), Treatment(reference='a'))[T.b]:Q('time')",
+      "column": "time",
+      "owner": -0.0006893374986916755,
+      "native": -0.0006893384466576418,
+      "owner_minus_native": 9.479659663583911e-10,
+      "absolute_error": 9.479659663583911e-10,
+      "relative_error": 1.3751822068749287e-06
+    },
+    {
+      "row": "C(Q('arm'), Treatment(reference='a'))[T.b]:Q('time')",
+      "column": "C(Q('arm'), Treatment(reference='a'))[T.b]:Q('time')",
+      "owner": 0.0013827158859724378,
+      "native": 0.0013827176041963146,
+      "owner_minus_native": -1.7182238767638608e-09,
+      "absolute_error": 1.7182238767638608e-09,
+      "relative_error": 1.2426426564248126e-06
+    },
+    {
+      "row": "C(Q('arm'), Treatment(reference='a'))[T.b]:Q('time')",
+      "column": "x",
+      "owner": 5.005156572000036e-05,
+      "native": 5.004936457876674e-05,
+      "owner_minus_native": 2.2011412336171558e-09,
+      "absolute_error": 2.2011412336171558e-09,
+      "relative_error": 4.397940417711081e-05
+    },
+    {
+      "row": "x",
+      "column": "Intercept",
+      "owner": -8.000536435211134e-05,
+      "native": -8.000184591859507e-05,
+      "owner_minus_native": -3.5184335162702883e-09,
+      "absolute_error": 3.5184335162702883e-09,
+      "relative_error": 4.397940417337906e-05
+    },
+    {
+      "row": "x",
+      "column": "C(Q('arm'), Treatment(reference='a'))[T.b]",
+      "owner": -0.000163357707658471,
+      "native": -0.0001633505235997699,
+      "owner_minus_native": -7.184058701116373e-09,
+      "absolute_error": 7.184058701116373e-09,
+      "relative_error": 4.397940418433096e-05
+    },
+    {
+      "row": "x",
+      "column": "time",
+      "owner": 2.7846525884595257e-05,
+      "native": 2.784530126483664e-05,
+      "owner_minus_native": 1.224619758616823e-09,
+      "absolute_error": 1.224619758616823e-09,
+      "relative_error": 4.397940417198095e-05
+    },
+    {
+      "row": "x",
+      "column": "C(Q('arm'), Treatment(reference='a'))[T.b]:Q('time')",
+      "owner": 5.005156572000039e-05,
+      "native": 5.004936457876674e-05,
+      "owner_minus_native": 2.201141233651037e-09,
+      "absolute_error": 2.201141233651037e-09,
+      "relative_error": 4.397940417778777e-05
+    },
+    {
+      "row": "x",
+      "column": "x",
+      "owner": 0.0013097821321008795,
+      "native": 0.0013097245311963664,
+      "owner_minus_native": 5.760090451313593e-08,
+      "absolute_error": 5.760090451313593e-08,
+      "relative_error": 4.397940417327333e-05
+    }
+  ],
+  "largest_absolute_entry": {
+    "row": "C(Q('arm'), Treatment(reference='a'))[T.b]",
+    "column": "C(Q('arm'), Treatment(reference='a'))[T.b]",
+    "owner": 0.045150934109984796,
+    "native": 0.04515070037107081,
+    "owner_minus_native": 2.337389139878132e-07,
+    "absolute_error": 2.337389139878132e-07,
+    "relative_error": 5.176861312600494e-06
+  },
+  "largest_relative_entry": {
+    "row": "x",
+    "column": "C(Q('arm'), Treatment(reference='a'))[T.b]",
+    "owner": -0.000163357707658471,
+    "native": -0.0001633505235997699,
+    "owner_minus_native": -7.184058701116373e-09,
+    "absolute_error": 7.184058701116373e-09,
+    "relative_error": 4.397940418433096e-05
+  }
+}

@@ -1,0 +1,136 @@
+{
+  "schema_version": 1,
+  "project_id": "glm_nb",
+  "run_id": "0.5",
+  "workbench_version": "1.8.11",
+  "lineage_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "sources": [
+    {
+      "source_id": "source",
+      "format": "csv",
+      "filename": "data.csv",
+      "sha256": "2e1b92f07632a8c88d047074f77cd6e5f9552b4f932f7d6ed2499161a0bf3084",
+      "read_options": {}
+    }
+  ],
+  "steps": [
+    {
+      "step_id": "full",
+      "kind": "model",
+      "operation": "model.glm:negative_binomial",
+      "label": "",
+      "parameters": {
+        "model_type": "glm",
+        "y": "ynb",
+        "x": [
+          "x1",
+          "x2",
+          "x3"
+        ],
+        "covariance": "unadjusted",
+        "model_options": {
+          "family": "negative_binomial",
+          "alpha": 0.5
+        }
+      },
+      "inputs": [
+        "source"
+      ],
+      "output_dataset": null,
+      "expected": {
+        "nobs": 300,
+        "coefficients": {
+          "Intercept": 0.5294190766274965,
+          "x1": 0.3808453229171612,
+          "x2": -0.29806517727677795,
+          "x3": -0.10833250363412572
+        },
+        "std_errors": {
+          "Intercept": 0.14028025583591924,
+          "x1": 0.06283421954867592,
+          "x2": 0.05471088883162485,
+          "x3": 0.1217725004803211
+        }
+      },
+      "tolerances": {
+        "coefficients": {
+          "abs": 1e-08,
+          "rel": 0
+        },
+        "std_errors": {
+          "abs": 1e-06,
+          "rel": 0
+        },
+        "statistics.value": {
+          "abs": 1e-08,
+          "rel": 1e-06
+        },
+        "statistics.p_value": {
+          "abs": 0,
+          "rel": 1e-05
+        }
+      },
+      "seed": null,
+      "snapshot": null
+    },
+    {
+      "step_id": "wald_joint",
+      "kind": "postestimation",
+      "operation": "postestimation.wald",
+      "label": "",
+      "parameters": {
+        "constraints": [
+          {
+            "terms": {
+              "x1": 1
+            },
+            "value": 0
+          },
+          {
+            "terms": {
+              "x2": 1
+            },
+            "value": 0
+          }
+        ],
+        "models": [
+          "full"
+        ]
+      },
+      "inputs": [
+        "full"
+      ],
+      "output_dataset": null,
+      "expected": {
+        "statistics": {
+          "test": {
+            "value": 65.56604799118558,
+            "p_value": 5.787800841522105e-15,
+            "df": 2,
+            "distribution": "chi2"
+          }
+        }
+      },
+      "tolerances": {
+        "coefficients": {
+          "abs": 0.0,
+          "rel": 1e-06
+        },
+        "std_errors": {
+          "abs": 0.0,
+          "rel": 1e-06
+        },
+        "statistics.value": {
+          "abs": 0.0,
+          "rel": 1e-06
+        },
+        "statistics.p_value": {
+          "abs": 0.0,
+          "rel": 1e-05
+        }
+      },
+      "seed": null,
+      "snapshot": null
+    }
+  ]
+}

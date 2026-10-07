@@ -1,0 +1,60 @@
+{
+  "summary": {
+    "run_id": "20261005_091811_675151_95c6f12b",
+    "target": "artifact:workflow_postestimation_wald_eb8536a4853eb607_7711a519e7dfd24baae3d05e",
+    "language": "r",
+    "fully_native": true,
+    "coverage": [
+      {
+        "step_id": "step_76b2427e32344554a37924aa",
+        "operation": "data.cleaning",
+        "status": "native",
+        "note": ""
+      },
+      {
+        "step_id": "step_eca26cfbad39adff69c00721",
+        "operation": "data.subset",
+        "status": "native",
+        "note": ""
+      },
+      {
+        "step_id": "step_226b4b10776b3612293e8e34",
+        "operation": "data.feature_recipe",
+        "status": "native",
+        "note": ""
+      },
+      {
+        "step_id": "step_5bb28f6498e4698e7347d1d5",
+        "operation": "data.cleaning",
+        "status": "native",
+        "note": ""
+      },
+      {
+        "step_id": "step_59722572b3c11a55aa32ba09",
+        "operation": "model.ols",
+        "status": "native",
+        "note": ""
+      },
+      {
+        "step_id": "step_522468aadb113d7b603dca9b",
+        "operation": "postestimation.wald",
+        "status": "native",
+        "note": ""
+      }
+    ],
+    "required_packages": [
+      "sandwich",
+      "stats"
+    ],
+    "lineage_hash": "44cdd1794406cf58e7845d729b4a21bf1c8ddacba382ef059f60da06f836b26d",
+    "artifact_id": "script_export_r_2ba72e911f123b8ac9ca7501",
+    "filename": "analysis-r.zip",
+    "sha256": "2ba72e911f123b8ac9ca7501fadd7fe23f49f704deeebc67328e9e74aeed61de",
+    "download_url": "/runs/20261005_091811_675151_95c6f12b/artifacts/script_export_r_2ba72e911f123b8ac9ca7501?project_root=%2Fprivate%2Ftmp%2Fv1811-evaluation-8d8a2fd4c7d44af693b267e6d893d16f-r01%2Fe05-public0%2Fscript",
+    "bytes": 106670
+  },
+  "zip_sha256": "2ba72e911f123b8ac9ca7501fadd7fe23f49f704deeebc67328e9e74aeed61de",
+  "native_exit": 0,
+  "tampered_exit": 1,
+  "owner": "/private/tmp/v1811-evaluation-8d8a2fd4c7d44af693b267e6d893d16f-r01/e05-public0/script/runs/20261005_091811_675151_95c6f12b"
+}

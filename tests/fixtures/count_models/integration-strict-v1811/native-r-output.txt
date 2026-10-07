@@ -1,0 +1,287 @@
+$R
+[1] "R version 4.6.0 (2026-04-24)"
+
+$packages
+$packages$MASS
+[1] "7.3.65"
+
+$packages$car
+[1] "3.1.5"
+
+$packages$marginaleffects
+[1] "1.0.0"
+
+$packages$jsonlite
+[1] "2.0.0"
+
+
+Warning messages:
+1: glm.fit: algorithm did not converge 
+2: glm.fit: algorithm did not converge 
+3: glm.fit: algorithm did not converge 
+         [,1]      [,2]       [,3]       [,4]        [,5]
+[1,] 16.58692  3.990413 -3.1615924 17.1471510  0.01220566
+[2,]  0.00000 16.403526 -0.5699148  0.4334537  0.15731047
+[3,]  0.00000  0.000000 19.1368853 -0.3968740 -0.55609381
+[4,]  0.00000  0.000000  0.0000000  8.5633027 -0.20487972
+[5,]  0.00000  0.000000  0.0000000  0.0000000 10.47977164
+          [,1]         [,2]        [,3]         [,4]          [,5]
+[1,] 0.1350282 -0.003825189 0.001506412 -0.103409176 -0.0011884158
+[2,] 0.0000000  0.060949738 0.001491207 -0.012273811 -0.0014482968
+[3,] 0.0000000  0.000000000 0.052344263  0.008851606  0.0052165733
+[4,] 0.0000000  0.000000000 0.000000000  0.052150857  0.0005945051
+[5,] 0.0000000  0.000000000 0.000000000  0.000000000  0.0952589529
+$params
+$params$`(Intercept)`
+[1] 0.5303704
+
+$params$x1
+[1] 0.3813241
+
+$params$x2
+[1] -0.2996697
+
+$params$x3
+[1] -0.109621
+
+
+$alpha
+          
+0.4426187 
+
+$wald_joint
+$wald_joint$statistic
+[1] 73.66324
+
+$wald_joint$p_value
+[1] 1.009791e-16
+
+$wald_joint$df_num
+[1] 2
+
+$wald_joint$distribution
+[1] "chi2"
+
+
+$wald_shifted
+$wald_shifted$statistic
+[1] 16.14377
+
+$wald_shifted$p_value
+[1] 5.871132e-05
+
+$wald_shifted$df_num
+[1] 1
+
+$wald_shifted$distribution
+[1] "chi2"
+
+
+$lincom
+$lincom$estimate
+[1] -0.7180153
+
+$lincom$std_error
+[1] 0.1226689
+
+
+$nlcom
+$nlcom$estimate
+[1] -1.272481
+
+$nlcom$std_error
+[1] 0.3056583
+
+
+$margins
+$margins$average
+$margins$average$x1
+$margins$average$x1$estimate
+[1] 0.6574385
+
+$margins$average$x1$std_error
+[1] 0.1191552
+
+
+$margins$average$x2
+$margins$average$x2$estimate
+[1] -0.5166587
+
+$margins$average$x2$std_error
+[1] 0.09960669
+
+
+
+$margins$at_means
+$margins$at_means$x1
+$margins$at_means$x1$estimate
+[1] 0.5750681
+
+$margins$at_means$x1$std_error
+[1] 0.09175805
+
+
+$margins$at_means$x2
+$margins$at_means$x2$estimate
+[1] -0.4519265
+
+$margins$at_means$x2$std_error
+[1] 0.07860858
+
+
+
+
+$`epsilon1e-08`
+$`epsilon1e-08`$params
+$`epsilon1e-08`$params$`(Intercept)`
+[1] 0.4210048
+
+$`epsilon1e-08`$params$x1
+[1] 0.3789886
+
+$`epsilon1e-08`$params$x2
+[1] -0.2293059
+
+
+$`epsilon1e-08`$std_error
+[1] 0.06192394 0.06423160 0.06134534
+
+$`epsilon1e-08`$covariance
+              [,1]          [,2]         [,3]
+[1,]  0.0038345739 -6.649312e-04 3.721870e-04
+[2,] -0.0006649312  4.125699e-03 2.951688e-05
+[3,]  0.0003721870  2.951688e-05 3.763251e-03
+
+$`epsilon1e-08`$ll
+[1] -773.6298
+
+$`epsilon1e-08`$iterations
+[1] 6
+
+$`epsilon1e-08`$max_absolute_score
+[1] 0.001153839
+
+$`epsilon1e-08`$meta
+$`epsilon1e-08`$meta$n
+[1] 450
+
+$`epsilon1e-08`$meta$formula
+[1] "y ~ x1 + x2"
+
+$`epsilon1e-08`$meta$alpha_fixed
+[1] 1
+
+$`epsilon1e-08`$meta$information
+[1] "expected"
+
+$`epsilon1e-08`$meta$scale
+[1] 1
+
+$`epsilon1e-08`$meta$epsilon
+[1] 1e-08
+
+
+
+$`epsilon1e-14`
+$`epsilon1e-14`$params
+$`epsilon1e-14`$params$`(Intercept)`
+[1] 0.4210053
+
+$`epsilon1e-14`$params$x1
+[1] 0.3789844
+
+$`epsilon1e-14`$params$x2
+[1] -0.2293065
+
+
+$`epsilon1e-14`$std_error
+[1] 0.06192392 0.06423158 0.06134534
+
+$`epsilon1e-14`$covariance
+              [,1]          [,2]         [,3]
+[1,]  0.0038345713 -0.0006649249 0.0003721874
+[2,] -0.0006649249  0.0041256963 0.0000295182
+[3,]  0.0003721874  0.0000295182 0.0037632506
+
+$`epsilon1e-14`$ll
+[1] -773.6298
+
+$`epsilon1e-14`$iterations
+[1] 9
+
+$`epsilon1e-14`$max_absolute_score
+[1] 2.926017e-06
+
+$`epsilon1e-14`$meta
+$`epsilon1e-14`$meta$n
+[1] 450
+
+$`epsilon1e-14`$meta$formula
+[1] "y ~ x1 + x2"
+
+$`epsilon1e-14`$meta$alpha_fixed
+[1] 1
+
+$`epsilon1e-14`$meta$information
+[1] "expected"
+
+$`epsilon1e-14`$meta$scale
+[1] 1
+
+$`epsilon1e-14`$meta$epsilon
+[1] 1e-14
+
+
+
+$`epsilon1e-16`
+$`epsilon1e-16`$params
+$`epsilon1e-16`$params$`(Intercept)`
+[1] 0.4210053
+
+$`epsilon1e-16`$params$x1
+[1] 0.3789844
+
+$`epsilon1e-16`$params$x2
+[1] -0.2293065
+
+
+$`epsilon1e-16`$std_error
+[1] 0.06192392 0.06423158 0.06134534
+
+$`epsilon1e-16`$covariance
+              [,1]          [,2]         [,3]
+[1,]  0.0038345713 -6.649249e-04 3.721874e-04
+[2,] -0.0006649249  4.125696e-03 2.951819e-05
+[3,]  0.0003721874  2.951819e-05 3.763251e-03
+
+$`epsilon1e-16`$ll
+[1] -773.6298
+
+$`epsilon1e-16`$iterations
+[1] 19
+
+$`epsilon1e-16`$max_absolute_score
+[1] 7.81597e-14
+
+$`epsilon1e-16`$meta
+$`epsilon1e-16`$meta$n
+[1] 450
+
+$`epsilon1e-16`$meta$formula
+[1] "y ~ x1 + x2"
+
+$`epsilon1e-16`$meta$alpha_fixed
+[1] 1
+
+$`epsilon1e-16`$meta$information
+[1] "expected"
+
+$`epsilon1e-16`$meta$scale
+[1] 1
+
+$`epsilon1e-16`$meta$epsilon
+[1] 1e-16
+
+
+
+Saved new immutable v1811 numeric references

@@ -1,0 +1,7 @@
+Traceback (most recent call last):
+  File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_recheck_evidence/sidecars/actual-python-d02cc66c/analysis.py", line 108, in <module>
+    wb_check(checks[3], 1.475820771771979, 1e-08, 1e-06, 'completed:coefficients')
+    ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_recheck_evidence/sidecars/actual-python-d02cc66c/analysis.py", line 31, in wb_check
+    raise AssertionError(f'{label}: {actual!r} != {expected!r}')
+AssertionError: completed:coefficients: 2.475820771771979 != 1.475820771771979

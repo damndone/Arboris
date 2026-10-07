@@ -66,6 +66,7 @@ describe("sectionRegistry", () => {
       "estimatedEquation",
       "roleGroups",
       "code",
+      "scriptExport",
       "lineage",
       "basic",
       "decision",
@@ -74,7 +75,7 @@ describe("sectionRegistry", () => {
 
   it("orders keep source compare between Ask AI and Operation", () => {
     expect(sectionRegistry.map((s) => s.order)).toEqual([
-      5, 10, 20, 24, 25, 26, 27, 28, 29, 29.5, 30, 31, 32, 34, 35, 40, 50, 60, 70,
+      5, 10, 20, 24, 25, 26, 27, 28, 29, 29.5, 30, 31, 32, 34, 35, 40, 45, 50, 60, 70,
     ]);
   });
 
@@ -88,6 +89,7 @@ describe("sectionRegistry", () => {
       "askAi",
       "estimatedEquation",
       "roleGroups",
+      "scriptExport",
       "lineage",
       "basic",
     ]);

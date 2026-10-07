@@ -1,0 +1,56 @@
+[
+  {
+    "expected": 0.524033398275554,
+    "abs": 1e-08,
+    "rel": 0.0,
+    "label": "full:coefficients"
+  },
+  {
+    "expected": 0.37889378683709035,
+    "abs": 1e-08,
+    "rel": 0.0,
+    "label": "full:coefficients"
+  },
+  {
+    "expected": -0.28894515154376593,
+    "abs": 1e-08,
+    "rel": 0.0,
+    "label": "full:coefficients"
+  },
+  {
+    "expected": -0.10121807811349151,
+    "abs": 1e-08,
+    "rel": 0.0,
+    "label": "full:coefficients"
+  },
+  {
+    "expected": 0.16986251046239487,
+    "abs": 1e-06,
+    "rel": 0.0,
+    "label": "full:std_errors"
+  },
+  {
+    "expected": 0.07594663821229021,
+    "abs": 1e-06,
+    "rel": 0.0,
+    "label": "full:std_errors"
+  },
+  {
+    "expected": 0.06578041865981685,
+    "abs": 1e-06,
+    "rel": 0.0,
+    "label": "full:std_errors"
+  },
+  {
+    "expected": 0.14744903698769615,
+    "abs": 1e-06,
+    "rel": 0.0,
+    "label": "full:std_errors"
+  },
+  {
+    "expected": 300.0,
+    "abs": 0.0,
+    "rel": 0.0,
+    "label": "full:nobs"
+  }
+]

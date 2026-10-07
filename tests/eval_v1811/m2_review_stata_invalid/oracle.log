@@ -1,0 +1,132 @@
+
+  ___  ____  ____  ____  ____ ®
+ /__    /   ____/   /   ____/      18.0
+___/   /   /___/   /   /___/       MP—Parallel Edition
+
+ Statistics and Data Science       Copyright 1985-2023 StataCorp LLC
+                                   StataCorp
+                                   4905 Lakeway Drive
+                                   College Station, Texas 77845 USA
+                                   800-STATA-PC        https://www.stata.com
+                                   979-696-4600        stata@stata.com
+
+Stata license: Single-user 2-core  perpetual
+Serial number: [REDACTED]
+  Licensed to: [REDACTED]
+               
+
+Notes:
+      1. Stata is running in batch mode.
+      2. Unicode is supported; see help unicode_advice.
+      3. More than 2 billion observations are allowed; see help obs_advice.
+      4. Maximum number of variables is set to 5,000 but can be increased;
+          see help set_maxvar.
+
+
+Running /Applications/Stata/profile.do ...
+command window is unrecognized
+r(199);
+
+. do oracle.do 
+
+. version 18
+
+. set more off
+
+. file open wbout using "wb_results.tsv", write replace
+(file wb_results.tsv not found)
+
+. import delimited "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-m2/tests/
+> fixtures/count_models/reference-v3/nb2.csv", asdouble clear case(preserve)
+(encoding automatically selected: UTF-8)
+(3 vars, 1,200 obs)
+
+. replace y=0.5 in 1
+variable y was byte now float
+(1 real change made)
+
+. capture noisily glm y x1 x2, family(nbinomial 0.5) link(log) ml
+note: y has noninteger values
+
+Iteration 0:  Log likelihood = -2015.8671  
+Iteration 1:  Log likelihood = -2010.5787  
+Iteration 2:  Log likelihood = -2010.5784  
+Iteration 3:  Log likelihood = -2010.5784  
+
+Generalized linear models                         Number of obs   =      1,200
+Optimization     : ML                             Residual df     =      1,197
+                                                  Scale parameter =          1
+Deviance         =  1435.443128                   (1/df) Deviance =   1.199201
+Pearson          =  1349.453138                   (1/df) Pearson  =   1.127363
+
+Variance function: V(u) = u+(.5)u^2               [Neg. Binomial]
+Link function    : g(u) = ln(u)                   [Log]
+
+                                                  AIC             =   3.355964
+Log likelihood   = -2010.578374                   BIC             =  -7051.379
+
+------------------------------------------------------------------------------
+             |                 OIM
+           y | Coefficient  std. err.      z    P>|z|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+          x1 |   .3805658   .0322165    11.81   0.000     .3174227    .4437088
+          x2 |  -.1964721   .0324509    -6.05   0.000    -.2600746   -.1328695
+       _cons |   .3841209   .0321127    11.96   0.000     .3211811    .4470607
+------------------------------------------------------------------------------
+
+. file write wbout "glm_fractional_rc" _tab %21.15g (_rc) _n
+
+. capture noisily nbreg y x1 x2
+note: you are responsible for interpretation of non-count dep. variable
+
+Fitting Poisson model:
+
+Iteration 0:  Log likelihood = -2195.6073  
+Iteration 1:  Log likelihood = -2195.6073  
+
+Fitting constant-only model:
+
+Iteration 0:  Log likelihood = -2080.9715  
+Iteration 1:  Log likelihood = -2080.3991  
+Iteration 2:  Log likelihood = -2080.3986  
+Iteration 3:  Log likelihood = -2080.3986  
+
+Fitting full model:
+
+Iteration 0:  Log likelihood = -2014.2839  
+Iteration 1:  Log likelihood = -2005.5479  
+Iteration 2:  Log likelihood = -2005.4194  
+Iteration 3:  Log likelihood = -2005.4194  
+
+Negative binomial regression                            Number of obs =  1,200
+                                                        LR chi2(2)    = 149.96
+Dispersion: mean                                        Prob > chi2   = 0.0000
+Log likelihood = -2005.4194                             Pseudo R2     = 0.0360
+
+------------------------------------------------------------------------------
+           y | Coefficient  Std. err.      z    P>|z|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+          x1 |   .3814224   .0347851    10.97   0.000     .3132448       .4496
+          x2 |  -.1963414   .0351092    -5.59   0.000    -.2651541   -.1275286
+       _cons |   .3839534    .034385    11.17   0.000       .31656    .4513468
+-------------+----------------------------------------------------------------
+    /lnalpha |  -.3851339   .0913782                     -.5642319   -.2060359
+-------------+----------------------------------------------------------------
+       alpha |   .6803595     .06217                      .5687969    .8138039
+------------------------------------------------------------------------------
+LR test of alpha=0: chibar2(01) = 380.38               Prob >= chibar2 = 0.000
+
+. file write wbout "nb_fractional_rc" _tab %21.15g (_rc) _n
+
+. replace y=-1 in 1
+(1 real change made)
+
+. capture noisily glm y x1 x2, family(nbinomial 0.5) link(log) ml
+dependent variable y has negative values
+
+. file write wbout "glm_negative_rc" _tab %21.15g (_rc) _n
+
+. file close wbout
+
+. 
+end of do-file

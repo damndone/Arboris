@@ -148,7 +148,7 @@ def _project_native_family_params_for_execution(
             family_spec,
             {"outcome": projected.get("y"), "predictors": list(projected.get("x") or [])},
             list(projected.get("x") or []),
-            str(projected.get("covariance", "unadjusted")),
+            str(projected.get("covariance") or family.default_covariance),
         )
         execution_params = dict(params)
         for field_name in family.context_spec_fields:

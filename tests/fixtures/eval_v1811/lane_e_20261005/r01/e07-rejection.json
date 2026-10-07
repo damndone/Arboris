@@ -1,0 +1,10 @@
+{
+  "http_status": 200,
+  "http": {
+    "run_id": "20261005_091818_097439_36618812",
+    "status": "running"
+  },
+  "cli_exit": 0,
+  "cli_exception": "None",
+  "agent_error": "model.genesis glm:negative_binomial model_options requires: alpha"
+}

@@ -1,0 +1,326 @@
+[
+  {
+    "path": "tests/fixtures/script_export/v1811_statistical_adapters/fpc_population_stata_8918741e38",
+    "language": "stata",
+    "number_count": 16,
+    "max_absolute_difference": 1.0658141036401503e-14,
+    "max_relative_difference": 9.686183536324768e-15,
+    "all_within_tolerance": true,
+    "elapsed_seconds": 0.9980804580263793
+  },
+  {
+    "path": "tests/fixtures/script_export/v1811_statistical_adapters/fpc_population_r_be0c89e286",
+    "language": "r",
+    "number_count": 16,
+    "max_absolute_difference": 0.0,
+    "max_relative_difference": 0.0,
+    "all_within_tolerance": true,
+    "elapsed_seconds": 0.6497423329856247
+  },
+  {
+    "path": "tests/fixtures/script_export/v1811_statistical_adapters/fpc_population_python_1f259a6cbe",
+    "language": "python",
+    "number_count": 16,
+    "max_absolute_difference": 3.375077994860476e-14,
+    "max_relative_difference": 3.347633456259535e-14,
+    "all_within_tolerance": true,
+    "elapsed_seconds": 0.8736543339909986
+  },
+  {
+    "path": "tests/fixtures/script_export/v1811_statistical_adapters/fpc_fraction_stata_71e2b6567c",
+    "language": "stata",
+    "number_count": 16,
+    "max_absolute_difference": 1.0658141036401503e-14,
+    "max_relative_difference": 9.686183536324768e-15,
+    "all_within_tolerance": true,
+    "elapsed_seconds": 0.7637749999994412
+  },
+  {
+    "path": "tests/fixtures/script_export/v1811_statistical_adapters/fpc_fraction_r_cfaad33862",
+    "language": "r",
+    "number_count": 16,
+    "max_absolute_difference": 0.0,
+    "max_relative_difference": 0.0,
+    "all_within_tolerance": true,
+    "elapsed_seconds": 0.5894919580314308
+  },
+  {
+    "path": "tests/fixtures/script_export/v1811_statistical_adapters/fpc_fraction_python_a6ea592194",
+    "language": "python",
+    "number_count": 16,
+    "max_absolute_difference": 3.375077994860476e-14,
+    "max_relative_difference": 3.347633456259535e-14,
+    "all_within_tolerance": true,
+    "elapsed_seconds": 0.8098094159504399
+  },
+  {
+    "path": "tests/fixtures/script_export/v1811_statistical_adapters/fpc_subpopulation_stata_34de94c359",
+    "language": "stata",
+    "number_count": 16,
+    "max_absolute_difference": 1.9539925233402755e-14,
+    "max_relative_difference": 2.139989187258576e-14,
+    "all_within_tolerance": true,
+    "elapsed_seconds": 0.7654249590123072
+  },
+  {
+    "path": "tests/fixtures/script_export/v1811_statistical_adapters/fpc_subpopulation_r_2f08a5f373",
+    "language": "r",
+    "number_count": 16,
+    "max_absolute_difference": 0.0,
+    "max_relative_difference": 0.0,
+    "all_within_tolerance": true,
+    "elapsed_seconds": 0.5927794580347836
+  },
+  {
+    "path": "tests/fixtures/script_export/v1811_statistical_adapters/fpc_subpopulation_python_27eea9b04a",
+    "language": "python",
+    "number_count": 16,
+    "max_absolute_difference": 3.019806626980426e-14,
+    "max_relative_difference": 3.40605608862098e-14,
+    "all_within_tolerance": true,
+    "elapsed_seconds": 0.8160948340082541
+  },
+  {
+    "path": "tests/fixtures/script_export/v1811_statistical_adapters/fpc_lonely_census_stata_8a7becaf56",
+    "language": "stata",
+    "number_count": 16,
+    "max_absolute_difference": 1.5987211554602254e-14,
+    "max_relative_difference": 1.1730361680449353e-14,
+    "all_within_tolerance": true,
+    "elapsed_seconds": 0.7651741250883788
+  },
+  {
+    "path": "tests/fixtures/script_export/v1811_statistical_adapters/fpc_lonely_census_r_dc2e6bbd20",
+    "language": "r",
+    "number_count": 16,
+    "max_absolute_difference": 0.0,
+    "max_relative_difference": 0.0,
+    "all_within_tolerance": true,
+    "elapsed_seconds": 0.5996916249860078
+  },
+  {
+    "path": "tests/fixtures/script_export/v1811_statistical_adapters/fpc_lonely_census_python_1f0f304d9f",
+    "language": "python",
+    "number_count": 16,
+    "max_absolute_difference": 7.72715225139109e-14,
+    "max_relative_difference": 8.582567354191805e-14,
+    "all_within_tolerance": true,
+    "elapsed_seconds": 0.8248197090579197
+  },
+  {
+    "path": "tests/fixtures/script_export/v1811_statistical_adapters/fpc_no_psu_stata_9cc0962491",
+    "language": "stata",
+    "number_count": 16,
+    "max_absolute_difference": 3.907985046680551e-14,
+    "max_relative_difference": 1.148891650514627e-13,
+    "all_within_tolerance": true,
+    "elapsed_seconds": 0.7704407500568777
+  },
+  {
+    "path": "tests/fixtures/script_export/v1811_statistical_adapters/fpc_no_psu_r_f1fac38a16",
+    "language": "r",
+    "number_count": 16,
+    "max_absolute_difference": 0.0,
+    "max_relative_difference": 0.0,
+    "all_within_tolerance": true,
+    "elapsed_seconds": 0.5973216670099646
+  },
+  {
+    "path": "tests/fixtures/script_export/v1811_statistical_adapters/fpc_no_psu_python_d60550d445",
+    "language": "python",
+    "number_count": 16,
+    "max_absolute_difference": 8.526512829121202e-14,
+    "max_relative_difference": 2.192670164658423e-13,
+    "all_within_tolerance": true,
+    "elapsed_seconds": 0.8230506250401959
+  },
+  {
+    "path": "tests/fixtures/script_export/v1811_statistical_adapters/fpc_no_strata_stata_8ba1f70db8",
+    "language": "stata",
+    "number_count": 16,
+    "max_absolute_difference": 2.4868995751603507e-14,
+    "max_relative_difference": 4.1044832000142205e-14,
+    "all_within_tolerance": true,
+    "elapsed_seconds": 0.7733129999833182
+  },
+  {
+    "path": "tests/fixtures/script_export/v1811_statistical_adapters/fpc_no_strata_r_3acd67086d",
+    "language": "r",
+    "number_count": 16,
+    "max_absolute_difference": 0.0,
+    "max_relative_difference": 0.0,
+    "all_within_tolerance": true,
+    "elapsed_seconds": 0.597571583930403
+  },
+  {
+    "path": "tests/fixtures/script_export/v1811_statistical_adapters/fpc_no_strata_python_b69f6c8b53",
+    "language": "python",
+    "number_count": 16,
+    "max_absolute_difference": 4.618527782440651e-14,
+    "max_relative_difference": 6.559154052067797e-14,
+    "all_within_tolerance": true,
+    "elapsed_seconds": 0.8157612499780953
+  },
+  {
+    "path": "tests/fixtures/script_export/v1811_statistical_adapters/fpc_zero_fraction_stata_f86ad9af4c",
+    "language": "stata",
+    "number_count": 16,
+    "max_absolute_difference": 8.881784197001252e-15,
+    "max_relative_difference": 6.435893759646509e-15,
+    "all_within_tolerance": true,
+    "elapsed_seconds": 0.7786198749672621
+  },
+  {
+    "path": "tests/fixtures/script_export/v1811_statistical_adapters/fpc_zero_fraction_r_7edbc0ef85",
+    "language": "r",
+    "number_count": 16,
+    "max_absolute_difference": 0.0,
+    "max_relative_difference": 0.0,
+    "all_within_tolerance": true,
+    "elapsed_seconds": 0.5877424160717055
+  },
+  {
+    "path": "tests/fixtures/script_export/v1811_statistical_adapters/fpc_zero_fraction_python_7af37ab6f3",
+    "language": "python",
+    "number_count": 16,
+    "max_absolute_difference": 3.019806626980426e-14,
+    "max_relative_difference": 2.9497846398379834e-14,
+    "all_within_tolerance": true,
+    "elapsed_seconds": 0.8147711670026183
+  },
+  {
+    "path": "tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_stata_False_6fd09395e0",
+    "language": "stata",
+    "number_count": 9,
+    "max_absolute_difference": 3.3306690738754696e-16,
+    "max_relative_difference": 1.9608029251474134e-15,
+    "all_within_tolerance": true,
+    "elapsed_seconds": 0.9243327500298619
+  },
+  {
+    "path": "tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_r_False_2149fad610",
+    "language": "r",
+    "number_count": 9,
+    "max_absolute_difference": 0.0,
+    "max_relative_difference": 0.0,
+    "all_within_tolerance": true,
+    "elapsed_seconds": 0.18188870896119624
+  },
+  {
+    "path": "tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_python_False_1b0134f7bd",
+    "language": "python",
+    "number_count": 9,
+    "max_absolute_difference": 5.46229728115577e-14,
+    "max_relative_difference": 5.234775727595355e-13,
+    "all_within_tolerance": true,
+    "elapsed_seconds": 0.7904264579992741
+  },
+  {
+    "path": "tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_stata_True_0fba41a98a",
+    "language": "stata",
+    "number_count": 9,
+    "max_absolute_difference": 3.3306690738754696e-16,
+    "max_relative_difference": 1.9608029251474134e-15,
+    "all_within_tolerance": true,
+    "elapsed_seconds": 0.9760858750669286
+  },
+  {
+    "path": "tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_r_True_3c23d1c826",
+    "language": "r",
+    "number_count": 9,
+    "max_absolute_difference": 0.0,
+    "max_relative_difference": 0.0,
+    "all_within_tolerance": true,
+    "elapsed_seconds": 0.18511341698467731
+  },
+  {
+    "path": "tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_python_True_db8e350b41",
+    "language": "python",
+    "number_count": 9,
+    "max_absolute_difference": 5.46229728115577e-14,
+    "max_relative_difference": 5.234775727595355e-13,
+    "all_within_tolerance": true,
+    "elapsed_seconds": 0.6901553750503808
+  },
+  {
+    "path": "tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_alpha_half_stata_e0441bf97a",
+    "language": "stata",
+    "number_count": 9,
+    "max_absolute_difference": 1.4377388168895777e-14,
+    "max_relative_difference": 3.775125307767806e-14,
+    "all_within_tolerance": true,
+    "elapsed_seconds": 0.905846833018586
+  },
+  {
+    "path": "tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_alpha_half_r_35c61b52bd",
+    "language": "r",
+    "number_count": 9,
+    "max_absolute_difference": 0.0,
+    "max_relative_difference": 0.0,
+    "all_within_tolerance": true,
+    "elapsed_seconds": 0.17058220808394253
+  },
+  {
+    "path": "tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_alpha_half_python_4ab4a51206",
+    "language": "python",
+    "number_count": 9,
+    "max_absolute_difference": 3.863576125695545e-14,
+    "max_relative_difference": 3.5664052764294125e-13,
+    "all_within_tolerance": true,
+    "elapsed_seconds": 0.6572440000018105
+  },
+  {
+    "path": "tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_primitives_1.0_stata_0a4bd82d47",
+    "language": "stata",
+    "number_count": 54,
+    "max_absolute_difference": 1.185974984885263e-09,
+    "max_relative_difference": 5.811308390729005e-09,
+    "all_within_tolerance": true,
+    "elapsed_seconds": 1.235479791997932
+  },
+  {
+    "path": "tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_primitives_1.0_r_4df5e45214",
+    "language": "r",
+    "number_count": 54,
+    "max_absolute_difference": 1.4844279139225591e-09,
+    "max_relative_difference": 6.440268388448978e-09,
+    "all_within_tolerance": true,
+    "elapsed_seconds": 0.23919454193674028
+  },
+  {
+    "path": "tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_primitives_1.0_python_0e97e8b48e",
+    "language": "python",
+    "number_count": 54,
+    "max_absolute_difference": 1.4845115137163134e-09,
+    "max_relative_difference": 6.440274686501286e-09,
+    "all_within_tolerance": true,
+    "elapsed_seconds": 0.6968372500268742
+  },
+  {
+    "path": "tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_primitives_0.5_stata_c56785b09c",
+    "language": "stata",
+    "number_count": 54,
+    "max_absolute_difference": 1.2036485141919684e-09,
+    "max_relative_difference": 1.0340846184604561e-08,
+    "all_within_tolerance": true,
+    "elapsed_seconds": 1.0005209170049056
+  },
+  {
+    "path": "tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_primitives_0.5_r_f1a309cb06",
+    "language": "r",
+    "number_count": 54,
+    "max_absolute_difference": 1.510395919446239e-09,
+    "max_relative_difference": 6.5616694635453216e-09,
+    "all_within_tolerance": true,
+    "elapsed_seconds": 0.20653712505009025
+  },
+  {
+    "path": "tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_primitives_0.5_python_2450d94d00",
+    "language": "python",
+    "number_count": 54,
+    "max_absolute_difference": 1.510338298871261e-09,
+    "max_relative_difference": 6.5616694635453216e-09,
+    "all_within_tolerance": true,
+    "elapsed_seconds": 0.6884977499721572
+  }
+]

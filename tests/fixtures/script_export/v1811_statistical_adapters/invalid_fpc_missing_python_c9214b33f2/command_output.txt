@@ -1,0 +1,16 @@
+Traceback (most recent call last):
+  File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/invalid_fpc_missing_python_c9214b33f2/analysis.py", line 64, in <module>
+    wb_design = build_design_from_artifacts(wb_frame, {'_sampling_weight': 'weight', '_survey_psu_col': 'psu', '_survey_strata_col': 'stratum', '_survey_fpc_col': 'population'})
+  File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/backend/workbench/survey/adapters.py", line 61, in build_design_from_artifacts
+    return SurveyDesign(
+        frame=frame,
+    ...<7 lines>...
+        replicate_weight_columns=replicate_columns,
+    )
+  File "<string>", line 13, in __init__
+  File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/backend/workbench/survey/design.py", line 101, in __post_init__
+    self._fpc_fractions()
+    ~~~~~~~~~~~~~~~~~~~^^
+  File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/backend/workbench/survey/design.py", line 131, in _fpc_fractions
+    raise SurveyEngineError("SURVEY_FPC_INVALID", "FPC values must be finite, nonmissing and nonnegative")
+workbench.survey.errors.SurveyEngineError: SURVEY_FPC_INVALID: FPC values must be finite, nonmissing and nonnegative

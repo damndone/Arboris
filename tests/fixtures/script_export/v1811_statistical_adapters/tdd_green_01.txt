@@ -1,0 +1,63 @@
+Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_population_stata_c763eada4c stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_population_r_f6879c8fba r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_population_python_80403158cc python
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_fraction_stata_bc2939b63c stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_fraction_r_4ed5d00617 r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_fraction_python_c7f9f7e815 python
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_subpopulation_stata_072ecb7a2a stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_subpopulation_r_cef9b9a5c3 r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_subpopulation_python_e28de9a29e python
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_lonely_census_stata_a9b4332af5 stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_lonely_census_r_a32639d9ae r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_lonely_census_python_35c5505245 python
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_no_psu_stata_ee2344d3e1 stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_no_psu_r_3fcdf09c21 r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_no_psu_python_21f728ed53 python
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_no_strata_stata_355e9b2094 stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_no_strata_r_320ac5f42a r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_no_strata_python_2ac1012eec python
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_zero_fraction_stata_fd947d7d31 stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_zero_fraction_r_8baa1e331f r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_zero_fraction_python_0415ca5a28 python
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_stata_False_41015a62c2 stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_r_False_8214b274f6 r
+.FNative evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_stata_True_f1685875b6 stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_r_True_2c96475297 r
+.F........
+=================================== FAILURES ===================================
+_ test_fixed_alpha_glm_nb_final_eim_model_matches_approved_oracle[False-python] _
+tests/test_script_export_v1811_statistical_adapters.py:113: in test_fixed_alpha_glm_nb_final_eim_model_matches_approved_oracle
+    native_run(plan, language, path, monkeypatch)
+tests/test_script_export_v1811_statistical_adapters.py:63: in native_run
+    assert code == 0, output
+E   AssertionError: Traceback (most recent call last):
+E       File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_python_False_80bd796d7d/analysis.py", line 58, in <module>
+E         assert np.isfinite(wb_fit.params).all() and np.isfinite(wb_fit.cov_params()).all()
+E                                                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+E       File "/Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/pandas/core/generic.py", line 1501, in __bool__
+E         raise ValueError(
+E         ...<2 lines>...
+E         )
+E     ValueError: The truth value of a Series is ambiguous. Use a.empty, a.bool(), a.item(), a.any() or a.all().
+E     
+E   assert 1 == 0
+_ test_fixed_alpha_glm_nb_final_eim_model_matches_approved_oracle[True-python] _
+tests/test_script_export_v1811_statistical_adapters.py:113: in test_fixed_alpha_glm_nb_final_eim_model_matches_approved_oracle
+    native_run(plan, language, path, monkeypatch)
+tests/test_script_export_v1811_statistical_adapters.py:63: in native_run
+    assert code == 0, output
+E   AssertionError: Traceback (most recent call last):
+E       File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-script-adapters/tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_python_True_85f0cc15c6/analysis.py", line 58, in <module>
+E         assert np.isfinite(wb_fit.params).all() and np.isfinite(wb_fit.cov_params()).all()
+E                                                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+E       File "/Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/pandas/core/generic.py", line 1501, in __bool__
+E         raise ValueError(
+E         ...<2 lines>...
+E         )
+E     ValueError: The truth value of a Series is ambiguous. Use a.empty, a.bool(), a.item(), a.any() or a.all().
+E     
+E   assert 1 == 0
+=========================== short test summary info ============================
+FAILED tests/test_script_export_v1811_statistical_adapters.py::test_fixed_alpha_glm_nb_final_eim_model_matches_approved_oracle[False-python]
+FAILED tests/test_script_export_v1811_statistical_adapters.py::test_fixed_alpha_glm_nb_final_eim_model_matches_approved_oracle[True-python]
+2 failed, 33 passed in 21.20s

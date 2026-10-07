@@ -19,6 +19,8 @@ vi.mock("../capabilities/useCapabilities", () => ({
         { key: "multinomial_logit", label: "Multinomial logit", group: "Nominal" },
         { key: "survival_cox", label: "Survival / Cox", group: "Survival" },
         { key: "quantile_regression", label: "Quantile regression", group: "Quantile" },
+        { key: "negative_binomial", label: "Negative binomial", group: "Count" },
+        { key: "glm:negative_binomial", label: "GLM negative binomial", group: "GLM" },
       ],
       imputation_methods: [],
       covariance_options: [
@@ -168,6 +170,29 @@ describe("RunForm IV wiring", () => {
       optimizer: "lbfgs",
       maxiter: 800,
     });
+  });
+});
+
+describe("RunForm negative binomial options", () => {
+  it("sends NB1 through the bound model-options envelope", async () => {
+    const spy=vi.spyOn(api,"runWorkflow").mockResolvedValue(RUN_RESPONSE);
+    renderForm(); fillForm();
+    fireEvent.change(screen.getByLabelText("model type"), {target:{value:"negative_binomial"}});
+    fireEvent.change(screen.getByLabelText("Dispersion"), {target:{value:"constant"}});
+    fireEvent.click(screen.getByRole("button",{name:/run workflow/i}));
+    await waitFor(()=>expect(spy).toHaveBeenCalled());
+    expect(spy.mock.calls[0][9]?.modelOptions).toEqual({dispersion:"constant"});
+  });
+  it("blocks an unspecified GLM alpha and sends only the explicit value", async () => {
+    const spy=vi.spyOn(api,"runWorkflow").mockResolvedValue(RUN_RESPONSE);
+    renderForm(); fillForm();
+    fireEvent.change(screen.getByLabelText("model type"), {target:{value:"glm:negative_binomial"}});
+    expect(screen.getByRole("button",{name:/run workflow/i})).toBeDisabled();
+    expect(spy).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText("Fixed alpha"), {target:{value:"0.7"}});
+    fireEvent.click(screen.getByRole("button",{name:/run workflow/i}));
+    await waitFor(()=>expect(spy).toHaveBeenCalled());
+    expect(spy.mock.calls[0][9]?.modelOptions).toEqual({alpha:.7});
   });
 });
 

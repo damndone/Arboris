@@ -1,0 +1,68 @@
+
+Fontconfig error: No writable cache directories
+	/opt/homebrew/var/cache/fontconfig
+	/Users/jiayuanren/.cache/fontconfig
+	/Users/jiayuanren/.fontconfig
+...F.EE
+==================================== ERRORS ====================================
+_______ ERROR at setup of test_coefficients_and_standard_errors_match_r ________
+
+tmp_path_factory = TempPathFactory(_given_basetemp=None, _trace=<pluggy._tracing.TagTracerSub object at 0x1056c55b0>, _basetemp=PosixPath.../0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-698'), _retention_count=1000000, _retention_policy='all')
+
+    @pytest.fixture(scope="module")
+    def fitted(tmp_path_factory):
+        project = create_project(tmp_path_factory.mktemp("oracle-glm_negative_binomial"), "oracle")
+        outcome = run_workflow(project.root, [FIXTURES / "data.csv"], mode="auto",
+                               model_type='glm:negative_binomial', y='y', x=['x1', 'x2'], **{})
+        root = project.root / "runs" / outcome["run_id"]
+>       assert outcome["status"] == "completed", read_json(root / "errors.json")
+E       AssertionError: {'issues': [{'severity': 'BLOCKER', 'code': 'MODEL_FIT_FAILED', 'message': 'GLM_NB_ALPHA_REQUIRED: supply a fixed posi...'model_type': 'glm:negative_binomial', 'model_id': 'glm_1', 'engine': 'statsmodels', 'step': 'estimation', ...}, ...}]}
+E       assert 'failed' == 'completed'
+E         
+E         - completed
+E         + failed
+
+../workbench-v1.8.11/tests/test_admission_oracle_glm_negative_binomial.py:21: AssertionError
+__________ ERROR at setup of test_inference_settings_match_reference ___________
+
+tmp_path_factory = TempPathFactory(_given_basetemp=None, _trace=<pluggy._tracing.TagTracerSub object at 0x1056c55b0>, _basetemp=PosixPath.../0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-698'), _retention_count=1000000, _retention_policy='all')
+
+    @pytest.fixture(scope="module")
+    def fitted(tmp_path_factory):
+        project = create_project(tmp_path_factory.mktemp("oracle-glm_negative_binomial"), "oracle")
+        outcome = run_workflow(project.root, [FIXTURES / "data.csv"], mode="auto",
+                               model_type='glm:negative_binomial', y='y', x=['x1', 'x2'], **{})
+        root = project.root / "runs" / outcome["run_id"]
+>       assert outcome["status"] == "completed", read_json(root / "errors.json")
+E       AssertionError: {'issues': [{'severity': 'BLOCKER', 'code': 'MODEL_FIT_FAILED', 'message': 'GLM_NB_ALPHA_REQUIRED: supply a fixed posi...'model_type': 'glm:negative_binomial', 'model_id': 'glm_1', 'engine': 'statsmodels', 'step': 'estimation', ...}, ...}]}
+E       assert 'failed' == 'completed'
+E         
+E         - completed
+E         + failed
+
+../workbench-v1.8.11/tests/test_admission_oracle_glm_negative_binomial.py:21: AssertionError
+=================================== FAILURES ===================================
+_______ test_explicit_alpha_one_matches_high_precision_admission_oracle ________
+
+    def test_explicit_alpha_one_matches_high_precision_admission_oracle():
+        path = Path(__file__).parent / "fixtures/admission/glm_negative_binomial"
+        oracle = json.loads((path / "oracle_high_precision.json").read_text())
+        result, fitted = run_glm(pd.read_csv(path / "data.csv", float_precision="round_trip"), "y", ["x1", "x2"], "glm", "negative_binomial", alpha=1.)
+        for term, value in oracle["coefficients"].items():
+>           assert abs(result["coefficients"][term]["estimate"]-value) < 1e-8
+E           assert 1.0561876151449212e-08 < 1e-08
+E            +  where 1.0561876151449212e-08 = abs((0.3789844117869672 - 0.378984401225091))
+
+../workbench-v1.8.11/tests/test_count_models_glm_precision.py:16: AssertionError
+=============================== warnings summary ===============================
+tests/test_count_models_glm_precision.py::test_explicit_alpha_one_matches_high_precision_admission_oracle
+tests/test_count_models_glm_precision.py::test_final_optimum_matches_r_with_epsilon_16_and_final_expected_information
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/genmod/generalized_linear_model.py:1923: FutureWarning: The bic value is computed using the deviance formula. After 0.13 this will change to the log-likelihood based formula. This change has no impact on the relative rank of models compared using BIC. You can directly access the log-likelihood version using the `bic_llf` attribute. You can suppress this message by calling statsmodels.genmod.generalized_linear_model.SET_USE_BIC_LLF with True to get the LLF-based version now or False to retainthe deviance version.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED ../workbench-v1.8.11/tests/test_count_models_glm_precision.py::test_explicit_alpha_one_matches_high_precision_admission_oracle
+ERROR ../workbench-v1.8.11/tests/test_admission_oracle_glm_negative_binomial.py::test_coefficients_and_standard_errors_match_r
+ERROR ../workbench-v1.8.11/tests/test_admission_oracle_glm_negative_binomial.py::test_inference_settings_match_reference
+1 failed, 4 passed, 57 deselected, 2 warnings, 2 errors in 12.65s

@@ -1,0 +1,83 @@
+Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_population_stata_9727ee3ec8 stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_population_r_f24b1a55e8 r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_population_python_6568d90cc4 python
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_fraction_stata_4a637e0ac9 stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_fraction_r_6ef71f1c2a r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_fraction_python_01ec968d11 python
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_subpopulation_stata_ea9b3c0c91 stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_subpopulation_r_9a9a8c09a3 r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_subpopulation_python_9509413286 python
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_lonely_census_stata_726252ca78 stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_lonely_census_r_885ea43ca4 r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_lonely_census_python_157d0a6f79 python
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_no_psu_stata_775060f7f6 stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_no_psu_r_f3654ae51c r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_no_psu_python_13b85f535a python
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_no_strata_stata_da9206d3f0 stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_no_strata_r_57dc29004d r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_no_strata_python_e708d4769c python
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_zero_fraction_stata_8e0d31e4ec stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_zero_fraction_r_f63bfd3d42 r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/fpc_zero_fraction_python_a92fcfee45 python
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_stata_False_5b3532cbee stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_r_False_a8f61e9b6d r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_python_False_ecc6712ce1 python
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_stata_True_77edeea27a stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_r_True_a4b368f70b r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_python_True_a1a75f39a3 python
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_convergence_1e+20_r_2ccbcac080 r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_convergence_1e+308_r_8cfbf214de r
+...........................................Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_alpha_half_stata_c69e4db055 stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_alpha_half_r_f415e6b837 r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_alpha_half_python_7c2186c22c python
+.......Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_primitives_1.0_stata_f5a38ecbf2 stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_primitives_1.0_r_ccf27266cf r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_primitives_1.0_python_88893acac1 python
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_primitives_0.5_stata_409198e713 stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_primitives_0.5_r_569f51192e r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/glm_nb_primitives_0.5_python_eff7649b99 python
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/invalid_fpc_mixed_stata_4a6ebaa970 stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/invalid_fpc_mixed_r_60e2e86f6a r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/invalid_fpc_mixed_python_60a03404c4 python
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/invalid_fpc_missing_stata_c5d0c051a3 stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/invalid_fpc_missing_r_6c43e5e069 r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/invalid_fpc_missing_python_c9214b33f2 python
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/invalid_fpc_within_stratum_stata_88d0fb0501 stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/invalid_fpc_within_stratum_r_cf94113836 r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/invalid_fpc_within_stratum_python_5d75d9ec4a python
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/invalid_fpc_small_population_stata_a995451757 stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/invalid_fpc_small_population_r_d28ac9dff2 r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/invalid_fpc_small_population_python_53114adc15 python
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/invalid_fpc_noninteger_stata_0a3209621a stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/invalid_fpc_noninteger_r_b636b4196e r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/invalid_fpc_noninteger_python_e58c256b69 python
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/invalid_fpc_negative_stata_008ef95ecd stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/invalid_fpc_negative_r_8f60f739df r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/invalid_fpc_negative_python_885e35d6f5 python
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/invalid_fpc_boolean_stata_8a6692be0c stata
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/invalid_fpc_boolean_r_091983cc45 r
+.Native evidence: tests/fixtures/script_export/v1811_statistical_adapters/invalid_fpc_boolean_python_34b26faa17 python
+.......
+=============================== warnings summary ===============================
+tests/test_script_export_v1811_statistical_adapters.py::test_r_fixed_alpha_convergence_is_certified_before_publishing[1e+20]
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/genmod/generalized_linear_model.py:1923: FutureWarning: The bic value is computed using the deviance formula. After 0.13 this will change to the log-likelihood based formula. This change has no impact on the relative rank of models compared using BIC. You can directly access the log-likelihood version using the `bic_llf` attribute. You can suppress this message by calling statsmodels.genmod.generalized_linear_model.SET_USE_BIC_LLF with True to get the LLF-based version now or False to retainthe deviance version.
+    warnings.warn(
+
+tests/test_script_export_v1811_statistical_adapters.py::test_r_fixed_alpha_convergence_is_certified_before_publishing[1e+308]
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/genmod/families/varfuncs.py:265: RuntimeWarning: overflow encountered in multiply
+    return p + self.alpha*p**2
+
+tests/test_script_export_v1811_statistical_adapters.py::test_r_fixed_alpha_convergence_is_certified_before_publishing[1e+308]
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/genmod/families/family.py:1406: RuntimeWarning: divide by zero encountered in log
+    resid_dev -= endog_alpha * np.log(endog_alpha / mu_alpha)
+
+tests/test_script_export_v1811_statistical_adapters.py::test_r_fixed_alpha_convergence_is_certified_before_publishing[1e+308]
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/genmod/families/varfuncs.py:265: RuntimeWarning: overflow encountered in square
+    return p + self.alpha*p**2
+
+tests/test_script_export_v1811_statistical_adapters.py::test_r_fixed_alpha_convergence_is_certified_before_publishing[1e+308]
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/genmod/families/family.py:143: RuntimeWarning: invalid value encountered in multiply
+    return 1. / (self.link.deriv(mu)**2 * self.variance(mu))
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+113 passed, 5 warnings in 36.63s

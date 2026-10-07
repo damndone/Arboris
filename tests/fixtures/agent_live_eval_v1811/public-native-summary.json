@@ -1,0 +1,2923 @@
+[
+  {
+    "family": "cs_did",
+    "status": "PUBLIC_SEED_NATIVE_FIELDS_PASS_NOT_LIVE",
+    "run_id": "20261004_211712_508922_4475b63d",
+    "executed_params": {
+      "mode": "auto",
+      "model_type": "cs_did",
+      "y": "y",
+      "x": [
+        "x1"
+      ],
+      "sheet_name": "",
+      "transpose": "false",
+      "imputation": "",
+      "entity_col": "unit",
+      "time_col": "period",
+      "covariance": "robust",
+      "prediction_model_type": "",
+      "prediction_cv_folds": "0",
+      "prediction_sampling_method": "",
+      "prediction_data_structure": null,
+      "prediction_entity_column": "",
+      "prediction_group_column": "",
+      "prediction_time_column": "",
+      "prediction_final_holdout_fraction": null,
+      "prediction_shuffle": null,
+      "frequency_weight": "",
+      "analysis_weight": "",
+      "sampling_weight": "",
+      "survey_strata_col": "",
+      "survey_psu_col": "",
+      "survey_fpc_col": "",
+      "survey_replicate_weights": "",
+      "survey_replicate_type": "",
+      "survey_lonely_psu": "",
+      "survey_weight_frame": "",
+      "survey_subpop": "",
+      "iv_endog": [],
+      "iv_instruments": [],
+      "did_mode": "cohort",
+      "did_cohort_col": "first_treat",
+      "did_treat_col": "",
+      "did_post_col": "",
+      "did_status_col": "",
+      "did_treatment_path": "",
+      "cs_control_group": "never",
+      "cs_est_method": "dr",
+      "cs_base_period": "varying",
+      "cs_cluster_var": "",
+      "cs_anticipation": 0,
+      "honest_did": "false",
+      "focal_x": "",
+      "model_options": {},
+      "labels": {
+        "variable_labels": {},
+        "value_labels": {}
+      },
+      "form": {
+        "mode": "auto",
+        "model_type": "cs_did",
+        "y": "y",
+        "x": "[\"x1\"]",
+        "sheet_name": "",
+        "transpose": "false",
+        "imputation": "",
+        "entity_col": "unit",
+        "time_col": "period",
+        "covariance": "",
+        "prediction_model_type": "",
+        "prediction_cv_folds": "0",
+        "prediction_sampling_method": "",
+        "prediction_data_structure": null,
+        "prediction_entity_column": "",
+        "prediction_group_column": "",
+        "prediction_time_column": "",
+        "prediction_final_holdout_fraction": null,
+        "prediction_shuffle": null,
+        "frequency_weight": "",
+        "analysis_weight": "",
+        "sampling_weight": "",
+        "survey_strata_col": "",
+        "survey_psu_col": "",
+        "survey_fpc_col": "",
+        "survey_replicate_weights": "",
+        "survey_replicate_type": "",
+        "survey_lonely_psu": "",
+        "survey_weight_frame": "",
+        "survey_subpop": "",
+        "iv_endog": "",
+        "iv_instruments": "",
+        "did_mode": "cohort",
+        "did_cohort_col": "first_treat",
+        "did_treat_col": "",
+        "did_post_col": "",
+        "did_status_col": "",
+        "did_treatment_path": "",
+        "cs_control_group": "never",
+        "cs_est_method": "dr",
+        "cs_base_period": "varying",
+        "cs_cluster_var": "",
+        "cs_anticipation": "0",
+        "honest_did": "false",
+        "focal_x": "",
+        "model_options": {},
+        "labels": {
+          "variable_labels": {},
+          "value_labels": {}
+        }
+      },
+      "rerun_of": null,
+      "from_node": null
+    },
+    "actual_family": "cs_did",
+    "model_artifact": {
+      "artifact_id": "cs_did_1",
+      "path": "model_results/cs_did_1.json",
+      "artifact_type": "model_result",
+      "step": "econometrics",
+      "sha256": "c512b98b62c0dd4232ff6b89e4e71d82fc081dcbe21341a94b9279ed9377eba1",
+      "inputs": [
+        "cleaned_dataset"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    "kernel_artifact": {
+      "artifact_id": "inference_kernel_cs_did_1",
+      "path": "model_results/inference_kernels/cs_did_1.json",
+      "artifact_type": "inference_kernel",
+      "step": "econometrics",
+      "sha256": "cf259e07c666d96a95073fd6a359e7e07efa09a99cff138f8e74b076b69b0ed7",
+      "inputs": [
+        "cs_did_1"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    "manifest_sha256": "faaee18325fab97a78757790f5dc3826ccc6bfd6774bc31c0e4acfdc51efed75",
+    "run_inputs_sha256": "8b1774764e5a4b36b1c4faa17e64ef0c56b6cb2767e5b7e79c920e634a99fcf5",
+    "artifacts_index_sha256": "d78ea42a5062eb5ebcc48ef49af4bb7334802c09ab6a913f491f4cc842559a24",
+    "native_diffs": [
+      {
+        "field": [
+          "coefficients",
+          "ATT",
+          "estimate"
+        ],
+        "actual": 0.9429039843546839,
+        "native": 0.9429039844733,
+        "difference": -1.1861611692864926e-10,
+        "tolerance": 1e-06,
+        "passed": true
+      },
+      {
+        "field": [
+          "coefficients",
+          "ATT",
+          "std_error"
+        ],
+        "actual": 0.06555621729356913,
+        "native": 0.06555621730834,
+        "difference": -1.4770878964398548e-11,
+        "tolerance": 1e-06,
+        "passed": true
+      }
+    ],
+    "known_limitations": [],
+    "retained_evidence": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-859/test_public_family_fixture_own14/public-fixture-evidence.json"
+  },
+  {
+    "family": "dcdh",
+    "status": "PUBLIC_SEED_NATIVE_FIELDS_PASS_NOT_LIVE",
+    "run_id": "20261004_211713_350225_876da831",
+    "executed_params": {
+      "mode": "auto",
+      "model_type": "dcdh",
+      "y": "y",
+      "x": [],
+      "sheet_name": "",
+      "transpose": "false",
+      "imputation": "",
+      "entity_col": "id",
+      "time_col": "year",
+      "covariance": "robust",
+      "prediction_model_type": "",
+      "prediction_cv_folds": "0",
+      "prediction_sampling_method": "",
+      "prediction_data_structure": null,
+      "prediction_entity_column": "",
+      "prediction_group_column": "",
+      "prediction_time_column": "",
+      "prediction_final_holdout_fraction": null,
+      "prediction_shuffle": null,
+      "frequency_weight": "",
+      "analysis_weight": "",
+      "sampling_weight": "",
+      "survey_strata_col": "",
+      "survey_psu_col": "",
+      "survey_fpc_col": "",
+      "survey_replicate_weights": "",
+      "survey_replicate_type": "",
+      "survey_lonely_psu": "",
+      "survey_weight_frame": "",
+      "survey_subpop": "",
+      "iv_endog": [],
+      "iv_instruments": [],
+      "did_mode": "",
+      "did_cohort_col": "",
+      "did_treat_col": "",
+      "did_post_col": "",
+      "did_status_col": "",
+      "did_treatment_path": "d",
+      "cs_control_group": "",
+      "cs_est_method": "",
+      "cs_base_period": "",
+      "cs_cluster_var": "",
+      "cs_anticipation": 0,
+      "honest_did": "false",
+      "focal_x": "",
+      "model_options": {},
+      "labels": {
+        "variable_labels": {},
+        "value_labels": {}
+      },
+      "form": {
+        "mode": "auto",
+        "model_type": "dcdh",
+        "y": "y",
+        "x": "[]",
+        "sheet_name": "",
+        "transpose": "false",
+        "imputation": "",
+        "entity_col": "id",
+        "time_col": "year",
+        "covariance": "",
+        "prediction_model_type": "",
+        "prediction_cv_folds": "0",
+        "prediction_sampling_method": "",
+        "prediction_data_structure": null,
+        "prediction_entity_column": "",
+        "prediction_group_column": "",
+        "prediction_time_column": "",
+        "prediction_final_holdout_fraction": null,
+        "prediction_shuffle": null,
+        "frequency_weight": "",
+        "analysis_weight": "",
+        "sampling_weight": "",
+        "survey_strata_col": "",
+        "survey_psu_col": "",
+        "survey_fpc_col": "",
+        "survey_replicate_weights": "",
+        "survey_replicate_type": "",
+        "survey_lonely_psu": "",
+        "survey_weight_frame": "",
+        "survey_subpop": "",
+        "iv_endog": "",
+        "iv_instruments": "",
+        "did_mode": "",
+        "did_cohort_col": "",
+        "did_treat_col": "",
+        "did_post_col": "",
+        "did_status_col": "",
+        "did_treatment_path": "d",
+        "cs_control_group": "",
+        "cs_est_method": "",
+        "cs_base_period": "",
+        "cs_cluster_var": "",
+        "cs_anticipation": "0",
+        "honest_did": "false",
+        "focal_x": "",
+        "model_options": {},
+        "labels": {
+          "variable_labels": {},
+          "value_labels": {}
+        }
+      },
+      "rerun_of": null,
+      "from_node": null
+    },
+    "actual_family": "dcdh",
+    "model_artifact": {
+      "artifact_id": "dcdh_1",
+      "path": "model_results/dcdh_1.json",
+      "artifact_type": "model_result",
+      "step": "econometrics",
+      "sha256": "dd8f57fa282a9bca0f21c917e6755c223fdcee5c21ffd27d137ce818f4bf58af",
+      "inputs": [
+        "cleaned_dataset"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    "kernel_artifact": {
+      "artifact_id": "inference_kernel_dcdh_1",
+      "path": "model_results/inference_kernels/dcdh_1.json",
+      "artifact_type": "inference_kernel",
+      "step": "econometrics",
+      "sha256": "e7ab63afe5a468c5fb355fcdb70ea51df6ad58271f0d7acad2af505d523e2fd3",
+      "inputs": [
+        "dcdh_1"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    "manifest_sha256": "f3dc0251ca01cd2a5ea83a092b7096f8611a50e3cd7c1a938b8b2c52e25d5d10",
+    "run_inputs_sha256": "26971462df9a5e9db15162bc62955284754b196de3041267d337d76067a6718f",
+    "artifacts_index_sha256": "3fe78a64ef7d4972558f7c363636df9a1f4c3a40a5a7da88c5254b9b2019a431",
+    "native_diffs": [
+      {
+        "field": [
+          "event_study",
+          "estimate",
+          2
+        ],
+        "actual": 0.8584090204704826,
+        "native": 0.8584090204704825,
+        "difference": 1.1102230246251565e-16,
+        "tolerance": 1e-06,
+        "passed": true
+      },
+      {
+        "field": [
+          "event_study",
+          "estimate",
+          3
+        ],
+        "actual": 0.8618156387981905,
+        "native": 0.861815638798191,
+        "difference": -5.551115123125783e-16,
+        "tolerance": 1e-06,
+        "passed": true
+      },
+      {
+        "field": [
+          "event_study",
+          "estimate",
+          4
+        ],
+        "actual": 0.6678264075046085,
+        "native": 0.6678264075046093,
+        "difference": -7.771561172376096e-16,
+        "tolerance": 1e-06,
+        "passed": true
+      },
+      {
+        "field": [
+          "event_study",
+          "se",
+          2
+        ],
+        "actual": 0.058708292036495,
+        "native": 0.05870829203649501,
+        "difference": -1.3877787807814457e-17,
+        "tolerance": 1e-09,
+        "passed": true
+      },
+      {
+        "field": [
+          "event_study",
+          "se",
+          3
+        ],
+        "actual": 0.06097614131672798,
+        "native": 0.06097614131672802,
+        "difference": -4.163336342344337e-17,
+        "tolerance": 1e-09,
+        "passed": true
+      },
+      {
+        "field": [
+          "event_study",
+          "se",
+          4
+        ],
+        "actual": 0.06851975954911135,
+        "native": 0.06851975954911138,
+        "difference": -2.7755575615628914e-17,
+        "tolerance": 1e-09,
+        "passed": true
+      }
+    ],
+    "known_limitations": [
+      "Public overall ATT is an experimental switcher-weighted horizon average. It is not native DIDmultiplegtDYN Av_tot_eff; the original public value 0.7960170222577605 differs from native 0.8428415529788059. Only dynamic Effect_1..3 and their pointwise standard errors are compared."
+    ],
+    "retained_evidence": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-859/test_public_family_fixture_own16/public-fixture-evidence.json"
+  },
+  {
+    "family": "did",
+    "status": "PUBLIC_SEED_NATIVE_FIELDS_PASS_NOT_LIVE",
+    "run_id": "20261004_211706_169320_265a6b4d",
+    "executed_params": {
+      "mode": "auto",
+      "model_type": "did",
+      "y": "y",
+      "x": [
+        "x1"
+      ],
+      "sheet_name": "",
+      "transpose": "false",
+      "imputation": "",
+      "entity_col": "g",
+      "time_col": "time",
+      "covariance": "clustered",
+      "prediction_model_type": "",
+      "prediction_cv_folds": "0",
+      "prediction_sampling_method": "",
+      "prediction_data_structure": null,
+      "prediction_entity_column": "",
+      "prediction_group_column": "",
+      "prediction_time_column": "",
+      "prediction_final_holdout_fraction": null,
+      "prediction_shuffle": null,
+      "frequency_weight": "",
+      "analysis_weight": "",
+      "sampling_weight": "",
+      "survey_strata_col": "",
+      "survey_psu_col": "",
+      "survey_fpc_col": "",
+      "survey_replicate_weights": "",
+      "survey_replicate_type": "",
+      "survey_lonely_psu": "",
+      "survey_weight_frame": "",
+      "survey_subpop": "",
+      "iv_endog": [],
+      "iv_instruments": [],
+      "did_mode": "cohort",
+      "did_cohort_col": "first_treat",
+      "did_treat_col": "",
+      "did_post_col": "",
+      "did_status_col": "",
+      "did_treatment_path": "",
+      "cs_control_group": "",
+      "cs_est_method": "",
+      "cs_base_period": "",
+      "cs_cluster_var": "",
+      "cs_anticipation": 0,
+      "honest_did": "false",
+      "focal_x": "",
+      "model_options": {},
+      "labels": {
+        "variable_labels": {},
+        "value_labels": {}
+      },
+      "form": {
+        "mode": "auto",
+        "model_type": "did",
+        "y": "y",
+        "x": "[\"x1\"]",
+        "sheet_name": "",
+        "transpose": "false",
+        "imputation": "",
+        "entity_col": "g",
+        "time_col": "time",
+        "covariance": "clustered",
+        "prediction_model_type": "",
+        "prediction_cv_folds": "0",
+        "prediction_sampling_method": "",
+        "prediction_data_structure": null,
+        "prediction_entity_column": "",
+        "prediction_group_column": "",
+        "prediction_time_column": "",
+        "prediction_final_holdout_fraction": null,
+        "prediction_shuffle": null,
+        "frequency_weight": "",
+        "analysis_weight": "",
+        "sampling_weight": "",
+        "survey_strata_col": "",
+        "survey_psu_col": "",
+        "survey_fpc_col": "",
+        "survey_replicate_weights": "",
+        "survey_replicate_type": "",
+        "survey_lonely_psu": "",
+        "survey_weight_frame": "",
+        "survey_subpop": "",
+        "iv_endog": "",
+        "iv_instruments": "",
+        "did_mode": "cohort",
+        "did_cohort_col": "first_treat",
+        "did_treat_col": "",
+        "did_post_col": "",
+        "did_status_col": "",
+        "did_treatment_path": "",
+        "cs_control_group": "",
+        "cs_est_method": "",
+        "cs_base_period": "",
+        "cs_cluster_var": "",
+        "cs_anticipation": "0",
+        "honest_did": "false",
+        "focal_x": "",
+        "model_options": {},
+        "labels": {
+          "variable_labels": {},
+          "value_labels": {}
+        }
+      },
+      "rerun_of": null,
+      "from_node": null
+    },
+    "actual_family": "did",
+    "model_artifact": {
+      "artifact_id": "did_1",
+      "path": "model_results/did_1.json",
+      "artifact_type": "model_result",
+      "step": "econometrics",
+      "sha256": "9672d5d468051ad7c7c30fb52e49b16a1ee27bc35f16b31fe974c51dfea1a86f",
+      "inputs": [
+        "cleaned_dataset"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    "kernel_artifact": {
+      "artifact_id": "inference_kernel_did_1",
+      "path": "model_results/inference_kernels/did_1.json",
+      "artifact_type": "inference_kernel",
+      "step": "econometrics",
+      "sha256": "0306babd65aaad7cfefb2473f11b35cbbef9c8b1e66a711b30e6f8ee8ba04810",
+      "inputs": [
+        "did_1"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    "manifest_sha256": "e1686e4b844f9bd52e4c79a1e8630418fbb01820f187b88c2f6d4539a6697498",
+    "run_inputs_sha256": "8761638a5f4194f0aa23c77ac4fe915ab873b9fd2b75a3968423956fae65c1c3",
+    "artifacts_index_sha256": "1723890329d7daca9fe00026deb29ec6484fbfab3ebd9cf1344178f9203feda6",
+    "native_diffs": [
+      {
+        "field": [
+          "coefficients",
+          "_did_D",
+          "estimate"
+        ],
+        "actual": 0.6821289937316858,
+        "native": 0.682128993731686,
+        "difference": -2.220446049250313e-16,
+        "tolerance": 1e-09,
+        "passed": true
+      },
+      {
+        "field": [
+          "coefficients",
+          "x1",
+          "estimate"
+        ],
+        "actual": 0.32768631548082827,
+        "native": 0.327686315480828,
+        "difference": 2.7755575615628914e-16,
+        "tolerance": 1e-09,
+        "passed": true
+      },
+      {
+        "field": [
+          "coefficients",
+          "_did_D",
+          "std_error"
+        ],
+        "actual": 0.16366845074908956,
+        "native": 0.16366845074909,
+        "difference": -4.440892098500626e-16,
+        "tolerance": 1.6366845074909e-09,
+        "passed": true
+      },
+      {
+        "field": [
+          "coefficients",
+          "x1",
+          "std_error"
+        ],
+        "actual": 0.044161357973402905,
+        "native": 0.0441613579734029,
+        "difference": 6.938893903907228e-18,
+        "tolerance": 4.41613579734029e-10,
+        "passed": true
+      }
+    ],
+    "known_limitations": [],
+    "retained_evidence": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-859/test_public_family_fixture_own5/public-fixture-evidence.json"
+  },
+  {
+    "family": "glm:binomial",
+    "status": "PUBLIC_SEED_NATIVE_FIELDS_PASS_NOT_LIVE",
+    "run_id": "20261004_211703_530786_b3757a1a",
+    "executed_params": {
+      "mode": "auto",
+      "model_type": "glm:binomial",
+      "y": "y",
+      "x": [
+        "x1",
+        "x2"
+      ],
+      "sheet_name": "",
+      "transpose": "false",
+      "imputation": "",
+      "entity_col": "",
+      "time_col": "",
+      "covariance": "robust",
+      "prediction_model_type": "",
+      "prediction_cv_folds": "0",
+      "prediction_sampling_method": "",
+      "prediction_data_structure": null,
+      "prediction_entity_column": "",
+      "prediction_group_column": "",
+      "prediction_time_column": "",
+      "prediction_final_holdout_fraction": null,
+      "prediction_shuffle": null,
+      "frequency_weight": "",
+      "analysis_weight": "",
+      "sampling_weight": "",
+      "survey_strata_col": "",
+      "survey_psu_col": "",
+      "survey_fpc_col": "",
+      "survey_replicate_weights": "",
+      "survey_replicate_type": "",
+      "survey_lonely_psu": "",
+      "survey_weight_frame": "",
+      "survey_subpop": "",
+      "iv_endog": [],
+      "iv_instruments": [],
+      "did_mode": "",
+      "did_cohort_col": "",
+      "did_treat_col": "",
+      "did_post_col": "",
+      "did_status_col": "",
+      "did_treatment_path": "",
+      "cs_control_group": "",
+      "cs_est_method": "",
+      "cs_base_period": "",
+      "cs_cluster_var": "",
+      "cs_anticipation": 0,
+      "honest_did": "false",
+      "focal_x": "",
+      "model_options": {},
+      "labels": {
+        "variable_labels": {},
+        "value_labels": {}
+      },
+      "form": {
+        "mode": "auto",
+        "model_type": "glm:binomial",
+        "y": "y",
+        "x": "[\"x1\", \"x2\"]",
+        "sheet_name": "",
+        "transpose": "false",
+        "imputation": "",
+        "entity_col": "",
+        "time_col": "",
+        "covariance": "",
+        "prediction_model_type": "",
+        "prediction_cv_folds": "0",
+        "prediction_sampling_method": "",
+        "prediction_data_structure": null,
+        "prediction_entity_column": "",
+        "prediction_group_column": "",
+        "prediction_time_column": "",
+        "prediction_final_holdout_fraction": null,
+        "prediction_shuffle": null,
+        "frequency_weight": "",
+        "analysis_weight": "",
+        "sampling_weight": "",
+        "survey_strata_col": "",
+        "survey_psu_col": "",
+        "survey_fpc_col": "",
+        "survey_replicate_weights": "",
+        "survey_replicate_type": "",
+        "survey_lonely_psu": "",
+        "survey_weight_frame": "",
+        "survey_subpop": "",
+        "iv_endog": "",
+        "iv_instruments": "",
+        "did_mode": "",
+        "did_cohort_col": "",
+        "did_treat_col": "",
+        "did_post_col": "",
+        "did_status_col": "",
+        "did_treatment_path": "",
+        "cs_control_group": "",
+        "cs_est_method": "",
+        "cs_base_period": "",
+        "cs_cluster_var": "",
+        "cs_anticipation": "0",
+        "honest_did": "false",
+        "focal_x": "",
+        "model_options": {},
+        "labels": {
+          "variable_labels": {},
+          "value_labels": {}
+        }
+      },
+      "rerun_of": null,
+      "from_node": null
+    },
+    "actual_family": "glm:binomial",
+    "model_artifact": {
+      "artifact_id": "glm_1",
+      "path": "model_results/glm_1.json",
+      "artifact_type": "model_result",
+      "step": "econometrics",
+      "sha256": "8a064071ebcd71659f075d0d851bc23970ec41ff9568e71455f9dffda6cbe762",
+      "inputs": [
+        "cleaned_dataset"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    "kernel_artifact": {
+      "artifact_id": "inference_kernel_glm_1",
+      "path": "model_results/inference_kernels/glm_1.json",
+      "artifact_type": "inference_kernel",
+      "step": "econometrics",
+      "sha256": "4abc99d87f1ce94d6016bc599e95988f30dc155883602870534acc89ba4dfd70",
+      "inputs": [
+        "glm_1"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    "manifest_sha256": "b55ab0d401893634495fd3d92347d06f7bc18049cb9ee2fbdba7f0fa4f3ae2d7",
+    "run_inputs_sha256": "4938b88626d7b0f167ab644c27b8acd93ed61cc9d01f688b9fa5ce1eb0e5c459",
+    "artifacts_index_sha256": "251c292f7f4a87e659abe6a1ff3935c23eebeb63a4355067458748f6ae2c710c",
+    "native_diffs": [
+      {
+        "field": [
+          "coefficients",
+          "x1",
+          "estimate"
+        ],
+        "actual": 0.6946500026337921,
+        "native": 0.694650002633791,
+        "difference": 1.1102230246251565e-15,
+        "tolerance": 1e-08,
+        "passed": true
+      },
+      {
+        "field": [
+          "coefficients",
+          "x2",
+          "estimate"
+        ],
+        "actual": -0.4236990319395298,
+        "native": -0.42369903193953,
+        "difference": 2.220446049250313e-16,
+        "tolerance": 1e-08,
+        "passed": true
+      },
+      {
+        "field": [
+          "coefficients",
+          "x1",
+          "std_error"
+        ],
+        "actual": 0.11810398652475988,
+        "native": 0.118103985119511,
+        "difference": 1.4052488755966763e-09,
+        "tolerance": 1e-06,
+        "passed": true
+      },
+      {
+        "field": [
+          "coefficients",
+          "x2",
+          "std_error"
+        ],
+        "actual": 0.10659864722707116,
+        "native": 0.106598646337927,
+        "difference": 8.891441610758832e-10,
+        "tolerance": 1e-06,
+        "passed": true
+      }
+    ],
+    "known_limitations": [],
+    "retained_evidence": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-859/test_public_family_fixture_own1/public-fixture-evidence.json"
+  },
+  {
+    "family": "glm:negative_binomial",
+    "status": "PUBLIC_SEED_NATIVE_FIELDS_PASS_NOT_LIVE",
+    "run_id": "20261004_211704_630880_8140e798",
+    "executed_params": {
+      "mode": "auto",
+      "model_type": "glm:negative_binomial",
+      "y": "y",
+      "x": [
+        "x1",
+        "x2"
+      ],
+      "sheet_name": "",
+      "transpose": "false",
+      "imputation": "",
+      "entity_col": "",
+      "time_col": "",
+      "covariance": "",
+      "prediction_model_type": "",
+      "prediction_cv_folds": "0",
+      "prediction_sampling_method": "",
+      "prediction_data_structure": null,
+      "prediction_entity_column": "",
+      "prediction_group_column": "",
+      "prediction_time_column": "",
+      "prediction_final_holdout_fraction": null,
+      "prediction_shuffle": null,
+      "frequency_weight": "",
+      "analysis_weight": "",
+      "sampling_weight": "",
+      "survey_strata_col": "",
+      "survey_psu_col": "",
+      "survey_fpc_col": "",
+      "survey_replicate_weights": "",
+      "survey_replicate_type": "",
+      "survey_lonely_psu": "",
+      "survey_weight_frame": "",
+      "survey_subpop": "",
+      "iv_endog": [],
+      "iv_instruments": [],
+      "did_mode": "",
+      "did_cohort_col": "",
+      "did_treat_col": "",
+      "did_post_col": "",
+      "did_status_col": "",
+      "did_treatment_path": "",
+      "cs_control_group": "",
+      "cs_est_method": "",
+      "cs_base_period": "",
+      "cs_cluster_var": "",
+      "cs_anticipation": 0,
+      "honest_did": "false",
+      "focal_x": "",
+      "model_options": {
+        "alpha": 1.0
+      },
+      "labels": {
+        "variable_labels": {},
+        "value_labels": {}
+      },
+      "model_options_binding": {
+        "owner_model_type": "glm",
+        "owner_model_id": "glm_1",
+        "producer_version": "glm@1.0",
+        "input_contract_version": "glm_model_options@1.0",
+        "normalized_options_hash": "aa2c2c4f06f30aad68230de36f5f37ac04bb3795c349ea02ffd79bb7ae600405"
+      }
+    },
+    "actual_family": "glm:negative_binomial",
+    "model_artifact": {
+      "artifact_id": "glm_1",
+      "path": "model_results/glm_1.json",
+      "artifact_type": "model_result",
+      "step": "econometrics",
+      "sha256": "6d295e398713965f6e1fbd342868b992db0f28d276ca1d1de43293cc85042be7",
+      "inputs": [
+        "cleaned_dataset"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    "kernel_artifact": {
+      "artifact_id": "inference_kernel_glm_1",
+      "path": "model_results/inference_kernels/glm_1.json",
+      "artifact_type": "inference_kernel",
+      "step": "econometrics",
+      "sha256": "00b17d34434835cce7258351993d42d795bc0292ccef7f31f1a2316dd70e66f4",
+      "inputs": [
+        "glm_1"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    "manifest_sha256": "c63df5e39713a489f7fa459bde2d98837e9cde2e4db5b20a5296e2a7773a3a04",
+    "run_inputs_sha256": "322b94169a763aa0e5ba48457f9364cccc1dba4b5fffe9e5419acf08359783ce",
+    "artifacts_index_sha256": "b1e05bb56327038292219cee703f969a75a7311e4cd955fa74487d11e5fb82e2",
+    "native_diffs": [
+      {
+        "field": [
+          "coefficients",
+          "x1",
+          "estimate"
+        ],
+        "actual": 0.3789844117869672,
+        "native": 0.37898441178694714,
+        "difference": 2.0039525594484076e-14,
+        "tolerance": 1e-08,
+        "passed": true
+      },
+      {
+        "field": [
+          "coefficients",
+          "x2",
+          "estimate"
+        ],
+        "actual": -0.2293064553582496,
+        "native": -0.2293064553582519,
+        "difference": 2.3037127760972e-15,
+        "tolerance": 1e-08,
+        "passed": true
+      },
+      {
+        "field": [
+          "coefficients",
+          "x1",
+          "std_error"
+        ],
+        "actual": 0.06423158311977491,
+        "native": 0.06423158311977484,
+        "difference": 6.938893903907228e-17,
+        "tolerance": 1e-06,
+        "passed": true
+      },
+      {
+        "field": [
+          "coefficients",
+          "x2",
+          "std_error"
+        ],
+        "actual": 0.061345338701274954,
+        "native": 0.06134533870127498,
+        "difference": -2.7755575615628914e-17,
+        "tolerance": 1e-06,
+        "passed": true
+      }
+    ],
+    "known_limitations": [],
+    "retained_evidence": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-859/test_public_family_fixture_own3/public-fixture-evidence.json"
+  },
+  {
+    "family": "glm:poisson",
+    "status": "PUBLIC_SEED_NATIVE_FIELDS_PASS_NOT_LIVE",
+    "run_id": "20261004_211703_884995_4ac39ad5",
+    "executed_params": {
+      "mode": "auto",
+      "model_type": "glm:poisson",
+      "y": "y",
+      "x": [
+        "x1",
+        "x2"
+      ],
+      "sheet_name": "",
+      "transpose": "false",
+      "imputation": "",
+      "entity_col": "",
+      "time_col": "",
+      "covariance": "robust",
+      "prediction_model_type": "",
+      "prediction_cv_folds": "0",
+      "prediction_sampling_method": "",
+      "prediction_data_structure": null,
+      "prediction_entity_column": "",
+      "prediction_group_column": "",
+      "prediction_time_column": "",
+      "prediction_final_holdout_fraction": null,
+      "prediction_shuffle": null,
+      "frequency_weight": "",
+      "analysis_weight": "",
+      "sampling_weight": "",
+      "survey_strata_col": "",
+      "survey_psu_col": "",
+      "survey_fpc_col": "",
+      "survey_replicate_weights": "",
+      "survey_replicate_type": "",
+      "survey_lonely_psu": "",
+      "survey_weight_frame": "",
+      "survey_subpop": "",
+      "iv_endog": [],
+      "iv_instruments": [],
+      "did_mode": "",
+      "did_cohort_col": "",
+      "did_treat_col": "",
+      "did_post_col": "",
+      "did_status_col": "",
+      "did_treatment_path": "",
+      "cs_control_group": "",
+      "cs_est_method": "",
+      "cs_base_period": "",
+      "cs_cluster_var": "",
+      "cs_anticipation": 0,
+      "honest_did": "false",
+      "focal_x": "",
+      "model_options": {},
+      "labels": {
+        "variable_labels": {},
+        "value_labels": {}
+      },
+      "form": {
+        "mode": "auto",
+        "model_type": "glm:poisson",
+        "y": "y",
+        "x": "[\"x1\", \"x2\"]",
+        "sheet_name": "",
+        "transpose": "false",
+        "imputation": "",
+        "entity_col": "",
+        "time_col": "",
+        "covariance": "",
+        "prediction_model_type": "",
+        "prediction_cv_folds": "0",
+        "prediction_sampling_method": "",
+        "prediction_data_structure": null,
+        "prediction_entity_column": "",
+        "prediction_group_column": "",
+        "prediction_time_column": "",
+        "prediction_final_holdout_fraction": null,
+        "prediction_shuffle": null,
+        "frequency_weight": "",
+        "analysis_weight": "",
+        "sampling_weight": "",
+        "survey_strata_col": "",
+        "survey_psu_col": "",
+        "survey_fpc_col": "",
+        "survey_replicate_weights": "",
+        "survey_replicate_type": "",
+        "survey_lonely_psu": "",
+        "survey_weight_frame": "",
+        "survey_subpop": "",
+        "iv_endog": "",
+        "iv_instruments": "",
+        "did_mode": "",
+        "did_cohort_col": "",
+        "did_treat_col": "",
+        "did_post_col": "",
+        "did_status_col": "",
+        "did_treatment_path": "",
+        "cs_control_group": "",
+        "cs_est_method": "",
+        "cs_base_period": "",
+        "cs_cluster_var": "",
+        "cs_anticipation": "0",
+        "honest_did": "false",
+        "focal_x": "",
+        "model_options": {},
+        "labels": {
+          "variable_labels": {},
+          "value_labels": {}
+        }
+      },
+      "rerun_of": null,
+      "from_node": null
+    },
+    "actual_family": "glm:poisson",
+    "model_artifact": {
+      "artifact_id": "glm_1",
+      "path": "model_results/glm_1.json",
+      "artifact_type": "model_result",
+      "step": "econometrics",
+      "sha256": "9bd7b9bbc42648e4f17f65ccb16eab88925105b8a323d683f7d0055dfdcd6970",
+      "inputs": [
+        "cleaned_dataset"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    "kernel_artifact": {
+      "artifact_id": "inference_kernel_glm_1",
+      "path": "model_results/inference_kernels/glm_1.json",
+      "artifact_type": "inference_kernel",
+      "step": "econometrics",
+      "sha256": "789ba5f399d83e5c0189c06ae229285a6ad4910dc35f5fadad926c0fac4ad85f",
+      "inputs": [
+        "glm_1"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    "manifest_sha256": "52039fc644a8c31478bb875ddd238bc629f2f45add459419c06689153b585b51",
+    "run_inputs_sha256": "d453a1c2d9ac9f2c018c5e8b3c0bd914ad4cb3efaa967784fc598b1b8d0207e8",
+    "artifacts_index_sha256": "2fd8e164a17097739d446b907574fac12475b166a1b2b787dfc98c93dd20f848",
+    "native_diffs": [
+      {
+        "field": [
+          "coefficients",
+          "x1",
+          "estimate"
+        ],
+        "actual": 0.4025376328782475,
+        "native": 0.402537632878248,
+        "difference": -4.996003610813204e-16,
+        "tolerance": 1e-08,
+        "passed": true
+      },
+      {
+        "field": [
+          "coefficients",
+          "x2",
+          "estimate"
+        ],
+        "actual": -0.12901659858815104,
+        "native": -0.129016598588151,
+        "difference": -2.7755575615628914e-17,
+        "tolerance": 1e-08,
+        "passed": true
+      },
+      {
+        "field": [
+          "coefficients",
+          "x1",
+          "std_error"
+        ],
+        "actual": 0.03788760176921936,
+        "native": 0.0378876017691937,
+        "difference": 2.566002965664893e-14,
+        "tolerance": 1e-06,
+        "passed": true
+      },
+      {
+        "field": [
+          "coefficients",
+          "x2",
+          "std_error"
+        ],
+        "actual": 0.038646535652712345,
+        "native": 0.0386465356526668,
+        "difference": 4.554689958524705e-14,
+        "tolerance": 1e-06,
+        "passed": true
+      }
+    ],
+    "known_limitations": [],
+    "retained_evidence": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-859/test_public_family_fixture_own2/public-fixture-evidence.json"
+  },
+  {
+    "family": "iv_2sls",
+    "status": "PUBLIC_SEED_NATIVE_FIELDS_PASS_NOT_LIVE",
+    "run_id": "20261004_211653_697694_cb2a9df9",
+    "executed_params": {
+      "mode": "auto",
+      "model_type": "iv_2sls",
+      "y": "y",
+      "x": [
+        "x1"
+      ],
+      "sheet_name": "",
+      "transpose": "false",
+      "imputation": "",
+      "entity_col": "",
+      "time_col": "",
+      "covariance": "robust",
+      "prediction_model_type": "",
+      "prediction_cv_folds": "0",
+      "prediction_sampling_method": "",
+      "prediction_data_structure": null,
+      "prediction_entity_column": "",
+      "prediction_group_column": "",
+      "prediction_time_column": "",
+      "prediction_final_holdout_fraction": null,
+      "prediction_shuffle": null,
+      "frequency_weight": "",
+      "analysis_weight": "",
+      "sampling_weight": "",
+      "survey_strata_col": "",
+      "survey_psu_col": "",
+      "survey_fpc_col": "",
+      "survey_replicate_weights": "",
+      "survey_replicate_type": "",
+      "survey_lonely_psu": "",
+      "survey_weight_frame": "",
+      "survey_subpop": "",
+      "iv_endog": [
+        "xe"
+      ],
+      "iv_instruments": [
+        "z"
+      ],
+      "did_mode": "",
+      "did_cohort_col": "",
+      "did_treat_col": "",
+      "did_post_col": "",
+      "did_status_col": "",
+      "did_treatment_path": "",
+      "cs_control_group": "",
+      "cs_est_method": "",
+      "cs_base_period": "",
+      "cs_cluster_var": "",
+      "cs_anticipation": 0,
+      "honest_did": "false",
+      "focal_x": "",
+      "model_options": {},
+      "labels": {
+        "variable_labels": {},
+        "value_labels": {}
+      },
+      "form": {
+        "mode": "auto",
+        "model_type": "iv_2sls",
+        "y": "y",
+        "x": "[\"x1\"]",
+        "sheet_name": "",
+        "transpose": "false",
+        "imputation": "",
+        "entity_col": "",
+        "time_col": "",
+        "covariance": "robust",
+        "prediction_model_type": "",
+        "prediction_cv_folds": "0",
+        "prediction_sampling_method": "",
+        "prediction_data_structure": null,
+        "prediction_entity_column": "",
+        "prediction_group_column": "",
+        "prediction_time_column": "",
+        "prediction_final_holdout_fraction": null,
+        "prediction_shuffle": null,
+        "frequency_weight": "",
+        "analysis_weight": "",
+        "sampling_weight": "",
+        "survey_strata_col": "",
+        "survey_psu_col": "",
+        "survey_fpc_col": "",
+        "survey_replicate_weights": "",
+        "survey_replicate_type": "",
+        "survey_lonely_psu": "",
+        "survey_weight_frame": "",
+        "survey_subpop": "",
+        "iv_endog": "[\"xe\"]",
+        "iv_instruments": "[\"z\"]",
+        "did_mode": "",
+        "did_cohort_col": "",
+        "did_treat_col": "",
+        "did_post_col": "",
+        "did_status_col": "",
+        "did_treatment_path": "",
+        "cs_control_group": "",
+        "cs_est_method": "",
+        "cs_base_period": "",
+        "cs_cluster_var": "",
+        "cs_anticipation": "0",
+        "honest_did": "false",
+        "focal_x": "",
+        "model_options": {},
+        "labels": {
+          "variable_labels": {},
+          "value_labels": {}
+        }
+      },
+      "rerun_of": null,
+      "from_node": null
+    },
+    "actual_family": "iv_2sls",
+    "model_artifact": {
+      "artifact_id": "iv_2sls_1",
+      "path": "model_results/iv_2sls_1.json",
+      "artifact_type": "model_result",
+      "step": "econometrics",
+      "sha256": "2690506f2a8af96250aba46302088c8c2dc42478e5c59a2f7a86386019c27e67",
+      "inputs": [
+        "cleaned_dataset"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    "kernel_artifact": {
+      "artifact_id": "inference_kernel_iv_2sls_1",
+      "path": "model_results/inference_kernels/iv_2sls_1.json",
+      "artifact_type": "inference_kernel",
+      "step": "econometrics",
+      "sha256": "99ded12de695b6d2136ae4ddbf5405f01295fcb0d75d622903bdb0b5723772c7",
+      "inputs": [
+        "iv_2sls_1"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    "manifest_sha256": "cd413ad77e30dcb1fafd064dac2bdc933a72dca293f2ca49a968f8cc4bddf2bf",
+    "run_inputs_sha256": "9384b3661c19b9dea60991e1133af6916dffd74aaceb5e32860b8b4ff564b882",
+    "artifacts_index_sha256": "fab9136e254195eb449818af65cf7d6f5b08cb0a370af85a56e158c3aa6f384c",
+    "native_diffs": [
+      {
+        "field": [
+          "coefficients",
+          "x1",
+          "estimate"
+        ],
+        "actual": 0.5552201253208324,
+        "native": 0.555220125320833,
+        "difference": -5.551115123125783e-16,
+        "tolerance": 1e-08,
+        "passed": true
+      },
+      {
+        "field": [
+          "coefficients",
+          "xe",
+          "estimate"
+        ],
+        "actual": 0.8041549151923951,
+        "native": 0.804154915192396,
+        "difference": -8.881784197001252e-16,
+        "tolerance": 1e-08,
+        "passed": true
+      },
+      {
+        "field": [
+          "coefficients",
+          "x1",
+          "std_error"
+        ],
+        "actual": 0.052079051756544974,
+        "native": 0.0520790517565449,
+        "difference": 7.632783294297951e-17,
+        "tolerance": 1e-06,
+        "passed": true
+      },
+      {
+        "field": [
+          "coefficients",
+          "xe",
+          "std_error"
+        ],
+        "actual": 0.05155227948506298,
+        "native": 0.051552279485063,
+        "difference": -2.0816681711721685e-17,
+        "tolerance": 1e-06,
+        "passed": true
+      }
+    ],
+    "known_limitations": [],
+    "retained_evidence": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-859/test_public_family_fixture_own0/public-fixture-evidence.json"
+  },
+  {
+    "family": "linear_mixed_effects",
+    "status": "BLOCKED_NOT_LIVE_PASS",
+    "error": "public seed HTTP 422: {\"detail\":\"LMM_FROZEN_CONTAINMENT_REQUIRED\"}",
+    "retained_evidence": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-859/test_public_family_fixture_own6/lmm-blocker.json"
+  },
+  {
+    "family": "multinomial_logit",
+    "status": "PUBLIC_SEED_NATIVE_FIELDS_PASS_NOT_LIVE",
+    "run_id": "20261004_211710_913349_477449c4",
+    "executed_params": {
+      "mode": "auto",
+      "model_type": "multinomial_logit",
+      "y": "choice",
+      "x": [
+        "x1",
+        "x2",
+        "grp"
+      ],
+      "sheet_name": "",
+      "transpose": "false",
+      "imputation": "",
+      "entity_col": "",
+      "time_col": "",
+      "covariance": "",
+      "prediction_model_type": "",
+      "prediction_cv_folds": "0",
+      "prediction_sampling_method": "",
+      "prediction_data_structure": null,
+      "prediction_entity_column": "",
+      "prediction_group_column": "",
+      "prediction_time_column": "",
+      "prediction_final_holdout_fraction": null,
+      "prediction_shuffle": null,
+      "frequency_weight": "",
+      "analysis_weight": "",
+      "sampling_weight": "",
+      "survey_strata_col": "",
+      "survey_psu_col": "",
+      "survey_fpc_col": "",
+      "survey_replicate_weights": "",
+      "survey_replicate_type": "",
+      "survey_lonely_psu": "",
+      "survey_weight_frame": "",
+      "survey_subpop": "",
+      "iv_endog": [],
+      "iv_instruments": [],
+      "did_mode": "",
+      "did_cohort_col": "",
+      "did_treat_col": "",
+      "did_post_col": "",
+      "did_status_col": "",
+      "did_treatment_path": "",
+      "cs_control_group": "",
+      "cs_est_method": "",
+      "cs_base_period": "",
+      "cs_cluster_var": "",
+      "cs_anticipation": 0,
+      "honest_did": "false",
+      "focal_x": "",
+      "model_options": {
+        "base_category": "a"
+      },
+      "labels": {
+        "variable_labels": {},
+        "value_labels": {}
+      },
+      "model_options_binding": {
+        "owner_model_type": "multinomial_logit",
+        "owner_model_id": "multinomial_logit_1",
+        "producer_version": "v1.8.6",
+        "input_contract_version": "workbench.multinomial_logit.options.v1",
+        "normalized_options_hash": "028430cb7efdce6dc2940e6c2c2dc3caedf629a57a3a4619bbc874b6fffa04bf"
+      }
+    },
+    "actual_family": "multinomial_logit",
+    "model_artifact": {
+      "artifact_id": "multinomial_logit_1",
+      "path": "model_results/multinomial_logit_1.json",
+      "artifact_type": "model_result",
+      "step": "econometrics",
+      "sha256": "31e95c22cabf1c24c684c8777a03bf1531a53f7363de8dfd87cac75c479c52d4",
+      "inputs": [
+        "cleaned_dataset"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    "kernel_artifact": {
+      "artifact_id": "inference_kernel_multinomial_logit_1",
+      "path": "model_results/inference_kernels/multinomial_logit_1.json",
+      "artifact_type": "inference_kernel",
+      "step": "econometrics",
+      "sha256": "854ab82f83f7557feb9c10b3ac2ab0dd3ac9e27efc37917d50987912ecc2c74f",
+      "inputs": [
+        "multinomial_logit_1"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    "manifest_sha256": "6b665ffe5b2bc66b1ea4cdb5ab4d7e482a4d0777fbafcc55e2edca124b68980c",
+    "run_inputs_sha256": "d38c632bb6ab2a3fc2398225408d0ca45afbbcca93e55471a50ccbbac231872b",
+    "artifacts_index_sha256": "8f68b8f2f2e04f0f9ddba61692c69e5626e1907cb07c8f2fce2a7d1dfc1a2e43",
+    "native_diffs": [
+      {
+        "field": [
+          "coefficients",
+          "b:x1",
+          "estimate"
+        ],
+        "actual": 0.8755043494641593,
+        "native": 0.8754784525914064,
+        "difference": 2.5896872752895206e-05,
+        "tolerance": 0.0001,
+        "passed": true
+      },
+      {
+        "field": [
+          "coefficients",
+          "b:x2",
+          "estimate"
+        ],
+        "actual": 0.09619183433514727,
+        "native": 0.09619836343089634,
+        "difference": -6.529095749066571e-06,
+        "tolerance": 0.0001,
+        "passed": true
+      },
+      {
+        "field": [
+          "coefficients",
+          "b:grp",
+          "estimate"
+        ],
+        "actual": 0.5129924998615103,
+        "native": 0.5130023675654073,
+        "difference": -9.867703896992985e-06,
+        "tolerance": 0.0001,
+        "passed": true
+      },
+      {
+        "field": [
+          "coefficients",
+          "c:x1",
+          "estimate"
+        ],
+        "actual": 0.5777449618322049,
+        "native": 0.5777193078094149,
+        "difference": 2.5654022789978193e-05,
+        "tolerance": 0.0001,
+        "passed": true
+      },
+      {
+        "field": [
+          "coefficients",
+          "c:x2",
+          "estimate"
+        ],
+        "actual": -0.7920894392862209,
+        "native": -0.7920834391011938,
+        "difference": -6.000185027055238e-06,
+        "tolerance": 0.0001,
+        "passed": true
+      },
+      {
+        "field": [
+          "coefficients",
+          "c:grp",
+          "estimate"
+        ],
+        "actual": 0.07450184486860192,
+        "native": 0.07451012672235405,
+        "difference": -8.281853752123425e-06,
+        "tolerance": 0.0001,
+        "passed": true
+      }
+    ],
+    "known_limitations": [],
+    "retained_evidence": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-859/test_public_family_fixture_own11/public-fixture-evidence.json"
+  },
+  {
+    "family": "negative_binomial",
+    "status": "PUBLIC_SEED_NATIVE_FIELDS_PASS_NOT_LIVE",
+    "run_id": "20261004_211708_482068_7bc0f582",
+    "executed_params": {
+      "mode": "auto",
+      "model_type": "negative_binomial",
+      "y": "ynb",
+      "x": [
+        "x1",
+        "x2",
+        "x3"
+      ],
+      "sheet_name": "",
+      "transpose": "false",
+      "imputation": "",
+      "entity_col": "",
+      "time_col": "",
+      "covariance": "",
+      "prediction_model_type": "",
+      "prediction_cv_folds": "0",
+      "prediction_sampling_method": "",
+      "prediction_data_structure": null,
+      "prediction_entity_column": "",
+      "prediction_group_column": "",
+      "prediction_time_column": "",
+      "prediction_final_holdout_fraction": null,
+      "prediction_shuffle": null,
+      "frequency_weight": "",
+      "analysis_weight": "",
+      "sampling_weight": "",
+      "survey_strata_col": "",
+      "survey_psu_col": "",
+      "survey_fpc_col": "",
+      "survey_replicate_weights": "",
+      "survey_replicate_type": "",
+      "survey_lonely_psu": "",
+      "survey_weight_frame": "",
+      "survey_subpop": "",
+      "iv_endog": [],
+      "iv_instruments": [],
+      "did_mode": "",
+      "did_cohort_col": "",
+      "did_treat_col": "",
+      "did_post_col": "",
+      "did_status_col": "",
+      "did_treatment_path": "",
+      "cs_control_group": "",
+      "cs_est_method": "",
+      "cs_base_period": "",
+      "cs_cluster_var": "",
+      "cs_anticipation": 0,
+      "honest_did": "false",
+      "focal_x": "",
+      "model_options": {
+        "dispersion": "mean"
+      },
+      "labels": {
+        "variable_labels": {},
+        "value_labels": {}
+      },
+      "model_options_binding": {
+        "owner_model_type": "negative_binomial",
+        "owner_model_id": "negative_binomial_1",
+        "producer_version": "negative_binomial@1.0",
+        "input_contract_version": "count_model_options@1.0",
+        "normalized_options_hash": "26e2e23b3948e1367233161945cd7d89cf18e8e6c17843a785017e380de8e2a4"
+      }
+    },
+    "actual_family": "negative_binomial",
+    "model_artifact": {
+      "artifact_id": "negative_binomial_1",
+      "path": "model_results/negative_binomial_1.json",
+      "artifact_type": "model_result",
+      "step": "econometrics",
+      "sha256": "621b34c3537bb42024355077c74acab4edd8a32bdf20436063c2e9acef951010",
+      "inputs": [
+        "cleaned_dataset"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    "kernel_artifact": {
+      "artifact_id": "inference_kernel_negative_binomial_1",
+      "path": "model_results/inference_kernels/negative_binomial_1.json",
+      "artifact_type": "inference_kernel",
+      "step": "econometrics",
+      "sha256": "70d9cdf9343e6f99116601661f320c4a0cd96d90b5af15644e217a41ce642bfe",
+      "inputs": [
+        "negative_binomial_1"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    "manifest_sha256": "08d16670a20c8135471bcf3355dba836bb1b672a2e2679ea098d3ebcb20e74bc",
+    "run_inputs_sha256": "3064096d0d47d39ec23c2823419712b2c91ea37e5fa1ae3373e5950d12ff2b82",
+    "artifacts_index_sha256": "4aa94b967ce34e7e8347b388207cc5abd6c27db8c3f14935f8ca6d189735bb30",
+    "native_diffs": [
+      {
+        "field": [
+          "coefficients",
+          "x1",
+          "estimate"
+        ],
+        "actual": 0.3813241205336895,
+        "native": 0.381324124088426,
+        "difference": -3.5547364496402167e-09,
+        "tolerance": 1e-06,
+        "passed": true
+      },
+      {
+        "field": [
+          "coefficients",
+          "x2",
+          "estimate"
+        ],
+        "actual": -0.29966972557250415,
+        "native": -0.299669725500145,
+        "difference": -7.23591742080032e-11,
+        "tolerance": 1e-06,
+        "passed": true
+      },
+      {
+        "field": [
+          "coefficients",
+          "x3",
+          "estimate"
+        ],
+        "actual": -0.10962101283910355,
+        "native": -0.109621021981735,
+        "difference": 9.142631443581628e-09,
+        "tolerance": 1e-06,
+        "passed": true
+      },
+      {
+        "field": [
+          "ancillary_parameters",
+          1,
+          "estimate"
+        ],
+        "actual": 0.4426186817041306,
+        "native": 0.44261868332307,
+        "difference": -1.618939371450523e-09,
+        "tolerance": 4.4261868332307e-05,
+        "passed": true
+      },
+      {
+        "field": [
+          "ancillary_parameters",
+          1,
+          "std_error"
+        ],
+        "actual": 0.09542192619960575,
+        "native": 0.0954219265528708,
+        "difference": -3.5326504221888655e-10,
+        "tolerance": 9.54219265528708e-06,
+        "passed": true
+      }
+    ],
+    "known_limitations": [],
+    "retained_evidence": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-859/test_public_family_fixture_own9/public-fixture-evidence.json"
+  },
+  {
+    "family": "ordinal_logit",
+    "status": "PUBLIC_SEED_NATIVE_FIELDS_PASS_NOT_LIVE",
+    "run_id": "20261004_211710_273591_352f93ad",
+    "executed_params": {
+      "mode": "auto",
+      "model_type": "ordinal_logit",
+      "y": "rating",
+      "x": [
+        "x1",
+        "x2",
+        "grp"
+      ],
+      "sheet_name": "",
+      "transpose": "false",
+      "imputation": "",
+      "entity_col": "",
+      "time_col": "",
+      "covariance": "",
+      "prediction_model_type": "",
+      "prediction_cv_folds": "0",
+      "prediction_sampling_method": "",
+      "prediction_data_structure": null,
+      "prediction_entity_column": "",
+      "prediction_group_column": "",
+      "prediction_time_column": "",
+      "prediction_final_holdout_fraction": null,
+      "prediction_shuffle": null,
+      "frequency_weight": "",
+      "analysis_weight": "",
+      "sampling_weight": "",
+      "survey_strata_col": "",
+      "survey_psu_col": "",
+      "survey_fpc_col": "",
+      "survey_replicate_weights": "",
+      "survey_replicate_type": "",
+      "survey_lonely_psu": "",
+      "survey_weight_frame": "",
+      "survey_subpop": "",
+      "iv_endog": [],
+      "iv_instruments": [],
+      "did_mode": "",
+      "did_cohort_col": "",
+      "did_treat_col": "",
+      "did_post_col": "",
+      "did_status_col": "",
+      "did_treatment_path": "",
+      "cs_control_group": "",
+      "cs_est_method": "",
+      "cs_base_period": "",
+      "cs_cluster_var": "",
+      "cs_anticipation": 0,
+      "honest_did": "false",
+      "focal_x": "",
+      "model_options": {
+        "link": "logit",
+        "outcome_order": [
+          "low",
+          "mid",
+          "high"
+        ]
+      },
+      "labels": {
+        "variable_labels": {},
+        "value_labels": {}
+      },
+      "model_options_binding": {
+        "owner_model_type": "ordinal_logit",
+        "owner_model_id": "ordinal_logit_1",
+        "producer_version": "v1.8.6",
+        "input_contract_version": "workbench.ordinal_logit.options.v1",
+        "normalized_options_hash": "7e3a71d63e7750861b369427d18e69aa8690002f10309b0335463b255f180ef3"
+      }
+    },
+    "actual_family": "ordinal_logit",
+    "model_artifact": {
+      "artifact_id": "ordinal_logit_1",
+      "path": "model_results/ordinal_logit_1.json",
+      "artifact_type": "model_result",
+      "step": "econometrics",
+      "sha256": "b850c928a2436c48cdc5266c015de2810e7e780231f8a76646efc3e9a78bf4ca",
+      "inputs": [
+        "cleaned_dataset"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    "kernel_artifact": {
+      "artifact_id": "inference_kernel_ordinal_logit_1",
+      "path": "model_results/inference_kernels/ordinal_logit_1.json",
+      "artifact_type": "inference_kernel",
+      "step": "econometrics",
+      "sha256": "77b68e25568c36d8736d969d39e9dd3ea42a1d752771a5684b9fba0aeef06293",
+      "inputs": [
+        "ordinal_logit_1"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    "manifest_sha256": "6386005d12aec05f17ea08622f7ca393a3d5ab98ddfeaaaf36646337cc07c558",
+    "run_inputs_sha256": "926cc07da75e8463c23a3479cfb57dfa20949a8c479ac21f5b60eb9487cdcc85",
+    "artifacts_index_sha256": "23180becec6890763122f6991419e5be1a4a2a2d022ffab8990762c36bdf566e",
+    "native_diffs": [
+      {
+        "field": [
+          "coefficients",
+          "x1",
+          "estimate"
+        ],
+        "actual": 0.7119919143138459,
+        "native": 0.7120182116428941,
+        "difference": -2.6297329048241558e-05,
+        "tolerance": 0.0001,
+        "passed": true
+      },
+      {
+        "field": [
+          "coefficients",
+          "x2",
+          "estimate"
+        ],
+        "actual": -0.8150997905129971,
+        "native": -0.8151400337140546,
+        "difference": 4.0243201057554856e-05,
+        "tolerance": 0.0001,
+        "passed": true
+      },
+      {
+        "field": [
+          "coefficients",
+          "grp",
+          "estimate"
+        ],
+        "actual": 0.9628075483673852,
+        "native": 0.9628267679557806,
+        "difference": -1.921958839534721e-05,
+        "tolerance": 0.0001,
+        "passed": true
+      }
+    ],
+    "known_limitations": [],
+    "retained_evidence": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-859/test_public_family_fixture_own10/public-fixture-evidence.json"
+  },
+  {
+    "family": "panel_ols",
+    "status": "PUBLIC_SEED_NATIVE_FIELDS_PASS_NOT_LIVE",
+    "run_id": "20261004_211705_706138_fb602f89",
+    "executed_params": {
+      "mode": "auto",
+      "model_type": "panel_ols",
+      "y": "y",
+      "x": [
+        "x1",
+        "x2"
+      ],
+      "sheet_name": "",
+      "transpose": "false",
+      "imputation": "",
+      "entity_col": "g",
+      "time_col": "time",
+      "covariance": "clustered",
+      "prediction_model_type": "",
+      "prediction_cv_folds": "0",
+      "prediction_sampling_method": "",
+      "prediction_data_structure": null,
+      "prediction_entity_column": "",
+      "prediction_group_column": "",
+      "prediction_time_column": "",
+      "prediction_final_holdout_fraction": null,
+      "prediction_shuffle": null,
+      "frequency_weight": "",
+      "analysis_weight": "",
+      "sampling_weight": "",
+      "survey_strata_col": "",
+      "survey_psu_col": "",
+      "survey_fpc_col": "",
+      "survey_replicate_weights": "",
+      "survey_replicate_type": "",
+      "survey_lonely_psu": "",
+      "survey_weight_frame": "",
+      "survey_subpop": "",
+      "iv_endog": [],
+      "iv_instruments": [],
+      "did_mode": "",
+      "did_cohort_col": "",
+      "did_treat_col": "",
+      "did_post_col": "",
+      "did_status_col": "",
+      "did_treatment_path": "",
+      "cs_control_group": "",
+      "cs_est_method": "",
+      "cs_base_period": "",
+      "cs_cluster_var": "",
+      "cs_anticipation": 0,
+      "honest_did": "false",
+      "focal_x": "",
+      "model_options": {},
+      "labels": {
+        "variable_labels": {},
+        "value_labels": {}
+      },
+      "form": {
+        "mode": "auto",
+        "model_type": "panel_ols",
+        "y": "y",
+        "x": "[\"x1\", \"x2\"]",
+        "sheet_name": "",
+        "transpose": "false",
+        "imputation": "",
+        "entity_col": "g",
+        "time_col": "time",
+        "covariance": "clustered",
+        "prediction_model_type": "",
+        "prediction_cv_folds": "0",
+        "prediction_sampling_method": "",
+        "prediction_data_structure": null,
+        "prediction_entity_column": "",
+        "prediction_group_column": "",
+        "prediction_time_column": "",
+        "prediction_final_holdout_fraction": null,
+        "prediction_shuffle": null,
+        "frequency_weight": "",
+        "analysis_weight": "",
+        "sampling_weight": "",
+        "survey_strata_col": "",
+        "survey_psu_col": "",
+        "survey_fpc_col": "",
+        "survey_replicate_weights": "",
+        "survey_replicate_type": "",
+        "survey_lonely_psu": "",
+        "survey_weight_frame": "",
+        "survey_subpop": "",
+        "iv_endog": "",
+        "iv_instruments": "",
+        "did_mode": "",
+        "did_cohort_col": "",
+        "did_treat_col": "",
+        "did_post_col": "",
+        "did_status_col": "",
+        "did_treatment_path": "",
+        "cs_control_group": "",
+        "cs_est_method": "",
+        "cs_base_period": "",
+        "cs_cluster_var": "",
+        "cs_anticipation": "0",
+        "honest_did": "false",
+        "focal_x": "",
+        "model_options": {},
+        "labels": {
+          "variable_labels": {},
+          "value_labels": {}
+        }
+      },
+      "rerun_of": null,
+      "from_node": null
+    },
+    "actual_family": "panel_ols",
+    "model_artifact": {
+      "artifact_id": "panel_ols_1",
+      "path": "model_results/panel_ols_1.json",
+      "artifact_type": "model_result",
+      "step": "econometrics",
+      "sha256": "b3666a3ffa505d4a4511fd7c176bc0a5a5384456b9fcd6ddc870b97a6d34e244",
+      "inputs": [
+        "cleaned_dataset"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    "kernel_artifact": {
+      "artifact_id": "inference_kernel_panel_ols_1",
+      "path": "model_results/inference_kernels/panel_ols_1.json",
+      "artifact_type": "inference_kernel",
+      "step": "econometrics",
+      "sha256": "2e9b5e87b21970c2cbe44745fea3c0644dd59a69877c3c814a65d8034d391db5",
+      "inputs": [
+        "panel_ols_1"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    "manifest_sha256": "f001b20d979e7c2044e35a636954ebc612d068d4d133d158a7f63825c8f827c8",
+    "run_inputs_sha256": "85e06d7e355a9ff68ffd38149568225aa03e21a1a32d101587db098da4d3c251",
+    "artifacts_index_sha256": "5cc17910fbe779dc575f6ac4d39ec86c6de8b0165e490175c31bc57f4442b05a",
+    "native_diffs": [
+      {
+        "field": [
+          "coefficients",
+          "x1",
+          "estimate"
+        ],
+        "actual": 0.7127667823556812,
+        "native": 0.712766782355681,
+        "difference": 2.220446049250313e-16,
+        "tolerance": 1e-09,
+        "passed": true
+      },
+      {
+        "field": [
+          "coefficients",
+          "x2",
+          "estimate"
+        ],
+        "actual": -0.3891917163179698,
+        "native": -0.38919171631797,
+        "difference": 2.220446049250313e-16,
+        "tolerance": 1e-09,
+        "passed": true
+      },
+      {
+        "field": [
+          "coefficients",
+          "x1",
+          "std_error"
+        ],
+        "actual": 0.06586814244159747,
+        "native": 0.0658681424415974,
+        "difference": 6.938893903907228e-17,
+        "tolerance": 6.586814244159741e-10,
+        "passed": true
+      },
+      {
+        "field": [
+          "coefficients",
+          "x2",
+          "std_error"
+        ],
+        "actual": 0.06113217235613306,
+        "native": 0.0611321723561331,
+        "difference": -4.163336342344337e-17,
+        "tolerance": 6.11321723561331e-10,
+        "passed": true
+      }
+    ],
+    "known_limitations": [],
+    "retained_evidence": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-859/test_public_family_fixture_own4/public-fixture-evidence.json"
+  },
+  {
+    "family": "poisson",
+    "status": "PUBLIC_SEED_NATIVE_FIELDS_PASS_NOT_LIVE",
+    "run_id": "20261004_211707_119545_4fdc5df5",
+    "executed_params": {
+      "mode": "auto",
+      "model_type": "poisson",
+      "y": "yc",
+      "x": [
+        "x1",
+        "x2",
+        "x3"
+      ],
+      "sheet_name": "",
+      "transpose": "false",
+      "imputation": "",
+      "entity_col": "",
+      "time_col": "",
+      "covariance": "robust",
+      "prediction_model_type": "",
+      "prediction_cv_folds": "0",
+      "prediction_sampling_method": "",
+      "prediction_data_structure": null,
+      "prediction_entity_column": "",
+      "prediction_group_column": "",
+      "prediction_time_column": "",
+      "prediction_final_holdout_fraction": null,
+      "prediction_shuffle": null,
+      "frequency_weight": "",
+      "analysis_weight": "",
+      "sampling_weight": "",
+      "survey_strata_col": "",
+      "survey_psu_col": "",
+      "survey_fpc_col": "",
+      "survey_replicate_weights": "",
+      "survey_replicate_type": "",
+      "survey_lonely_psu": "",
+      "survey_weight_frame": "",
+      "survey_subpop": "",
+      "iv_endog": [],
+      "iv_instruments": [],
+      "did_mode": "",
+      "did_cohort_col": "",
+      "did_treat_col": "",
+      "did_post_col": "",
+      "did_status_col": "",
+      "did_treatment_path": "",
+      "cs_control_group": "",
+      "cs_est_method": "",
+      "cs_base_period": "",
+      "cs_cluster_var": "",
+      "cs_anticipation": 0,
+      "honest_did": "false",
+      "focal_x": "",
+      "model_options": {},
+      "labels": {
+        "variable_labels": {},
+        "value_labels": {}
+      },
+      "form": {
+        "mode": "auto",
+        "model_type": "poisson",
+        "y": "yc",
+        "x": "[\"x1\", \"x2\", \"x3\"]",
+        "sheet_name": "",
+        "transpose": "false",
+        "imputation": "",
+        "entity_col": "",
+        "time_col": "",
+        "covariance": "",
+        "prediction_model_type": "",
+        "prediction_cv_folds": "0",
+        "prediction_sampling_method": "",
+        "prediction_data_structure": null,
+        "prediction_entity_column": "",
+        "prediction_group_column": "",
+        "prediction_time_column": "",
+        "prediction_final_holdout_fraction": null,
+        "prediction_shuffle": null,
+        "frequency_weight": "",
+        "analysis_weight": "",
+        "sampling_weight": "",
+        "survey_strata_col": "",
+        "survey_psu_col": "",
+        "survey_fpc_col": "",
+        "survey_replicate_weights": "",
+        "survey_replicate_type": "",
+        "survey_lonely_psu": "",
+        "survey_weight_frame": "",
+        "survey_subpop": "",
+        "iv_endog": "",
+        "iv_instruments": "",
+        "did_mode": "",
+        "did_cohort_col": "",
+        "did_treat_col": "",
+        "did_post_col": "",
+        "did_status_col": "",
+        "did_treatment_path": "",
+        "cs_control_group": "",
+        "cs_est_method": "",
+        "cs_base_period": "",
+        "cs_cluster_var": "",
+        "cs_anticipation": "0",
+        "honest_did": "false",
+        "focal_x": "",
+        "model_options": {},
+        "labels": {
+          "variable_labels": {},
+          "value_labels": {}
+        }
+      },
+      "rerun_of": null,
+      "from_node": null
+    },
+    "actual_family": "poisson",
+    "model_artifact": {
+      "artifact_id": "poisson_1",
+      "path": "model_results/poisson_1.json",
+      "artifact_type": "model_result",
+      "step": "econometrics",
+      "sha256": "0e39d9651d64d98eb7f51a17be705f57c4be2ac8530d18e48b437685721b7866",
+      "inputs": [
+        "cleaned_dataset"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    "kernel_artifact": {
+      "artifact_id": "inference_kernel_poisson_1",
+      "path": "model_results/inference_kernels/poisson_1.json",
+      "artifact_type": "inference_kernel",
+      "step": "econometrics",
+      "sha256": "056ba5cf9375c68668256d71d23edf1bbdb8a10ebe4579c392024cff28799fcf",
+      "inputs": [
+        "poisson_1"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    "manifest_sha256": "71ad0f7746d84dc6463aae8884fd3c5dca90f6ad9019e6789db4448a373a08c7",
+    "run_inputs_sha256": "e47c0b747b80f37fb3647cd160cc79e21a6f9feb38248312b5fcb57f9992ed82",
+    "artifacts_index_sha256": "d3888036141d23dd7052c396691cd7b539b3cdc895a43aaa7d66e4c23f0c83c8",
+    "native_diffs": [
+      {
+        "field": [
+          "coefficients",
+          "x1",
+          "estimate"
+        ],
+        "actual": 0.40536541665861775,
+        "native": 0.405365416658618,
+        "difference": -2.7755575615628914e-16,
+        "tolerance": 4.05365416658618e-07,
+        "passed": true
+      },
+      {
+        "field": [
+          "coefficients",
+          "x2",
+          "estimate"
+        ],
+        "actual": -0.20305510290536338,
+        "native": -0.203055102905363,
+        "difference": -3.885780586188048e-16,
+        "tolerance": 2.0305510290536298e-07,
+        "passed": true
+      },
+      {
+        "field": [
+          "coefficients",
+          "x3",
+          "estimate"
+        ],
+        "actual": 0.06609661145714335,
+        "native": 0.0660966114571429,
+        "difference": 4.440892098500626e-16,
+        "tolerance": 6.60966114571429e-08,
+        "passed": true
+      }
+    ],
+    "known_limitations": [],
+    "retained_evidence": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-859/test_public_family_fixture_own8/public-fixture-evidence.json"
+  },
+  {
+    "family": "probit",
+    "status": "PUBLIC_SEED_NATIVE_FIELDS_PASS_NOT_LIVE",
+    "run_id": "20261004_211706_644477_556feaee",
+    "executed_params": {
+      "mode": "auto",
+      "model_type": "probit",
+      "y": "yb",
+      "x": [
+        "x1",
+        "x2",
+        "x3"
+      ],
+      "sheet_name": "",
+      "transpose": "false",
+      "imputation": "",
+      "entity_col": "",
+      "time_col": "",
+      "covariance": "robust",
+      "prediction_model_type": "",
+      "prediction_cv_folds": "0",
+      "prediction_sampling_method": "",
+      "prediction_data_structure": null,
+      "prediction_entity_column": "",
+      "prediction_group_column": "",
+      "prediction_time_column": "",
+      "prediction_final_holdout_fraction": null,
+      "prediction_shuffle": null,
+      "frequency_weight": "",
+      "analysis_weight": "",
+      "sampling_weight": "",
+      "survey_strata_col": "",
+      "survey_psu_col": "",
+      "survey_fpc_col": "",
+      "survey_replicate_weights": "",
+      "survey_replicate_type": "",
+      "survey_lonely_psu": "",
+      "survey_weight_frame": "",
+      "survey_subpop": "",
+      "iv_endog": [],
+      "iv_instruments": [],
+      "did_mode": "",
+      "did_cohort_col": "",
+      "did_treat_col": "",
+      "did_post_col": "",
+      "did_status_col": "",
+      "did_treatment_path": "",
+      "cs_control_group": "",
+      "cs_est_method": "",
+      "cs_base_period": "",
+      "cs_cluster_var": "",
+      "cs_anticipation": 0,
+      "honest_did": "false",
+      "focal_x": "",
+      "model_options": {},
+      "labels": {
+        "variable_labels": {},
+        "value_labels": {}
+      },
+      "form": {
+        "mode": "auto",
+        "model_type": "probit",
+        "y": "yb",
+        "x": "[\"x1\", \"x2\", \"x3\"]",
+        "sheet_name": "",
+        "transpose": "false",
+        "imputation": "",
+        "entity_col": "",
+        "time_col": "",
+        "covariance": "",
+        "prediction_model_type": "",
+        "prediction_cv_folds": "0",
+        "prediction_sampling_method": "",
+        "prediction_data_structure": null,
+        "prediction_entity_column": "",
+        "prediction_group_column": "",
+        "prediction_time_column": "",
+        "prediction_final_holdout_fraction": null,
+        "prediction_shuffle": null,
+        "frequency_weight": "",
+        "analysis_weight": "",
+        "sampling_weight": "",
+        "survey_strata_col": "",
+        "survey_psu_col": "",
+        "survey_fpc_col": "",
+        "survey_replicate_weights": "",
+        "survey_replicate_type": "",
+        "survey_lonely_psu": "",
+        "survey_weight_frame": "",
+        "survey_subpop": "",
+        "iv_endog": "",
+        "iv_instruments": "",
+        "did_mode": "",
+        "did_cohort_col": "",
+        "did_treat_col": "",
+        "did_post_col": "",
+        "did_status_col": "",
+        "did_treatment_path": "",
+        "cs_control_group": "",
+        "cs_est_method": "",
+        "cs_base_period": "",
+        "cs_cluster_var": "",
+        "cs_anticipation": "0",
+        "honest_did": "false",
+        "focal_x": "",
+        "model_options": {},
+        "labels": {
+          "variable_labels": {},
+          "value_labels": {}
+        }
+      },
+      "rerun_of": null,
+      "from_node": null
+    },
+    "actual_family": "probit",
+    "model_artifact": {
+      "artifact_id": "probit_1",
+      "path": "model_results/probit_1.json",
+      "artifact_type": "model_result",
+      "step": "econometrics",
+      "sha256": "2d1eb3dd3424e021d97cf70b23c5ea4ff55caf3c46c9183058ed0fa18c190145",
+      "inputs": [
+        "cleaned_dataset"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    "kernel_artifact": {
+      "artifact_id": "inference_kernel_probit_1",
+      "path": "model_results/inference_kernels/probit_1.json",
+      "artifact_type": "inference_kernel",
+      "step": "econometrics",
+      "sha256": "eda458b802c372cf6d28cfd90dcdfc87f112a28a0a69ba50895597a36fae09c8",
+      "inputs": [
+        "probit_1"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    "manifest_sha256": "32f59e5db50da28f740d9704c04170bbec585aec0cb6dad4a40882fcb002f9c6",
+    "run_inputs_sha256": "ddf04780aa65e42e97ff3cb766006918227df319411873c8c1349e4bf8b6a9ad",
+    "artifacts_index_sha256": "c47f9881f0085f3fb9a6da64391f06a8eb780ad96437a9f1706af27dbb1a94bf",
+    "native_diffs": [
+      {
+        "field": [
+          "coefficients",
+          "x1",
+          "estimate"
+        ],
+        "actual": 0.5010134100029809,
+        "native": 0.501013409203312,
+        "difference": 7.996688866640511e-10,
+        "tolerance": 5.01013409203312e-07,
+        "passed": true
+      },
+      {
+        "field": [
+          "coefficients",
+          "x2",
+          "estimate"
+        ],
+        "actual": -0.2977944066808204,
+        "native": -0.297794406392401,
+        "difference": -2.8841939947454875e-10,
+        "tolerance": 2.97794406392401e-07,
+        "passed": true
+      },
+      {
+        "field": [
+          "coefficients",
+          "x3",
+          "estimate"
+        ],
+        "actual": 0.24162206926838853,
+        "native": 0.241622066850616,
+        "difference": 2.4177725377327874e-09,
+        "tolerance": 2.41622066850616e-07,
+        "passed": true
+      }
+    ],
+    "known_limitations": [],
+    "retained_evidence": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-859/test_public_family_fixture_own7/public-fixture-evidence.json"
+  },
+  {
+    "family": "quantile_regression",
+    "status": "PUBLIC_SEED_NATIVE_FIELDS_PASS_NOT_LIVE",
+    "run_id": "20261004_211711_547215_99b00a4f",
+    "executed_params": {
+      "mode": "auto",
+      "model_type": "quantile_regression",
+      "y": "y",
+      "x": [
+        "x1",
+        "x2",
+        "grp"
+      ],
+      "sheet_name": "",
+      "transpose": "false",
+      "imputation": "",
+      "entity_col": "",
+      "time_col": "",
+      "covariance": "",
+      "prediction_model_type": "",
+      "prediction_cv_folds": "0",
+      "prediction_sampling_method": "",
+      "prediction_data_structure": null,
+      "prediction_entity_column": "",
+      "prediction_group_column": "",
+      "prediction_time_column": "",
+      "prediction_final_holdout_fraction": null,
+      "prediction_shuffle": null,
+      "frequency_weight": "",
+      "analysis_weight": "",
+      "sampling_weight": "",
+      "survey_strata_col": "",
+      "survey_psu_col": "",
+      "survey_fpc_col": "",
+      "survey_replicate_weights": "",
+      "survey_replicate_type": "",
+      "survey_lonely_psu": "",
+      "survey_weight_frame": "",
+      "survey_subpop": "",
+      "iv_endog": [],
+      "iv_instruments": [],
+      "did_mode": "",
+      "did_cohort_col": "",
+      "did_treat_col": "",
+      "did_post_col": "",
+      "did_status_col": "",
+      "did_treatment_path": "",
+      "cs_control_group": "",
+      "cs_est_method": "",
+      "cs_base_period": "",
+      "cs_cluster_var": "",
+      "cs_anticipation": 0,
+      "honest_did": "false",
+      "focal_x": "",
+      "model_options": {
+        "bootstrap_reps": 0,
+        "quantiles": [
+          0.25,
+          0.5,
+          0.75
+        ]
+      },
+      "labels": {
+        "variable_labels": {},
+        "value_labels": {}
+      },
+      "model_options_binding": {
+        "owner_model_type": "quantile_regression",
+        "owner_model_id": "quantile_regression_1",
+        "producer_version": "v1.8.6",
+        "input_contract_version": "workbench.quantile_regression.options.v1",
+        "normalized_options_hash": "96c5de746493b0b9647312e193317ed227cc06a5382b332091f92288b2f64554"
+      }
+    },
+    "actual_family": "quantile_regression",
+    "model_artifact": {
+      "artifact_id": "quantile_regression_1",
+      "path": "model_results/quantile_regression_1.json",
+      "artifact_type": "model_result",
+      "step": "econometrics",
+      "sha256": "e62c2a49f08b624042f15d8c669c19dd07a9b171eb07013eceb6608e9e247de8",
+      "inputs": [
+        "cleaned_dataset"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    "kernel_artifact": {
+      "artifact_id": "inference_kernel_quantile_regression_1",
+      "path": "model_results/inference_kernels/quantile_regression_1.json",
+      "artifact_type": "inference_kernel",
+      "step": "econometrics",
+      "sha256": "31706ec3adcdaf3ad70e675681d13bec95206c0fa6160af7a489385735acf58a",
+      "inputs": [
+        "quantile_regression_1"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    "manifest_sha256": "0a26fd29907cc177fbd8211e95e3c43e5c4056c5544f2edda0838697b0fdc061",
+    "run_inputs_sha256": "a872265e1fb5e57d81bf50465f92707dd3f4b3074ce74e7c51b6e4b26d402f1f",
+    "artifacts_index_sha256": "fe65f50f65f6c7c38098491607aeda18564c4e2c364425eff2a77fbbe9fcd8dc",
+    "native_diffs": [
+      {
+        "field": [
+          "fits",
+          "0.25",
+          "coefficients",
+          "x1",
+          "estimate"
+        ],
+        "actual": 1.4373880278049898,
+        "native": 1.4373878668755578,
+        "difference": 1.609294320026322e-07,
+        "tolerance": 1e-05,
+        "passed": true
+      },
+      {
+        "field": [
+          "fits",
+          "0.25",
+          "coefficients",
+          "x2",
+          "estimate"
+        ],
+        "actual": -0.8928106895121393,
+        "native": -0.8928107003126351,
+        "difference": 1.0800495831020385e-08,
+        "tolerance": 1e-05,
+        "passed": true
+      },
+      {
+        "field": [
+          "fits",
+          "0.25",
+          "coefficients",
+          "grp",
+          "estimate"
+        ],
+        "actual": 0.9732393813650848,
+        "native": 0.9732394310686129,
+        "difference": -4.97035280710989e-08,
+        "tolerance": 1e-05,
+        "passed": true
+      },
+      {
+        "field": [
+          "fits",
+          "0.5",
+          "coefficients",
+          "x1",
+          "estimate"
+        ],
+        "actual": 1.7035750541094252,
+        "native": 1.7035771993189324,
+        "difference": -2.145209507142809e-06,
+        "tolerance": 1e-05,
+        "passed": true
+      },
+      {
+        "field": [
+          "fits",
+          "0.5",
+          "coefficients",
+          "x2",
+          "estimate"
+        ],
+        "actual": -0.8493001935620095,
+        "native": -0.8493020492657863,
+        "difference": 1.8557037768651696e-06,
+        "tolerance": 1e-05,
+        "passed": true
+      },
+      {
+        "field": [
+          "fits",
+          "0.5",
+          "coefficients",
+          "grp",
+          "estimate"
+        ],
+        "actual": 0.5910500686398272,
+        "native": 0.5910486271196795,
+        "difference": 1.441520147693609e-06,
+        "tolerance": 1e-05,
+        "passed": true
+      },
+      {
+        "field": [
+          "fits",
+          "0.75",
+          "coefficients",
+          "x1",
+          "estimate"
+        ],
+        "actual": 1.6653105557418524,
+        "native": 1.6653084624911845,
+        "difference": 2.0932506679116614e-06,
+        "tolerance": 1e-05,
+        "passed": true
+      },
+      {
+        "field": [
+          "fits",
+          "0.75",
+          "coefficients",
+          "x2",
+          "estimate"
+        ],
+        "actual": -0.632131180608579,
+        "native": -0.632132615421787,
+        "difference": 1.4348132080233e-06,
+        "tolerance": 1e-05,
+        "passed": true
+      },
+      {
+        "field": [
+          "fits",
+          "0.75",
+          "coefficients",
+          "grp",
+          "estimate"
+        ],
+        "actual": 0.47532583269867956,
+        "native": 0.4753296189567018,
+        "difference": -3.7862580222203235e-06,
+        "tolerance": 1e-05,
+        "passed": true
+      }
+    ],
+    "known_limitations": [],
+    "retained_evidence": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-859/test_public_family_fixture_own12/public-fixture-evidence.json"
+  },
+  {
+    "family": "sa_did",
+    "status": "PUBLIC_SEED_NATIVE_FIELDS_PASS_NOT_LIVE",
+    "run_id": "20261004_211712_987861_daa14975",
+    "executed_params": {
+      "mode": "auto",
+      "model_type": "sa_did",
+      "y": "y",
+      "x": [],
+      "sheet_name": "",
+      "transpose": "false",
+      "imputation": "",
+      "entity_col": "id",
+      "time_col": "year",
+      "covariance": "robust",
+      "prediction_model_type": "",
+      "prediction_cv_folds": "0",
+      "prediction_sampling_method": "",
+      "prediction_data_structure": null,
+      "prediction_entity_column": "",
+      "prediction_group_column": "",
+      "prediction_time_column": "",
+      "prediction_final_holdout_fraction": null,
+      "prediction_shuffle": null,
+      "frequency_weight": "",
+      "analysis_weight": "",
+      "sampling_weight": "",
+      "survey_strata_col": "",
+      "survey_psu_col": "",
+      "survey_fpc_col": "",
+      "survey_replicate_weights": "",
+      "survey_replicate_type": "",
+      "survey_lonely_psu": "",
+      "survey_weight_frame": "",
+      "survey_subpop": "",
+      "iv_endog": [],
+      "iv_instruments": [],
+      "did_mode": "cohort",
+      "did_cohort_col": "cohort",
+      "did_treat_col": "",
+      "did_post_col": "",
+      "did_status_col": "",
+      "did_treatment_path": "",
+      "cs_control_group": "",
+      "cs_est_method": "",
+      "cs_base_period": "",
+      "cs_cluster_var": "",
+      "cs_anticipation": 0,
+      "honest_did": "false",
+      "focal_x": "",
+      "model_options": {},
+      "labels": {
+        "variable_labels": {},
+        "value_labels": {}
+      },
+      "form": {
+        "mode": "auto",
+        "model_type": "sa_did",
+        "y": "y",
+        "x": "[]",
+        "sheet_name": "",
+        "transpose": "false",
+        "imputation": "",
+        "entity_col": "id",
+        "time_col": "year",
+        "covariance": "",
+        "prediction_model_type": "",
+        "prediction_cv_folds": "0",
+        "prediction_sampling_method": "",
+        "prediction_data_structure": null,
+        "prediction_entity_column": "",
+        "prediction_group_column": "",
+        "prediction_time_column": "",
+        "prediction_final_holdout_fraction": null,
+        "prediction_shuffle": null,
+        "frequency_weight": "",
+        "analysis_weight": "",
+        "sampling_weight": "",
+        "survey_strata_col": "",
+        "survey_psu_col": "",
+        "survey_fpc_col": "",
+        "survey_replicate_weights": "",
+        "survey_replicate_type": "",
+        "survey_lonely_psu": "",
+        "survey_weight_frame": "",
+        "survey_subpop": "",
+        "iv_endog": "",
+        "iv_instruments": "",
+        "did_mode": "cohort",
+        "did_cohort_col": "cohort",
+        "did_treat_col": "",
+        "did_post_col": "",
+        "did_status_col": "",
+        "did_treatment_path": "",
+        "cs_control_group": "",
+        "cs_est_method": "",
+        "cs_base_period": "",
+        "cs_cluster_var": "",
+        "cs_anticipation": "0",
+        "honest_did": "false",
+        "focal_x": "",
+        "model_options": {},
+        "labels": {
+          "variable_labels": {},
+          "value_labels": {}
+        }
+      },
+      "rerun_of": null,
+      "from_node": null
+    },
+    "actual_family": "sa_did",
+    "model_artifact": {
+      "artifact_id": "sa_did_1",
+      "path": "model_results/sa_did_1.json",
+      "artifact_type": "model_result",
+      "step": "econometrics",
+      "sha256": "9b96c14f94194816ba397dcb913e09d0726345c6732b1472cdb51d07d08fc33a",
+      "inputs": [
+        "cleaned_dataset"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    "kernel_artifact": {
+      "artifact_id": "inference_kernel_sa_did_1",
+      "path": "model_results/inference_kernels/sa_did_1.json",
+      "artifact_type": "inference_kernel",
+      "step": "econometrics",
+      "sha256": "4f8d900193d18e7507b8d9a87c19996d3ba18f11bed8ebd6ffdcd6420e7a2894",
+      "inputs": [
+        "sa_did_1"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    "manifest_sha256": "81d4fcb2ffde1dc9c4b5777f981a53b898e573e8cfc5d6af751ca5e18e0273e3",
+    "run_inputs_sha256": "f663ac460c6522336bfa67f85beff233f1eb85a5dd323a35f8f3af2fa1f981e9",
+    "artifacts_index_sha256": "ec6de8fe5ceeeb8949273ccfd555bc271d7bd8a80ba97da066ccbc782a53c4f7",
+    "native_diffs": [
+      {
+        "field": [
+          "coefficients",
+          "ATT",
+          "estimate"
+        ],
+        "actual": 0.16494391934834762,
+        "native": 0.16494391934836417,
+        "difference": -1.6542323066914832e-14,
+        "tolerance": 1e-06,
+        "passed": true
+      }
+    ],
+    "known_limitations": [],
+    "retained_evidence": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-859/test_public_family_fixture_own15/public-fixture-evidence.json"
+  },
+  {
+    "family": "survival_cox",
+    "status": "PUBLIC_SEED_NATIVE_FIELDS_PASS_NOT_LIVE",
+    "run_id": "20261004_211712_014650_23cd7716",
+    "executed_params": {
+      "mode": "auto",
+      "model_type": "survival_cox",
+      "y": "duration",
+      "x": [
+        "x1",
+        "x2",
+        "grp"
+      ],
+      "sheet_name": "",
+      "transpose": "false",
+      "imputation": "",
+      "entity_col": "",
+      "time_col": "",
+      "covariance": "",
+      "prediction_model_type": "",
+      "prediction_cv_folds": "0",
+      "prediction_sampling_method": "",
+      "prediction_data_structure": null,
+      "prediction_entity_column": "",
+      "prediction_group_column": "",
+      "prediction_time_column": "",
+      "prediction_final_holdout_fraction": null,
+      "prediction_shuffle": null,
+      "frequency_weight": "",
+      "analysis_weight": "",
+      "sampling_weight": "",
+      "survey_strata_col": "",
+      "survey_psu_col": "",
+      "survey_fpc_col": "",
+      "survey_replicate_weights": "",
+      "survey_replicate_type": "",
+      "survey_lonely_psu": "",
+      "survey_weight_frame": "",
+      "survey_subpop": "",
+      "iv_endog": [],
+      "iv_instruments": [],
+      "did_mode": "",
+      "did_cohort_col": "",
+      "did_treat_col": "",
+      "did_post_col": "",
+      "did_status_col": "",
+      "did_treatment_path": "",
+      "cs_control_group": "",
+      "cs_est_method": "",
+      "cs_base_period": "",
+      "cs_cluster_var": "",
+      "cs_anticipation": 0,
+      "honest_did": "false",
+      "focal_x": "",
+      "model_options": {
+        "event_column": "event",
+        "ties": "efron"
+      },
+      "labels": {
+        "variable_labels": {},
+        "value_labels": {}
+      },
+      "model_options_binding": {
+        "owner_model_type": "survival_cox",
+        "owner_model_id": "survival_cox_1",
+        "producer_version": "v1.8.6",
+        "input_contract_version": "workbench.survival.options.v1",
+        "normalized_options_hash": "0ca77e9df9c6132a8caa258b0964b6e48e3c479c9bf76452b2d482029993842f"
+      }
+    },
+    "actual_family": "survival_cox",
+    "model_artifact": {
+      "artifact_id": "survival_cox_1",
+      "path": "model_results/survival_cox_1.json",
+      "artifact_type": "model_result",
+      "step": "econometrics",
+      "sha256": "76c22342ca72b0d8aacfcc27619f1ede453890ebd17409155ab53e233abad7a1",
+      "inputs": [
+        "cleaned_dataset"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    "kernel_artifact": {
+      "artifact_id": "inference_kernel_survival_cox_1",
+      "path": "model_results/inference_kernels/survival_cox_1.json",
+      "artifact_type": "inference_kernel",
+      "step": "econometrics",
+      "sha256": "2e1d1735b28082afd1fb18ebf29ba821f1ff48d371ac843b7746db0c07eff437",
+      "inputs": [
+        "survival_cox_1"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    "manifest_sha256": "75531ddb606e63b6142c8550bd2f8b2733cf3993ebdb90fc85b5689af6279bbe",
+    "run_inputs_sha256": "77113981e2724acf5fc07c9ae884aeef4e673e02540e2ee34189e08a4cfacf88",
+    "artifacts_index_sha256": "50cbf898342310832b21278ae1e7b1f1abc501d0bcd3621e86ccca76247b55b6",
+    "native_diffs": [
+      {
+        "field": [
+          "coefficients",
+          "x1",
+          "estimate"
+        ],
+        "actual": 0.725224638823786,
+        "native": 0.7252246388237762,
+        "difference": 9.769962616701378e-15,
+        "tolerance": 7.252246388237762e-11,
+        "passed": true
+      },
+      {
+        "field": [
+          "coefficients",
+          "x2",
+          "estimate"
+        ],
+        "actual": -0.525460571392371,
+        "native": -0.5254605713923672,
+        "difference": -3.774758283725532e-15,
+        "tolerance": 5.254605713923673e-11,
+        "passed": true
+      },
+      {
+        "field": [
+          "coefficients",
+          "grp",
+          "estimate"
+        ],
+        "actual": 0.4507203516860267,
+        "native": 0.4507203516860191,
+        "difference": 7.605027718682322e-15,
+        "tolerance": 4.507203516860191e-11,
+        "passed": true
+      },
+      {
+        "field": [
+          "coefficients",
+          "x1",
+          "std_error"
+        ],
+        "actual": 0.0904314981115256,
+        "native": 0.09043149811152544,
+        "difference": 1.5265566588595902e-16,
+        "tolerance": 9.043149811152544e-12,
+        "passed": true
+      },
+      {
+        "field": [
+          "coefficients",
+          "x2",
+          "std_error"
+        ],
+        "actual": 0.09760104056812526,
+        "native": 0.09760104056812526,
+        "difference": 0.0,
+        "tolerance": 9.760104056812526e-12,
+        "passed": true
+      },
+      {
+        "field": [
+          "coefficients",
+          "grp",
+          "std_error"
+        ],
+        "actual": 0.16732047119581742,
+        "native": 0.16732047119581736,
+        "difference": 5.551115123125783e-17,
+        "tolerance": 1.6732047119581736e-11,
+        "passed": true
+      }
+    ],
+    "known_limitations": [],
+    "retained_evidence": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-859/test_public_family_fixture_own13/public-fixture-evidence.json"
+  }
+]

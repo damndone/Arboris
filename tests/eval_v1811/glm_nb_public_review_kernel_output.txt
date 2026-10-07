@@ -1,0 +1,1 @@
+{"http_kernel_count": 6, "max_beta_abs": 1.78207448797707e-12, "max_se_abs": 1.4391265956703592e-14, "max_native_score_over_n": 6.171477660345201e-13}

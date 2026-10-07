@@ -1,0 +1,37 @@
+{
+  "candidate": "0a612419536a02fbba287e79114b6fab36dc025d",
+  "baseline": "01fb0752bce129c8d8848c021eca776dadccb515",
+  "author_assets_unchanged": true,
+  "public_review_asset_sha256": {
+    "tests/eval_v1811/iv_two_endogenous_independent_evidence/probe-output.txt": "17f2126d01d9873bbf822418a10f932d9505fb6181ce35270229127d57691484",
+    "tests/eval_v1811/iv_two_endogenous_independent_evidence/stata_reference.json": "c68888a37e6b982cee3e337814199fa8719f68b895171d54cd88232ae7f9536a",
+    "tests/eval_v1811/iv_two_endogenous_independent_evidence/focused-output.txt": "cb6daa3c144c8a4ec177e7886f3314f8a5743cb8863b5ec2262ae20e191bbb11",
+    "tests/eval_v1811/iv_two_endogenous_independent_evidence/owner.json": "d5ba05d1cb2529000ba4f42cdddeeed84bd4ec45d1790eaa6fc1ce3bc6c7461f",
+    "tests/eval_v1811/iv_two_endogenous_independent_evidence/scope.json": "58be16f996deda45cc14aab05ecad84c8769185204d4329e8660da97ba6ac359",
+    "tests/eval_v1811/iv_two_endogenous_independent_evidence/r_moment_reference.json": "ee312033579857fa10a95771d503c0b2e95f04fbc04bfeea2821e2fa8999fbba",
+    "tests/eval_v1811/iv_two_endogenous_independent_evidence/reproduce-output.txt": "e2dbcd2089a5372b5dac9b26376865ae42d6ee942bc357676e22782d5b250371",
+    "tests/eval_v1811/iv_two_endogenous_independent_evidence/comparison.json": "77c186b11a05d0b64ab46cef91e5abe2bafacf69460da44c87fd58d4a8926251",
+    "tests/eval_v1811/iv_two_endogenous_independent_evidence/stata.log": "2a1d536edbc4cd96fc037e7f4f8944e36d64eb04fd8eb7981125d220770e2f9c",
+    "tests/eval_v1811/iv_two_endogenous_independent_evidence/reconstructed_exact.csv": "d3b46c7cf6c42c4dc1db66b3ae63a0ef02ffe10ff3b24983687355daa238c497",
+    "tests/eval_v1811/iv_two_endogenous_independent_evidence/r_output.txt": "83233f913bc785b4e9ce600be735f8d54482ce6eb96ceb49f292556443402045",
+    "tests/eval_v1811/iv_two_endogenous_independent_evidence/stata.tsv": "211ee424e13266d516f91d9bbac2542ed279714c5d8ac9691f54d6978d9a5f88",
+    "tests/eval_v1811/iv_two_endogenous_independent_evidence/.gitignore": "35ea620237d2b53ad00dd1d761340d170d48b26515d3c88866ddb7c5db9a540a",
+    "tests/eval_v1811/iv_two_endogenous_independent_evidence/focused-final-output.txt": "daacfe72cf80d0815ba4897014ce9e41dc581ed2156b00a71676e87fc963a903",
+    "tests/eval_v1811/iv_two_endogenous_independent_evidence/reconstructed_data.csv": "428deb6f68e5337331c331b8bb0b0f626f39fbc9414da7176a374634550462b8",
+    "tests/eval_v1811/iv_two_endogenous_independent_evidence/stata.do": "7a648b0edc6808cfc7df6140e26f21ad7eaeac4aa56f16e19ec71d9c867f47d4",
+    "tests/eval_v1811/iv_two_endogenous_independent_evidence/reconstructed_exact.json": "a19944993d6e515aad8cbb2d700f6c90f9541a01f62164c5bb7c0956406376a8",
+    "tests/eval_v1811/iv_two_endogenous_independent_checks.py": "f9ce3fb8364ffcf7196c6c398f6f8a08cb1ce9bca4102f3dc367ca2ebeb4ddd0",
+    "tests/eval_v1811/iv_two_endogenous_independent_probe.py": "b825ecef7cc899f324978cf15eb709441786f2c315a5bf4805e6ede36a4eaedc",
+    "tests/eval_v1811/iv_two_endogenous_independent_summarize.py": "362d3e354db251dba812135d494c4eb97988017492f83f25bee0bc25e07934dd",
+    "tests/eval_v1811/iv_two_endogenous_independent_moments.R": "5a469ed12e87c54197131b1981f11689209bfdfb8d8d6bf616a1836045d903a4",
+    "tests/eval_v1811/iv_two_endogenous_independent_reproduce.R": "9ac9f4b0f0f73d7d307c4c24c68cce63f8b4137015eaec56e6c1b51a963c3c79"
+  },
+  "public_sensitive_values_found": 0,
+  "private_original_log": {
+    "raw_ignored_path": "tests/eval_v1811/iv_two_endogenous_independent_evidence/private_raw_stata/independent_iv.log",
+    "raw_sha256": "withheld-raw-sha256-77633a5f36c1a8f2d22baaf0",
+    "redacted_sha256": "2a1d536edbc4cd96fc037e7f4f8944e36d64eb04fd8eb7981125d220770e2f9c",
+    "non_header_bytes_equal": true,
+    "changed_header_count": 2
+  }
+}

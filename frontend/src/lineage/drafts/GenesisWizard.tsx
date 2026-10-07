@@ -19,6 +19,8 @@ import {
 } from "../../api";
 import { useCapabilities } from "../../capabilities/useCapabilities";
 import { ModelTypeSelect } from "../../runForm/ModelTypeSelect";
+import {CountModelControls, isCountModelType, buildCountModelOptions,
+  countModelValidationError, emptyCountOptions, type CountModelOptions} from "../../runForm/CountModelControls";
 import { ImputationControls } from "../../runForm/ImputationControls";
 import { PanelControls } from "../../runForm/PanelControls";
 import { LmmControls, type LmmControlValue } from "../../runForm/LmmControls";
@@ -203,6 +205,7 @@ export function GenesisWizard({
   const [tableConfigured, setTableConfigured] = useState(false);
   const [modelConfigured, setModelConfigured] = useState(false);
   const [modelType, setModelType] = useState("auto");
+  const [countOptions,setCountOptions]=useState<CountModelOptions>(emptyCountOptions);
   const [serverModelSchemaId, setServerModelSchemaId] = useState("");
   const [serverModelControls, setServerModelControls] = useState<GenesisServerControl[]>([]);
   const [serverModelOptions, setServerModelOptions] = useState<Record<string, unknown>>({});
@@ -397,6 +400,11 @@ export function GenesisWizard({
           armaGarchValueFromModelOptions(savedOptions as Record<string, unknown>, current),
         );
       }
+    }
+    if (isCountModelType(savedType) && savedModelOptions && typeof savedModelOptions === "object") {
+      const options=savedModelOptions as Record<string,unknown>;
+      setCountOptions({dispersion:options.dispersion === "constant" ? "constant" : "mean",
+        fixed:typeof options.alpha === "number",alpha:typeof options.alpha === "number" ? String(options.alpha) : ""});
     }
     if (isV186ModelType(savedType)) {
       setV186ModelOptionsByType((current) => ({
@@ -684,7 +692,7 @@ export function GenesisWizard({
           : isDcdh
             ? xColumns.filter((col) => !dcdhRoleCols.includes(col))
             : xColumns;
-    const defaultCovariance = covariance || covarianceDefault(capabilities);
+    const defaultCovariance = covariance || covarianceDefault(capabilities, modelType);
     const params: Record<string, unknown> = { model_type: modelType };
     if (!isRecipeModel) {
       params.y = y.trim();
@@ -702,6 +710,9 @@ export function GenesisWizard({
     }
     if (!isRecipeModel && modelType === "linear_mixed_effects") {
       params.model_options = lmmValue;
+    }
+    if (isCountModelType(modelType)) {
+      params.model_options=buildCountModelOptions(modelType,countOptions);
     }
     if (modelType === "time_series.arma_garch") {
       const sourceFilename = file?.name
@@ -846,6 +857,10 @@ export function GenesisWizard({
 
   async function saveModel() {
     if (!draft) return;
+    if (isCountModelType(modelType)) {
+      const issue=countModelValidationError(modelType,countOptions);
+      if (issue) {setError(issue);return;}
+    }
     if (modelType === "time_series.arma_garch") {
       const issues = armaGarchValidationErrors(armaGarchValue);
       if (issues.length > 0) {
@@ -983,6 +998,7 @@ export function GenesisWizard({
   const canSaveModel = Boolean(
     draftId &&
       tableConfigured &&
+      (!isCountModelType(modelType) || !countModelValidationError(modelType,countOptions)) &&
       (modelType === "time_series.arma_garch"
         ? armaGarchConfigured
         : usesGenericRecipeEditor
@@ -1107,6 +1123,11 @@ export function GenesisWizard({
               onChange={setAnovaOptions}
             />
           )}
+          {isCountModelType(modelType) && <>
+            <CountModelControls modelType={modelType} value={countOptions} onChange={setCountOptions}/>
+            {countModelValidationError(modelType,countOptions) && <p role="alert" className="ios-warning">
+              {countModelValidationError(modelType,countOptions)}</p>}
+          </>}
           {capabilities?.survey_design && surveyDesignApplies(capabilities.survey_design, modelType) && (
             <SurveyDesignControls
               columns={columnNames}

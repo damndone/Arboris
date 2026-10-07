@@ -33,21 +33,16 @@ def _xlsx_export_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def _refresh_artifact_checksum(run_root, artifact_id: str, path) -> None:
     """Keep an artifact index hash correct after serve-time metadata finalization."""
 
-    from ...artifacts import read_json, sha256_file, write_json
+    from ...artifacts import sha256_file
+    from ...artifact_index import artifact_index_transaction
 
-    index_path = run_root / "artifacts_index.json"
     try:
-        index = read_json(index_path)
-        records = index.get("artifacts", [])
-        changed = False
         digest = sha256_file(path)
-        for record in records:
-            if record.get("artifact_id") == artifact_id:
-                record["sha256"] = digest
-                changed = True
-                break
-        if changed:
-            write_json(index_path, index)
+        with artifact_index_transaction(run_root) as index:
+            for record in index.get('artifacts', []):
+                if record.get('artifact_id') == artifact_id:
+                    record['sha256'] = digest
+                    break
     except (OSError, ValueError, KeyError):
         # The report itself remains authoritative; a malformed index is handled
         # by the existing artifact/preview contract rather than failing a run.

@@ -295,6 +295,13 @@ class _JointState:
     parameters: np.ndarray | None = None
 
 
+@dataclass
+class _JointArmaState:
+    parameters: Mapping[str, float] | None = None
+    presample_variance: float | None = None
+    refit_summary: Mapping[str, object] | None = None
+
+
 @dataclass(frozen=True)
 class _PointForecast:
     mean: float
@@ -396,8 +403,11 @@ def run_rolling_validation(
     strategy = resolve_estimation_strategy(
         contract.estimation_strategy, mean_q=mean_candidate.q
     )
-    main_state: _SequentialState | _JointState
-    main_state = _SequentialState() if strategy == "sequential_arma_garch" else _JointState()
+    main_state: _SequentialState | _JointState | _JointArmaState
+    main_state = (
+        _SequentialState() if strategy == "sequential_arma_garch"
+        else _JointArmaState() if strategy == "joint_arma_garch" else _JointState()
+    )
     baseline_state = _SequentialState()
     rows: list[ForecastRow] = []
     baseline_rows: list[ForecastRow] = []
@@ -424,6 +434,13 @@ def run_rolling_validation(
                     hold_back=variance_candidate.hold_back,
                     state=main_state,
                     refit=main_refit,
+                )
+            elif strategy == "joint_arma_garch":
+                assert isinstance(main_state, _JointArmaState)
+                point = _joint_arma_point_forecast(
+                    history, mean_candidate=mean_candidate,
+                    variance_spec=_variance_spec(variance_candidate), state=main_state,
+                    refit=main_refit, time_index_semantics=contract.time_index_semantics,
                 )
             else:
                 assert isinstance(main_state, _JointState)
@@ -517,6 +534,8 @@ def run_rolling_validation(
     )
     frozen_spec = {
         "split_hash": split.split_hash,
+        "evaluation_mode": split.evaluation_mode,
+        "validation_data_role": split.validation_data_role,
         "mean_candidate_id": mean_candidate.candidate_id,
         "mean_order": [mean_candidate.p, mean_candidate.q],
         "mean_constant": mean_candidate.constant,
@@ -530,6 +549,9 @@ def run_rolling_validation(
         "refit_every": contract.validation.refit_every,
     }
     comparison = {
+        "evaluation_mode": split.evaluation_mode,
+        "validation_data_role": split.validation_data_role,
+        "candidate_selection_used_validation": split.evaluation_mode == "classical_replication",
         "locked_transform": contract.transform,
         "locked_split_hash": split.split_hash,
         "locked_mean_order": [mean_candidate.p, mean_candidate.q],
@@ -622,6 +644,12 @@ def forecast_next_observation(
             hold_back=variance_candidate.hold_back,
             state=_SequentialState(),
             refit=True,
+        )
+    elif strategy == "joint_arma_garch":
+        point = _joint_arma_point_forecast(
+            values, mean_candidate=mean_candidate,
+            variance_spec=_variance_spec(variance_candidate), state=_JointArmaState(),
+            refit=True, time_index_semantics=contract.time_index_semantics,
         )
     else:
         point = _joint_point_forecast(
@@ -789,7 +817,8 @@ def _validate_frozen_candidate_contract(
     variance_specs = enumerate_variance_candidates(contract)
     if variance.candidate_id not in {item.candidate_id for item in variance_specs}:
         raise ValueError("variance candidate is outside the frozen contract candidate set")
-    expected_hold_back = max(mean.p, common_hold_back(variance_specs))
+    resolved = resolve_estimation_strategy(contract.estimation_strategy, mean_q=mean.q)
+    expected_hold_back = 0 if resolved == "joint_arma_garch" else max(mean.p, common_hold_back(variance_specs))
     if variance.hold_back != expected_hold_back:
         raise ValueError("variance candidate hold_back does not match the frozen search")
     if mean.failure_code is not None or not (
@@ -800,8 +829,7 @@ def _validate_frozen_candidate_contract(
         variance.converged and variance.parameters_valid
     ):
         raise ValueError("rolling validation requires an eligible variance candidate")
-    resolved = resolve_estimation_strategy(contract.estimation_strategy, mean_q=mean.q)
-    expected_strategy = "joint" if resolved == "joint_ar_garch" else "sequential"
+    expected_strategy = "sequential" if resolved == "sequential_arma_garch" else "joint"
     if variance.estimation_strategy != expected_strategy:
         raise ValueError("variance candidate strategy does not match the rolling strategy")
     return resolved
@@ -904,6 +932,52 @@ def _statsmodels_convergence_summary(fitted: object) -> dict[str, object]:
         if isinstance(value, (int, np.integer)):
             summary[target_key] = int(value)
     return summary
+
+
+def _joint_arma_point_forecast(
+    history: np.ndarray, *, mean_candidate: ArmaCandidateResult,
+    variance_spec: VarianceCandidateSpec, state: _JointArmaState,
+    refit: bool, time_index_semantics: str,
+) -> _PointForecast:
+    from .joint_mle import fit_joint_arma_garch, filter_joint_arma_garch
+
+    if refit or state.parameters is None:
+        fitted = fit_joint_arma_garch(
+            history, mean_p=mean_candidate.p, mean_q=mean_candidate.q,
+            include_constant=mean_candidate.constant, variance_spec=variance_spec,
+            time_index_semantics=time_index_semantics,
+            start=state.parameters,
+        )
+        state.parameters = dict(fitted.parameters)
+        state.presample_variance = float(fitted.presample["variance"])
+        state.refit_summary = {
+            "fit_scope": "all_available_observations", "nobs": len(history),
+            "effective_sample": len(history), "converged": fitted.converged,
+            "finite_parameters": True, "parameters": dict(fitted.parameters),
+            "convergence_details": thaw_json(fitted.convergence_details),
+            "fit_statistics": {"log_likelihood": fitted.log_likelihood, "aic": fitted.aic, "bic": fitted.bic},
+            "presample_variance": state.presample_variance,
+            "backend": fitted.backend, "resolved_strategy": fitted.resolved_strategy,
+            "initialization": "previous_prefix_fit" if state.refit_summary is not None else "cold_start",
+            "warnings": list(fitted.warnings),
+        }
+    if state.presample_variance is None or state.refit_summary is None:
+        raise ValueError("joint ARMA forecast state is missing its fitted presample evidence")
+    parameters = state.parameters
+    residuals, variances = filter_joint_arma_garch(
+        history, mean_p=mean_candidate.p, mean_q=mean_candidate.q,
+        include_constant=mean_candidate.constant, variance_spec=variance_spec,
+        parameters=parameters, presample_variance=state.presample_variance,
+    )
+    mu = parameters.get("mu", 0.)
+    mean = mu + sum(parameters[f"ar{i}"]*(history[-i]-mu) for i in range(1, mean_candidate.p+1))
+    mean += sum(parameters[f"ma{i}"]*residuals[-i] for i in range(1, mean_candidate.q+1))
+    variance = parameters["omega"]
+    variance += sum(parameters[f"arch{i}"]*residuals[-i]**2 for i in range(1, variance_spec.p+1))
+    variance += sum(parameters[f"garch{i}"]*variances[-i] for i in range(1, variance_spec.q+1))
+    return _point_payload(mean=float(mean), variance=float(variance), fitted_parameters=parameters,
+        distribution=variance_spec.distribution, warnings=state.refit_summary["warnings"],
+        refit_summary=state.refit_summary)
 
 
 def _joint_point_forecast(
@@ -1096,8 +1170,8 @@ def _variance_spec(candidate: VarianceCandidateResult) -> VarianceCandidateSpec:
     )
 
 
-def _state_empty(state: _SequentialState | _JointState) -> bool:
-    if isinstance(state, _JointState):
+def _state_empty(state: _SequentialState | _JointState | _JointArmaState) -> bool:
+    if isinstance(state, (_JointState, _JointArmaState)):
         return state.parameters is None
     return state.mean_parameters is None or state.variance_parameters is None
 

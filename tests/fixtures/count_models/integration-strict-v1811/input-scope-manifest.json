@@ -1,0 +1,62 @@
+{
+  "integration_merge_baseline": "35e81a0ed2ad7c498001c967c46557dc30b6fa03",
+  "numeric_runtime_head": "457d529d9e59bf19ca287aae978f028a8d86aa3d",
+  "read_only_files": [
+    {
+      "path": "tests/fixtures/postestimation/data.csv",
+      "sha256": "2e1b92f07632a8c88d047074f77cd6e5f9552b4f932f7d6ed2499161a0bf3084",
+      "verified_against": "35e81a0ed2ad7c498001c967c46557dc30b6fa03",
+      "unchanged": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/oracle.json",
+      "sha256": "d80dbc69f91648cbd17443f89deaf21df63296f1296a6d674c3ef9e135b9302c",
+      "verified_against": "35e81a0ed2ad7c498001c967c46557dc30b6fa03",
+      "unchanged": true
+    },
+    {
+      "path": "tests/fixtures/postestimation/generate_oracle.R",
+      "sha256": "82b35d95a30650daf85de157c93eed380ddcb151557e64cf3ac5b9f0d4d459ef",
+      "verified_against": "35e81a0ed2ad7c498001c967c46557dc30b6fa03",
+      "unchanged": true
+    },
+    {
+      "path": "tests/fixtures/admission/glm_negative_binomial/data.csv",
+      "sha256": "33bf1067bdf7f7ca7f1bf7fb34c16fc167d9318b482f60aae8febd402b084711",
+      "verified_against": "35e81a0ed2ad7c498001c967c46557dc30b6fa03",
+      "unchanged": true
+    },
+    {
+      "path": "tests/fixtures/admission/glm_negative_binomial/oracle.json",
+      "sha256": "67620f2e795f1ee49827436288c1b7c7bcd9894951bac53c495ef7c04773582d",
+      "verified_against": "35e81a0ed2ad7c498001c967c46557dc30b6fa03",
+      "unchanged": true
+    },
+    {
+      "path": "tests/fixtures/admission/glm_negative_binomial/oracle_high_precision.json",
+      "sha256": "0e52e10663056eb28a96ed5095742a651d5ba24ef58e941e79a87e0f963aa777",
+      "verified_against": "35e81a0ed2ad7c498001c967c46557dc30b6fa03",
+      "unchanged": true
+    },
+    {
+      "path": "tests/fixtures/admission/glm_negative_binomial/generate_oracle.R",
+      "sha256": "2eec14f99b0fad55f455e6bec8a8ae0d2a1310aec790ac2bc3171d59df98b41a",
+      "verified_against": "35e81a0ed2ad7c498001c967c46557dc30b6fa03",
+      "unchanged": true
+    },
+    {
+      "path": "backend/workbench/econometrics/count_models.py",
+      "sha256": "143b75513c18d4a5aa0a20ea08b61169f65d1a358a533ee0d497c768cff7dd50",
+      "verified_against": "35e81a0ed2ad7c498001c967c46557dc30b6fa03",
+      "unchanged": true
+    },
+    {
+      "path": "backend/workbench/econometrics/runner.py",
+      "sha256": "9948cf3319691f2b193365b451c78209622efb35c4fa0618967dcddbf06f2f60",
+      "verified_against": "edeba374247bd9e4d608a68e87def84883315cdc",
+      "unchanged": true
+    }
+  ],
+  "reference_only_scope": true,
+  "no_old_oracle_update_required_for_nb2": true
+}

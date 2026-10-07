@@ -1,0 +1,2 @@
+Error: length(unique(wb_fpc[wb_rows])) == 1 is not TRUE
+Execution halted

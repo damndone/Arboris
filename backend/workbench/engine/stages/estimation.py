@@ -26,8 +26,14 @@ from ..registry import (
 )
 from ...contracts.model.ols import (
     OLS_MODEL_OPTIONS_CONTRACT,
+    validate_did_model_options,
     validate_ols_model_options,
     validate_panel_ols_model_options,
+)
+from ...contracts.model.count_models import (
+    NEGATIVE_BINOMIAL_MODEL_OPTIONS_CONTRACT, GLM_MODEL_OPTIONS_CONTRACT,
+    validate_negative_binomial_model_options, validate_glm_model_options,
+    validate_glm_family_options,
 )
 
 
@@ -108,11 +114,13 @@ def _validate_model_family_weights(
         )
 
 
-def _record_fitted_kernel(ctx, fitted, *, model_id: str, model_type: str) -> None:
+def _record_fitted_kernel(ctx, fitted, *, model_id: str, model_type: str,
+                          param_positions: tuple[int, ...] | None = None) -> None:
     """Record the kernel of the fit whose covariance the result reports."""
     kernel = kernel_from_fitted(
         fitted, model_id=model_id, model_type=model_type,
         nobs=int(getattr(fitted, "nobs", 0) or 0), public_name=_public_term,
+        param_positions=param_positions,
     )
     if kernel is not None:
         record_inference_kernel(ctx, kernel)
@@ -183,10 +191,21 @@ def _model_id(ctx, default: str) -> str:
     return str(override) if override else default
 
 
+def _panel_covariance_request(ctx) -> tuple[str, str | None]:
+    """Covariance and cluster column for a panel or DID fit (clustered by default)."""
+    from ...cleaning import normalize_column_name
+    from ...contracts.model.ols import effective_panel_covariance
+
+    covariance, cluster = effective_panel_covariance(
+        ctx.artifacts.get("_covariance"), ctx.artifacts.get("_model_options") or {}
+    )
+    return covariance, normalize_column_name(cluster) if cluster else None
+
+
 def _fit_panel_ols(ctx, env):
     id_cands = ctx.artifacts.get("_id_candidates") or []
     t_cands = ctx.artifacts.get("_time_candidates") or []
-    covariance = ctx.artifacts.get("_covariance") or "robust"
+    covariance, cluster = _panel_covariance_request(ctx)
     primary, fitted = _orch().run_panel_ols(
         ctx.data.frame,
         y=ctx.artifacts["_normalized_y"],
@@ -195,6 +214,7 @@ def _fit_panel_ols(ctx, env):
         time=t_cands[0] if t_cands else None,
         model_id="panel_ols_1",
         covariance=covariance,
+        cluster_col=cluster,
     )
     # NB: today's code does NOT store panel_ols fitted; preserve that, but hand
     # the stage its kernel so post-estimation does not need the fitted object.
@@ -220,25 +240,39 @@ def _fit_probit(ctx, env):
 
 
 def _fit_negative_binomial(ctx, env):
+    options = ctx.artifacts.get("_model_options") or {}
     primary, fitted = _orch().run_negative_binomial(
         ctx.data.frame,
         y=ctx.artifacts["_normalized_y"],
         x=ctx.artifacts["_normalized_x"],
         model_id="negative_binomial_1",
         categorical_x=ctx.artifacts.get("_categorical_vars"),
+        dispersion=options.get("dispersion", "mean"),
+        alpha=options.get("alpha"),
     )
+    # This owner fits beta first, followed by the estimated ancillary term.
+    # Positions retain a real regressor named alpha, even with duplicate names.
+    _record_fitted_kernel(ctx, fitted, model_id="negative_binomial_1",
+        model_type="negative_binomial", param_positions=tuple(range(fitted.model.exog.shape[1])))
     return "negative_binomial_1", primary, fitted
 
 
 def _fit_glm(ctx, env):
+    options = ctx.artifacts.get("_model_options") or {}
+    family = ctx.artifacts.get("_glm_family") or ""
+    validate_glm_family_options(options, family)
     primary, fitted = _orch().run_glm(
         ctx.data.frame,
         y=ctx.artifacts["_normalized_y"],
         x=ctx.artifacts["_normalized_x"],
         model_id="glm_1",
-        family_name=(ctx.artifacts.get("_glm_family") or ""),
+        family_name=family,
         categorical_x=ctx.artifacts.get("_categorical_vars"),
+        alpha=options.get("alpha"),
     )
+    # The packet stays `glm`; its kernel names the family, because what is
+    # valid after the fit (and how it predicts) depends on the family.
+    primary["kernel_family"] = f"glm:{primary.get('glm_family')}"
     return "glm_1", primary, fitted
 
 
@@ -305,6 +339,8 @@ def _fit_did(ctx, env):
         status=ctx.artifacts.get("_did_status_col"),
     )
     ctx.artifacts["_did_normalized"] = norm
+    covariance, cluster = _panel_covariance_request(ctx)
+    ctx.artifacts["_panel_covariance"] = (covariance, cluster)
     primary, fitted = _orch().run_did(
         norm.frame,
         y=norm.y,
@@ -312,7 +348,8 @@ def _fit_did(ctx, env):
         entity=norm.entity,
         time=norm.time,
         model_id="did_1",
-        covariance=ctx.artifacts.get("_covariance") or "robust",
+        covariance=covariance,
+        cluster_col=cluster,
     )
     return "did_1", primary, fitted   # MUST return fitted (diagnostics needs it)
 
@@ -449,6 +486,9 @@ def _ols_robust_se_decision(ctx):
     """Record the ACTUAL standard-error choice for ols_1 (v1.7 honesty fix)."""
     from ... import graph_decision_factory as dpf
 
+    if _survey_design_declared(ctx):
+        method = "replicate" if str(ctx.artifacts.get("_survey_replicate_type") or "").strip() else "linearization"
+        return dpf.ols_default_robust_se(variant=f"Design-based ({method})", explicit=True)
     covariance = (ctx.artifacts.get("_covariance") or "").strip()
     if covariance == "unadjusted":
         return dpf.ols_default_robust_se(variant="nonrobust", explicit=True)
@@ -618,7 +658,7 @@ def _apply_survey_design_variance(ctx, model_type: str, primary: dict) -> None:
     """
     from scipy import stats
 
-    from ...survey.adapters import build_design_from_artifacts
+    from ...survey.adapters import build_design_from_artifacts, fpc_summary
     from ...survey.engine import estimate_with_design
     from ...survey.errors import SurveyEngineError
 
@@ -680,8 +720,17 @@ def _apply_survey_design_variance(ctx, model_type: str, primary: dict) -> None:
         entry["ci_upper"] = estimate + critical * se
         entry["p_value"] = float(
             2 * stats.t.sf(abs(estimate / se), result.inference_degf)
-        ) if se > 0 else float("nan")
+        ) if se > 0 else (None if design.fpc is not None else float("nan"))
         entry["variance_source"] = "survey_design"
+
+    if design.fpc is not None and any(
+        entry["std_error"] == 0 for entry in coefficients.values()
+    ):
+        primary["warnings"] = list(primary.get("warnings") or []) + [{
+            "code": "SURVEY_ZERO_VARIANCE_INFERENCE_UNAVAILABLE",
+            "message": "The finite population correction gives zero sampling variance; "
+                       "coefficient p-values with zero standard errors are unavailable.",
+        }]
 
     # The kernel must carry the variance the user now sees. Without this a joint
     # test would read the naive covariance still attached to the fitted object.
@@ -759,6 +808,36 @@ def _apply_survey_design_variance(ctx, model_type: str, primary: dict) -> None:
         "replicates_failed": summary.failed if summary else None,
         "replicate_failure_reasons": summary.failure_reasons if summary else None,
     }
+    if design.fpc is not None:
+        primary["survey_design"]["fpc"] = fpc_summary(design)
+
+    # Every public reader must describe the replacement, not the fitted
+    # object's earlier covariance. Keep submitted wire options unchanged.
+    evidence = {
+        "covariance": "survey_design",
+        "covariance_estimator": f"survey_design_{result.method}",
+        "variance_source": "survey_design",
+        "engine": "workbench.survey",
+        "use_t": True,
+        "df_method": result.df_convention,
+        "effective_df": float(result.inference_degf),
+        "inference_distribution": "t",
+        "p_value_method": "t",
+        "confidence_interval_method": "t",
+        "confidence_level": 0.95,
+        "alpha": 0.05,
+        "survey_design": primary["survey_design"],
+    }
+    primary.update(covariance="survey_design", covariance_estimator=evidence["covariance_estimator"],
+                   variance_source="survey_design", covariance_evidence=evidence,
+                   inference_config=evidence, source_eligible=False)
+    from ...analysis_loop.fingerprints import inference_config_fingerprint
+    primary["inference_config_fingerprint"] = inference_config_fingerprint(
+        covariance="survey_design", cluster_var=design.psu, cluster_count=design.n_psu,
+        corrections={"survey_design": primary["survey_design"]}, df=result.inference_degf,
+        use_t=True, confidence_level=0.95, engine="workbench.survey",
+        inference_distribution="t", p_value_method="t", confidence_interval_method="t",
+    )
 
 
 def _persist_ols_contract_metadata(run_root, result: dict[str, Any]) -> None:
@@ -922,8 +1001,12 @@ CORE_PACK = AnalysisPack(
             model_options_contract=OLS_MODEL_OPTIONS_CONTRACT,
         ),
         ModelHandler("probit", "probit_1", ("binary",), _fit_probit),
-        ModelHandler("negative_binomial", "negative_binomial_1", ("count",), _fit_negative_binomial),
-        ModelHandler("glm", "glm_1", ("count", "continuous", "binary"), _fit_glm),
+        ModelHandler("negative_binomial", "negative_binomial_1", ("count",), _fit_negative_binomial,
+            validate_model_options=validate_negative_binomial_model_options,
+            model_options_contract=NEGATIVE_BINOMIAL_MODEL_OPTIONS_CONTRACT),
+        ModelHandler("glm", "glm_1", ("count", "continuous", "binary"), _fit_glm,
+            validate_model_options=validate_glm_model_options,
+            model_options_contract=GLM_MODEL_OPTIONS_CONTRACT),
         ModelHandler("logit", "logit_1", ("binary",), _fit_logit),
         ModelHandler("poisson_rate", "poisson_1", ("count",), _fit_poisson),
         ModelHandler("poisson", "poisson_1", ("count",), _fit_poisson),
@@ -936,7 +1019,14 @@ CORE_PACK = AnalysisPack(
             model_options_contract=OLS_MODEL_OPTIONS_CONTRACT,
         ),
         ModelHandler("iv_2sls", "iv_2sls_1", ("continuous",), _fit_iv_2sls),
-        ModelHandler("did", "did_1", ("continuous",), _fit_did),
+        ModelHandler(
+            "did",
+            "did_1",
+            ("continuous",),
+            _fit_did,
+            validate_model_options=validate_did_model_options,
+            model_options_contract=OLS_MODEL_OPTIONS_CONTRACT,
+        ),
         ModelHandler("cs_did", "cs_did_1", ("continuous",), _fit_cs_did),
         ModelHandler("sa_did", "sa_did_1", ("continuous",), _fit_sa_did),
         ModelHandler("dcdh", "dcdh_1", ("continuous",), _fit_dcdh),
@@ -1225,7 +1315,9 @@ class EstimationStage:
                         # The packet may refine the handler's family (a Poisson fit
                         # with an exposure is `poisson_rate`); the kernel names
                         # what the packet names.
-                        model_type=str(primary.get("model_type") or handler.model_type),
+                        model_type=str(
+                            primary.get("kernel_family") or primary.get("model_type") or handler.model_type
+                        ),
                         primary=_kernel_source_packet(primary),
                         fitted=fitted,
                         recorded=recorded_inference_kernel(ctx, model_id),

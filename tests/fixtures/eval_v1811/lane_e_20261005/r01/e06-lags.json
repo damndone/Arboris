@@ -1,0 +1,29 @@
+[
+  {
+    "lag": 5,
+    "statistic": 568.3647446988444,
+    "p_value": null,
+    "df": null,
+    "status": "unavailable",
+    "reason_code": "LJUNG_BOX_NONPOSITIVE_DF",
+    "reason": "Adjusted Ljung-Box p-value is unavailable: lag 5 <= model_df 10."
+  },
+  {
+    "lag": 10,
+    "statistic": 849.4119396917282,
+    "p_value": null,
+    "df": null,
+    "status": "unavailable",
+    "reason_code": "LJUNG_BOX_NONPOSITIVE_DF",
+    "reason": "Adjusted Ljung-Box p-value is unavailable: lag 10 <= model_df 10."
+  },
+  {
+    "lag": 20,
+    "statistic": 1075.8689206240795,
+    "p_value": 8.394094005983444e-225,
+    "df": 10,
+    "status": "ok",
+    "reason_code": null,
+    "reason": null
+  }
+]

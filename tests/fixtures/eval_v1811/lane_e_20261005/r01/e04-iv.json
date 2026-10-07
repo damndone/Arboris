@@ -1,0 +1,90 @@
+{
+  "owner": "/private/tmp/v1811-evaluation-8d8a2fd4c7d44af693b267e6d893d16f-r01/test_public_two_endogenous_iv_0/iv/runs/20261005_091809_911211_334df8b4",
+  "native": {
+    "wald": 52.96646947649708,
+    "wald_df": 2.0,
+    "wald_p": 3.1512095954357774e-12,
+    "lincom": 0.3093092999008241,
+    "lincom_se": 0.07122789759662757,
+    "lincom_p": 1.4085108501376491e-05,
+    "nlcom": 0.7863490730138125,
+    "nlcom_se": 0.03812083420704242
+  },
+  "actual": {
+    "wald": {
+      "operation": "wald",
+      "model_id": "iv_2sls_1",
+      "model_type": "iv_2sls",
+      "covariance_estimator": "robust",
+      "nobs": 650,
+      "df_method": "asymptotic",
+      "n_clusters": null,
+      "constraints": [
+        {
+          "terms": {
+            "xe1": 1.0
+          },
+          "value": 0.0
+        },
+        {
+          "terms": {
+            "xe2": 1.0
+          },
+          "value": 0.0
+        }
+      ],
+      "distribution": "chi2",
+      "statistic": 52.966469476497096,
+      "df_num": 2,
+      "df_den": null,
+      "p_value": 3.1512095954357576e-12
+    },
+    "lincom": {
+      "operation": "lincom",
+      "model_id": "iv_2sls_1",
+      "model_type": "iv_2sls",
+      "covariance_estimator": "robust",
+      "nobs": 650,
+      "df_method": "asymptotic",
+      "n_clusters": null,
+      "terms": {
+        "x1": 1.0,
+        "xe1": -0.4
+      },
+      "constant": 0.1,
+      "estimate": 0.30930929990082423,
+      "std_error": 0.07122789759662751,
+      "statistic": 4.342530249207711,
+      "distribution": "z",
+      "df": null,
+      "p_value": 1.4085108501376178e-05,
+      "level": 0.95,
+      "ci": [
+        0.16970518591692724,
+        0.4489134138847212
+      ]
+    },
+    "nlcom": {
+      "operation": "nlcom",
+      "model_id": "iv_2sls_1",
+      "model_type": "iv_2sls",
+      "covariance_estimator": "robust",
+      "nobs": 650,
+      "df_method": "asymptotic",
+      "n_clusters": null,
+      "expression": "exp(xe2)",
+      "estimate": 0.7863490730138125,
+      "std_error": 0.038120834206139195,
+      "statistic": 20.627803388604082,
+      "distribution": "z",
+      "df": null,
+      "p_value": 1.5451094253770711e-94,
+      "level": 0.95,
+      "ci": [
+        0.7116336109091571,
+        0.8610645351184679
+      ],
+      "warnings": []
+    }
+  }
+}

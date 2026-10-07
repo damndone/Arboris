@@ -1,0 +1,44 @@
+..........................FF......                                       [100%]
+=================================== FAILURES ===================================
+___________ test_large_coefficient_is_contract_refusal_not_overflow ____________
+
+    def test_large_coefficient_is_contract_refusal_not_overflow():
+        value = payload()
+        value["values"]["coefficients"]["x"] = 10 ** 400
+        with pytest.raises(ContractError):
+>           validate(value)
+
+tests/eval_v1811/m2_review_result_snapshot_adversarial.py:79: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/eval_v1811/m2_review_result_snapshot_adversarial.py:38: in validate
+    return subject.validate_result_snapshot(value, expected_binding=payload()["binding"])
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/workbench/script_export/result_snapshot.py:124: in validate_result_snapshot
+    _number(value, f"values.{key}.{name}")
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+value = 100000000000000000...0000000000000000000
+field = 'values.coefficients.x', nullable = False
+
+    def _number(value: object, field: str, *, nullable: bool = False) -> None:
+        if nullable and value is None:
+            return
+>       if type(value) not in (int, float) or not math.isfinite(value):
+                                                  ^^^^^^^^^^^^^^^^^^^^
+E       OverflowError: int too large to convert to float
+
+backend/workbench/script_export/result_snapshot.py:99: OverflowError
+_______ test_nobs_not_representable_as_finite_script_number_is_rejected ________
+
+    def test_nobs_not_representable_as_finite_script_number_is_rejected():
+        value = payload()
+        value["values"]["nobs"] = 10 ** 400
+>       with pytest.raises(ContractError):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE ContractError
+
+tests/eval_v1811/m2_review_result_snapshot_adversarial.py:85: Failed
+=========================== short test summary info ============================
+FAILED tests/eval_v1811/m2_review_result_snapshot_adversarial.py::test_large_coefficient_is_contract_refusal_not_overflow
+FAILED tests/eval_v1811/m2_review_result_snapshot_adversarial.py::test_nobs_not_representable_as_finite_script_number_is_rejected
+2 failed, 32 passed in 0.86s

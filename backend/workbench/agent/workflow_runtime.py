@@ -2022,7 +2022,7 @@ def build_workflow_step_executor(
             from .postestimation_steps import execute_postestimation_step
 
             result, model_run_id, model_id = execute_postestimation_step(
-                root, str(draft.target["run_id"]), step
+                root, str(draft.target["run_id"]), step, previous=previous
             )
             return _persist_model_post_estimation_result(
                 root,
@@ -2104,7 +2104,10 @@ def _execute_model_genesis_branches(
     workflow_step_id = str(step.step_id) if step is not None else "legacy-model-genesis"
     for branch in branch_spec["branches"]:
         branch_id = str(branch["branch_id"])
-        branch_covariance = branch.get("covariance") or branch_spec.get("covariance") or "unadjusted"
+        branch_covariance = (
+            branch.get("covariance") or branch_spec.get("covariance")
+            or family_contract.default_covariance
+        )
         # Genesis estimates from an uploaded dataset, not from a formula, so a
         # dummy set or a squared term has to exist as a real column first. When
         # a branch declares derived terms, materialize an augmented upload and
@@ -2119,7 +2122,9 @@ def _execute_model_genesis_branches(
                 f"{model_family} branch {branch_id} derived terms: {exc}"
             ) from exc
         if family_contract.validate_branch_frame is not None:
-            family_contract.validate_branch_frame(branch_frame, branch)
+            family_contract.validate_branch_frame(branch_frame, {
+                **branch, "model_options": dict(branch_spec.get("model_options") or {}),
+            })
         # A branch can have no branch-local dummy/polynomial expansion and
         # still depend on an upstream numeric derivation.  Reusing the original
         # upload in that case would silently discard a declared column before
@@ -2282,10 +2287,18 @@ def _execute_model_genesis_branches(
                 + ", ".join(missing_figures)
             )
         artifact_ids.extend(f"{run_id}:{artifact_id}" for artifact_id in ids)
+        from ..contracts.model.inference_kernel import kernel_relative_path
+
+        kernel_path = run_root / kernel_relative_path(primary_model_artifact_id)
         branch_outputs.append(
             {
                 "branch_id": branch_id,
                 "run_id": run_id,
+                "model_id": primary_model_artifact_id if not by_group else None,
+                "inference_kernel_sha256": (
+                    sha256_file(kernel_path) if not by_group and kernel_path.is_file()
+                    else None
+                ),
                 "artifact_ids": ids,
                 "branch_spec": {
                     "model_family": model_family,
@@ -2616,6 +2629,11 @@ def _persist_model_post_estimation_result(
         },
         "result": dict(result),
     }
+    if artifact_type == "post_estimation":
+        # Retain the compiled request whose fingerprints the durable executor
+        # committed to, so exports can distinguish changed hypotheses from
+        # genuinely executed results even if an artifact is re-registered.
+        payload["execution"] = draft.to_dict()
     if artifact_path.exists():
         if read_json(artifact_path) != payload:
             raise WorkflowExecutionError("post-estimation artifact path is occupied")
@@ -2998,8 +3016,16 @@ def _branch_kernel(root: Path, branch: Mapping[str, Any]) -> dict[str, Any]:
     kernel = read_json(paths[0])
     try:
         validate_inference_kernel(kernel)
+        if kernel.get("model_id") != branch.get("model_id") or paths[0].stem != branch.get("model_id"):
+            raise InferenceKernelError("the branch kernel identity does not match its model owner")
     except InferenceKernelError as exc:
         raise WorkflowExecutionError(f"the branch's inference kernel is not usable: {exc}") from exc
+    from ..postestimation.comparison_data import assert_completed_kernel
+
+    try:
+        assert_completed_kernel(root / "runs" / str(branch["run_id"]), kernel)
+    except (OSError, ValueError, KeyError) as exc:
+        raise WorkflowExecutionError(f"the branch's completed kernel binding is not usable: {exc}") from exc
     return kernel
 
 

@@ -1,0 +1,137 @@
+{
+  "red": {
+    "path": "tests/fixtures/agent_live_eval_v1811/remaining-owner-red-records/metadata_owner_only.json",
+    "sha256": "0e16cd3d2f2fec902e814589f7519d0ba0203e693ed7bfd32beb8846b0e01ab1",
+    "passed": true,
+    "checks": [
+      {
+        "check": "reply",
+        "passed": true,
+        "detail": "stop"
+      },
+      {
+        "check": "language",
+        "passed": true,
+        "detail": "zh"
+      },
+      {
+        "check": "executed",
+        "passed": true,
+        "detail": "True"
+      },
+      {
+        "check": "confirmed_operations_completed",
+        "passed": true,
+        "detail": "['completed']"
+      },
+      {
+        "check": "no_fabricated_numbers",
+        "passed": true,
+        "detail": "[]"
+      },
+      {
+        "check": "current_confirmation_identity",
+        "passed": true
+      },
+      {
+        "check": "native_oracle",
+        "passed": true
+      },
+      {
+        "check": "result_answer_provenance",
+        "passed": true
+      },
+      {
+        "check": "requested_native_numbers_in_answer",
+        "passed": true
+      }
+    ],
+    "tool_field_evidence": null
+  },
+  "independent-green": {
+    "path": "tests/fixtures/agent_live_eval_v1811/remaining-owner-independent-green-records/metadata_owner_only.json",
+    "sha256": "a7a2e225ecb888ae7a0fc6ece074dadf8ec5c2c6a7b1f171e0e18f311c8a3fbf",
+    "passed": false,
+    "checks": [
+      {
+        "check": "reply",
+        "passed": true,
+        "detail": "stop"
+      },
+      {
+        "check": "language",
+        "passed": true,
+        "detail": "zh"
+      },
+      {
+        "check": "executed",
+        "passed": true,
+        "detail": "True"
+      },
+      {
+        "check": "confirmed_operations_completed",
+        "passed": true,
+        "detail": "['completed']"
+      },
+      {
+        "check": "no_fabricated_numbers",
+        "passed": true,
+        "detail": "[]"
+      },
+      {
+        "check": "current_confirmation_identity",
+        "passed": true
+      },
+      {
+        "check": "native_oracle",
+        "passed": true
+      },
+      {
+        "check": "result_answer_provenance",
+        "passed": false
+      },
+      {
+        "check": "requested_native_numbers_in_answer",
+        "passed": true
+      }
+    ],
+    "tool_field_evidence": {
+      "passed": false,
+      "fields": [
+        {
+          "path": [
+            "coefficients",
+            "x1",
+            "estimate"
+          ],
+          "artifact": null,
+          "bindings": [],
+          "rejected_sources": [],
+          "passed": false
+        },
+        {
+          "path": [
+            "coefficients",
+            "x2",
+            "estimate"
+          ],
+          "artifact": null,
+          "bindings": [],
+          "rejected_sources": [],
+          "passed": false
+        },
+        {
+          "path": [
+            "coefficients",
+            "x3",
+            "estimate"
+          ],
+          "artifact": null,
+          "bindings": [],
+          "rejected_sources": [],
+          "passed": false
+        }
+      ]
+    }
+  }
+}

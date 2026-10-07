@@ -1,0 +1,66 @@
+.
+Fontconfig error: No writable cache directories
+	/opt/homebrew/var/cache/fontconfig
+	/Users/jiayuanren/.cache/fontconfig
+	/Users/jiayuanren/.fontconfig
+/Users/runner/work/crossbow/crossbow/arrow/cpp/src/arrow/util/cpu_info.cc:242: IOError: sysctlbyname failed for 'hw.l1dcachesize'. Detail: [errno 1] Operation not permitted
+/Users/runner/work/crossbow/crossbow/arrow/cpp/src/arrow/util/cpu_info.cc:242: IOError: sysctlbyname failed for 'hw.l2cachesize'. Detail: [errno 1] Operation not permitted
+/Users/runner/work/crossbow/crossbow/arrow/cpp/src/arrow/util/cpu_info.cc:242: IOError: sysctlbyname failed for 'hw.l3cachesize'. Detail: [errno 1] Operation not permitted
+/Users/runner/work/crossbow/crossbow/arrow/cpp/src/arrow/util/cpu_info.cc:242: IOError: sysctlbyname failed for 'hw.optional.neon'. Detail: [errno 1] Operation not permitted
+F.......
+=================================== FAILURES ===================================
+________ test_actual_owner_coefficient_kernel_matches_final_native_eim _________
+
+owner = {'full_kernel': {'contract': 'workbench.inference_kernel.v1', 'model_id': 'glm_1', 'model_type': 'glm:negative_binomia...1621_30f032cf'}, 'packet': {'schema_version': 1, 'model_id': 'direct_owner', 'nobs': 300, 'r_squared': None, ...}, ...}
+oracle = {'params': {'(Intercept)': 0.524033398275554, 'x1': 0.37889378683709, 'x2': -0.288945151543766, 'x3': -0.1012180781134...': 1, 'p_value': 0.00104520507911674}, 'lincom': {'estimate': -0.698996516250441, 'std_error': 0.150768687856702}, ...}
+
+    def test_actual_owner_coefficient_kernel_matches_final_native_eim(owner,oracle):
+        kernel=owner["full_kernel"]
+        assert kernel["model_type"] == "glm:negative_binomial"
+        assert kernel["param_names"] == ["Intercept","x1","x2","x3"]
+        assert kernel["nobs"] == oracle["nobs"] == 300
+        assert kernel["df_resid"] == 296
+        assert kernel["reference_distribution"] == "z"
+        assert kernel["covariance_estimator"] == "nonrobust"
+        for i,term in enumerate(kernel["param_names"]):
+            name="(Intercept)" if term == "Intercept" else term
+            assert abs(kernel["params"][i]-float(oracle["full_precision"]["params"][name])) <= 1e-8
+            assert abs(np.sqrt(kernel["vcov"][i][i])-float(oracle["full_precision"]["std_error"][name])) <= 1e-6
+>       np.testing.assert_array_equal(kernel["vcov"],owner["direct_fit_vcov"])
+E       AssertionError: 
+E       Arrays are not equal
+E       
+E       Mismatched elements: 16 / 16 (100%)
+E       First 5 mismatches are at indices:
+E        [0, 0]: 0.028853272460587356 (ACTUAL), 0.02885327246058737 (DESIRED)
+E        [0, 1]: -0.00018703369026302574 (ACTUAL), -0.00018703369026302526 (DESIRED)
+E        [0, 2]: -0.0001220058983949169 (ACTUAL), -0.00012200589839491763 (DESIRED)
+E        [0, 3]: -0.022391429324453177 (ACTUAL), -0.022391429324453187 (DESIRED)
+E        [1, 0]: -0.00018703369026302574 (ACTUAL), -0.00018703369026302761 (DESIRED)
+E       Max absolute difference among violations: 1.38777878e-17
+E       Max relative difference among violations: 9.99952867e-15
+E        ACTUAL: array([[ 2.885327e-02, -1.870337e-04, -1.220059e-04, -2.239143e-02],
+E              [-1.870337e-04,  5.767892e-03, -8.623713e-05, -7.567699e-04],
+E              [-1.220059e-04, -8.623713e-05,  4.327063e-03,  5.314706e-04],
+E              [-2.239143e-02, -7.567699e-04,  5.314706e-04,  2.174122e-02]])
+E        DESIRED: array([[ 2.885327e-02, -1.870337e-04, -1.220059e-04, -2.239143e-02],
+E              [-1.870337e-04,  5.767892e-03, -8.623713e-05, -7.567699e-04],
+E              [-1.220059e-04, -8.623713e-05,  4.327063e-03,  5.314706e-04],
+E              [-2.239143e-02, -7.567699e-04,  5.314706e-04,  2.174122e-02]])
+
+tests/test_glm_nb_v1811_reference.py:96: AssertionError
+------------------------------ Captured log setup ------------------------------
+WARNING  matplotlib:__init__.py:577 /Users/jiayuanren/.matplotlib is not a writable directory
+WARNING  matplotlib:__init__.py:593 Matplotlib created a temporary cache directory at /var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/matplotlib-wpqqm7_n because there was an issue with the default path ({configdir}); it is highly recommended to set the MPLCONFIGDIR environment variable to a writable directory, in particular to speed up the import of Matplotlib and to better support multiprocessing.
+WARNING  matplotlib.font_manager:font_manager.py:1249 Matplotlib is building the font cache; this may take a moment.
+=============================== warnings summary ===============================
+tests/test_glm_nb_v1811_reference.py::test_actual_owner_coefficient_kernel_matches_final_native_eim
+tests/test_glm_nb_v1811_reference.py::test_actual_owner_coefficient_kernel_matches_final_native_eim
+tests/test_glm_nb_v1811_reference.py::test_actual_owner_coefficient_kernel_matches_final_native_eim
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/genmod/generalized_linear_model.py:1923: FutureWarning: The bic value is computed using the deviance formula. After 0.13 this will change to the log-likelihood based formula. This change has no impact on the relative rank of models compared using BIC. You can directly access the log-likelihood version using the `bic_llf` attribute. You can suppress this message by calling statsmodels.genmod.generalized_linear_model.SET_USE_BIC_LLF with True to get the LLF-based version now or False to retainthe deviance version.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_glm_nb_v1811_reference.py::test_actual_owner_coefficient_kernel_matches_final_native_eim
+1 failed, 8 passed, 3 warnings in 12.91s

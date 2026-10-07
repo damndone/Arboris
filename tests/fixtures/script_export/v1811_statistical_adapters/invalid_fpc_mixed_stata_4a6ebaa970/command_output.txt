@@ -1,0 +1,74 @@
+. do analysis.do 
+
+. * Workbench 1.8.11
+. * project: invalid_fpc
+. * run: mixed
+. * lineage_hash: ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+> ccc
+. * Coverage
+. * model | model.ols | native_with_equivalence_note | Full single-stage linear
+> ization design including supplied FPC and domain; coefficient and joint-test 
+> df preserve the executed Workbench convention.
+. version 18
+
+. set more off
+
+. set type double
+
+. capture program drop wb_repost
+
+. program define wb_repost, eclass
+  1.     args beta covariance
+  2.     ereturn repost b=`beta' V=`covariance', rename
+  3. end
+
+. capture program drop wb_sha
+
+. program define wb_sha
+  1.     args filename expected
+  2.     tempfile digestfile
+  3.     shell shasum -a 256 "`filename'" > "`digestfile'"
+  4.     tempname fh
+  5.     file open `fh' using "`digestfile'", read text
+  6.     file read `fh' line
+  7.     file close `fh'
+  8.     if substr("`line'",1,64) != "`expected'" {
+  9.         display as error "SHA256 mismatch"
+ 10.         exit 9
+ 11.     }
+ 12. end
+
+. 
+. wb_sha "data.csv" "317f29a5508244b473cac214f7877c28fd6677c0c64d6eb4be54b9f645
+> d5185a"
+
+
+. frame create wb_src0
+
+. frame change wb_src0
+
+. import delimited using "data.csv", varnames(1) delimiters(",") encoding("UTF-
+> 8") asdouble clear case(preserve)
+(15 vars, 80 obs)
+
+. frame copy wb_src0 wb_model_data1
+
+. frame change wb_model_data1
+
+. drop if missing(y) | missing(x1) | missing(x2)
+(0 observations deleted)
+
+. assert !missing(population) & population >= 0
+
+. quietly summarize population, meanonly
+
+. scalar wb_fpc_fraction = (r(max)<=1)
+
+. if !wb_fpc_fraction assert population>1 & population==floor(population)
+10 contradictions in 80 observations
+assertion is false
+r(9);
+r(9);
+
+end of do-file
+r(9);

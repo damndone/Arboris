@@ -1,0 +1,8 @@
+Traceback (most recent call last):
+  File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_recheck_evidence/sidecars/models-python-b537df3c/analysis.py", line 61, in <module>
+    wb_result_values2 = read_result_snapshot(base,ResultSnapshotRef(**{'filename': 'post_result.json', 'sha256': '17784f30529a702ab8574a5401fb8421932c5016854df09b203a4a30cb63a3c9', 'schema_version': 1}),expected_binding={'project_id': 'sidecar', 'run_id': 'executed', 'lineage_hash': 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff', 'step_id': 'post', 'kind': 'postestimation', 'operation': 'postestimation.wald', 'parameters_sha256': 'eae0c2c236d26de1d6f48d962cef577e23609bfdaf6abe2c2495e30e1b72f8ce', 'inputs': ['completed'], 'models': ['completed']})
+  File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/backend/workbench/script_export/result_snapshot.py", line 187, in read_result_snapshot
+    return validate_result_snapshot(_strict_json(raw), expected_binding=expected_binding)
+  File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/backend/workbench/script_export/result_snapshot.py", line 117, in validate_result_snapshot
+    raise ContractError("result snapshot binding differs from the executed step")
+workbench.contracts.common.envelope.ContractError: result snapshot binding differs from the executed step

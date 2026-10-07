@@ -1,0 +1,7 @@
+{
+  "raw_sha256": "withheld-raw-sha256-19351085fd73b05c583d4ef7",
+  "redacted_sha256": "546bcf3ba0bf11d2cb587329b35486d4d614222fa700a54f7bab0e5b7dec28c1",
+  "ignored_raw": "local/v1811-script-statistical-adapters/fpc_lonely_census_stata_8a7becaf56/analysis.log",
+  "outside_header_values_byte_identical": true,
+  "raw_mode": "0600"
+}

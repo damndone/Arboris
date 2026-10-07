@@ -140,6 +140,15 @@ def cluster_count(context: CheckContext, spec: CheckSpec) -> CheckOutcome:
     if not isinstance(clusters, int):
         return CheckOutcome("not_checked", "The fit does not record its number of clusters.")
     evidence = {"clusters": clusters}
+    if clusters < spec.threshold("severe_below"):
+        return CheckOutcome(
+            "caution",
+            f"Only {clusters} clusters: with this few, cluster-robust standard errors are unreliable even "
+            "with the t(G - 1) reference distribution, and tests can reject far too often.",
+            evidence,
+            "Use the wild cluster bootstrap (Cameron, Gelbach & Miller 2008) for inference; Workbench "
+            "does not offer it yet, so treat these p-values and intervals as optimistic.",
+        )
     if clusters < spec.threshold("caution_below"):
         return CheckOutcome(
             "caution",
@@ -257,8 +266,12 @@ CLUSTER_COUNT = CheckSpec(
     requires=frozenset({"vce.cluster"}),
     blinding="design",
     thresholds=(
-        Threshold("caution_below", 40.0, "fewer than 40 clusters",
-                  "Cameron, Gelbach & Miller (2008), REStat 90(3); Angrist & Pischke (2009), section 8.2"),
+        # The single source for the cluster-count threshold (v1.8.11; the
+        # analysis loop's policy reads it from here).
+        Threshold("caution_below", 30.0, "fewer than 30 clusters",
+                  "Cameron & Miller (2015), Journal of Human Resources 50(2), section VI"),
+        Threshold("severe_below", 10.0, "fewer than 10 clusters; the wild cluster bootstrap is recommended",
+                  "Cameron, Gelbach & Miller (2008), REStat 90(3)"),
     ),
     run=cluster_count,
 )

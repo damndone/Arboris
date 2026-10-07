@@ -87,17 +87,18 @@ def build_project_forest(
             existing = nodes.get(key)
             if existing is None:
                 nodes[key] = node
-                presentation_created_at[key] = str(node.get("created_at") or "")
+                presentation_created_at[key] = str(node.get("presentation_created_at") or node.get("created_at") or "")
             else:  # defensive: merge run membership across overlapping scans
                 for rid in node.get("runs", []):
                     if rid not in existing.get("runs", []):
                         existing.setdefault("runs", []).append(rid)
-                incoming_created_at = str(node.get("created_at") or "")
+                incoming_created_at = str(node.get("presentation_created_at") or node.get("created_at") or "")
                 if incoming_created_at > presentation_created_at.get(key, ""):
-                    for field in ("display_label", "summary"):
+                    for field in ("display_label", "summary", "decision_points"):
                         if field in node:
                             existing[field] = node[field]
                     presentation_created_at[key] = incoming_created_at
+                    existing["presentation_created_at"] = incoming_created_at
         for edge in body["edges"]:
             k = (edge["source"], edge["target"], edge.get("op"))
             if k not in edge_seen:

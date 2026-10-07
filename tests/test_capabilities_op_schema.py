@@ -47,3 +47,13 @@ def test_ols_cluster_variable_is_a_scalar_text_wire_field():
     assert cluster["kind"] == "text"
     assert cluster["required"] is False
     assert cluster["role"] == "cluster"
+
+
+def test_covariance_editors_follow_family_contracts():
+    from workbench.agent.workflow_contracts import MODEL_FAMILY_CONTRACTS
+
+    entries = {entry["key"]: entry for entry in build_capabilities()["model_types"]}
+    for family, contract in MODEL_FAMILY_CONTRACTS.items():
+        if family in entries and not contract.allows_covariance:
+            assert "covariance" not in {param["key"] for param in entries[family]["params"]}, family
+    assert "covariance" in {param["key"] for param in entries["iv_2sls"]["params"]}

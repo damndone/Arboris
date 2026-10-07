@@ -1,0 +1,7 @@
+{
+  "protected_references": 68,
+  "protected_logs": 85,
+  "scanned_new_texts": 2737,
+  "unredacted_header_findings": 0,
+  "successful_final_native_runs": 36
+}

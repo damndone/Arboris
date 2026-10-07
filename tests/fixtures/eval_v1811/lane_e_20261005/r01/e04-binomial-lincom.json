@@ -1,0 +1,39 @@
+{
+  "owner": "/private/tmp/v1811-evaluation-8d8a2fd4c7d44af693b267e6d893d16f-r01/e04-native0/public-post/runs/20261005_091806_626686_9694b325",
+  "expected": {
+    "estimate": 0.5520968816394289,
+    "std_error": 0.08196791080134054,
+    "p_value": 1.633394971766559e-11,
+    "ci": [
+      0.39144272858080986,
+      0.712751034698048
+    ]
+  },
+  "actual": {
+    "schema_version": "workbench.postestimation.result/v1",
+    "model_run_id": "20261005_091806_626686_9694b325",
+    "operation": "lincom",
+    "model_id": "glm_1",
+    "model_type": "glm:binomial",
+    "covariance_estimator": "nonrobust",
+    "nobs": 850,
+    "df_method": "asymptotic",
+    "n_clusters": null,
+    "terms": {
+      "x1": 1.0,
+      "x2": -0.4
+    },
+    "constant": 0.1,
+    "estimate": 0.5520968816394289,
+    "std_error": 0.08196791080134051,
+    "statistic": 6.735524624721799,
+    "distribution": "z",
+    "df": null,
+    "p_value": 1.6333949717665297e-11,
+    "level": 0.95,
+    "ci": [
+      0.39144272858080986,
+      0.712751034698048
+    ]
+  }
+}

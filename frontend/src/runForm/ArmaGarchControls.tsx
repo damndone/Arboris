@@ -26,6 +26,7 @@ export type ArmaGarchControlValue = {
   garchQ: number;
   estimationStrategy: "auto" | "sequential" | "joint";
   innovationDistribution: "normal" | "student_t";
+  evaluationMode: "train_validation" | "classical_replication";
   validationN: number;
   refitEvery: number;
   randomSeed: number;
@@ -65,6 +66,7 @@ export function createDefaultArmaGarchValue(): ArmaGarchControlValue {
     garchQ: 1,
     estimationStrategy: "auto",
     innovationDistribution: "normal",
+    evaluationMode: "train_validation",
     validationN: 20,
     refitEvery: 1,
     randomSeed: 20260720,
@@ -119,6 +121,8 @@ export function buildArmaGarchModelOptions(
     estimation_strategy: value.estimationStrategy,
     innovation_distribution: value.innovationDistribution,
     validation: {
+      ...(value.evaluationMode === "classical_replication"
+        ? { evaluation_mode: value.evaluationMode } : {}),
       validation_n: value.validationN,
       refit_every: value.refitEvery,
     },
@@ -153,6 +157,7 @@ export function armaGarchValueFromModelOptions(
     garchQ: pick(variance.garch_q, base.garchQ),
     estimationStrategy: pick(options.estimation_strategy, base.estimationStrategy),
     innovationDistribution: pick(options.innovation_distribution, base.innovationDistribution),
+    evaluationMode: pick(validation.evaluation_mode, "train_validation"),
     validationN: pick(validation.validation_n, base.validationN),
     refitEvery: pick(validation.refit_every, base.refitEvery),
     randomSeed: pick(options.random_seed, base.randomSeed),
@@ -183,8 +188,8 @@ export function armaGarchValidationErrors(
     errors.push("Time and value columns must be different");
   }
   if (!value.transformConfirmed) errors.push("Confirm the selected transform");
-  if (value.estimationStrategy === "joint" && value.selectionMode === "manual" && value.armaQ > 0) {
-    errors.push("Joint estimation supports AR(q=0) mean models only in v1.8");
+  if (value.estimationStrategy !== "sequential" && value.selectionMode === "manual" && value.armaQ > 0 && value.innovationDistribution !== "normal") {
+    errors.push("Joint estimation with MA terms requires normal innovations");
   }
   if (value.selectionMode === "manual") {
     boundedInteger(value.armaP, 0, 10, "AR order");
@@ -197,19 +202,23 @@ export function armaGarchValidationErrors(
       boundedInteger(value.garchQ, 1, 5, "GARCH q");
     }
   }
-  boundedInteger(value.validationN, 1, 250, "Validation observations");
+  if (value.evaluationMode === "classical_replication" && value.refitEvery !== 1) {
+    errors.push("Classical replication requires a refit at every origin");
+  }
+  boundedInteger(value.validationN, 1, null, "Validation observations");
   boundedInteger(value.refitEvery, 1, 250, "Refit frequency");
   boundedInteger(value.randomSeed, 0, null, "Random seed");
   return errors;
 }
 
-function numericInput(value: number, minimum: number, maximum: number, onChange: (value: number) => void, label: string) {
+function numericInput(value: number, minimum: number, maximum: number | null, onChange: (value: number) => void, label: string, disabled = false) {
   return (
     <input
       aria-label={label}
       type="number"
       min={minimum}
-      max={maximum}
+      max={maximum ?? undefined}
+      disabled={disabled}
       value={value}
       onChange={(event) => onChange(Number(event.target.value))}
     />
@@ -330,9 +339,9 @@ export function ArmaGarchControls({
         <label>
           Estimation strategy
           <select aria-label="estimation strategy" value={value.estimationStrategy} onChange={(event) => update({ estimationStrategy: event.target.value as ArmaGarchControlValue["estimationStrategy"] })}>
-            <option value="auto">Auto (joint for AR; sequential for ARMA)</option>
+            <option value="auto">Auto (manual MA: joint; automatic search: order-based)</option>
             <option value="sequential">Sequential ARMA → ARCH/GARCH</option>
-            <option value="joint">Joint AR-GARCH (MA order must be 0)</option>
+            <option value="joint">Joint ARMA–ARCH/GARCH</option>
           </select>
         </label>
         <label>
@@ -342,8 +351,23 @@ export function ArmaGarchControls({
             <option value="student_t">Student-t</option>
           </select>
         </label>
-        <label>Validation observations {numericInput(value.validationN, 1, 250, (next) => update({ validationN: next }), "validation observations")}</label>
-        <label>Refit every N origins {numericInput(value.refitEvery, 1, 250, (next) => update({ refitEvery: next }), "refit every")}</label>
+        <label>
+          Evaluation mode
+          <select aria-label="evaluation mode" value={value.evaluationMode} onChange={(event) => {
+            const evaluationMode = event.target.value as ArmaGarchControlValue["evaluationMode"];
+            update({ evaluationMode, refitEvery: evaluationMode === "classical_replication" ? 1 : value.refitEvery });
+          }}>
+            <option value="train_validation">Train / validation split</option>
+            <option value="classical_replication">Classical replication</option>
+          </select>
+        </label>
+        <p className="ios-hint">
+          {value.evaluationMode === "classical_replication"
+            ? "Estimate and diagnose the full sample. Refit before every tail forecast using only earlier observations. Tail evaluation is retrospective, not independent validation."
+            : "Select, estimate and diagnose on the training interval; evaluate forecasts on the held-out tail."}
+        </p>
+        <label>Validation observations {numericInput(value.validationN, 1, null, (next) => update({ validationN: next }), "validation observations")}</label>
+        <label>Refit every N origins {numericInput(value.refitEvery, 1, 250, (next) => update({ refitEvery: next }), "refit every", value.evaluationMode === "classical_replication")}</label>
         <p className="ios-hint">
           {value.selectionMode === "auto"
             ? "Bounded search: up to 26 mean specifications, then up to 12 variance specifications for each shortlisted mean."
@@ -367,7 +391,11 @@ export function ArmaGarchControls({
 
       <fieldset>
         <legend>5. Review execution graph</legend>
-        <p className="ios-hint">Raw input → internal analysis view → frozen split → ARMA selection → volatility selection → one-step rolling validation → full-sample production child.</p>
+        <p className="ios-hint">
+          {value.evaluationMode === "classical_replication"
+            ? "Raw input → internal analysis view → full-sample estimation and diagnostics → prefix-only tail refits → next-observation forecast."
+            : "Raw input → internal analysis view → frozen split → ARMA selection → volatility selection → one-step rolling validation → full-sample production child."}
+        </p>
         <p className="ios-hint">Current: {value.timeColumn || "time?"} + {value.valueColumn || "value?"}; {TRANSFORM_LABELS[value.transform]}; {value.selectionMode}; {value.estimationStrategy}; {value.innovationDistribution}.</p>
         {errors.length > 0 && <ul className="field-error" aria-label="ARMA-GARCH blocking issues">{errors.map((error) => <li key={error}>{error}</li>)}</ul>}
       </fieldset>

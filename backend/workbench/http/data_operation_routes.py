@@ -158,6 +158,7 @@ class DataModelRunRequest(BaseModel):
     y: str = Field(min_length=1, max_length=200)
     x: list[str] = Field(min_length=1, max_length=200)
     covariance: Literal["", "unadjusted", "robust", "clustered"] = "robust"
+    entity_col: str = Field(default="", max_length=200)
 
 
 class CodeExecuteRequest(BaseModel):
@@ -1045,6 +1046,7 @@ def start_model_from_data_node_route(
                 "mode": "auto",
                 "model_type": body.model_type,
                 "covariance": body.covariance or "robust",
+                "entity_col": body.entity_col,
                 "y": body.y,
                 "x": ",".join(body.x),
             },

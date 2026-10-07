@@ -1,0 +1,301 @@
+FFFFFFFFFF                                                               [100%]
+=================================== FAILURES ===================================
+_______________ test_invalid_selection_precedes_provider[extra0] _______________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x166684d60>
+tmp_path = PosixPath('/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-836/test_invalid_selection_precede0')
+cases_path = PosixPath('/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-836/test_invalid_selection_precede0/cases.json')
+extra = ('--only', '')
+
+    @pytest.mark.parametrize("extra", [("--only", ""), ("--only", "missing"), ("--only", "one,one"), ("--only", "one,,two"), ("--repeat", "0"), ("--repeat", "-2")])
+    def test_invalid_selection_precedes_provider(monkeypatch, tmp_path, cases_path, extra):
+        def forbidden():
+            pytest.fail("provider config read before CLI validation")
+        monkeypatch.setattr(harness, "load_llm_config", forbidden)
+        with pytest.raises(SystemExit) as exc:
+>           invoke(monkeypatch, tmp_path / "fresh", cases_path, *extra)
+
+tests/test_agent_live_eval_v1811_harness.py:31: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_agent_live_eval_v1811_harness.py:23: in invoke
+    return harness.main()
+           ^^^^^^^^^^^^^^
+scripts/agent_live_eval.py:320: in main
+    config = load_llm_config()
+             ^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def forbidden():
+>       pytest.fail("provider config read before CLI validation")
+E       Failed: provider config read before CLI validation
+
+tests/test_agent_live_eval_v1811_harness.py:28: Failed
+_______________ test_invalid_selection_precedes_provider[extra1] _______________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x166684c30>
+tmp_path = PosixPath('/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-836/test_invalid_selection_precede1')
+cases_path = PosixPath('/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-836/test_invalid_selection_precede1/cases.json')
+extra = ('--only', 'missing')
+
+    @pytest.mark.parametrize("extra", [("--only", ""), ("--only", "missing"), ("--only", "one,one"), ("--only", "one,,two"), ("--repeat", "0"), ("--repeat", "-2")])
+    def test_invalid_selection_precedes_provider(monkeypatch, tmp_path, cases_path, extra):
+        def forbidden():
+            pytest.fail("provider config read before CLI validation")
+        monkeypatch.setattr(harness, "load_llm_config", forbidden)
+        with pytest.raises(SystemExit) as exc:
+>           invoke(monkeypatch, tmp_path / "fresh", cases_path, *extra)
+
+tests/test_agent_live_eval_v1811_harness.py:31: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_agent_live_eval_v1811_harness.py:23: in invoke
+    return harness.main()
+           ^^^^^^^^^^^^^^
+scripts/agent_live_eval.py:320: in main
+    config = load_llm_config()
+             ^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def forbidden():
+>       pytest.fail("provider config read before CLI validation")
+E       Failed: provider config read before CLI validation
+
+tests/test_agent_live_eval_v1811_harness.py:28: Failed
+_______________ test_invalid_selection_precedes_provider[extra2] _______________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x1668e6e70>
+tmp_path = PosixPath('/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-836/test_invalid_selection_precede2')
+cases_path = PosixPath('/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-836/test_invalid_selection_precede2/cases.json')
+extra = ('--only', 'one,one')
+
+    @pytest.mark.parametrize("extra", [("--only", ""), ("--only", "missing"), ("--only", "one,one"), ("--only", "one,,two"), ("--repeat", "0"), ("--repeat", "-2")])
+    def test_invalid_selection_precedes_provider(monkeypatch, tmp_path, cases_path, extra):
+        def forbidden():
+            pytest.fail("provider config read before CLI validation")
+        monkeypatch.setattr(harness, "load_llm_config", forbidden)
+        with pytest.raises(SystemExit) as exc:
+>           invoke(monkeypatch, tmp_path / "fresh", cases_path, *extra)
+
+tests/test_agent_live_eval_v1811_harness.py:31: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_agent_live_eval_v1811_harness.py:23: in invoke
+    return harness.main()
+           ^^^^^^^^^^^^^^
+scripts/agent_live_eval.py:320: in main
+    config = load_llm_config()
+             ^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def forbidden():
+>       pytest.fail("provider config read before CLI validation")
+E       Failed: provider config read before CLI validation
+
+tests/test_agent_live_eval_v1811_harness.py:28: Failed
+_______________ test_invalid_selection_precedes_provider[extra3] _______________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x1668e88d0>
+tmp_path = PosixPath('/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-836/test_invalid_selection_precede3')
+cases_path = PosixPath('/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-836/test_invalid_selection_precede3/cases.json')
+extra = ('--only', 'one,,two')
+
+    @pytest.mark.parametrize("extra", [("--only", ""), ("--only", "missing"), ("--only", "one,one"), ("--only", "one,,two"), ("--repeat", "0"), ("--repeat", "-2")])
+    def test_invalid_selection_precedes_provider(monkeypatch, tmp_path, cases_path, extra):
+        def forbidden():
+            pytest.fail("provider config read before CLI validation")
+        monkeypatch.setattr(harness, "load_llm_config", forbidden)
+        with pytest.raises(SystemExit) as exc:
+>           invoke(monkeypatch, tmp_path / "fresh", cases_path, *extra)
+
+tests/test_agent_live_eval_v1811_harness.py:31: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_agent_live_eval_v1811_harness.py:23: in invoke
+    return harness.main()
+           ^^^^^^^^^^^^^^
+scripts/agent_live_eval.py:320: in main
+    config = load_llm_config()
+             ^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def forbidden():
+>       pytest.fail("provider config read before CLI validation")
+E       Failed: provider config read before CLI validation
+
+tests/test_agent_live_eval_v1811_harness.py:28: Failed
+_______________ test_invalid_selection_precedes_provider[extra4] _______________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x1668e9590>
+tmp_path = PosixPath('/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-836/test_invalid_selection_precede4')
+cases_path = PosixPath('/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-836/test_invalid_selection_precede4/cases.json')
+extra = ('--repeat', '0')
+
+    @pytest.mark.parametrize("extra", [("--only", ""), ("--only", "missing"), ("--only", "one,one"), ("--only", "one,,two"), ("--repeat", "0"), ("--repeat", "-2")])
+    def test_invalid_selection_precedes_provider(monkeypatch, tmp_path, cases_path, extra):
+        def forbidden():
+            pytest.fail("provider config read before CLI validation")
+        monkeypatch.setattr(harness, "load_llm_config", forbidden)
+        with pytest.raises(SystemExit) as exc:
+>           invoke(monkeypatch, tmp_path / "fresh", cases_path, *extra)
+
+tests/test_agent_live_eval_v1811_harness.py:31: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_agent_live_eval_v1811_harness.py:23: in invoke
+    return harness.main()
+           ^^^^^^^^^^^^^^
+scripts/agent_live_eval.py:320: in main
+    config = load_llm_config()
+             ^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def forbidden():
+>       pytest.fail("provider config read before CLI validation")
+E       Failed: provider config read before CLI validation
+
+tests/test_agent_live_eval_v1811_harness.py:28: Failed
+_______________ test_invalid_selection_precedes_provider[extra5] _______________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x1668ee650>
+tmp_path = PosixPath('/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-836/test_invalid_selection_precede5')
+cases_path = PosixPath('/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-836/test_invalid_selection_precede5/cases.json')
+extra = ('--repeat', '-2')
+
+    @pytest.mark.parametrize("extra", [("--only", ""), ("--only", "missing"), ("--only", "one,one"), ("--only", "one,,two"), ("--repeat", "0"), ("--repeat", "-2")])
+    def test_invalid_selection_precedes_provider(monkeypatch, tmp_path, cases_path, extra):
+        def forbidden():
+            pytest.fail("provider config read before CLI validation")
+        monkeypatch.setattr(harness, "load_llm_config", forbidden)
+        with pytest.raises(SystemExit) as exc:
+>           invoke(monkeypatch, tmp_path / "fresh", cases_path, *extra)
+
+tests/test_agent_live_eval_v1811_harness.py:31: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_agent_live_eval_v1811_harness.py:23: in invoke
+    return harness.main()
+           ^^^^^^^^^^^^^^
+scripts/agent_live_eval.py:320: in main
+    config = load_llm_config()
+             ^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def forbidden():
+>       pytest.fail("provider config read before CLI validation")
+E       Failed: provider config read before CLI validation
+
+tests/test_agent_live_eval_v1811_harness.py:28: Failed
+____________________ test_existing_output_never_overwritten ____________________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x1668eec50>
+tmp_path = PosixPath('/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-836/test_existing_output_never_ove0')
+cases_path = PosixPath('/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-836/test_existing_output_never_ove0/cases.json')
+
+    def test_existing_output_never_overwritten(monkeypatch, tmp_path, cases_path):
+        stub_run(monkeypatch)
+        out = tmp_path / "existing"
+        out.mkdir()
+        marker = out / "results.json"
+        marker.write_text("keep original")
+>       with pytest.raises(SystemExit):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE SystemExit
+
+tests/test_agent_live_eval_v1811_harness.py:55: Failed
+----------------------------- Captured stdout call -----------------------------
+[one#1] PASS 0s tools=[]
+[two#1] PASS 0s tools=[]
+one: 1/1
+two: 1/1
+wrote /private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-836/test_existing_output_never_ove0/existing/results.json
+______________ test_fail_has_nonzero_exit_and_each_case_persisted ______________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x166a6f110>
+tmp_path = PosixPath('/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-836/test_fail_has_nonzero_exit_and0')
+cases_path = PosixPath('/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-836/test_fail_has_nonzero_exit_and0/cases.json')
+
+    def test_fail_has_nonzero_exit_and_each_case_persisted(monkeypatch, tmp_path, cases_path):
+        stub_run(monkeypatch, fail=True)
+        out = tmp_path / "fresh"
+>       assert invoke(monkeypatch, out, cases_path, "--repeat", "2") == 1
+E       AssertionError: assert 0 == 1
+E        +  where 0 = invoke(<_pytest.monkeypatch.MonkeyPatch object at 0x166a6f110>, PosixPath('/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-836/test_fail_has_nonzero_exit_and0/fresh'), PosixPath('/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-836/test_fail_has_nonzero_exit_and0/cases.json'), '--repeat', '2')
+
+tests/test_agent_live_eval_v1811_harness.py:62: AssertionError
+----------------------------- Captured stdout call -----------------------------
+[one#1] FAIL offline 0s tools=[]
+[one#2] FAIL offline 0s tools=[]
+[two#1] FAIL offline 0s tools=[]
+[two#2] FAIL offline 0s tools=[]
+one: 0/2
+two: 0/2
+wrote /private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-836/test_fail_has_nonzero_exit_and0/fresh/results.json
+___________ test_case_exception_is_persisted_and_remaining_cases_run ___________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x166a6fd40>
+tmp_path = PosixPath('/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-836/test_case_exception_is_persist0')
+cases_path = PosixPath('/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-836/test_case_exception_is_persist0/cases.json')
+
+    def test_case_exception_is_persisted_and_remaining_cases_run(monkeypatch, tmp_path, cases_path):
+        stub_run(monkeypatch, exception=True)
+        out = tmp_path / "fresh"
+>       assert invoke(monkeypatch, out, cases_path) == 1
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_agent_live_eval_v1811_harness.py:70: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_agent_live_eval_v1811_harness.py:23: in invoke
+    return harness.main()
+           ^^^^^^^^^^^^^^
+scripts/agent_live_eval.py:348: in main
+    record = _run_case(client, root, run_id, case, confirm=args.confirm)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+a = (<object object at 0x135ed9530>, PosixPath('/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-836/test_case_exception_is_persist0/fresh/project'), 'seed', {'id': 'one', 'request': 'hello'})
+k = {'confirm': False}
+
+    def run(*a, **k):
+        if exception and a[3]["id"] == "one":
+>           raise RuntimeError("offline injected failure")
+E           RuntimeError: offline injected failure
+
+tests/test_agent_live_eval_v1811_harness.py:44: RuntimeError
+_________________ test_exact_selected_repeats_pass_and_persist _________________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x166897770>
+tmp_path = PosixPath('/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-836/test_exact_selected_repeats_pa0')
+cases_path = PosixPath('/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-836/test_exact_selected_repeats_pa0/cases.json')
+
+    def test_exact_selected_repeats_pass_and_persist(monkeypatch, tmp_path, cases_path):
+        stub_run(monkeypatch)
+        out = tmp_path / "fresh"
+        assert invoke(monkeypatch, out, cases_path, "--only", "two", "--repeat", "2") == 0
+        report = json.loads((out / "results.json").read_text())
+        assert [(r["id"], r["attempt"]) for r in report["results"]] == [("two", 1), ("two", 2)]
+>       assert len(list((out / "cases").glob("*.json"))) == 2
+E       AssertionError: assert 0 == 2
+E        +  where 0 = len([])
+E        +    where [] = list(<map object at 0x166236980>)
+E        +      where <map object at 0x166236980> = glob('*.json')
+E        +        where glob = (PosixPath('/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-836/test_exact_selected_repeats_pa0/fresh') / 'cases').glob
+
+tests/test_agent_live_eval_v1811_harness.py:83: AssertionError
+----------------------------- Captured stdout call -----------------------------
+[two#1] PASS 0s tools=[]
+[two#2] PASS 0s tools=[]
+two: 2/2
+wrote /private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-836/test_exact_selected_repeats_pa0/fresh/results.json
+=============================== warnings summary ===============================
+../../.venv/lib/python3.14/site-packages/fastapi/testclient.py:1
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_invalid_selection_precedes_provider[extra0]
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_invalid_selection_precedes_provider[extra1]
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_invalid_selection_precedes_provider[extra2]
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_invalid_selection_precedes_provider[extra3]
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_invalid_selection_precedes_provider[extra4]
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_invalid_selection_precedes_provider[extra5]
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_existing_output_never_overwritten
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_fail_has_nonzero_exit_and_each_case_persisted
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_case_exception_is_persisted_and_remaining_cases_run
+FAILED tests/test_agent_live_eval_v1811_harness.py::test_exact_selected_repeats_pass_and_persist
+10 failed, 1 warning in 2.12s

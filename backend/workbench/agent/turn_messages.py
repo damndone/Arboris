@@ -37,6 +37,17 @@ def proposal_summary(proposal: Mapping[str, Any], language: str) -> str:
     operation = str(proposal.get("operation_id") or "operation")
     lines = proposal_lines(proposal)
     body = "\n".join(f"{index}. {line}" for index, line in enumerate(lines, start=1))
+    from .workflow_contracts import WORKFLOW_STEP_SPEC_CONTRACTS
+
+    notes = []
+    changes = proposal.get("changes") or {}
+    for step in changes.get("steps", []):
+        contract = WORKFLOW_STEP_SPEC_CONTRACTS.get(step.get("operation_id"))
+        note = contract.proposal_notes.get(language) if contract is not None else None
+        if note and note not in notes:
+            notes.append(note)
+    if notes:
+        body += "\n" + "\n".join(notes)
     if language == "zh":
         return (
             f"已生成待确认的提案（{operation}），尚未执行：\n{body}\n"
@@ -84,6 +95,10 @@ def provider_failure_message(language: str, error: str) -> str:
     analysis the Agent ran earlier in the turn did run and stays recorded.
     """
 
+    if error == "agent_timeout":
+        if language == "zh":
+            return "这次请求超时（agent_timeout），没有生成完整回答。已经执行的操作与证据仍保留；你可以重试或让我继续。"
+        return "This request timed out (agent_timeout) before a complete answer was produced. Executed operations and evidence are retained; retry or ask me to continue."
     if error.endswith(("upstream_401", "upstream_403")):
         # Retrying cannot help a rejected key; say where to fix it.
         if language == "zh":

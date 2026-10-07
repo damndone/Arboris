@@ -402,7 +402,7 @@ def test_every_coefficient_in_a_real_run_carries_the_design_standard_error(tmp_p
         sampling_weight="weight",
         survey_strata_col="stratum",
         survey_psu_col="psu",
-        survey_fpc_col="fpc",
+        # The unchanged R linearization reference declares no FPC.
         survey_df="design_minus_p",  # R's convention: R is the oracle
     )
     assert outcome["status"] == "completed"

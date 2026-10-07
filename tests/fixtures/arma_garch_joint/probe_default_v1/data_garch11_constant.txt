@@ -1,0 +1,79 @@
+. do /Users/jiayuanren/项目规划/.worktrees/codex-v1811-m1/tests/fixtures/arma_g
+> arch_joint/probe_presample.do /Users/jiayuanren/项目规划/.worktrees/codex-v18
+> 11-m1/tests/fixtures/arma_garch_joint/probe_default_v1 /Users/jiayuanren/项目
+> 规划/.worktrees/codex-v1811-m1/tests/fixtures/arma_garch_joint/oracle_v1/data
+> _garch11_constant.csv 
+
+. // Verify Stata defaults and the parameter-dependent variance prime.
+. version 18
+
+. set more off
+
+. args output data
+
+. cd "`output'"
+/Users/jiayuanren/项目规划/.worktrees/codex-v1811-m1/tests/fixtures/arma_garch_
+> joint/probe_default_v1
+
+. import delimited using "`data'", asdouble clear case(preserve)
+(encoding automatically selected: ISO-8859-1)
+(2 vars, 2,540 obs)
+
+. tsset t
+
+Time variable: t, 1 to 2540
+        Delta: 1 unit
+
+. quietly arch y, ar(1) ma(1) arch(1) garch(1) vce(opg) tolerance(1e-12) ltoler
+> ance(1e-12) nrtolerance(1e-8)
+
+. scalar default_ll = e(ll)
+
+. scalar default_n = e(N)
+
+. matrix default_b = e(b)
+
+. quietly arch y, ar(1) ma(1) arch(1) garch(1) arch0(xb) arma0(zero) vce(opg) t
+> olerance(1e-12) ltolerance(1e-12) nrtolerance(1e-8)
+
+. matrix explicit_b = e(b)
+
+. predict double residual, residuals
+
+. predict double variance, variance
+
+. generate double square = residual^2
+
+. quietly summarize square, meanonly
+
+. scalar prime = r(mean)
+
+. scalar first_expected = explicit_b[1,6]+(explicit_b[1,4]+explicit_b[1,5])*pri
+> me
+
+. file open out using probe.tsv, write replace
+(file probe.tsv not found)
+
+. file write out "default_ll" _tab %24.17g (default_ll) _n
+
+. file write out "explicit_ll" _tab %24.17g (e(ll)) _n
+
+. file write out "default_n" _tab %24.17g (default_n) _n
+
+. file write out "explicit_n" _tab %24.17g (e(N)) _n
+
+. file write out "prime" _tab %24.17g (prime) _n
+
+. file write out "first_variance" _tab %24.17g (variance[1]) _n
+
+. file write out "first_expected" _tab %24.17g (first_expected) _n
+
+. forvalues i=1/6 {
+  2.     file write out "parameter_difference`i'" _tab %24.17g (default_b[1,`i'
+> ]-explicit_b[1,`i']) _n
+  3. }
+
+. file close out
+
+. 
+end of do-file

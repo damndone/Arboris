@@ -1,0 +1,22 @@
+...............................................                          [100%]
+=============================== warnings summary ===============================
+tests/test_count_models_remediation.py::test_uncertified_natural_stationarity_fails_closed[constant]
+tests/eval_v1811/m2_review_assertions.py::test_uncertified_interior_ancillary_point_does_not_publish_regular_oim_inference[constant-1]
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/base/model.py:595: HessianInversionWarning: Inverting hessian failed, no bse or cov_params available
+    warnings.warn('Inverting hessian failed, no bse or cov_params '
+
+tests/test_count_models_remediation.py::test_uncertified_natural_stationarity_fails_closed[constant]
+tests/eval_v1811/m2_review_assertions.py::test_uncertified_interior_ancillary_point_does_not_publish_regular_oim_inference[constant-1]
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/base/model.py:607: ConvergenceWarning: Maximum Likelihood optimization failed to converge. Check mle_retvals
+    warnings.warn("Maximum Likelihood optimization failed to "
+
+tests/test_count_models_remediation.py::test_fixed_fractional_nb_matches_native_stata_oim_and_r_eim
+tests/test_count_models_remediation.py::test_fixed_fractional_nb_matches_native_stata_oim_and_r_eim
+tests/test_count_models_remediation.py::test_binomial_fractional_response_remains_valid
+tests/test_count_models_contract.py::test_fixed_alpha_uses_observed_information_and_has_no_estimation_claim
+tests/test_count_models_contract.py::test_glm_fixed_alpha_matches_r_expected_information
+  /Users/jiayuanren/项目规划/.venv/lib/python3.14/site-packages/statsmodels/genmod/generalized_linear_model.py:1923: FutureWarning: The bic value is computed using the deviance formula. After 0.13 this will change to the log-likelihood based formula. This change has no impact on the relative rank of models compared using BIC. You can directly access the log-likelihood version using the `bic_llf` attribute. You can suppress this message by calling statsmodels.genmod.generalized_linear_model.SET_USE_BIC_LLF with True to get the LLF-based version now or False to retainthe deviance version.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+47 passed, 1 deselected, 9 warnings in 1.71s

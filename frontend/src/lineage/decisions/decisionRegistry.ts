@@ -1,3 +1,5 @@
+import type { DecisionPoint } from "../types";
+
 export interface DPDisplay {
   title: string;
   displaySelected: (selected: unknown) => string;
@@ -99,10 +101,9 @@ function humanize(id: string): string {
     .join(" ");
 }
 
-export function getDPDisplay(decisionId: string): DPDisplay {
+export function getDPDisplay(decisionId: string, actual?: DecisionPoint): DPDisplay {
   const entry = DP_REGISTRY[decisionId];
-  if (entry) return entry;
-  return {
+  const display: DPDisplay = entry ?? {
     title: humanize(decisionId),
     displaySelected: (s) => String(s),
     displayAlternatives: () => [],
@@ -110,4 +111,14 @@ export function getDPDisplay(decisionId: string): DPDisplay {
     whyLong: () => "",
     confirmPrompt: "",
   };
+  if (actual?.source === "user_explicit") {
+    return {
+      ...display,
+      displayAlternatives: () => actual.candidates.map(String),
+      whyShort: () => "User selected",
+      whyLong: () => actual.reason?.explanation ?? "Selected explicitly for this run.",
+      confirmPrompt: "Review the supplied analysis settings and design.",
+    };
+  }
+  return display;
 }

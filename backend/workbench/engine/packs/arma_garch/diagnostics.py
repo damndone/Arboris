@@ -15,7 +15,7 @@ from statsmodels.tools.sm_exceptions import MissingDataError
 from statsmodels.tsa.stattools import acf, adfuller, pacf
 
 from workbench.contracts.common.envelope import freeze_json
-from workbench.engine.packs.arma_garch.statistics import ljung_box_results
+from workbench.engine.packs.arma_garch.statistics import ljung_box_results, ljung_box_warnings
 
 
 @dataclass(frozen=True)
@@ -27,7 +27,7 @@ class MeanModelDiagnostics:
     residual_series: tuple[Mapping[str, float | int], ...]
     residual_acf: tuple[Mapping[str, float | int | None], ...]
     residual_pacf: tuple[Mapping[str, float | int | None], ...]
-    ljung_box: tuple[Mapping[str, float | int | None], ...]
+    ljung_box: tuple[Mapping[str, object], ...]
     squared_residual_acf: tuple[Mapping[str, float | int | None], ...]
     arch_lm: Mapping[str, object]
     normality: Mapping[str, object]
@@ -100,6 +100,8 @@ def build_mean_diagnostics(
     arch_result = _arch_lm_result(errors, model_df=model_df)
     if arch_result["status"] != "ok":
         warnings.append("ARCH_LM_UNAVAILABLE")
+    ljung_box = ljung_box_results(errors, model_df=model_df)
+    warnings.extend(ljung_box_warnings(ljung_box))
 
     return MeanModelDiagnostics(
         max_plot_lag=max_plot_lag,
@@ -112,7 +114,7 @@ def build_mean_diagnostics(
         ),
         residual_acf=_correlations(errors, max_plot_lag, partial=False),
         residual_pacf=_correlations(errors, max_plot_lag, partial=True),
-        ljung_box=ljung_box_results(errors, model_df=model_df),
+        ljung_box=ljung_box,
         squared_residual_acf=_correlations(
             np.square(_scale_for_numerics(errors)), max_plot_lag, partial=False
         ),

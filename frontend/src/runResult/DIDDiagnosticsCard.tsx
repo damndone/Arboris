@@ -7,7 +7,8 @@ export interface DIDDiagnostics {
     coef: (number | null)[]; se: (number | null)[]; ci_lower: (number | null)[];
     ci_upper: (number | null)[]; ref_period: number };
   parallel_trends: { test: string; statistic: number | null; pvalue: number | null;
-    n_pre_leads: number; verdict: "not_rejected" | "rejected"; message: string };
+    n_pre_leads: number; verdict: "not_rejected" | "rejected"; message: string;
+    df_num?: number; df_den?: number | null; distribution?: "F" | "chi2" };
   goodman_bacon: { applicable: boolean; message?: string;
     components: { type: string; weight: number; estimate: number }[];
     weighted_avg: number | null; forbidden_weight: number | null };
@@ -74,7 +75,11 @@ export function DIDDiagnosticsCard({ diagnostics }: { diagnostics: DIDDiagnostic
 
       <div>
         Parallel trends <span style={{ color: ptColor }}>{ptText}</span>
-        {d.parallel_trends.pvalue != null && <> (p={d.parallel_trends.pvalue.toFixed(3)})</>}
+        {d.parallel_trends.pvalue != null && (
+          <> ({d.parallel_trends.statistic != null && d.parallel_trends.df_num != null
+            ? `F(${d.parallel_trends.df_num}${d.parallel_trends.df_den ? `, ${d.parallel_trends.df_den}` : ""}) = ${d.parallel_trends.statistic.toFixed(2)}, `
+            : ""}p={d.parallel_trends.pvalue.toFixed(3)})</>
+        )}
       </div>
 
       <div>

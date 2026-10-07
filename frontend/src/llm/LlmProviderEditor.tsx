@@ -1,7 +1,8 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { ChangeEvent, CSSProperties } from "react";
 import {
   createLlmProvider,
+  discoverLlmProviderModels,
   probeLlmProvider,
   refreshLlmProviderModels,
   updateLlmProvider,
@@ -67,21 +68,6 @@ function formatContextWindow(value: number | null): string {
   return value === null ? "—" : value.toLocaleString("en-US");
 }
 
-const deepSeekV4Models: LlmModel[] = [
-  {
-    display_name: "DeepSeek V4 Flash",
-    request_model: "deepseek-v4-flash",
-    context_window_tokens: null,
-    supports_1m: false,
-  },
-  {
-    display_name: "DeepSeek V4 Pro",
-    request_model: "deepseek-v4-pro",
-    context_window_tokens: null,
-    supports_1m: false,
-  },
-];
-
 export function LlmProviderEditor({ provider, isCopy = false, onSaved, onBack }: LlmProviderEditorProps) {
   const isEditing = Boolean(provider && !isCopy);
   const [id, setId] = useState(provider?.id ?? "");
@@ -104,6 +90,13 @@ export function LlmProviderEditor({ provider, isCopy = false, onSaved, onBack }:
   const [modelsLoading, setModelsLoading] = useState(false);
   const [probeMessage, setProbeMessage] = useState<string | null>(null);
   const [modelsMessage, setModelsMessage] = useState<string | null>(null);
+  const discoveryGeneration = useRef(0);
+
+  function invalidateDiscovery() {
+    discoveryGeneration.current += 1;
+    setModelsLoading(false);
+    setModelsMessage(models.length ? "Provider settings changed; refresh models or enter a model manually." : null);
+  }
 
   const preview = useMemo(() => JSON.stringify({
     id: id.trim(),
@@ -141,6 +134,7 @@ export function LlmProviderEditor({ provider, isCopy = false, onSaved, onBack }:
   function handlePreset(event: ChangeEvent<HTMLSelectElement>) {
     const preset = providerPresets.find((candidate) => candidate.name === event.target.value);
     if (!preset) return;
+    invalidateDiscovery();
     setName(preset.name);
     setBaseUrl(preset.baseUrl);
   }
@@ -173,18 +167,6 @@ export function LlmProviderEditor({ provider, isCopy = false, onSaved, onBack }:
     });
   }
 
-  function addDeepSeekV4Models() {
-    setModels((current) => {
-      const existing = new Set(current.map((entry) => entry.request_model));
-      return [
-        ...current,
-        ...deepSeekV4Models.filter((entry) => !existing.has(entry.request_model)),
-      ];
-    });
-  }
-
-  const isDeepSeek = /deepseek/i.test(`${id} ${name} ${baseUrl}`);
-
   async function handleProbe() {
     if (!isEditing || !provider?.id) {
       setProbeMessage("Save the provider before testing its connection");
@@ -203,23 +185,34 @@ export function LlmProviderEditor({ provider, isCopy = false, onSaved, onBack }:
     }
   }
 
-  async function handleRefreshModels() {
-    if (!isEditing || !provider?.id) {
-      setModelsMessage("Save the provider before refreshing models");
-      return;
-    }
+  async function handleRefreshModels(automatic = false) {
+    if (!isEditing) {
+      let validUrl = false;
+      try {
+        const url = new URL(baseUrl.trim());
+        validUrl = url.protocol === "http:" || url.protocol === "https:";
+      } catch { /* Keep incomplete drafts local. */ }
+      if (!validUrl || !apiKey.trim()) {
+        if (!automatic) setModelsMessage("Enter a valid Base URL and API key to fetch models, or enter a model manually.");
+        return;
+      }
+    } else if (automatic) return;
+    const generation = ++discoveryGeneration.current;
     setModelsLoading(true);
     setModelsMessage(null);
     setRequestError(null);
     try {
-      const result = await refreshLlmProviderModels(provider.id);
+      const result = isEditing && provider?.id
+        ? await refreshLlmProviderModels(provider.id)
+        : await discoverLlmProviderModels({ base_url: baseUrl.trim(), api_key: apiKey.trim(), timeout_s: Number(timeout) || 60 });
+      if (generation !== discoveryGeneration.current) return;
       setModels(result.models.map((entry) => ({ ...entry })));
-      setModel(result.model);
-      setModelsMessage("Models refreshed");
+      if ("model" in result) setModel(result.model);
+      setModelsMessage(result.models.length ? (isEditing ? "Models refreshed" : "Models discovered") : "No models returned; enter a model manually.");
     } catch (error) {
-      setModelsMessage(errorMessage(error));
+      if (generation === discoveryGeneration.current) setModelsMessage(`Unable to fetch models; enter a model manually. ${errorMessage(error)}`);
     } finally {
-      setModelsLoading(false);
+      if (generation === discoveryGeneration.current) setModelsLoading(false);
     }
   }
 
@@ -298,17 +291,17 @@ export function LlmProviderEditor({ provider, isCopy = false, onSaved, onBack }:
             </label>
             <label>API Key
               <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
-                <input aria-label="api key" type={showApiKey ? "text" : "password"} value={apiKey} placeholder={provider?.key_present ? "Leave blank to keep current key" : "Paste an API key"} onChange={(event) => { setApiKey(event.target.value); if (event.target.value) setClearApiKey(false); }} style={{ ...inputStyle, marginTop: 0, flex: 1 }} />
+                <input aria-label="api key" type={showApiKey ? "text" : "password"} value={apiKey} placeholder={provider?.key_present ? "Leave blank to keep current key" : "Paste an API key"} onChange={(event) => { invalidateDiscovery(); setApiKey(event.target.value); if (event.target.value) setClearApiKey(false); }} onBlur={() => void handleRefreshModels(true)} style={{ ...inputStyle, marginTop: 0, flex: 1 }} />
                 <button type="button" aria-label={showApiKey ? "Hide API key" : "Show API key"} onClick={() => setShowApiKey((visible) => !visible)} style={actionStyle}>{showApiKey ? "Hide" : "Show"}</button>
               </div>
               {provider?.key_present && <div style={{ marginTop: 6, color: "var(--label-secondary, #98989d)", fontSize: 12 }}>An API key is already configured.</div>}
-              {provider?.key_present && <button type="button" aria-label="Clear API key" onClick={() => { setApiKey(""); setClearApiKey(true); }} style={{ ...actionStyle, marginTop: 8, color: "var(--danger, #ff453a)" }}>Clear API key</button>}
+              {provider?.key_present && <button type="button" aria-label="Clear API key" onClick={() => { invalidateDiscovery(); setApiKey(""); setClearApiKey(true); }} style={{ ...actionStyle, marginTop: 8, color: "var(--danger, #ff453a)" }}>Clear API key</button>}
               {clearApiKey && <span data-testid="llm-provider-key-cleared" style={{ display: "block", marginTop: 5, color: "var(--danger, #ff453a)" }}>The existing key will be cleared.</span>}
             </label>
           </div>
           <label style={{ display: "block", marginTop: 16 }}>Base URL
             <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
-              <input aria-label="base url" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} style={{ ...inputStyle, marginTop: 0, flex: 1 }} />
+              <input aria-label="base url" value={baseUrl} onChange={(event) => { invalidateDiscovery(); setBaseUrl(event.target.value); }} onBlur={() => void handleRefreshModels(true)} style={{ ...inputStyle, marginTop: 0, flex: 1 }} />
               <button type="button" onClick={() => void handleProbe()} disabled={probeLoading} style={actionStyle}>{probeLoading ? "Testing…" : "Test connection"}</button>
             </div>
             {fieldErrors.baseUrl && <span style={{ display: "block", marginTop: 5, color: "var(--danger, #ff453a)" }}>{fieldErrors.baseUrl}</span>}
@@ -329,7 +322,7 @@ export function LlmProviderEditor({ provider, isCopy = false, onSaved, onBack }:
                 <option value="authorization-bearer">Authorization: Bearer</option>
               </select>
             </label>
-            <label>Request timeout (seconds)<input aria-label="request timeout" type="number" min="1" value={timeout} onChange={(event) => setTimeoutValue(event.target.value)} style={inputStyle} /></label>
+            <label>Request timeout (seconds)<input aria-label="request timeout" type="number" min="1" value={timeout} onChange={(event) => { invalidateDiscovery(); setTimeoutValue(event.target.value); }} style={inputStyle} /></label>
           </div>
         </details>
 
@@ -338,11 +331,11 @@ export function LlmProviderEditor({ provider, isCopy = false, onSaved, onBack }:
             <h2 style={{ margin: 0, fontSize: 16 }}>Model mapping</h2>
             <button type="button" onClick={() => void handleRefreshModels()} disabled={modelsLoading} style={{ ...actionStyle, marginLeft: "auto" }}>{modelsLoading ? "Refreshing…" : "Refresh models"}</button>
             <button type="button" onClick={addModel} style={actionStyle}>Add model</button>
-            {isDeepSeek && <button type="button" data-testid="add-deepseek-v4-models" onClick={addDeepSeekV4Models} style={actionStyle}>Add DeepSeek V4 presets</button>}
           </div>
           {modelsMessage && <div aria-live="polite" style={{ color: modelsMessage === "Models refreshed" ? "var(--green, #30d158)" : "var(--danger, #ff453a)", marginBottom: 10 }}>{modelsMessage}</div>}
           <label>Default model
-            <input aria-label="default model" value={model} onChange={(event) => setModel(event.target.value)} style={inputStyle} />
+            <input aria-label="default model" list="llm-discovered-models" value={model} onChange={(event) => setModel(event.target.value)} style={inputStyle} />
+            <datalist id="llm-discovered-models">{models.map((entry) => <option key={entry.request_model} value={entry.request_model}>{entry.display_name}</option>)}</datalist>
             {fieldErrors.model && <span style={{ display: "block", marginTop: 5, color: "var(--danger, #ff453a)" }}>{fieldErrors.model}</span>}
           </label>
           <div style={{ display: "grid", gap: 8, marginTop: 16 }}>

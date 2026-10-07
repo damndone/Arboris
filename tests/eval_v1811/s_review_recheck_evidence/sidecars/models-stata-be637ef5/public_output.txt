@@ -1,0 +1,314 @@
+. do analysis.do 
+
+. * Workbench 1.8.11
+. * project: sidecar
+. * run: executed
+. * lineage_hash: fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+> fff
+. * Coverage
+. * completed | model.ols | snapshot | FPC is supplied, but the frozen Workbenc
+> h linearization engine does not apply FPC; native FPC would change the execut
+> ed covariance. Workbench completed this step; numeric values come from a veri
+> fied result sidecar, without native re-estimation.
+. * post | postestimation.wald | snapshot | Dependent post-estimation needs its
+>  own completed Workbench result sidecar; no fitted state is reconstructed. Wo
+> rkbench completed this step; numeric values come from a verified result sidec
+> ar, without native re-estimation.
+. * selected | data.subset | native | 
+. * independent | model.ols | native | 
+. version 18
+
+. set more off
+
+. set type double
+
+. capture program drop wb_repost
+
+. program define wb_repost, eclass
+  1.     args beta covariance
+  2.     ereturn repost b=`beta' V=`covariance', rename
+  3. end
+
+. capture program drop wb_sha
+
+. program define wb_sha
+  1.     args filename expected
+  2.     tempfile digestfile
+  3.     shell shasum -a 256 "`filename'" > "`digestfile'"
+  4.     tempname fh
+  5.     file open `fh' using "`digestfile'", read text
+  6.     file read `fh' line
+  7.     file close `fh'
+  8.     if substr("`line'",1,64) != "`expected'" {
+  9.         display as error "SHA256 mismatch"
+ 10.         exit 9
+ 11.     }
+ 12. end
+
+. 
+. wb_sha "data.csv" "5f8d0cc66fc9efdfd08e6a06640ea410d58671fe93ac5cac2ad90d6aa6
+> 8de937"
+
+
+. frame create wb_src0
+
+. frame change wb_src0
+
+. import delimited using "data.csv", varnames(1) delimiters(",") encoding("UTF-
+> 8") asdouble clear case(preserve)
+(8 vars, 80 obs)
+
+. * Workbench completed this step: Sampling OLS completed in Workbench
+. wb_sha "completed.csv" "5f8d0cc66fc9efdfd08e6a06640ea410d58671fe93ac5cac2ad90
+> d6aa68de937"
+
+
+. frame create wb1
+
+. frame change wb1
+
+. import delimited using "completed.csv", varnames(1) delimiters(",") encoding(
+> "UTF-8") asdouble clear case(preserve)
+(8 vars, 80 obs)
+
+. scalar wb_number_0 = _N
+
+. unab wb_columns: _all
+
+. scalar wb_check_1 = (`"`wb_columns'"' == "stratum psu y x1 x2 weight fpc subp
+> op")
+
+. tempfile wb_result_bridge
+
+. tempname wb_result_writer
+
+. file open `wb_result_writer' using "`wb_result_bridge'", write text
+
+. file write `wb_result_writer' `"import base64"' _n
+
+. file write `wb_result_writer' `"import json"' _n
+
+. file write `wb_result_writer' `"import os"' _n
+
+. file write `wb_result_writer' `"from pathlib import Path"' _n
+
+. file write `wb_result_writer' `"import sys"' _n
+
+. file write `wb_result_writer' `"from workbench.contracts.common.envelope impo
+> rt thaw_json"' _n
+
+. file write `wb_result_writer' `"from workbench.script_export.result_snapshot 
+> import ResultSnapshotRef, read_result_snapshot"' _n
+
+. file write `wb_result_writer' `""' _n
+
+. file write `wb_result_writer' `"configuration = json.loads(base64.b64decode(s
+> ys.argv[2]))"' _n
+
+. file write `wb_result_writer' `"reference = ResultSnapshotRef(**configuration
+> ['reference'])"' _n
+
+. file write `wb_result_writer' `"values = read_result_snapshot(Path(sys.argv[1
+> ]), reference, expected_binding=configuration['binding'])"' _n
+
+. file write `wb_result_writer' `"for name, distribution in configuration['dist
+> ributions'].items():"' _n
+
+. file write `wb_result_writer' `"    if values['statistics'][name]['distributi
+> on'] != distribution:"' _n
+
+. file write `wb_result_writer' `"        raise AssertionError('Result sidecar 
+> reference distribution differs')"' _n
+
+. file write `wb_result_writer' `"if sys.argv[3] == 'r':"' _n
+
+. file write `wb_result_writer' `"    print(json.dumps(thaw_json(values), ensur
+> e_ascii=False, allow_nan=False))"' _n
+
+. file write `wb_result_writer' `"elif sys.argv[3] == 'stata':"' _n
+
+. file write `wb_result_writer' `"    lines = []"' _n
+
+. file write `wb_result_writer' `"    for index, path in enumerate(configuratio
+> n['queries']):"' _n
+
+. file write `wb_result_writer' `"        value = values"' _n
+
+. file write `wb_result_writer' `"        for key in path:"' _n
+
+. file write `wb_result_writer' `"            value = value[key]"' _n
+
+. file write `wb_result_writer' `"        if value is not None and type(value) 
+> not in (int, float):"' _n
+
+. file write `wb_result_writer' `"            raise AssertionError('Result side
+> car query is not numeric')"' _n
+
+. file write `wb_result_writer' `"        token = '.' if value is None else rep
+> r(value)"' _n
+
+. file write `wb_result_writer' `"        lines.append('scalar wb_result_' + st
+> r(configuration['index']) + '_' + str(index) + ' = ' + token)"' _n
+
+. file write `wb_result_writer' `"    lines.append('scalar wb_result_valid_' + 
+> str(configuration['index']) + ' = 1')"' _n
+
+. file write `wb_result_writer' `"    fd = os.open(sys.argv[4], os.O_WRONLY | o
+> s.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)"' _n
+
+. file write `wb_result_writer' `"    with os.fdopen(fd, 'w', encoding='utf-8')
+>  as handle:"' _n
+
+. file write `wb_result_writer' `"        handle.write('\n'.join(lines) + '\n')
+> "' _n
+
+. file write `wb_result_writer' `"else:"' _n
+
+. file write `wb_result_writer' `"    raise AssertionError('Unsupported result 
+> bridge mode')"' _n
+
+. file close `wb_result_writer'
+
+. tempfile wb_result_commands
+
+. shell python3 "`wb_result_bridge'" . eyJyZWZlcmVuY2UiOiB7ImZpbGVuYW1lIjogImNv
+> bXBsZXRlZF9yZXN1bHQuanNvbiIsICJzaGEyNTYiOiAiMmViYjlhYjdmYWFkZGVmM2ExYTFjNGEzM
+> Dc0Zjg2MWUxZDUxYTBlYjgwMjBlNDU1ODQzMTJlMzZiMzEwMGQ1NCIsICJzY2hlbWFfdmVyc2lvbi
+> I6IDF9LCAiYmluZGluZyI6IHsicHJvamVjdF9pZCI6ICJzaWRlY2FyIiwgInJ1bl9pZCI6ICJleGV
+> jdXRlZCIsICJsaW5lYWdlX2hhc2giOiAiZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZm
+> ZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZiIsICJzdGVwX2lkIjogImNvbXBsZXRlZCIsI
+> CJraW5kIjogIm1vZGVsIiwgIm9wZXJhdGlvbiI6ICJtb2RlbC5vbHMiLCAicGFyYW1ldGVyc19zaG
+> EyNTYiOiAiYWM1ZDZiMzc1YWRhOTIwYTBmM2MyZDI5NzFmM2I4ZTk5NTA0YWYwN2ExMjY0MTE1MjU
+> wYzA1NDg0N2FiNmZiMiIsICJpbnB1dHMiOiBbInNvdXJjZSJdLCAibW9kZWxzIjogW119LCAicXVl
+> cmllcyI6IFtbIm5vYnMiXSwgWyJjb2VmZmljaWVudHMiLCAiSW50ZXJjZXB0Il0sIFsiY29lZmZpY
+> 2llbnRzIiwgIngxIl0sIFsiY29lZmZpY2llbnRzIiwgIngyIl0sIFsic3RkX2Vycm9ycyIsICJJbn
+> RlcmNlcHQiXSwgWyJzdGRfZXJyb3JzIiwgIngxIl0sIFsic3RkX2Vycm9ycyIsICJ4MiJdLCBbInN
+> 0YXRpc3RpY3MiLCAiSW50ZXJjZXB0IiwgInZhbHVlIl0sIFsic3RhdGlzdGljcyIsICJJbnRlcmNl
+> cHQiLCAiZGYiXSwgWyJzdGF0aXN0aWNzIiwgIkludGVyY2VwdCIsICJwX3ZhbHVlIl0sIFsic3Rhd
+> GlzdGljcyIsICJ4MSIsICJ2YWx1ZSJdLCBbInN0YXRpc3RpY3MiLCAieDEiLCAiZGYiXSwgWyJzdG
+> F0aXN0aWNzIiwgIngxIiwgInBfdmFsdWUiXSwgWyJzdGF0aXN0aWNzIiwgIngyIiwgInZhbHVlIl0
+> sIFsic3RhdGlzdGljcyIsICJ4MiIsICJkZiJdLCBbInN0YXRpc3RpY3MiLCAieDIiLCAicF92YWx1
+> ZSJdXSwgImRpc3RyaWJ1dGlvbnMiOiB7IkludGVyY2VwdCI6ICJ0IiwgIngxIjogInQiLCAieDIiO
+> iAidCJ9LCAiaW5kZXgiOiAxfQ== stata "`wb_result_commands'"
+
+
+. confirm file "`wb_result_commands'"
+
+. do "`wb_result_commands'"
+
+. scalar wb_result_1_0 = 80
+
+. scalar wb_result_1_1 = 4.652711573943123
+
+. scalar wb_result_1_2 = 1.475820771771979
+
+. scalar wb_result_1_3 = -0.40404481777033774
+
+. scalar wb_result_1_4 = 1.5955241455226616
+
+. scalar wb_result_1_5 = 0.17732404110690134
+
+. scalar wb_result_1_6 = 0.08888234469730581
+
+. scalar wb_result_1_7 = 2.9161022645752492
+
+. scalar wb_result_1_8 = 8
+
+. scalar wb_result_1_9 = 0.019406798019796175
+
+. scalar wb_result_1_10 = 8.322733694537604
+
+. scalar wb_result_1_11 = 8
+
+. scalar wb_result_1_12 = 3.2813378097179405e-05
+
+. scalar wb_result_1_13 = -4.545838874371921
+
+. scalar wb_result_1_14 = 8
+
+. scalar wb_result_1_15 = 0.0018846599328036571
+
+. scalar wb_result_valid_1 = 1
+
+. 
+end of do-file
+
+. assert scalar(wb_result_valid_1) == 1
+
+. scalar wb_number_2 = scalar(wb_result_1_0)
+
+. scalar wb_number_3 = scalar(wb_result_1_1)
+
+. scalar wb_number_4 = scalar(wb_result_1_2)
+
+. scalar wb_number_5 = scalar(wb_result_1_3)
+
+. scalar wb_number_6 = scalar(wb_result_1_4)
+
+. scalar wb_number_7 = scalar(wb_result_1_5)
+
+. scalar wb_number_8 = scalar(wb_result_1_6)
+
+. scalar wb_number_9 = scalar(wb_result_1_7)
+
+. scalar wb_number_10 = scalar(wb_result_1_8)
+
+. scalar wb_number_11 = scalar(wb_result_1_9)
+
+. scalar wb_number_12 = scalar(wb_result_1_10)
+
+. scalar wb_number_13 = scalar(wb_result_1_11)
+
+. scalar wb_number_14 = scalar(wb_result_1_12)
+
+. scalar wb_number_15 = scalar(wb_result_1_13)
+
+. scalar wb_number_16 = scalar(wb_result_1_14)
+
+. scalar wb_number_17 = scalar(wb_result_1_15)
+
+. * Workbench completed this step: Actual persisted design Wald
+. frame copy wb1 wb2
+
+. frame change wb2
+
+. tempfile wb_result_commands
+
+. shell python3 "`wb_result_bridge'" . eyJyZWZlcmVuY2UiOiB7ImZpbGVuYW1lIjogInBv
+> c3RfcmVzdWx0Lmpzb24iLCAic2hhMjU2IjogIjE3Nzg0ZjMwNTI5YTcwMmFiODU3NGE1NDAxZmI4N
+> DIxOTMyYzUwMTY4NTRkZjA5YjIwM2E0YTMwY2I2M2EzYzkiLCAic2NoZW1hX3ZlcnNpb24iOiAxfS
+> wgImJpbmRpbmciOiB7InByb2plY3RfaWQiOiAic2lkZWNhciIsICJydW5faWQiOiAiZXhlY3V0ZWQ
+> iLCAibGluZWFnZV9oYXNoIjogImZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZm
+> ZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmYiLCAic3RlcF9pZCI6ICJwb3N0IiwgImtpbmQiOiAic
+> G9zdGVzdGltYXRpb24iLCAib3BlcmF0aW9uIjogInBvc3Rlc3RpbWF0aW9uLndhbGQiLCAicGFyYW
+> 1ldGVyc19zaGEyNTYiOiAiZWFlMGMyYzIzNmQyNmRlMWQ2ZjQ4ZDk2MmNlZjU3N2UyMzYwOWJmZGF
+> mNmFiZTJjMjQ5NWUzMGUxYjcyZjhjZSIsICJpbnB1dHMiOiBbImNvbXBsZXRlZCJdLCAibW9kZWxz
+> IjogWyJjb21wbGV0ZWQiXX0sICJxdWVyaWVzIjogW1sic3RhdGlzdGljcyIsICJ0ZXN0IiwgInZhb
+> HVlIl0sIFsic3RhdGlzdGljcyIsICJ0ZXN0IiwgImRmIl0sIFsic3RhdGlzdGljcyIsICJ0ZXN0Ii
+> wgImRmX2Rlbm9taW5hdG9yIl0sIFsic3RhdGlzdGljcyIsICJ0ZXN0IiwgInBfdmFsdWUiXV0sICJ
+> kaXN0cmlidXRpb25zIjogeyJ0ZXN0IjogIkYifSwgImluZGV4IjogMn0= stata "`wb_result_c
+> ommands'"
+
+Traceback (most recent call last):
+  File "/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T//St30665.000001", line
+>  11, in <module>
+    values = read_result_snapshot(Path(sys.argv[1]), reference, expected_bindin
+> g=configuration['binding'])
+  File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/backend/workbench/s
+> cript_export/result_snapshot.py", line 187, in read_result_snapshot
+    return validate_result_snapshot(_strict_json(raw), expected_binding=expecte
+> d_binding)
+  File "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/backend/workbench/s
+> cript_export/result_snapshot.py", line 117, in validate_result_snapshot
+    raise ContractError("result snapshot binding differs from the executed step
+> ")
+workbench.contracts.common.envelope.ContractError: result snapshot binding diff
+> ers from the executed step
+
+. confirm file "`wb_result_commands'"
+file /var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T//St30665.000003 not
+    found
+r(601);
+
+end of do-file
+r(601);

@@ -1,0 +1,10 @@
+{
+  "run": null,
+  "language": "r",
+  "command": [
+    "Rscript",
+    "analysis.R"
+  ],
+  "os_exit": 1,
+  "normalized_exit": 1
+}

@@ -1,0 +1,83 @@
+[
+  {
+    "expected": 0.524033398275554,
+    "abs": 1e-08,
+    "rel": 0.0,
+    "label": "full:coefficients",
+    "actual": 0.5240333982754993,
+    "difference": 5.46229728115577e-14,
+    "allowed": 1e-08
+  },
+  {
+    "expected": 0.37889378683709035,
+    "abs": 1e-08,
+    "rel": 0.0,
+    "label": "full:coefficients",
+    "actual": 0.37889378683705344,
+    "difference": 3.6914915568786455e-14,
+    "allowed": 1e-08
+  },
+  {
+    "expected": -0.28894515154376593,
+    "abs": 1e-08,
+    "rel": 0.0,
+    "label": "full:coefficients",
+    "actual": -0.2889451515437183,
+    "difference": 4.7628567756419216e-14,
+    "allowed": 1e-08
+  },
+  {
+    "expected": -0.10121807811349151,
+    "abs": 1e-08,
+    "rel": 0.0,
+    "label": "full:coefficients",
+    "actual": -0.10121807811343853,
+    "difference": 5.2985393850235596e-14,
+    "allowed": 1e-08
+  },
+  {
+    "expected": 0.16986251046239487,
+    "abs": 1e-06,
+    "rel": 0.0,
+    "label": "full:std_errors",
+    "actual": 0.1698625104623953,
+    "difference": 4.440892098500626e-16,
+    "allowed": 1e-06
+  },
+  {
+    "expected": 0.07594663821229021,
+    "abs": 1e-06,
+    "rel": 0.0,
+    "label": "full:std_errors",
+    "actual": 0.07594663821228986,
+    "difference": 3.469446951953614e-16,
+    "allowed": 1e-06
+  },
+  {
+    "expected": 0.06578041865981685,
+    "abs": 1e-06,
+    "rel": 0.0,
+    "label": "full:std_errors",
+    "actual": 0.06578041865981656,
+    "difference": 2.914335439641036e-16,
+    "allowed": 1e-06
+  },
+  {
+    "expected": 0.14744903698769615,
+    "abs": 1e-06,
+    "rel": 0.0,
+    "label": "full:std_errors",
+    "actual": 0.147449036987696,
+    "difference": 1.3877787807814457e-16,
+    "allowed": 1e-06
+  },
+  {
+    "expected": 300.0,
+    "abs": 0.0,
+    "rel": 0.0,
+    "label": "full:nobs",
+    "actual": 300.0,
+    "difference": 0.0,
+    "allowed": 0.0
+  }
+]

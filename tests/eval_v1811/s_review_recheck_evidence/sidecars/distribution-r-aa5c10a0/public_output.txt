@@ -1,0 +1,8 @@
+Warning message:
+In system2("python3", c(shQuote(wb_result_bridge), shQuote(base),  :
+  running command ''python3' '/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T//Rtmp5Z1NDA/file783f5183644c.py' '/Users/jiayuanren/项目规划/.worktrees/codex-v1811-s/tests/eval_v1811/s_review_recheck_evidence/sidecars/distribution-r-aa5c10a0' eyJyZWZlcmVuY2UiOiB7ImZpbGVuYW1lIjogInBvc3RfcmVzdWx0Lmpzb24iLCAic2hhMjU2IjogImIxYjgwYzFiZDUxYjM5YjE1OTA4NDUyOTg4MWY5ZGQ2NmNhMTk2MjYzZDg0M2Q1ODA2MzA2MjMxMmM0N2EzNmUiLCAic2NoZW1hX3ZlcnNpb24iOiAxfSwgImJpbmRpbmciOiB7InByb2plY3RfaWQiOiAic2lkZWNhciIsICJydW5faWQiOiAiZXhlY3V0ZWQiLCAibGluZWFnZV9oYXNoIjogImZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmYiLCAic3RlcF9pZCI6ICJwb3N0IiwgImtpbmQiOiAicG9zdGVzdGltYXRpb24iLCAib3BlcmF0aW9uIjogInBvc3Rlc3RpbWF0aW9uLndhbGQiLCAicGFyYW1ldGVyc19zaGEyNTYiOiAiZWFlMGMyYzIzNmQyNmRlMWQ2ZjQ4ZDk2MmNlZjU3N2UyMzYwOWJmZGFmNmFiZTJjMjQ5NWUzMGUxYjcyZjhjZSIsICJpbnB1dHMiOiBbImNvbXBsZXRlZCJdLCAibW9kZWxzIjogWyJjb21wbGV0ZWQiXX0sICJxdWVyaWVzIjogW1sic3RhdGlzdGljcyIsICJ0ZXN0IiwgInZhbHVlIl0sIFsic3RhdGlzdGlj [... truncated]
+Error: Traceback (most recent call last):
+  File "/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T//Rtmp5Z1NDA/file783f5183644c.py", line 14, in <module>
+    raise AssertionError('Result sidecar reference distribution differs')
+AssertionError: Result sidecar reference distribution differs
+Execution halted

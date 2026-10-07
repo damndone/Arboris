@@ -221,6 +221,12 @@ class StepSpecContract:
     #: its `source`. A per-operation fact, so it is declared here with the rest
     #: of them rather than in a set maintained alongside the registry.
     produces_dataset: bool = False
+    #: Persisted, named model branches available to subsequent inference steps.
+    produces_model_branches: bool = False
+    #: Fields whose model references may bind to a producer in this same plan.
+    model_reference_fields: tuple[str, ...] = ()
+    #: Method requirements and alternatives retained in server-written replies.
+    proposal_notes: Mapping[str, str] = field(default_factory=dict)
     #: Server-owned semantic role published by a dataset producer.
     produced_dataset_kind: str | None = None
     #: Closed input roles accepted by a consumer. An empty tuple means this
@@ -469,6 +475,10 @@ class ModelFamilyContract:
     allows_polynomial_terms: bool = True
     requires_nonempty_predictors: bool = True
     allows_covariance: bool = True
+    #: v1.8.11. The covariance a branch gets when it names none. Panel and DID
+    #: fits cluster by entity, as Stata's xtreg, fe vce(robust); the others keep
+    #: the conventional default.
+    default_covariance: str = "unadjusted"
     allows_weights: tuple[str, ...] = ()
     #: v1.8.7. Which statsmodels GLM link this family's fit corresponds to, if
     #: any. Declaring it is the whole cost of joining the design-variance engine
@@ -549,10 +559,16 @@ def _build_panel_ols_model_params(
         "y": branch["outcome"],
         "x": list(predictors),
         "covariance": covariance,
-        "model_options": {"covariance": covariance},
+        "model_options": _panel_model_options(spec, covariance),
         "entity_col": spec.get("entity_col"),
         "time_col": spec.get("time_col"),
     }
+
+
+def _panel_model_options(spec: Mapping[str, Any], covariance: str) -> dict[str, Any]:
+    """A panel or DID fit's options: its covariance and, if named, its cluster column."""
+    cluster = (spec.get("model_options") or {}).get("cluster")
+    return {"covariance": covariance, **({"cluster": cluster} if cluster else {})}
 
 
 def _build_generalized_model_params(
@@ -649,6 +665,22 @@ def _validate_family_options(
         )
     if contract.validate_model_options is not None:
         contract.validate_model_options(options)
+
+
+def _validate_nb_options(options: Mapping[str, Any]) -> None:
+    from ..contracts.model.count_models import validate_negative_binomial_model_options
+    try:
+        validate_negative_binomial_model_options(options)
+    except ValueError as exc:
+        raise OperationValidationError(str(exc)) from exc
+
+
+def _validate_glm_nb_options(options: Mapping[str, Any]) -> None:
+    from ..contracts.model.count_models import validate_glm_family_options
+    try:
+        validate_glm_family_options(options, "negative_binomial")
+    except ValueError as exc:
+        raise OperationValidationError(str(exc)) from exc
 
 
 def _validate_ordinal_model_options(options: Mapping[str, Any]) -> None:
@@ -817,6 +849,19 @@ def _validate_count_outcome(
     return _validate
 
 
+def _validate_nb_outcome(frame: pd.DataFrame, branch: Mapping[str, Any]) -> None:
+    values = _require_outcome_values(frame, branch, "negative_binomial")
+    fixed = (branch.get("model_options") or {}).get("alpha") is not None
+    if (values < 0).any() or (not fixed and not (values == np.floor(values)).all()):
+        raise OperationValidationError("NB_COUNTS_INVALID: estimated dispersion requires integer counts; fixed alpha allows finite nonnegative responses.")
+
+
+def _validate_fixed_count_outcome(frame: pd.DataFrame, branch: Mapping[str, Any]) -> None:
+    values = _require_outcome_values(frame, branch, "fixed-dispersion GLM")
+    if (values < 0).any():
+        raise OperationValidationError("GLM_RESPONSE_INVALID: fixed count-family GLM requires finite nonnegative responses.")
+
+
 def _build_iv_2sls_model_params(
     spec: Mapping[str, Any], branch: Mapping[str, Any], predictors: list[str], covariance: str
 ) -> dict[str, Any]:
@@ -841,6 +886,7 @@ def _build_did_model_params(
         "time_col": spec["time_col"],
         "did_mode": spec["did_mode"],
         "covariance": covariance,
+        "model_options": _panel_model_options(spec, covariance),
     }
     for field_name in ("did_cohort_col", "did_treat_col", "did_post_col", "did_status_col"):
         value = spec.get(field_name)
@@ -1024,7 +1070,7 @@ MODEL_FAMILY_CONTRACTS: dict[str, ModelFamilyContract] = {
         required_spec_fields=(),
         required_spec_field_mode="all",
         forbidden_spec_fields=("entity_col", "time_col"),
-        build_model_params=_build_generalized_model_params("negative_binomial"),
+        build_model_params=_build_model_params_with_options("negative_binomial"),
         expected_artifacts=(
             "negative_binomial_1",
             "diagnostics_negative_binomial_1",
@@ -1035,7 +1081,9 @@ MODEL_FAMILY_CONTRACTS: dict[str, ModelFamilyContract] = {
             "model.genesis negative_binomial does not accept panel entity_col or time_col"
         ),
         allows_covariance=False,
-        validate_branch_frame=_validate_count_outcome("negative_binomial"),
+        validate_branch_frame=_validate_nb_outcome,
+        model_options_fields=("dispersion", "alpha"),
+        validate_model_options=_validate_nb_options,
     ),
     "glm:binomial": ModelFamilyContract(
         family="glm:binomial",
@@ -1070,14 +1118,17 @@ MODEL_FAMILY_CONTRACTS: dict[str, ModelFamilyContract] = {
         required_spec_fields=(),
         required_spec_field_mode="all",
         forbidden_spec_fields=("entity_col", "time_col"),
-        build_model_params=_build_generalized_model_params("glm:negative_binomial"),
+        build_model_params=_build_model_params_with_options("glm:negative_binomial"),
         expected_artifacts=("glm_1",),
         result_shape="coefficient_intervals",
         forbidden_spec_fields_message=(
             "model.genesis glm:negative_binomial does not accept panel entity_col or time_col"
         ),
         allows_covariance=False,
-        validate_branch_frame=_validate_count_outcome("glm:negative_binomial"),
+        validate_branch_frame=_validate_fixed_count_outcome,
+        model_options_fields=("alpha",),
+        model_options_required_fields=("alpha",),
+        validate_model_options=_validate_glm_nb_options,
     ),
     "panel_ols": ModelFamilyContract(
         family="panel_ols",
@@ -1091,6 +1142,7 @@ MODEL_FAMILY_CONTRACTS: dict[str, ModelFamilyContract] = {
             "model.genesis panel_ols requires entity_col or time_col"
         ),
         cluster_requires_entity=True,
+        default_covariance="clustered",
         allows_categorical_terms=False,
         context_spec_fields=("entity_col", "time_col"),
         column_spec_fields=("entity_col", "time_col"),
@@ -1130,6 +1182,7 @@ MODEL_FAMILY_CONTRACTS: dict[str, ModelFamilyContract] = {
         result_shape="coefficient_intervals",
         missing_required_fields_message="model.genesis did requires entity_col and time_col",
         requires_nonempty_predictors=False,
+        default_covariance="clustered",
         context_spec_fields=(
             "entity_col",
             "time_col",
@@ -1553,23 +1606,43 @@ def validate_model_genesis_spec(spec: Mapping[str, Any]) -> ModelFamilyContract:
                 f"model branch {branch_id} covariance must be one of: "
                 + ", ".join(OLS_COVARIANCE_VALUES)
             )
+        cluster_option = None
         if contract.allows_covariance:
-            # Covariance-specific options (HAC's time order) are checked with the
-            # covariance they belong to, by the one OLS option contract.
-            from ..contracts.model.ols import OLS_HAC_FIELDS, validate_ols_model_options
+            # Covariance-specific options (HAC's time order, a panel's cluster
+            # column) are checked with the covariance they belong to.
+            from ..contracts.model.ols import (
+                OLS_HAC_FIELDS,
+                PANEL_COVARIANCE_FAMILIES,
+                validate_ols_model_options,
+                validate_panel_model_options,
+            )
 
             options = spec.get("model_options") or {}
             try:
-                validate_ols_model_options(
-                    {"covariance": covariance or "robust",
-                     **{key: options[key] for key in OLS_HAC_FIELDS if key in options}},
-                    family=contract.family,
-                )
+                if contract.family in PANEL_COVARIANCE_FAMILIES:
+                    cluster_option = options.get("cluster")
+                    validate_panel_model_options(
+                        {"covariance": covariance or contract.default_covariance,
+                         **{key: options[key] for key in ("cluster", *OLS_HAC_FIELDS) if key in options}},
+                        family=contract.family,
+                    )
+                else:
+                    validate_ols_model_options(
+                        {"covariance": covariance or "robust",
+                         **{key: options[key] for key in OLS_HAC_FIELDS if key in options}},
+                        family=contract.family,
+                    )
             except ValueError as error:
                 raise OperationValidationError(f"model branch {branch_id}: {error}") from error
-        if contract.cluster_requires_entity and covariance == "clustered" and not dimensions.get("entity_col"):
+        if (
+            contract.cluster_requires_entity
+            and (covariance or contract.default_covariance) == "clustered"
+            and not dimensions.get("entity_col")
+            and not cluster_option
+        ):
             raise OperationValidationError(
-                "model.genesis clustered panel_ols requires entity_col"
+                f"model.genesis {contract.family} clusters its standard errors by entity: set entity_col, "
+                "name another cluster column in model_options.cluster, or choose covariance robust"
             )
         if not contract.allows_categorical_terms and branch.get("categorical"):
             raise OperationValidationError(
@@ -2250,7 +2323,13 @@ WORKFLOW_STEP_SPEC_CONTRACTS: WorkflowStepContractRegistry = WorkflowStepContrac
             # request for a factorial ANOVA had nowhere to land -- and nothing
             # failed, because prose does not fail.
             "model_family": _workflow_executable_family_sentence(),
-            "covariance": "Default covariance for every branch.",
+            "covariance": (
+                "Default covariance for every branch. panel_ols and did cluster by entity when "
+                "omitted (CR1, t(G-1), as Stata's xtreg, fe vce(robust)); to cluster at the level "
+                "where treatment was assigned, name that column in model_options.cluster. robust "
+                "(not clustered) is inconsistent with a fixed number of periods; offer it only to "
+                "reproduce earlier work."
+            ),
             "model_options": (
                 "Family-owned JSON options. Only the selected model family's declared "
                 "option fields are accepted; do not copy options from another family."
@@ -2341,6 +2420,7 @@ WORKFLOW_STEP_SPEC_CONTRACTS: WorkflowStepContractRegistry = WorkflowStepContrac
         verification_builder_key="genesis.verification.v1",
         ui_description="Estimate one or more models from the source table.",
         accepted_dataset_kinds=("derived_data", "prepared_data"),
+        produces_model_branches=True,
     ),
     "model.joint_f_test": StepSpecContract(
         summary=(
@@ -3807,6 +3887,10 @@ def validate_workflow_steps(
     # reference is folded into depends_on, neither the ordering nor the cycle
     # refusal can see that edge at all.
     by_id = {step["step_id"]: step for step in normalized}
+    from .postestimation_steps import bind_model_step_dependencies
+
+    for step in normalized:
+        bind_model_step_dependencies(step, by_id, WORKFLOW_STEP_SPEC_CONTRACTS)
     for step in normalized:
         # Keyed on presence for the same reason the spec check above is: an
         # explicit `source: null` was already refused, so a missing key here

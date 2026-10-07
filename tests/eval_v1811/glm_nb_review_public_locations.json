@@ -1,0 +1,50 @@
+[
+  {
+    "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/native-output.txt",
+    "line": 185,
+    "field": "license_header",
+    "value": "withheld"
+  },
+  {
+    "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/native-output.txt",
+    "line": 186,
+    "field": "license_header",
+    "value": "withheld"
+  },
+  {
+    "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/native-stata/oracle.log",
+    "line": 14,
+    "field": "license_header",
+    "value": "withheld"
+  },
+  {
+    "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/native-stata/oracle.log",
+    "line": 15,
+    "field": "license_header",
+    "value": "withheld"
+  },
+  {
+    "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/native-stata-v2/oracle.log",
+    "line": 14,
+    "field": "license_header",
+    "value": "withheld"
+  },
+  {
+    "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/native-stata-v2/oracle.log",
+    "line": 15,
+    "field": "license_header",
+    "value": "withheld"
+  },
+  {
+    "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/native-stata-v3/oracle.log",
+    "line": 14,
+    "field": "license_header",
+    "value": "withheld"
+  },
+  {
+    "path": "tests/fixtures/postestimation/glm_negative_binomial_v1811/native-stata-v3/oracle.log",
+    "line": 15,
+    "field": "license_header",
+    "value": "withheld"
+  }
+]

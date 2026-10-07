@@ -1,0 +1,49 @@
+{
+  "baseline": "01fb0752bce129c8d8848c021eca776dadccb515",
+  "reviewed_producer_tip": "64ec3d73121c7d8e792942e62d30d0b92c9d8907",
+  "code_reference_commit": "b2f7adec0e1503e11e9b0b7da564a1bfdc1157e1",
+  "worktree": "/Users/jiayuanren/项目规划/.worktrees/codex-v1811-final-oracles",
+  "conclusion": "REQUEST CHANGES: P2 public license headers; statistical reference PASS",
+  "commands": [
+    "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 MPLCONFIGDIR=/private/tmp/glm-nb-review-mpl XDG_CACHE_HOME=/private/tmp/glm-nb-review-cache PYTHONPATH=backend .venv/bin/python /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py .venv/bin/python tests/eval_v1811/glm_nb_review_capture.py tests/eval_v1811/glm_nb_review_evidence_final",
+    "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 MPLCONFIGDIR=/private/tmp/glm-nb-review-mpl XDG_CACHE_HOME=/private/tmp/glm-nb-review-cache PYTHONPATH=backend .venv/bin/python /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py .venv/bin/python -m pytest -q tests/eval_v1811/glm_nb_review_test.py tests/test_glm_nb_v1811_reference.py > tests/eval_v1811/glm_nb_review_test_output.txt 2>&1",
+    "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 MPLCONFIGDIR=/private/tmp/glm-nb-review-mpl XDG_CACHE_HOME=/private/tmp/glm-nb-review-cache PYTHONPATH=backend .venv/bin/python /Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.11/local/v1811-coordination/run_exclusive.py .venv/bin/python -m pytest -q tests/eval_v1811/glm_nb_review_public_guard_test.py > tests/eval_v1811/glm_nb_review_public_guard_final_red.txt 2>&1",
+    "git diff --name-status 01fb0752bce129c8d8848c021eca776dadccb515 64ec3d73121c7d8e792942e62d30d0b92c9d8907",
+    "protected proof: SHA256 current bytes versus manifest; current bytes versus git show <baseline>:<path>"
+  ],
+  "results": {
+    "statistics": "18 passed, 3 warnings in 3.90s",
+    "public_guard": "1 failed; 8 license header locations in 4 tracked assets",
+    "asset_hashes": 24,
+    "protected_baseline_identical": 9,
+    "all_producer_changes_are_additions": 26
+  },
+  "owned_file_sha256": {
+    "tests/eval_v1811/glm_nb_review_capture.py": "d2ebcf245bc1477ae46273c2e6bc154062dd39be58c75560198fccb002162609",
+    "tests/eval_v1811/glm_nb_review_native.R": "d6b7961ad6770946e5db442e9fd2117002e8b9ce40eae2eea78f371b017e7b4d",
+    "tests/eval_v1811/glm_nb_review_test.py": "e9b5b9d8a61b4eb83c72feeb3e1bf07ae81ff0cd47a85be8d9a4dbcff4fe0f77",
+    "tests/eval_v1811/glm_nb_review_public_guard_test.py": "3eb8675940b1c4ce81adf12aaccdfa019b3a232ab7ac97500cc6166eefa3a17a",
+    "tests/eval_v1811/glm_nb_review_protected.json": "1fdb25af7cbfc7503829669008341b01668fdf1c4c1c4977a1e64e00ec7a323f",
+    "tests/eval_v1811/glm_nb_review_public_locations.json": "da931455be2d45cefbc64a2363a6b078ce0a9b460c4f18c5ddbdbb95727961ac",
+    "tests/eval_v1811/glm_nb_review_public_guard_final_red.txt": "a8ba0e37c947019006935cb3b558999950e71b58b3ceaa72c8d938c8da4d94bc",
+    "tests/eval_v1811/glm_nb_review_test_output.txt": "c1148382d6346c748903b0c2ce9624e60b235bfcb5f439f41daa6a04aeb6debe",
+    "tests/eval_v1811/glm_nb_review_evidence_final/r-reference.json": "40c794d72625b3e16f32ee2204895bcd090234724afae0bdb52e7469b4df8d42",
+    "tests/eval_v1811/glm_nb_review_evidence_final/r-output.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "tests/eval_v1811/glm_nb_review_evidence_final/stata-reference.json": "8f21d7767adcea8a7495db92f9e23aeabbc41b2e43b3c0d734a953b70e89d593",
+    "tests/eval_v1811/glm_nb_review_evidence_final/stata-own-output.txt": "3e89447cf6261ee8e701f72bef349a9818b46061e811e492fd1c0fad9523e366",
+    "tests/eval_v1811/glm_nb_review_evidence_final/source.json": "96381cd1626dba97a276beba8aeb564ae79c815ebc451099ee5fc33f05ffd5c8",
+    "tests/eval_v1811/glm_nb_review_evidence_final/owner.json": "7496e1f88793babb56de2dc63cc5f0ed196c3ecd2e4290ceb32790a608e36418",
+    "tests/eval_v1811/glm_nb_review_evidence_final/metrics.json": "c334cee253eb15cfe03d1cae4dcab6b5523ca6f38d92be6af6e10f445c3b08a4",
+    "tests/eval_v1811/glm_nb_review_evidence_final/stata/glm_nb_review.do": "db1ad4a11a1815a28d74044f92448f5a4b91d572e3e543a7fee9fe7a7edb68a7",
+    "tests/eval_v1811/glm_nb_review_evidence_final/stata/wb_results.tsv": "4b462bc4cfac3bc10c17935bfcebe65b0c0017790a526065e715529e27f32549",
+    "docs/superpowers/handoffs/2026-10-04-v1811-glm-nb-independent-review.md": "23d7feb1f8f479eb13359927bb6279d254cbec0435563821b96bec980ba42ea8"
+  },
+  "retained_not_staged": [
+    "tests/eval_v1811/glm_nb_review_evidence/",
+    "tests/eval_v1811/glm_nb_review_evidence_final/projects/",
+    "tests/eval_v1811/glm_nb_review_evidence_final/stata/glm_nb_review.log",
+    "tests/eval_v1811/glm_nb_review_public_guard_red.txt"
+  ],
+  "raw_final_stata_log_sha256": "withheld-raw-sha256-c6f365c547b7012eeea0e827",
+  "review_commit_role": "Evidence only; reviewed producer tip remains fixed and this is not a feature baseline"
+}

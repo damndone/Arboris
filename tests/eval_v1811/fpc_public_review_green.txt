@@ -1,0 +1,17 @@
+
+Fontconfig error: No writable cache directories
+	/opt/homebrew/var/cache/fontconfig
+	/Users/jiayuanren/.cache/fontconfig
+	/Users/jiayuanren/.fontconfig
+...............{"run_root": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-769/test_public_covariance_and_ful0/review/runs/20261004_201730_634245_8fd90cb7", "options": {"survey_fpc_col": "population_fpc"}, "status": "completed"}
+.{"run_root": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-769/test_public_covariance_and_ful1/review/runs/20261004_201731_307832_ac41aa5c", "options": {"survey_fpc_col": "fraction_fpc"}, "status": "completed"}
+.{"run_root": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-769/test_public_covariance_and_ful2/review/runs/20261004_201731_901372_bbfe62f0", "options": {"survey_fpc_col": "population_fpc", "survey_subpop": "subpop == 1"}, "status": "completed"}
+.{"run_root": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-769/test_public_covariance_and_ful3/review/runs/20261004_201732_299315_16b1355c", "options": {"survey_fpc_col": "fraction_fpc", "survey_subpop": "subpop == 1"}, "status": "completed"}
+.{"run_root": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-769/test_no_fpc_public_packet_and_0/current/review/runs/20261004_201732_672161_4b01b9ca", "options": {}, "status": "completed"}
+{"run_root": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-769/test_no_fpc_public_packet_and_0/baseline/review/runs/20261004_201733_365989_9a070acc", "options": {}, "status": "completed"}
+.{"run_root": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-769/test_no_fpc_public_packet_and_1/current/review/runs/20261004_201733_986054_b5d98b14", "options": {"survey_subpop": "subpop == 1"}, "status": "completed"}
+{"run_root": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-769/test_no_fpc_public_packet_and_1/baseline/review/runs/20261004_201734_393092_a65390a0", "options": {"survey_subpop": "subpop == 1"}, "status": "completed"}
+.{"run_root": "/private/var/folders/n0/0xwbb3jn2vs3lmj2rn6wn2940000gn/T/pytest-of-jiayuanren/pytest-769/test_census_public_kernel_and_0/projects/review/runs/20261004_201734_781839_2bd59c8c", "options": {"survey_fpc_col": "review_census"}, "status": "completed"}
+{"census_public_warnings": [{"code": "SURVEY_ZERO_VARIANCE_INFERENCE_UNAVAILABLE", "message": "The finite population correction gives zero sampling variance; coefficient p-values with zero standard errors are unavailable."}], "shared_issues": {"schema_version": "legacy", "run_id": "20261004_201734_781839_2bd59c8c", "issues": [], "superseded_by": "diagnostic_summary.json"}}
+..
+23 passed in 15.66s

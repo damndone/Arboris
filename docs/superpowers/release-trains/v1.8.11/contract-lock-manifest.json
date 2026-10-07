@@ -1,0 +1,42 @@
+{
+  "release": "v1.8.11",
+  "release_baseline_commit": "75481d7adef190d343f5c9da47b0a259c683aac5",
+  "integration_base_commit": "1af5498e7e0d327b97edd6910624267b801d8fb4",
+  "contract_lock_commit": "6f0f87c6d8241a93d81e2c34f8ef8e9408a907b3",
+  "contracts": {
+    "joint_arma_garch": "C1",
+    "negative_binomial": "C2",
+    "script_export": "C3",
+    "integration": "C4",
+    "script_plan_schema_version": 1
+  },
+  "locked_files": [
+    {
+      "path": "docs/superpowers/specs/2026-10-04-v1.8.11-lane-contracts.md",
+      "sha256": "14ac3849647e10cee38e2adfc1ed5002375f8c24f49c0dee35eb007e91fc6049"
+    },
+    {
+      "path": "backend/workbench/script_export/plan.py",
+      "sha256": "5cc33431693692348eab881d722145f081cf28f0dbf9011e2a752f5159636294"
+    },
+    {
+      "path": "backend/workbench/script_export/__init__.py",
+      "sha256": "ac80f52d70646b14e5266fe1b2dacacb500e075d6b795e2a53bf3aa1bb66a39b"
+    },
+    {
+      "path": "tests/test_script_export_plan_contract.py",
+      "sha256": "aae591553800460b6ef2b0948a344f7f6e41e774684aae0e26f936e1b2f864ba"
+    },
+    {
+      "path": "tests/fixtures/script_export/basic/plan.json",
+      "sha256": "10651da29e9bdcaf215a4c20dab1cac0ec267c60a477b503c9845bc47d0aeda5"
+    }
+  ],
+  "branch_start_commits": {
+    "M1": "6f0f87c6d8241a93d81e2c34f8ef8e9408a907b3",
+    "M2": "6f0f87c6d8241a93d81e2c34f8ef8e9408a907b3",
+    "S": "6f0f87c6d8241a93d81e2c34f8ef8e9408a907b3"
+  },
+  "work_orders": "docs/superpowers/handoffs/2026-10-04-codex-v1.8.11-work-orders.md",
+  "note": "Original semantic contract lock retained unchanged; this manifest is recorded before producer implementation. Read from the integration worktree."
+}

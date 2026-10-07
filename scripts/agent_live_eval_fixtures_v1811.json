@@ -1,0 +1,2138 @@
+{
+  "schema_version": 1,
+  "basis_commit": "485ce4fcd20a9b20d15d6916d8510754b7b74834",
+  "protocol": "public family seed -> exact model.rerun -> completed result -> fresh result session answer",
+  "families": {
+    "iv_2sls": {
+      "source_path": "tests/fixtures/admission/iv_2sls/data.csv",
+      "source_sha256": "880c3b4ff039e86d358f9d1c804dd729bcaeafe2bd33075f3649902c629c7a2f",
+      "params": {
+        "model_type": "iv_2sls",
+        "y": "y",
+        "x": [
+          "x1"
+        ],
+        "model_options": {},
+        "iv_endog": [
+          "xe"
+        ],
+        "iv_instruments": [
+          "z"
+        ],
+        "covariance": "robust"
+      },
+      "oracle_path": "tests/fixtures/admission/iv_2sls/oracle.json",
+      "oracle_sha256": "0691f282ded15fcf2e6fa0e03b7911d4032bd036ecc4686d1dcedaf10799af75",
+      "model_id": "iv_2sls_1",
+      "comparisons": [
+        {
+          "actual": [
+            "coefficients",
+            "x1",
+            "estimate"
+          ],
+          "oracle": [
+            "coefficients",
+            "x1"
+          ],
+          "tolerance_source": "tests/test_admission_oracle_iv_2sls.py",
+          "abs": 1e-08
+        },
+        {
+          "actual": [
+            "coefficients",
+            "xe",
+            "estimate"
+          ],
+          "oracle": [
+            "coefficients",
+            "xe"
+          ],
+          "tolerance_source": "tests/test_admission_oracle_iv_2sls.py",
+          "abs": 1e-08
+        },
+        {
+          "actual": [
+            "coefficients",
+            "x1",
+            "std_error"
+          ],
+          "oracle": [
+            "std_error",
+            "x1"
+          ],
+          "tolerance_source": "tests/test_admission_oracle_iv_2sls.py",
+          "abs": 1e-06
+        },
+        {
+          "actual": [
+            "coefficients",
+            "xe",
+            "std_error"
+          ],
+          "oracle": [
+            "std_error",
+            "xe"
+          ],
+          "tolerance_source": "tests/test_admission_oracle_iv_2sls.py",
+          "abs": 1e-06
+        }
+      ],
+      "native_verified_fields": [
+        {
+          "artifact": "model_results/iv_2sls_1.json",
+          "path": [
+            "coefficients",
+            "x1",
+            "estimate"
+          ]
+        },
+        {
+          "artifact": "model_results/iv_2sls_1.json",
+          "path": [
+            "coefficients",
+            "xe",
+            "estimate"
+          ]
+        },
+        {
+          "artifact": "model_results/iv_2sls_1.json",
+          "path": [
+            "coefficients",
+            "x1",
+            "std_error"
+          ]
+        },
+        {
+          "artifact": "model_results/iv_2sls_1.json",
+          "path": [
+            "coefficients",
+            "xe",
+            "std_error"
+          ]
+        }
+      ],
+      "not_native_verified_fields": [
+        "Any field not listed in native_verified_fields, including unlisted intercepts, p-values and confidence intervals"
+      ],
+      "answer_comparison_indices": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    "glm:binomial": {
+      "source_path": "tests/fixtures/admission/glm_binomial/data.csv",
+      "source_sha256": "ab6719fcec6c408c47dff6d3ca93d27f01ed43124697c0478f487455db6a88b0",
+      "params": {
+        "model_type": "glm:binomial",
+        "y": "y",
+        "x": [
+          "x1",
+          "x2"
+        ],
+        "model_options": {}
+      },
+      "oracle_path": "tests/fixtures/admission/glm_binomial/oracle.json",
+      "oracle_sha256": "33c948ae25bc1ea80b80d22edcdc65d830af2b4b15141abe6bc22b14f6357e2d",
+      "model_id": "glm_1",
+      "comparisons": [
+        {
+          "actual": [
+            "coefficients",
+            "x1",
+            "estimate"
+          ],
+          "oracle": [
+            "coefficients",
+            "x1"
+          ],
+          "tolerance_source": "tests/test_admission_oracle_glm_binomial.py",
+          "abs": 1e-08
+        },
+        {
+          "actual": [
+            "coefficients",
+            "x2",
+            "estimate"
+          ],
+          "oracle": [
+            "coefficients",
+            "x2"
+          ],
+          "tolerance_source": "tests/test_admission_oracle_glm_binomial.py",
+          "abs": 1e-08
+        },
+        {
+          "actual": [
+            "coefficients",
+            "x1",
+            "std_error"
+          ],
+          "oracle": [
+            "std_error",
+            "x1"
+          ],
+          "tolerance_source": "tests/test_admission_oracle_glm_binomial.py",
+          "abs": 1e-06
+        },
+        {
+          "actual": [
+            "coefficients",
+            "x2",
+            "std_error"
+          ],
+          "oracle": [
+            "std_error",
+            "x2"
+          ],
+          "tolerance_source": "tests/test_admission_oracle_glm_binomial.py",
+          "abs": 1e-06
+        }
+      ],
+      "native_verified_fields": [
+        {
+          "artifact": "model_results/glm_1.json",
+          "path": [
+            "coefficients",
+            "x1",
+            "estimate"
+          ]
+        },
+        {
+          "artifact": "model_results/glm_1.json",
+          "path": [
+            "coefficients",
+            "x2",
+            "estimate"
+          ]
+        },
+        {
+          "artifact": "model_results/glm_1.json",
+          "path": [
+            "coefficients",
+            "x1",
+            "std_error"
+          ]
+        },
+        {
+          "artifact": "model_results/glm_1.json",
+          "path": [
+            "coefficients",
+            "x2",
+            "std_error"
+          ]
+        }
+      ],
+      "not_native_verified_fields": [
+        "Any field not listed in native_verified_fields, including unlisted intercepts, p-values and confidence intervals"
+      ],
+      "answer_comparison_indices": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    "glm:poisson": {
+      "source_path": "tests/fixtures/admission/glm_poisson/data.csv",
+      "source_sha256": "214027c9911853bb988276a7611ff079670d3b44ca95345b4a35a7737d790126",
+      "params": {
+        "model_type": "glm:poisson",
+        "y": "y",
+        "x": [
+          "x1",
+          "x2"
+        ],
+        "model_options": {}
+      },
+      "oracle_path": "tests/fixtures/admission/glm_poisson/oracle.json",
+      "oracle_sha256": "10454ba9e1d08809e1d81f2f562da942042920abee1dfd15c09cb793c75156d4",
+      "model_id": "glm_1",
+      "comparisons": [
+        {
+          "actual": [
+            "coefficients",
+            "x1",
+            "estimate"
+          ],
+          "oracle": [
+            "coefficients",
+            "x1"
+          ],
+          "tolerance_source": "tests/test_admission_oracle_glm_poisson.py",
+          "abs": 1e-08
+        },
+        {
+          "actual": [
+            "coefficients",
+            "x2",
+            "estimate"
+          ],
+          "oracle": [
+            "coefficients",
+            "x2"
+          ],
+          "tolerance_source": "tests/test_admission_oracle_glm_poisson.py",
+          "abs": 1e-08
+        },
+        {
+          "actual": [
+            "coefficients",
+            "x1",
+            "std_error"
+          ],
+          "oracle": [
+            "std_error",
+            "x1"
+          ],
+          "tolerance_source": "tests/test_admission_oracle_glm_poisson.py",
+          "abs": 1e-06
+        },
+        {
+          "actual": [
+            "coefficients",
+            "x2",
+            "std_error"
+          ],
+          "oracle": [
+            "std_error",
+            "x2"
+          ],
+          "tolerance_source": "tests/test_admission_oracle_glm_poisson.py",
+          "abs": 1e-06
+        }
+      ],
+      "native_verified_fields": [
+        {
+          "artifact": "model_results/glm_1.json",
+          "path": [
+            "coefficients",
+            "x1",
+            "estimate"
+          ]
+        },
+        {
+          "artifact": "model_results/glm_1.json",
+          "path": [
+            "coefficients",
+            "x2",
+            "estimate"
+          ]
+        },
+        {
+          "artifact": "model_results/glm_1.json",
+          "path": [
+            "coefficients",
+            "x1",
+            "std_error"
+          ]
+        },
+        {
+          "artifact": "model_results/glm_1.json",
+          "path": [
+            "coefficients",
+            "x2",
+            "std_error"
+          ]
+        }
+      ],
+      "not_native_verified_fields": [
+        "Any field not listed in native_verified_fields, including unlisted intercepts, p-values and confidence intervals"
+      ],
+      "answer_comparison_indices": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    "glm:negative_binomial": {
+      "source_path": "tests/fixtures/admission/glm_negative_binomial/data.csv",
+      "source_sha256": "33bf1067bdf7f7ca7f1bf7fb34c16fc167d9318b482f60aae8febd402b084711",
+      "params": {
+        "model_type": "glm:negative_binomial",
+        "y": "y",
+        "x": [
+          "x1",
+          "x2"
+        ],
+        "model_options": {
+          "alpha": 1.0
+        }
+      },
+      "oracle_path": "tests/fixtures/count_models/integration-strict-v1811/glm-negative-binomial-v1811-oracle.json",
+      "oracle_sha256": "8edac87c50fe78ed186f75297abae9de4f11c0d0f848d120620c1b3705cb0c6c",
+      "model_id": "glm_1",
+      "comparisons": [
+        {
+          "actual": [
+            "coefficients",
+            "x1",
+            "estimate"
+          ],
+          "oracle": [
+            "coefficients",
+            "x1"
+          ],
+          "tolerance_source": "tests/test_admission_oracle_glm_negative_binomial.py",
+          "abs": 1e-08
+        },
+        {
+          "actual": [
+            "coefficients",
+            "x2",
+            "estimate"
+          ],
+          "oracle": [
+            "coefficients",
+            "x2"
+          ],
+          "tolerance_source": "tests/test_admission_oracle_glm_negative_binomial.py",
+          "abs": 1e-08
+        },
+        {
+          "actual": [
+            "coefficients",
+            "x1",
+            "std_error"
+          ],
+          "oracle": [
+            "std_error",
+            "x1"
+          ],
+          "tolerance_source": "tests/test_admission_oracle_glm_negative_binomial.py",
+          "abs": 1e-06
+        },
+        {
+          "actual": [
+            "coefficients",
+            "x2",
+            "std_error"
+          ],
+          "oracle": [
+            "std_error",
+            "x2"
+          ],
+          "tolerance_source": "tests/test_admission_oracle_glm_negative_binomial.py",
+          "abs": 1e-06
+        }
+      ],
+      "native_verified_fields": [
+        {
+          "artifact": "model_results/glm_1.json",
+          "path": [
+            "coefficients",
+            "x1",
+            "estimate"
+          ]
+        },
+        {
+          "artifact": "model_results/glm_1.json",
+          "path": [
+            "coefficients",
+            "x2",
+            "estimate"
+          ]
+        },
+        {
+          "artifact": "model_results/glm_1.json",
+          "path": [
+            "coefficients",
+            "x1",
+            "std_error"
+          ]
+        },
+        {
+          "artifact": "model_results/glm_1.json",
+          "path": [
+            "coefficients",
+            "x2",
+            "std_error"
+          ]
+        }
+      ],
+      "not_native_verified_fields": [
+        "Any field not listed in native_verified_fields, including unlisted intercepts, p-values and confidence intervals"
+      ],
+      "answer_comparison_indices": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    "panel_ols": {
+      "source_path": "tests/fixtures/admission/panel_ols/data.csv",
+      "source_sha256": "b03b366bfd8cb184868689b8a979711c0f2a13b946d282a2bad59ccc5871a9ee",
+      "params": {
+        "model_type": "panel_ols",
+        "y": "y",
+        "x": [
+          "x1",
+          "x2"
+        ],
+        "model_options": {},
+        "entity_col": "g",
+        "time_col": "time",
+        "covariance": "clustered"
+      },
+      "oracle_path": "tests/fixtures/panel_cluster/oracle.json",
+      "oracle_sha256": "5762c67bc879535d6ad880028fe255fccef9048b4d0c35de06321712a39a331e",
+      "model_id": "panel_ols_1",
+      "comparisons": [
+        {
+          "actual": [
+            "coefficients",
+            "x1",
+            "estimate"
+          ],
+          "oracle": [
+            "results",
+            "panel_b_x1"
+          ],
+          "tolerance_source": "tests/test_panel_cluster_inference.py",
+          "abs": 1e-09
+        },
+        {
+          "actual": [
+            "coefficients",
+            "x2",
+            "estimate"
+          ],
+          "oracle": [
+            "results",
+            "panel_b_x2"
+          ],
+          "tolerance_source": "tests/test_panel_cluster_inference.py",
+          "abs": 1e-09
+        },
+        {
+          "actual": [
+            "coefficients",
+            "x1",
+            "std_error"
+          ],
+          "oracle": [
+            "results",
+            "panel_se_x1"
+          ],
+          "tolerance_source": "tests/test_panel_cluster_inference.py",
+          "rel": 1e-08
+        },
+        {
+          "actual": [
+            "coefficients",
+            "x2",
+            "std_error"
+          ],
+          "oracle": [
+            "results",
+            "panel_se_x2"
+          ],
+          "tolerance_source": "tests/test_panel_cluster_inference.py",
+          "rel": 1e-08
+        }
+      ],
+      "native_verified_fields": [
+        {
+          "artifact": "model_results/panel_ols_1.json",
+          "path": [
+            "coefficients",
+            "x1",
+            "estimate"
+          ]
+        },
+        {
+          "artifact": "model_results/panel_ols_1.json",
+          "path": [
+            "coefficients",
+            "x2",
+            "estimate"
+          ]
+        },
+        {
+          "artifact": "model_results/panel_ols_1.json",
+          "path": [
+            "coefficients",
+            "x1",
+            "std_error"
+          ]
+        },
+        {
+          "artifact": "model_results/panel_ols_1.json",
+          "path": [
+            "coefficients",
+            "x2",
+            "std_error"
+          ]
+        }
+      ],
+      "not_native_verified_fields": [
+        "Any field not listed in native_verified_fields, including unlisted intercepts, p-values and confidence intervals"
+      ],
+      "answer_comparison_indices": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    "did": {
+      "source_path": "tests/fixtures/panel_cluster/staggered.csv",
+      "source_sha256": "480b5a87a735761be6ccb0260e56a631ce34c1f9245de6a7a50bb072379471dc",
+      "params": {
+        "model_type": "did",
+        "y": "y",
+        "x": [
+          "x1"
+        ],
+        "model_options": {},
+        "entity_col": "g",
+        "time_col": "time",
+        "covariance": "clustered",
+        "did_mode": "cohort",
+        "did_cohort_col": "first_treat"
+      },
+      "oracle_path": "tests/fixtures/panel_cluster/oracle.json",
+      "oracle_sha256": "5762c67bc879535d6ad880028fe255fccef9048b4d0c35de06321712a39a331e",
+      "model_id": "did_1",
+      "comparisons": [
+        {
+          "actual": [
+            "coefficients",
+            "_did_D",
+            "estimate"
+          ],
+          "oracle": [
+            "results",
+            "stag_b_D"
+          ],
+          "tolerance_source": "tests/test_panel_cluster_inference.py",
+          "abs": 1e-09
+        },
+        {
+          "actual": [
+            "coefficients",
+            "x1",
+            "estimate"
+          ],
+          "oracle": [
+            "results",
+            "stag_b_x1"
+          ],
+          "tolerance_source": "tests/test_panel_cluster_inference.py",
+          "abs": 1e-09
+        },
+        {
+          "actual": [
+            "coefficients",
+            "_did_D",
+            "std_error"
+          ],
+          "oracle": [
+            "results",
+            "stag_se_D"
+          ],
+          "tolerance_source": "tests/test_panel_cluster_inference.py",
+          "rel": 1e-08
+        },
+        {
+          "actual": [
+            "coefficients",
+            "x1",
+            "std_error"
+          ],
+          "oracle": [
+            "results",
+            "stag_se_x1"
+          ],
+          "tolerance_source": "tests/test_panel_cluster_inference.py",
+          "rel": 1e-08
+        }
+      ],
+      "native_verified_fields": [
+        {
+          "artifact": "model_results/did_1.json",
+          "path": [
+            "coefficients",
+            "_did_D",
+            "estimate"
+          ]
+        },
+        {
+          "artifact": "model_results/did_1.json",
+          "path": [
+            "coefficients",
+            "x1",
+            "estimate"
+          ]
+        },
+        {
+          "artifact": "model_results/did_1.json",
+          "path": [
+            "coefficients",
+            "_did_D",
+            "std_error"
+          ]
+        },
+        {
+          "artifact": "model_results/did_1.json",
+          "path": [
+            "coefficients",
+            "x1",
+            "std_error"
+          ]
+        }
+      ],
+      "not_native_verified_fields": [
+        "Any field not listed in native_verified_fields, including unlisted intercepts, p-values and confidence intervals"
+      ],
+      "answer_comparison_indices": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    "linear_mixed_effects": {
+      "source_path": "tests/fixtures/admission/linear_mixed_effects/data.csv",
+      "source_sha256": "f971e489477c8c912580aa09b2f0327334f0e12a2f9d5313a5e95f9ccf333828",
+      "params": {
+        "model_type": "linear_mixed_effects",
+        "y": "y",
+        "x": [
+          "x"
+        ],
+        "model_options": {
+          "subject_id": "g",
+          "time": "time",
+          "group": "arm",
+          "fit_method": "reml",
+          "random_slope": false
+        }
+      },
+      "oracle_path": "tests/fixtures/admission/linear_mixed_effects/oracle.json",
+      "oracle_sha256": "82471ced411e0b571015c05c265c376194cf0360936311e3d00e309e867bf9c5",
+      "model_id": "linear_mixed_effects_1",
+      "comparisons": [
+        {
+          "actual": [
+            "coefficients",
+            "group_time_interaction",
+            "estimate"
+          ],
+          "oracle": [
+            "coefficients",
+            "armb:time"
+          ],
+          "tolerance_source": "tests/test_admission_oracle_linear_mixed_effects.py",
+          "abs": 1e-08
+        },
+        {
+          "actual": [
+            "coefficients",
+            "group_time_interaction",
+            "std_error"
+          ],
+          "oracle": [
+            "std_error",
+            "armb:time"
+          ],
+          "tolerance_source": "tests/test_admission_oracle_linear_mixed_effects.py",
+          "rel": 1e-06
+        }
+      ],
+      "host_canary_required": true,
+      "native_verified_fields": [
+        {
+          "artifact": "artifacts/model_results/linear_mixed_effects_1.result.json",
+          "path": [
+            "payload",
+            "coefficients",
+            "group_time_interaction",
+            "estimate"
+          ]
+        },
+        {
+          "artifact": "artifacts/model_results/linear_mixed_effects_1.result.json",
+          "path": [
+            "payload",
+            "coefficients",
+            "group_time_interaction",
+            "std_error"
+          ]
+        }
+      ],
+      "not_native_verified_fields": [
+        "The LMM recipe publishes only its group x time estimand; other fixed effects are reachable through validated wald/lincom/nlcom on the inference kernel, not as a public coefficient table",
+        "All live execution and numeric fields remain blocked until genuine host startup canary admission"
+      ],
+      "answer_comparison_indices": [
+        0,
+        1
+      ]
+    },
+    "probit": {
+      "source_path": "tests/fixtures/postestimation/data.csv",
+      "source_sha256": "2e1b92f07632a8c88d047074f77cd6e5f9552b4f932f7d6ed2499161a0bf3084",
+      "params": {
+        "model_type": "probit",
+        "y": "yb",
+        "x": [
+          "x1",
+          "x2",
+          "x3"
+        ],
+        "model_options": {}
+      },
+      "oracle_path": "tests/fixtures/postestimation/oracle.json",
+      "oracle_sha256": "d80dbc69f91648cbd17443f89deaf21df63296f1296a6d674c3ef9e135b9302c",
+      "model_id": "probit_1",
+      "comparisons": [
+        {
+          "actual": [
+            "coefficients",
+            "x1",
+            "estimate"
+          ],
+          "oracle": [
+            "families",
+            "probit",
+            "params",
+            "x1"
+          ],
+          "tolerance_source": "tests/test_postestimation_core.py",
+          "rel": 1e-06
+        },
+        {
+          "actual": [
+            "coefficients",
+            "x2",
+            "estimate"
+          ],
+          "oracle": [
+            "families",
+            "probit",
+            "params",
+            "x2"
+          ],
+          "tolerance_source": "tests/test_postestimation_core.py",
+          "rel": 1e-06
+        },
+        {
+          "actual": [
+            "coefficients",
+            "x3",
+            "estimate"
+          ],
+          "oracle": [
+            "families",
+            "probit",
+            "params",
+            "x3"
+          ],
+          "tolerance_source": "tests/test_postestimation_core.py",
+          "rel": 1e-06
+        }
+      ],
+      "native_verified_fields": [
+        {
+          "artifact": "model_results/probit_1.json",
+          "path": [
+            "coefficients",
+            "x1",
+            "estimate"
+          ]
+        },
+        {
+          "artifact": "model_results/probit_1.json",
+          "path": [
+            "coefficients",
+            "x2",
+            "estimate"
+          ]
+        },
+        {
+          "artifact": "model_results/probit_1.json",
+          "path": [
+            "coefficients",
+            "x3",
+            "estimate"
+          ]
+        }
+      ],
+      "not_native_verified_fields": [
+        "Any field not listed in native_verified_fields, including unlisted intercepts, p-values and confidence intervals",
+        "Coefficient standard errors are not included in this family packet native comparison"
+      ],
+      "answer_comparison_indices": [
+        0,
+        1,
+        2
+      ]
+    },
+    "poisson": {
+      "source_path": "tests/fixtures/postestimation/data.csv",
+      "source_sha256": "2e1b92f07632a8c88d047074f77cd6e5f9552b4f932f7d6ed2499161a0bf3084",
+      "params": {
+        "model_type": "poisson",
+        "y": "yc",
+        "x": [
+          "x1",
+          "x2",
+          "x3"
+        ],
+        "model_options": {}
+      },
+      "oracle_path": "tests/fixtures/postestimation/oracle.json",
+      "oracle_sha256": "d80dbc69f91648cbd17443f89deaf21df63296f1296a6d674c3ef9e135b9302c",
+      "model_id": "poisson_1",
+      "comparisons": [
+        {
+          "actual": [
+            "coefficients",
+            "x1",
+            "estimate"
+          ],
+          "oracle": [
+            "families",
+            "poisson",
+            "params",
+            "x1"
+          ],
+          "tolerance_source": "tests/test_postestimation_core.py",
+          "rel": 1e-06
+        },
+        {
+          "actual": [
+            "coefficients",
+            "x2",
+            "estimate"
+          ],
+          "oracle": [
+            "families",
+            "poisson",
+            "params",
+            "x2"
+          ],
+          "tolerance_source": "tests/test_postestimation_core.py",
+          "rel": 1e-06
+        },
+        {
+          "actual": [
+            "coefficients",
+            "x3",
+            "estimate"
+          ],
+          "oracle": [
+            "families",
+            "poisson",
+            "params",
+            "x3"
+          ],
+          "tolerance_source": "tests/test_postestimation_core.py",
+          "rel": 1e-06
+        }
+      ],
+      "native_verified_fields": [
+        {
+          "artifact": "model_results/poisson_1.json",
+          "path": [
+            "coefficients",
+            "x1",
+            "estimate"
+          ]
+        },
+        {
+          "artifact": "model_results/poisson_1.json",
+          "path": [
+            "coefficients",
+            "x2",
+            "estimate"
+          ]
+        },
+        {
+          "artifact": "model_results/poisson_1.json",
+          "path": [
+            "coefficients",
+            "x3",
+            "estimate"
+          ]
+        }
+      ],
+      "not_native_verified_fields": [
+        "Any field not listed in native_verified_fields, including unlisted intercepts, p-values and confidence intervals",
+        "Coefficient standard errors are not included in this family packet native comparison"
+      ],
+      "answer_comparison_indices": [
+        0,
+        1,
+        2
+      ]
+    },
+    "negative_binomial": {
+      "source_path": "tests/fixtures/postestimation/data.csv",
+      "source_sha256": "2e1b92f07632a8c88d047074f77cd6e5f9552b4f932f7d6ed2499161a0bf3084",
+      "params": {
+        "model_type": "negative_binomial",
+        "y": "ynb",
+        "x": [
+          "x1",
+          "x2",
+          "x3"
+        ],
+        "model_options": {
+          "dispersion": "mean"
+        }
+      },
+      "oracle_path": "tests/fixtures/count_models/integration-strict-v1811/native-reference/nb2-postestimation-reference.json",
+      "oracle_sha256": "ea67d3316222edf8a36b99c93bd8f1e5f00c0bef3677712f537d4369941d80d9",
+      "model_id": "negative_binomial_1",
+      "comparisons": [
+        {
+          "actual": [
+            "coefficients",
+            "x1",
+            "estimate"
+          ],
+          "oracle": [
+            "params",
+            "x1"
+          ],
+          "tolerance_source": "tests/test_count_models_v1811_numeric_reference.py",
+          "abs": 1e-06
+        },
+        {
+          "actual": [
+            "coefficients",
+            "x2",
+            "estimate"
+          ],
+          "oracle": [
+            "params",
+            "x2"
+          ],
+          "tolerance_source": "tests/test_count_models_v1811_numeric_reference.py",
+          "abs": 1e-06
+        },
+        {
+          "actual": [
+            "coefficients",
+            "x3",
+            "estimate"
+          ],
+          "oracle": [
+            "params",
+            "x3"
+          ],
+          "tolerance_source": "tests/test_count_models_v1811_numeric_reference.py",
+          "abs": 1e-06
+        },
+        {
+          "actual": [
+            "ancillary_parameters",
+            1,
+            "estimate"
+          ],
+          "oracle": [
+            "ancillary",
+            "alpha",
+            "estimate"
+          ],
+          "tolerance_source": "tests/test_count_models_v1811_numeric_reference.py",
+          "rel": 0.0001
+        },
+        {
+          "actual": [
+            "ancillary_parameters",
+            1,
+            "std_error"
+          ],
+          "oracle": [
+            "ancillary",
+            "alpha",
+            "std_error"
+          ],
+          "tolerance_source": "tests/test_count_models_v1811_numeric_reference.py",
+          "rel": 0.0001
+        }
+      ],
+      "native_verified_fields": [
+        {
+          "artifact": "model_results/negative_binomial_1.json",
+          "path": [
+            "coefficients",
+            "x1",
+            "estimate"
+          ]
+        },
+        {
+          "artifact": "model_results/negative_binomial_1.json",
+          "path": [
+            "coefficients",
+            "x2",
+            "estimate"
+          ]
+        },
+        {
+          "artifact": "model_results/negative_binomial_1.json",
+          "path": [
+            "coefficients",
+            "x3",
+            "estimate"
+          ]
+        },
+        {
+          "artifact": "model_results/negative_binomial_1.json",
+          "path": [
+            "ancillary_parameters",
+            1,
+            "estimate"
+          ]
+        },
+        {
+          "artifact": "model_results/negative_binomial_1.json",
+          "path": [
+            "ancillary_parameters",
+            1,
+            "std_error"
+          ]
+        }
+      ],
+      "not_native_verified_fields": [
+        "Any field not listed in native_verified_fields, including unlisted intercepts, p-values and confidence intervals"
+      ],
+      "answer_comparison_indices": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ]
+    },
+    "ordinal_logit": {
+      "source_path": "tests/fixtures/v186_families/families.csv",
+      "source_sha256": "cb8172fbd6c7a4b70a5c524df660480c1e98529ccbe3bfdd10b30748ffa35ad8",
+      "params": {
+        "model_type": "ordinal_logit",
+        "y": "rating",
+        "x": [
+          "x1",
+          "x2",
+          "grp"
+        ],
+        "model_options": {
+          "outcome_order": [
+            "low",
+            "mid",
+            "high"
+          ],
+          "link": "logit"
+        }
+      },
+      "oracle_path": "tests/fixtures/v186_families/oracle.json",
+      "oracle_sha256": "30dbea51f144a42a18340ac62e3f283b8ac62a708f0f54993b5547af2ef183fb",
+      "model_id": "ordinal_logit_1",
+      "comparisons": [
+        {
+          "actual": [
+            "coefficients",
+            "x1",
+            "estimate"
+          ],
+          "oracle": [
+            "ordinal_logit",
+            "coefficients",
+            "x1"
+          ],
+          "tolerance_source": "tests/test_v186_families_external_oracle_v187.py",
+          "abs": 0.0001
+        },
+        {
+          "actual": [
+            "coefficients",
+            "x2",
+            "estimate"
+          ],
+          "oracle": [
+            "ordinal_logit",
+            "coefficients",
+            "x2"
+          ],
+          "tolerance_source": "tests/test_v186_families_external_oracle_v187.py",
+          "abs": 0.0001
+        },
+        {
+          "actual": [
+            "coefficients",
+            "grp",
+            "estimate"
+          ],
+          "oracle": [
+            "ordinal_logit",
+            "coefficients",
+            "grp"
+          ],
+          "tolerance_source": "tests/test_v186_families_external_oracle_v187.py",
+          "abs": 0.0001
+        }
+      ],
+      "native_verified_fields": [
+        {
+          "artifact": "model_results/ordinal_logit_1.json",
+          "path": [
+            "coefficients",
+            "x1",
+            "estimate"
+          ]
+        },
+        {
+          "artifact": "model_results/ordinal_logit_1.json",
+          "path": [
+            "coefficients",
+            "x2",
+            "estimate"
+          ]
+        },
+        {
+          "artifact": "model_results/ordinal_logit_1.json",
+          "path": [
+            "coefficients",
+            "grp",
+            "estimate"
+          ]
+        }
+      ],
+      "not_native_verified_fields": [
+        "Any field not listed in native_verified_fields, including unlisted intercepts, p-values and confidence intervals",
+        "Coefficient standard errors are not included in this family packet native comparison"
+      ],
+      "answer_comparison_indices": [
+        0,
+        1,
+        2
+      ]
+    },
+    "multinomial_logit": {
+      "source_path": "tests/fixtures/v186_families/families.csv",
+      "source_sha256": "cb8172fbd6c7a4b70a5c524df660480c1e98529ccbe3bfdd10b30748ffa35ad8",
+      "params": {
+        "model_type": "multinomial_logit",
+        "y": "choice",
+        "x": [
+          "x1",
+          "x2",
+          "grp"
+        ],
+        "model_options": {
+          "base_category": "a"
+        }
+      },
+      "oracle_path": "tests/fixtures/v186_families/oracle.json",
+      "oracle_sha256": "30dbea51f144a42a18340ac62e3f283b8ac62a708f0f54993b5547af2ef183fb",
+      "model_id": "multinomial_logit_1",
+      "comparisons": [
+        {
+          "actual": [
+            "coefficients",
+            "b:x1",
+            "estimate"
+          ],
+          "oracle": [
+            "multinomial_logit",
+            "coefficients",
+            "b",
+            "x1"
+          ],
+          "tolerance_source": "tests/test_v186_families_external_oracle_v187.py",
+          "abs": 0.0001
+        },
+        {
+          "actual": [
+            "coefficients",
+            "b:x2",
+            "estimate"
+          ],
+          "oracle": [
+            "multinomial_logit",
+            "coefficients",
+            "b",
+            "x2"
+          ],
+          "tolerance_source": "tests/test_v186_families_external_oracle_v187.py",
+          "abs": 0.0001
+        },
+        {
+          "actual": [
+            "coefficients",
+            "b:grp",
+            "estimate"
+          ],
+          "oracle": [
+            "multinomial_logit",
+            "coefficients",
+            "b",
+            "grp"
+          ],
+          "tolerance_source": "tests/test_v186_families_external_oracle_v187.py",
+          "abs": 0.0001
+        },
+        {
+          "actual": [
+            "coefficients",
+            "c:x1",
+            "estimate"
+          ],
+          "oracle": [
+            "multinomial_logit",
+            "coefficients",
+            "c",
+            "x1"
+          ],
+          "tolerance_source": "tests/test_v186_families_external_oracle_v187.py",
+          "abs": 0.0001
+        },
+        {
+          "actual": [
+            "coefficients",
+            "c:x2",
+            "estimate"
+          ],
+          "oracle": [
+            "multinomial_logit",
+            "coefficients",
+            "c",
+            "x2"
+          ],
+          "tolerance_source": "tests/test_v186_families_external_oracle_v187.py",
+          "abs": 0.0001
+        },
+        {
+          "actual": [
+            "coefficients",
+            "c:grp",
+            "estimate"
+          ],
+          "oracle": [
+            "multinomial_logit",
+            "coefficients",
+            "c",
+            "grp"
+          ],
+          "tolerance_source": "tests/test_v186_families_external_oracle_v187.py",
+          "abs": 0.0001
+        }
+      ],
+      "native_verified_fields": [
+        {
+          "artifact": "model_results/multinomial_logit_1.json",
+          "path": [
+            "coefficients",
+            "b:x1",
+            "estimate"
+          ]
+        },
+        {
+          "artifact": "model_results/multinomial_logit_1.json",
+          "path": [
+            "coefficients",
+            "b:x2",
+            "estimate"
+          ]
+        },
+        {
+          "artifact": "model_results/multinomial_logit_1.json",
+          "path": [
+            "coefficients",
+            "b:grp",
+            "estimate"
+          ]
+        },
+        {
+          "artifact": "model_results/multinomial_logit_1.json",
+          "path": [
+            "coefficients",
+            "c:x1",
+            "estimate"
+          ]
+        },
+        {
+          "artifact": "model_results/multinomial_logit_1.json",
+          "path": [
+            "coefficients",
+            "c:x2",
+            "estimate"
+          ]
+        },
+        {
+          "artifact": "model_results/multinomial_logit_1.json",
+          "path": [
+            "coefficients",
+            "c:grp",
+            "estimate"
+          ]
+        }
+      ],
+      "not_native_verified_fields": [
+        "Any field not listed in native_verified_fields, including unlisted intercepts, p-values and confidence intervals",
+        "Coefficient standard errors are not included in this family packet native comparison"
+      ],
+      "answer_comparison_indices": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5
+      ]
+    },
+    "quantile_regression": {
+      "source_path": "tests/fixtures/v186_families/families.csv",
+      "source_sha256": "cb8172fbd6c7a4b70a5c524df660480c1e98529ccbe3bfdd10b30748ffa35ad8",
+      "params": {
+        "model_type": "quantile_regression",
+        "y": "y",
+        "x": [
+          "x1",
+          "x2",
+          "grp"
+        ],
+        "model_options": {
+          "quantiles": [
+            0.25,
+            0.5,
+            0.75
+          ],
+          "bootstrap_reps": 0
+        }
+      },
+      "oracle_path": "tests/fixtures/v186_families/oracle.json",
+      "oracle_sha256": "30dbea51f144a42a18340ac62e3f283b8ac62a708f0f54993b5547af2ef183fb",
+      "model_id": "quantile_regression_1",
+      "comparisons": [
+        {
+          "actual": [
+            "fits",
+            "0.25",
+            "coefficients",
+            "x1",
+            "estimate"
+          ],
+          "oracle": [
+            "quantile_regression",
+            "tau_0.25",
+            "coefficients",
+            "x1"
+          ],
+          "tolerance_source": "tests/test_v186_families_external_oracle_v187.py",
+          "abs": 1e-05
+        },
+        {
+          "actual": [
+            "fits",
+            "0.25",
+            "coefficients",
+            "x2",
+            "estimate"
+          ],
+          "oracle": [
+            "quantile_regression",
+            "tau_0.25",
+            "coefficients",
+            "x2"
+          ],
+          "tolerance_source": "tests/test_v186_families_external_oracle_v187.py",
+          "abs": 1e-05
+        },
+        {
+          "actual": [
+            "fits",
+            "0.25",
+            "coefficients",
+            "grp",
+            "estimate"
+          ],
+          "oracle": [
+            "quantile_regression",
+            "tau_0.25",
+            "coefficients",
+            "grp"
+          ],
+          "tolerance_source": "tests/test_v186_families_external_oracle_v187.py",
+          "abs": 1e-05
+        },
+        {
+          "actual": [
+            "fits",
+            "0.5",
+            "coefficients",
+            "x1",
+            "estimate"
+          ],
+          "oracle": [
+            "quantile_regression",
+            "tau_0.5",
+            "coefficients",
+            "x1"
+          ],
+          "tolerance_source": "tests/test_v186_families_external_oracle_v187.py",
+          "abs": 1e-05
+        },
+        {
+          "actual": [
+            "fits",
+            "0.5",
+            "coefficients",
+            "x2",
+            "estimate"
+          ],
+          "oracle": [
+            "quantile_regression",
+            "tau_0.5",
+            "coefficients",
+            "x2"
+          ],
+          "tolerance_source": "tests/test_v186_families_external_oracle_v187.py",
+          "abs": 1e-05
+        },
+        {
+          "actual": [
+            "fits",
+            "0.5",
+            "coefficients",
+            "grp",
+            "estimate"
+          ],
+          "oracle": [
+            "quantile_regression",
+            "tau_0.5",
+            "coefficients",
+            "grp"
+          ],
+          "tolerance_source": "tests/test_v186_families_external_oracle_v187.py",
+          "abs": 1e-05
+        },
+        {
+          "actual": [
+            "fits",
+            "0.75",
+            "coefficients",
+            "x1",
+            "estimate"
+          ],
+          "oracle": [
+            "quantile_regression",
+            "tau_0.75",
+            "coefficients",
+            "x1"
+          ],
+          "tolerance_source": "tests/test_v186_families_external_oracle_v187.py",
+          "abs": 1e-05
+        },
+        {
+          "actual": [
+            "fits",
+            "0.75",
+            "coefficients",
+            "x2",
+            "estimate"
+          ],
+          "oracle": [
+            "quantile_regression",
+            "tau_0.75",
+            "coefficients",
+            "x2"
+          ],
+          "tolerance_source": "tests/test_v186_families_external_oracle_v187.py",
+          "abs": 1e-05
+        },
+        {
+          "actual": [
+            "fits",
+            "0.75",
+            "coefficients",
+            "grp",
+            "estimate"
+          ],
+          "oracle": [
+            "quantile_regression",
+            "tau_0.75",
+            "coefficients",
+            "grp"
+          ],
+          "tolerance_source": "tests/test_v186_families_external_oracle_v187.py",
+          "abs": 1e-05
+        }
+      ],
+      "answer_comparison_indices": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8
+      ],
+      "native_verified_fields": [
+        {
+          "artifact": "model_results/quantile_regression_1.json",
+          "path": [
+            "fits",
+            "0.25",
+            "coefficients",
+            "x1",
+            "estimate"
+          ]
+        },
+        {
+          "artifact": "model_results/quantile_regression_1.json",
+          "path": [
+            "fits",
+            "0.25",
+            "coefficients",
+            "x2",
+            "estimate"
+          ]
+        },
+        {
+          "artifact": "model_results/quantile_regression_1.json",
+          "path": [
+            "fits",
+            "0.25",
+            "coefficients",
+            "grp",
+            "estimate"
+          ]
+        },
+        {
+          "artifact": "model_results/quantile_regression_1.json",
+          "path": [
+            "fits",
+            "0.5",
+            "coefficients",
+            "x1",
+            "estimate"
+          ]
+        },
+        {
+          "artifact": "model_results/quantile_regression_1.json",
+          "path": [
+            "fits",
+            "0.5",
+            "coefficients",
+            "x2",
+            "estimate"
+          ]
+        },
+        {
+          "artifact": "model_results/quantile_regression_1.json",
+          "path": [
+            "fits",
+            "0.5",
+            "coefficients",
+            "grp",
+            "estimate"
+          ]
+        },
+        {
+          "artifact": "model_results/quantile_regression_1.json",
+          "path": [
+            "fits",
+            "0.75",
+            "coefficients",
+            "x1",
+            "estimate"
+          ]
+        },
+        {
+          "artifact": "model_results/quantile_regression_1.json",
+          "path": [
+            "fits",
+            "0.75",
+            "coefficients",
+            "x2",
+            "estimate"
+          ]
+        },
+        {
+          "artifact": "model_results/quantile_regression_1.json",
+          "path": [
+            "fits",
+            "0.75",
+            "coefficients",
+            "grp",
+            "estimate"
+          ]
+        }
+      ],
+      "not_native_verified_fields": [
+        "Any field not listed in native_verified_fields, including unlisted intercepts, p-values and confidence intervals",
+        "Coefficient standard errors are not included in this family packet native comparison"
+      ]
+    },
+    "survival_cox": {
+      "source_path": "tests/fixtures/v186_families/families.csv",
+      "source_sha256": "cb8172fbd6c7a4b70a5c524df660480c1e98529ccbe3bfdd10b30748ffa35ad8",
+      "params": {
+        "model_type": "survival_cox",
+        "y": "duration",
+        "x": [
+          "x1",
+          "x2",
+          "grp"
+        ],
+        "model_options": {
+          "event_column": "event",
+          "ties": "efron"
+        }
+      },
+      "oracle_path": "tests/fixtures/v186_families/oracle.json",
+      "oracle_sha256": "30dbea51f144a42a18340ac62e3f283b8ac62a708f0f54993b5547af2ef183fb",
+      "model_id": "survival_cox_1",
+      "comparisons": [
+        {
+          "actual": [
+            "coefficients",
+            "x1",
+            "estimate"
+          ],
+          "oracle": [
+            "survival_cox",
+            "coefficients",
+            "x1"
+          ],
+          "tolerance_source": "tests/test_v186_families_external_oracle_v187.py",
+          "rel": 1e-10
+        },
+        {
+          "actual": [
+            "coefficients",
+            "x2",
+            "estimate"
+          ],
+          "oracle": [
+            "survival_cox",
+            "coefficients",
+            "x2"
+          ],
+          "tolerance_source": "tests/test_v186_families_external_oracle_v187.py",
+          "rel": 1e-10
+        },
+        {
+          "actual": [
+            "coefficients",
+            "grp",
+            "estimate"
+          ],
+          "oracle": [
+            "survival_cox",
+            "coefficients",
+            "grp"
+          ],
+          "tolerance_source": "tests/test_v186_families_external_oracle_v187.py",
+          "rel": 1e-10
+        },
+        {
+          "actual": [
+            "coefficients",
+            "x1",
+            "std_error"
+          ],
+          "oracle": [
+            "survival_cox",
+            "std_errors",
+            "x1"
+          ],
+          "tolerance_source": "tests/test_v186_families_external_oracle_v187.py",
+          "rel": 1e-10
+        },
+        {
+          "actual": [
+            "coefficients",
+            "x2",
+            "std_error"
+          ],
+          "oracle": [
+            "survival_cox",
+            "std_errors",
+            "x2"
+          ],
+          "tolerance_source": "tests/test_v186_families_external_oracle_v187.py",
+          "rel": 1e-10
+        },
+        {
+          "actual": [
+            "coefficients",
+            "grp",
+            "std_error"
+          ],
+          "oracle": [
+            "survival_cox",
+            "std_errors",
+            "grp"
+          ],
+          "tolerance_source": "tests/test_v186_families_external_oracle_v187.py",
+          "rel": 1e-10
+        }
+      ],
+      "native_verified_fields": [
+        {
+          "artifact": "model_results/survival_cox_1.json",
+          "path": [
+            "coefficients",
+            "x1",
+            "estimate"
+          ]
+        },
+        {
+          "artifact": "model_results/survival_cox_1.json",
+          "path": [
+            "coefficients",
+            "x2",
+            "estimate"
+          ]
+        },
+        {
+          "artifact": "model_results/survival_cox_1.json",
+          "path": [
+            "coefficients",
+            "grp",
+            "estimate"
+          ]
+        },
+        {
+          "artifact": "model_results/survival_cox_1.json",
+          "path": [
+            "coefficients",
+            "x1",
+            "std_error"
+          ]
+        },
+        {
+          "artifact": "model_results/survival_cox_1.json",
+          "path": [
+            "coefficients",
+            "x2",
+            "std_error"
+          ]
+        },
+        {
+          "artifact": "model_results/survival_cox_1.json",
+          "path": [
+            "coefficients",
+            "grp",
+            "std_error"
+          ]
+        }
+      ],
+      "not_native_verified_fields": [
+        "Unlisted hazard ratios, p-values, confidence intervals and likelihood"
+      ],
+      "answer_comparison_indices": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5
+      ]
+    },
+    "cs_did": {
+      "source_path": "tests/fixtures/cs_did/panel.csv",
+      "source_sha256": "3e929df973399a5015a658306830ce9ef0d08dc551dd14556940f3377ed0f268",
+      "params": {
+        "model_type": "cs_did",
+        "y": "y",
+        "x": [
+          "x1"
+        ],
+        "model_options": {},
+        "entity_col": "unit",
+        "time_col": "period",
+        "did_mode": "cohort",
+        "did_cohort_col": "first_treat",
+        "cs_control_group": "never",
+        "cs_est_method": "dr",
+        "cs_base_period": "varying",
+        "cs_anticipation": 0
+      },
+      "oracle_path": "tests/fixtures/cs_did/aggte.json",
+      "oracle_sha256": "d835af04b0d372aa002a107d598d7da3a056a86a6285cadcfe695d772b790b7c",
+      "model_id": "cs_did_1",
+      "comparisons": [
+        {
+          "actual": [
+            "coefficients",
+            "ATT",
+            "estimate"
+          ],
+          "oracle": [
+            "dr",
+            "simple",
+            "overall"
+          ],
+          "tolerance_source": "tests/test_cs_did_oracle.py",
+          "abs": 1e-06
+        },
+        {
+          "actual": [
+            "coefficients",
+            "ATT",
+            "std_error"
+          ],
+          "oracle": [
+            "dr",
+            "simple",
+            "overall_se"
+          ],
+          "tolerance_source": "tests/test_cs_did_oracle.py",
+          "abs": 1e-06
+        }
+      ],
+      "native_verified_fields": [
+        {
+          "artifact": "model_results/cs_did_1.json",
+          "path": [
+            "coefficients",
+            "ATT",
+            "estimate"
+          ]
+        },
+        {
+          "artifact": "model_results/cs_did_1.json",
+          "path": [
+            "coefficients",
+            "ATT",
+            "std_error"
+          ]
+        }
+      ],
+      "not_native_verified_fields": [
+        "Any field not listed in native_verified_fields, including unlisted intercepts, p-values and confidence intervals"
+      ],
+      "answer_comparison_indices": [
+        0,
+        1
+      ]
+    },
+    "sa_did": {
+      "source_path": "tests/fixtures/sa_did/panel_balanced.csv",
+      "source_sha256": "cd4a9dae122f0d3d905841471801bd041e053da1d36f7ecac2144abcb60d0add",
+      "params": {
+        "model_type": "sa_did",
+        "y": "y",
+        "x": [],
+        "model_options": {},
+        "entity_col": "id",
+        "time_col": "year",
+        "did_mode": "cohort",
+        "did_cohort_col": "cohort"
+      },
+      "oracle_path": "tests/fixtures/sa_did/sunab_balanced.json",
+      "oracle_sha256": "346c45a4dafa934df1bd0ead22be46efc6413507831cb3f00de0adc5fd910e0b",
+      "model_id": "sa_did_1",
+      "comparisons": [
+        {
+          "actual": [
+            "coefficients",
+            "ATT",
+            "estimate"
+          ],
+          "oracle": [
+            "att_overall"
+          ],
+          "tolerance_source": "tests/test_sa_attgt.py",
+          "abs": 1e-06
+        }
+      ],
+      "native_verified_fields": [
+        {
+          "artifact": "model_results/sa_did_1.json",
+          "path": [
+            "coefficients",
+            "ATT",
+            "estimate"
+          ]
+        }
+      ],
+      "not_native_verified_fields": [
+        "Any field not listed in native_verified_fields, including unlisted intercepts, p-values and confidence intervals",
+        "Coefficient standard errors are not included in this family packet native comparison"
+      ],
+      "answer_comparison_indices": [
+        0
+      ]
+    },
+    "dcdh": {
+      "source_path": "tests/fixtures/dcdh/panel_nonabsorbing.csv",
+      "source_sha256": "12dbc956c84a9e22d3b449c49df5acbcd32ba8de2e427587b7d2dd81a3762960",
+      "params": {
+        "model_type": "dcdh",
+        "y": "y",
+        "x": [],
+        "model_options": {},
+        "entity_col": "id",
+        "time_col": "year",
+        "did_treatment_path": "d"
+      },
+      "oracle_path": "tests/fixtures/dcdh/dyn_nonabsorbing.json",
+      "oracle_sha256": "bcb348d317971461531ccee5e1ba1d3009a839f9da607c00cbab2a39ee25dcd1",
+      "model_id": "dcdh_1",
+      "comparisons": [
+        {
+          "artifact": "dcdh.json",
+          "actual": [
+            "event_study",
+            "estimate",
+            2
+          ],
+          "oracle": [
+            "effect_estimate",
+            0
+          ],
+          "abs": 1e-06,
+          "tolerance_source": "tests/test_dcdh_estimator.py"
+        },
+        {
+          "artifact": "dcdh.json",
+          "actual": [
+            "event_study",
+            "estimate",
+            3
+          ],
+          "oracle": [
+            "effect_estimate",
+            1
+          ],
+          "abs": 1e-06,
+          "tolerance_source": "tests/test_dcdh_estimator.py"
+        },
+        {
+          "artifact": "dcdh.json",
+          "actual": [
+            "event_study",
+            "estimate",
+            4
+          ],
+          "oracle": [
+            "effect_estimate",
+            2
+          ],
+          "abs": 1e-06,
+          "tolerance_source": "tests/test_dcdh_estimator.py"
+        },
+        {
+          "artifact": "dcdh.json",
+          "actual": [
+            "event_study",
+            "se",
+            2
+          ],
+          "oracle": [
+            "effect_se",
+            0
+          ],
+          "abs": 1e-09,
+          "tolerance_source": "tests/test_dcdh_estimator.py"
+        },
+        {
+          "artifact": "dcdh.json",
+          "actual": [
+            "event_study",
+            "se",
+            3
+          ],
+          "oracle": [
+            "effect_se",
+            1
+          ],
+          "abs": 1e-09,
+          "tolerance_source": "tests/test_dcdh_estimator.py"
+        },
+        {
+          "artifact": "dcdh.json",
+          "actual": [
+            "event_study",
+            "se",
+            4
+          ],
+          "oracle": [
+            "effect_se",
+            2
+          ],
+          "abs": 1e-09,
+          "tolerance_source": "tests/test_dcdh_estimator.py"
+        }
+      ],
+      "answer_comparison_indices": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "native_verified_fields": [
+        {
+          "artifact": "dcdh.json",
+          "path": [
+            "event_study",
+            "estimate",
+            2
+          ]
+        },
+        {
+          "artifact": "dcdh.json",
+          "path": [
+            "event_study",
+            "estimate",
+            3
+          ]
+        },
+        {
+          "artifact": "dcdh.json",
+          "path": [
+            "event_study",
+            "estimate",
+            4
+          ]
+        },
+        {
+          "artifact": "dcdh.json",
+          "path": [
+            "event_study",
+            "se",
+            2
+          ]
+        },
+        {
+          "artifact": "dcdh.json",
+          "path": [
+            "event_study",
+            "se",
+            3
+          ]
+        },
+        {
+          "artifact": "dcdh.json",
+          "path": [
+            "event_study",
+            "se",
+            4
+          ]
+        }
+      ],
+      "not_native_verified_fields": [
+        "Any field not listed in native_verified_fields, including unlisted intercepts, p-values and confidence intervals",
+        "overall_att / coefficients.ATT: different estimand from native Av_tot_eff; no native equality claim"
+      ],
+      "known_limitations": [
+        "Public overall ATT is an experimental switcher-weighted horizon average. It is not native DIDmultiplegtDYN Av_tot_eff; the original public value 0.7960170222577605 differs from native 0.8428415529788059. Only dynamic Effect_1..3 and their pointwise standard errors are compared."
+      ]
+    }
+  }
+}

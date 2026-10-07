@@ -369,8 +369,9 @@ def fit_joint_variance_candidate(
         mean_order=mean_order,
         mean_constant=mean_constant,
     )
+    mean_q = binding[1][1] if binding[1] is not None else 0
     if binding[0] is not None and (
-        binding[1] != (mean_p, 0) or binding[2] is not include_constant
+        binding[1][0] != mean_p or binding[2] is not include_constant
     ):
         raise ValueError("joint mean binding must match the fitted AR specification")
     started = perf_counter()
@@ -378,6 +379,40 @@ def fit_joint_variance_candidate(
         series = _finite_one_dimensional(values)
         if type(mean_p) is not int or mean_p < 0:
             raise ValueError("mean_p must be a non-negative integer")
+        if mean_q > 0:
+            from workbench.engine.packs.arma_garch.joint_mle import fit_joint_arma_garch
+
+            if hold_back != 0:
+                raise ValueError("joint ARMA-GARCH requires hold_back=0")
+            fitted = fit_joint_arma_garch(
+                series, mean_p=mean_p, mean_q=mean_q,
+                include_constant=include_constant, variance_spec=spec,
+                time_index_semantics="observation_order",
+            )
+            conditional = fitted.conditional_series
+            standardized = np.asarray(conditional["standardized_residual"], dtype=float)
+            squared = np.asarray(conditional["squared_standardized_residual"], dtype=float)
+            aicc = calculate_aicc(aic=fitted.aic, parameter_count=len(fitted.parameters), effective_sample=fitted.nobs)
+            return VarianceCandidateResult(
+                candidate_id=spec.candidate_id, display_name=spec.display_name,
+                model=spec.model, p=spec.p, q=spec.q, distribution=spec.distribution,
+                estimation_strategy="joint", joint_likelihood=True,
+                mean_candidate_id=binding[0], mean_order=binding[1], mean_constant=binding[2],
+                nobs=fitted.nobs, hold_back=0, effective_sample=fitted.nobs,
+                converged=fitted.converged, convergence_details=fitted.convergence_details,
+                parameters=fitted.parameters, parameter_constraints=fitted.parameter_constraints,
+                parameters_valid=True, log_likelihood=fitted.log_likelihood,
+                parameter_count=len(fitted.parameters), aic=fitted.aic, aicc=aicc, bic=fitted.bic,
+                standardized_residual_diagnostics=tuple(ljung_box_results(standardized, model_df=0)),
+                squared_standardized_residual_diagnostics=tuple(ljung_box_results(squared, model_df=0)),
+                conditional_variance=tuple(conditional["variance"]),
+                conditional_volatility=tuple(conditional["volatility"]),
+                standardized_residuals=tuple(conditional["standardized_residual"]),
+                squared_standardized_residuals=tuple(conditional["squared_standardized_residual"]),
+                warnings=tuple((*fitted.warnings, *(("AICC_UNDEFINED",) if aicc is None else ()))),
+                failure_code=None if aicc is not None else "AICC_UNDEFINED",
+                elapsed_seconds=perf_counter()-started,
+            )
         _validate_hold_back(
             hold_back,
             len(series),
@@ -662,10 +697,8 @@ def search_joint_variance_candidates(
         mean_constant=mean_constant,
     )
     assert binding[1] is not None and binding[2] is not None
-    if binding[1][1] != 0:
-        raise ValueError("joint variance search requires mean_order q=0")
     specs = enumerate_variance_candidates(contract)
-    hold_back = max(binding[1][0], common_hold_back(specs))
+    hold_back = 0 if binding[1][1] > 0 else max(binding[1][0], common_hold_back(specs))
     candidates: list[VarianceCandidateResult] = []
     for spec in specs:
         if checkpoint is not None:

@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "project_id": "independent",
+  "run_id": "alpha_two",
+  "workbench_version": "1.8.11",
+  "lineage_hash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "sources": [
+    {
+      "source_id": "source",
+      "format": "csv",
+      "filename": "data.csv",
+      "sha256": "9707e4d6dc11d72fc6240b79a8ba79c8fd884b4edfa237905c086cddded60101",
+      "read_options": {}
+    }
+  ],
+  "steps": [
+    {
+      "step_id": "model",
+      "kind": "model",
+      "operation": "model.glm:negative_binomial",
+      "label": "",
+      "parameters": {
+        "model_type": "glm",
+        "y": "y",
+        "x": [
+          "x1",
+          "x2"
+        ],
+        "covariance": "unadjusted",
+        "model_options": {
+          "family": "negative_binomial",
+          "alpha": 2
+        }
+      },
+      "inputs": [
+        "source"
+      ],
+      "output_dataset": null,
+      "expected": {
+        "coefficients": {
+          "Intercept": 0.431862033963731,
+          "x1": 0.499237797659053,
+          "x2": -0.319131636821243
+        },
+        "std_errors": {
+          "Intercept": 0.108234874866925,
+          "x1": 0.11295797337987,
+          "x2": 0.0991705432200099
+        },
+        "nobs": 240
+      },
+      "tolerances": {
+        "coefficients": {
+          "abs": 1e-08,
+          "rel": 0
+        },
+        "std_errors": {
+          "abs": 1e-06,
+          "rel": 0
+        }
+      },
+      "seed": null,
+      "snapshot": null
+    }
+  ]
+}

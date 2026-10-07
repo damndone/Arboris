@@ -1,0 +1,36 @@
+{
+  "owner": "/private/tmp/v1811-evaluation-8d8a2fd4c7d44af693b267e6d893d16f-r01/e04-native0/public-post/runs/20261005_091808_144503_aa5b7bac",
+  "expected": {
+    "estimate": 0.5532356005981965,
+    "std_error": 0.08143302893488887
+  },
+  "actual": {
+    "schema_version": "workbench.postestimation.result/v1",
+    "model_run_id": "20261005_091808_144503_aa5b7bac",
+    "operation": "margins",
+    "model_id": "glm_1",
+    "model_type": "glm:negative_binomial",
+    "covariance_estimator": "nonrobust",
+    "at": "average",
+    "label": "average marginal effect",
+    "scale": "response",
+    "inverse_link": "log",
+    "nobs": 850,
+    "distribution": "z",
+    "df": null,
+    "level": 0.95,
+    "effects": [
+      {
+        "variable": "x1",
+        "estimate": 0.5532355990308084,
+        "std_error": 0.0814330283374621,
+        "statistic": 6.793749542730689,
+        "p_value": 1.09255997124486e-11,
+        "ci": [
+          0.39362979633735307,
+          0.7128414017242638
+        ]
+      }
+    ]
+  }
+}

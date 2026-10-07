@@ -1,0 +1,189 @@
+
+  ___  ____  ____  ____  ____ ®
+ /__    /   ____/   /   ____/      18.0
+___/   /   /___/   /   /___/       MP—Parallel Edition
+
+ Statistics and Data Science       Copyright 1985-2023 StataCorp LLC
+                                   StataCorp
+                                   4905 Lakeway Drive
+                                   College Station, Texas 77845 USA
+                                   800-STATA-PC        https://www.stata.com
+                                   979-696-4600        stata@stata.com
+
+Stata license: Single-user 2-core  perpetual
+Serial number: [REDACTED]
+  Licensed to: [REDACTED]
+               
+
+Notes:
+      1. Stata is running in batch mode.
+      2. Unicode is supported; see help unicode_advice.
+      3. More than 2 billion observations are allowed; see help obs_advice.
+      4. Maximum number of variables is set to 5,000 but can be increased;
+          see help set_maxvar.
+
+
+Running /Applications/Stata/profile.do ...
+command window is unrecognized
+r(199);
+
+. do analysis.do 
+
+. version 18
+
+. set more off
+
+. file open wbout using "wb_results.tsv", write replace
+(file wb_results.tsv not found)
+
+. * Workbench 1.8.11
+. * project: independent
+. * run: alpha_two
+. * lineage_hash: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+> eee
+. * Coverage
+. * model | model.glm:negative_binomial | native | 
+. version 18
+
+. set more off
+
+. set type double
+
+. capture program drop wb_repost
+
+. program define wb_repost, eclass
+  1.     args beta covariance
+  2.     ereturn repost b=`beta' V=`covariance', rename
+  3. end
+
+. capture program drop wb_sha
+
+. program define wb_sha
+  1.     args filename expected
+  2.     tempfile digestfile
+  3.     shell shasum -a 256 "`filename'" > "`digestfile'"
+  4.     tempname fh
+  5.     file open `fh' using "`digestfile'", read text
+  6.     file read `fh' line
+  7.     file close `fh'
+  8.     if substr("`line'",1,64) != "`expected'" {
+  9.         display as error "SHA256 mismatch"
+ 10.         exit 9
+ 11.     }
+ 12. end
+
+. 
+. wb_sha "data.csv" "9707e4d6dc11d72fc6240b79a8ba79c8fd884b4edfa237905c086cddde
+> d60101"
+
+
+. frame create wb_src0
+
+. frame change wb_src0
+
+. import delimited using "data.csv", varnames(1) delimiters(",") encoding("UTF-
+> 8") asdouble clear case(preserve)
+(3 vars, 240 obs)
+
+. frame copy wb_src0 wb_model_data1
+
+. frame change wb_model_data1
+
+. glm y x1 x2, family(nbinomial 2.0) link(log) ml vce(eim) scale(1) iterate(100
+> 0) tolerance(1e-12) ltolerance(1e-12)
+
+Iteration 0:  Log likelihood = -418.39088  
+Iteration 1:  Log likelihood = -406.44559  
+Iteration 2:  Log likelihood = -406.38589  
+Iteration 3:  Log likelihood = -406.38588  
+Iteration 4:  Log likelihood = -406.38588  
+
+Generalized linear models                         Number of obs   =        240
+Optimization     : ML                             Residual df     =        237
+                                                  Scale parameter =          1
+Deviance         =  238.8081094                   (1/df) Deviance =   1.007629
+Pearson          =  251.6725362                   (1/df) Pearson  =   1.061909
+
+Variance function: V(u) = u+(2)u^2                [Neg. Binomial]
+Link function    : g(u) = ln(u)                   [Log]
+
+                                                  AIC             =   3.411549
+Log likelihood   = -406.3858791                   BIC             =  -1060.103
+
+------------------------------------------------------------------------------
+             |                 EIM
+           y | Coefficient  std. err.      z    P>|z|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+          x1 |   .4992378    .112958     4.42   0.000     .2778442    .7206314
+          x2 |  -.3191316   .0991705    -3.22   0.001    -.5135023   -.1247609
+       _cons |    .431862   .1082349     3.99   0.000     .2197256    .6439985
+------------------------------------------------------------------------------
+
+. assert e(converged) == 1
+
+. estimates store wb_model1
+
+. generate long wb_sample_row = _n
+
+. generate byte wb_sample1 = e(sample)
+
+. scalar wb_number_0 = _b[_cons]
+
+. scalar wb_number_1 = _b[x1]
+
+. scalar wb_number_2 = _b[x2]
+
+. scalar wb_number_3 = _se[_cons]
+
+. scalar wb_number_4 = _se[x1]
+
+. scalar wb_number_5 = _se[x2]
+
+. scalar wb_number_6 = e(N)
+
+. * Closing self-checks
+. assert !missing(wb_number_0) & abs(wb_number_0-(0.431862033963731)) <= 1e-08+
+> 0*abs(0.431862033963731)
+
+. assert !missing(wb_number_1) & abs(wb_number_1-(0.499237797659053)) <= 1e-08+
+> 0*abs(0.499237797659053)
+
+. assert !missing(wb_number_2) & abs(wb_number_2-(-0.319131636821243)) <= 1e-08
+> +0*abs(-0.319131636821243)
+
+. assert !missing(wb_number_3) & abs(wb_number_3-(0.108234874866925)) <= 1e-06+
+> 0*abs(0.108234874866925)
+
+. assert !missing(wb_number_4) & abs(wb_number_4-(0.11295797337987)) <= 1e-06+0
+> *abs(0.11295797337987)
+
+. assert !missing(wb_number_5) & abs(wb_number_5-(0.0991705432200099)) <= 1e-06
+> +0*abs(0.0991705432200099)
+
+. assert !missing(wb_number_6) & abs(wb_number_6-(240)) <= 0.0+0.0*abs(240)
+
+. 
+. file write wbout "v_1_1" _tab %21.15g (e(V)[3,3]) _n
+
+. file write wbout "v_1_2" _tab %21.15g (e(V)[3,1]) _n
+
+. file write wbout "v_1_3" _tab %21.15g (e(V)[3,2]) _n
+
+. file write wbout "v_2_1" _tab %21.15g (e(V)[1,3]) _n
+
+. file write wbout "v_2_2" _tab %21.15g (e(V)[1,1]) _n
+
+. file write wbout "v_2_3" _tab %21.15g (e(V)[1,2]) _n
+
+. file write wbout "v_3_1" _tab %21.15g (e(V)[2,3]) _n
+
+. file write wbout "v_3_2" _tab %21.15g (e(V)[2,1]) _n
+
+. file write wbout "v_3_3" _tab %21.15g (e(V)[2,2]) _n
+
+. file write wbout "ll" _tab %21.15g (e(ll)) _n
+
+. file close wbout
+
+. 
+end of do-file

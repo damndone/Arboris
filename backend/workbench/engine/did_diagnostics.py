@@ -25,21 +25,38 @@ def _att_from_fitted(fitted) -> dict:
 
 
 def _parallel_trends(event_study: dict) -> dict:
-    """Joint significance of the pre-period (lead) coefficients via a Wald-style
-    F approximation: mean((coef/se)^2) over leads ~ F(df1, inf)."""
-    leads = [(c, s) for k, c, s in zip(event_study["event_time"],
-                                       event_study["coef"], event_study["se"]) if k < 0]
-    if not leads:
+    """Joint Wald test that every pre-period (lead) coefficient is zero.
+
+    Uses the leads' full covariance, as Stata's ``testparm``: F(q, G - 1) under
+    clustered errors, chi2(q) / q against F(q, inf) otherwise. (Before v1.8.11
+    this averaged the squared t statistics, which ignores the correlation
+    between the leads.)"""
+    terms = event_study.get("pre_period_terms") or []
+    if not terms:
         return {"test": "joint_pre_leads_f", "statistic": None, "pvalue": None,
                 "n_pre_leads": 0, "verdict": "not_rejected",
                 "message": "No pre-period leads available to test."}
-    z2 = [(c / s) ** 2 for c, s in leads if c is not None and s is not None and s > 0]
-    f_stat = float(np.mean(z2)) if z2 else 0.0
-    df1 = len(z2)
-    pvalue = float(stats.f.sf(f_stat, df1, 10_000)) if df1 else 1.0
+    beta = np.asarray([np.nan if v is None else v for v in event_study["pre_period_estimates"]], dtype=float)
+    covariance = np.asarray(
+        [[np.nan if v is None else v for v in row] for row in event_study["pre_period_covariance"]], dtype=float
+    )
+    # An absorbed lead has no estimate; the test covers the leads that have one.
+    keep = np.isfinite(beta) & np.isfinite(np.diag(covariance)) & (np.diag(covariance) > 0)
+    beta, covariance = beta[keep], covariance[np.ix_(keep, keep)]
+    q = int(keep.sum())
+    if q == 0:
+        return {"test": "joint_pre_leads_f", "statistic": None, "pvalue": None,
+                "n_pre_leads": 0, "verdict": "not_rejected",
+                "message": "No estimable pre-period leads available to test."}
+    f_stat = float(beta @ np.linalg.solve(covariance, beta) / q)
+    df_den = event_study.get("effective_df")
+    pvalue = float(stats.f.sf(f_stat, q, df_den)) if df_den else float(stats.chi2.sf(f_stat * q, q))
+    df1 = q
     verdict = "rejected" if pvalue < 0.05 else "not_rejected"
     return {"test": "joint_pre_leads_f", "statistic": f_stat,
             "pvalue": round(pvalue, 6), "n_pre_leads": df1, "verdict": verdict,
+            "df_num": q, "df_den": df_den,
+            "distribution": "F" if df_den else "chi2",
             "message": (
                 "Pre-trend leads jointly insignificant (p >= 0.05); parallel "
                 "trends not rejected." if verdict == "not_rejected" else
@@ -48,14 +65,14 @@ def _parallel_trends(event_study: dict) -> dict:
 
 
 def build_did_diagnostics(fitted: Any, norm: NormalizedDID, frame, *,
-                          covariance: str = "robust") -> dict:
+                          covariance: str = "clustered", cluster_col: str | None = None) -> dict:
     # The event study is unidentified for a single treatment cohort (event-time
     # indicators collinear with the time fixed effects). Skip it gracefully — the
     # ATT is still valid — exactly as Bacon is skipped on an unbalanced panel.
     try:
         es = run_event_study(frame, y=norm.y, x=[], entity=norm.entity,
                              time=norm.time, event_time_col="_did_event_time",
-                             ref_period=-1, covariance=covariance)
+                             ref_period=-1, covariance=covariance, cluster_col=cluster_col)
         es["applicable"] = True
     except ValueError as exc:
         if not str(exc).startswith(

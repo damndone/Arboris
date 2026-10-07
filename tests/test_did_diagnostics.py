@@ -62,29 +62,41 @@ def test_unbalanced_panel_skips_bacon_gracefully():
 from workbench.engine.did_diagnostics import _parallel_trends
 
 
+def _leads(estimates, covariance, df=None):
+    """v1.8.11: the event study carries its leads' estimates and covariance."""
+    terms = [f"_evt_m{k}" for k in range(len(estimates) + 1, 1, -1)]
+    return {"pre_period_terms": terms, "pre_period_estimates": estimates,
+            "pre_period_covariance": covariance, "effective_df": df}
+
+
 def test_parallel_trends_rejects_on_violated_pretrend():
     # Large, precise lead coefficients => joint pre-trend test rejects.
-    es = {"event_time": [-2, -1, 0, 1], "coef": [5.0, 4.0, 2.0, 2.1],
-          "se": [0.1, 0.1, 0.1, 0.1], "ci_lower": [], "ci_upper": [], "ref_period": -1}
-    pt = _parallel_trends(es)
+    pt = _parallel_trends(_leads([5.0, 4.0], [[0.01, 0.0], [0.0, 0.01]], df=59))
     assert pt["verdict"] == "rejected"
     assert pt["pvalue"] < 0.05
-    assert pt["n_pre_leads"] == 2  # only event_time < 0 leads counted
+    assert pt["n_pre_leads"] == 2
+    assert (pt["df_num"], pt["df_den"], pt["distribution"]) == (2, 59, "F")
+
+
+def test_parallel_trends_uses_the_leads_covariance():
+    # Two leads of 1.0 with variance 1: independent, F = (1 + 1) / 2 = 1; perfectly
+    # correlated at 0.9, the joint test sees one shift, F = 2 / (1 + 0.9) / 2.
+    independent = _parallel_trends(_leads([1.0, 1.0], [[1.0, 0.0], [0.0, 1.0]]))
+    correlated = _parallel_trends(_leads([1.0, 1.0], [[1.0, 0.9], [0.9, 1.0]]))
+    assert independent["statistic"] == pytest.approx(1.0)
+    assert correlated["statistic"] == pytest.approx(1 / 1.9)
 
 
 def test_parallel_trends_not_rejected_when_leads_flat():
-    es = {"event_time": [-2, -1, 0, 1], "coef": [0.01, 0.0, 2.0, 2.1],
-          "se": [0.2, 0.2, 0.2, 0.2], "ci_lower": [], "ci_upper": [], "ref_period": -1}
-    pt = _parallel_trends(es)
+    pt = _parallel_trends(_leads([0.01, 0.0], [[0.04, 0.0], [0.0, 0.04]], df=59))
     assert pt["verdict"] == "not_rejected"
 
 
 def test_parallel_trends_tolerates_none_coef_or_se():
     # Fix 1: a None coef/se (absorbed lead) must be skipped, not crash.
-    es = {"event_time": [-2, -1, 0, 1], "coef": [None, 0.0, 2.0, 2.1],
-          "se": [None, 0.2, 0.2, 0.2], "ci_lower": [], "ci_upper": [], "ref_period": -1}
-    pt = _parallel_trends(es)  # must not raise
+    pt = _parallel_trends(_leads([None, 0.1], [[None, None], [None, 0.04]], df=59))  # must not raise
     assert pt["verdict"] in {"not_rejected", "rejected"}
+    assert pt["n_pre_leads"] == 1
 
 
 def test_att_from_fitted_absorbed_raises_value_error():

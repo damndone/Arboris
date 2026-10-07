@@ -1,0 +1,56 @@
+{
+  "production_baseline": "5f8451b929ac51ba7ae9821e4a8a7f1adea642a8",
+  "actual_git_head": "5f8451b929ac51ba7ae9821e4a8a7f1adea642a8",
+  "repository": "/Users/jiayuanren/\u9879\u76ee\u89c4\u5212/.worktrees/codex-v1811-evaluation",
+  "loaded": {
+    "workbench": "/Users/jiayuanren/\u9879\u76ee\u89c4\u5212/.worktrees/codex-v1811-evaluation/backend/workbench/__init__.py",
+    "workbench.engine.packs.arma_garch.joint_mle": "/Users/jiayuanren/\u9879\u76ee\u89c4\u5212/.worktrees/codex-v1811-evaluation/backend/workbench/engine/packs/arma_garch/joint_mle.py",
+    "workbench.econometrics.count_models": "/Users/jiayuanren/\u9879\u76ee\u89c4\u5212/.worktrees/codex-v1811-evaluation/backend/workbench/econometrics/count_models.py",
+    "workbench.script_export.builder": "/Users/jiayuanren/\u9879\u76ee\u89c4\u5212/.worktrees/codex-v1811-evaluation/backend/workbench/script_export/builder.py"
+  },
+  "exit": 1,
+  "outcomes": [
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e01_joint.py::test_new_orders_report_final_parameters_se_ll_ic[small_beta-ar2-ma2-0.025-18112053]",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 1.1425508329411969
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e03_panel_did.py::test_actual_default_cluster_kernel_and_final_lincom_match_stata[panel_ols]",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 1.3840996669605374
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e06_classical.py::test_full_and_first_origin_match_stata_and_ignore_future_tail",
+      "phase": "call",
+      "outcome": "failed",
+      "duration": 1.077954625012353
+    },
+    {
+      "nodeid": "tests/eval_v1811/lane_e_20261005/test_e07_entries.py::test_missing_glm_nb_alpha_rejects_all_public_entries",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 1.5281617910368368
+    }
+  ],
+  "paths_sha256": {
+    "backend/workbench/__init__.py": "91447944015cec709e8aa7655f7e9d64e1e4508e7023a57fe3746911c0fc6fed",
+    "backend/workbench/engine/packs/arma_garch/joint_mle.py": "08441a0d22ff98b9cda7687d9a349a553a1c2b69346cef98b654f2a8b48ae55a",
+    "backend/workbench/econometrics/count_models.py": "143b75513c18d4a5aa0a20ea08b61169f65d1a358a533ee0d497c768cff7dd50",
+    "backend/workbench/script_export/builder.py": "f84786033c238be9436caf4b19b74efd7f6d97b837b00d590414fb55a0cb35fc",
+    "tests/eval_v1811/lane_e_20261005/conftest.py": "aa435149143e60fb119c39e5230f8e7bc086fe545275d1f6822f540ea104cd90",
+    "tests/eval_v1811/lane_e_20261005/support.py": "3edef8828b38e5fc2f75ba435cdc5e3c2205e3a42f9bc935fc304accd30a0564",
+    "tests/eval_v1811/lane_e_20261005/test_e01_joint.py": "6072ef4c817456a18f29e3e337d25a29cc4c001712dd1b5821438c7c84e90dac",
+    "tests/eval_v1811/lane_e_20261005/test_e03_panel_did.py": "7154c005e3f8bab31aa31a76095fbfbe3060c414102bb2037b0b874841607b4c",
+    "tests/eval_v1811/lane_e_20261005/test_e06_classical.py": "bfe026322e071ac8032c71b37d4e753a9e9f67443e5f2ade773dc2e0be9544ad",
+    "tests/eval_v1811/lane_e_20261005/test_e07_entries.py": "20be1a3ac7da3cf02b3b053636059cc9427c4d7ecfe74146c811d01a95a37f97",
+    "tests/eval_v1811/lane_e_20261005/test_e04_post.py": "5a4e41a3cfc76b7315ad02e7ba7ec5f69b425b2e8ff30969c58608fa21c49f87",
+    "tests/eval_v1811/lane_e_20261005/test_e02_count.py": "6a7f48176b7e5d25413a8aa03a23b46c5c81c76da142ff176c7be8e846119678",
+    "tests/eval_v1811/lane_e_20261005/test_e05_scripts.py": "8a01d80a68d78351326228e7d7a4099ff87ddece9fcfe5a9e9dff8c9e9dadf4e",
+    "tests/eval_v1811/lane_e_20261005/native_glm.R": "6fd362a7df13cc49ffa8fbc279b7d1ffd720c5a0dcc9c6341d197eace783c947",
+    "docs/superpowers/objectives/2026-10-04-v1.8.11-objective.md": "25fc5ecd1cc25f4f193e31661ef754bd4ab9efd1534719f69503750459a5732c",
+    "docs/superpowers/specs/2026-10-04-v1.8.11-lane-contracts.md": "14ac3849647e10cee38e2adfc1ed5002375f8c24f49c0dee35eb007e91fc6049"
+  }
+}

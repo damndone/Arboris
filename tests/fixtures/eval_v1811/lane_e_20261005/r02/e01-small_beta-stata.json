@@ -1,0 +1,30 @@
+{
+  "values": {
+    "b_mu": 1.203372374662802,
+    "se_mu": 0.033659069671553625,
+    "b_ar1": 0.561128662860432,
+    "se_ar1": 0.020967825775651042,
+    "b_ma1": 0.3856319271010712,
+    "se_ma1": 0.022986770066947923,
+    "b_arch1": 0.24646961195982323,
+    "se_arch1": 0.034372913162715964,
+    "b_garch1": 0.0,
+    "se_garch1": 0.0,
+    "b_omega": 0.24443329795638696,
+    "se_omega": 0.010458619392867909,
+    "ll": -2080.3562744935916,
+    "n": 2500.0,
+    "converged": 1.0,
+    "aic": 4170.712548987183,
+    "bic": 4199.832779041465
+  },
+  "raw_log": "/private/tmp/v1811-evaluation-df8776f74956480ba74501dbc3c2e1b3-r02/test_new_orders_report_final_p0/native-e01-small_beta/lane_e.log",
+  "error_type": null,
+  "public_log": "/Users/jiayuanren/\u9879\u76ee\u89c4\u5212/.worktrees/codex-v1811-evaluation/tests/fixtures/eval_v1811/lane_e_20261005/r02/e01-small_beta-stata-output.txt",
+  "command": [
+    "/Applications/Stata/StataMP.app/Contents/MacOS/stata-mp",
+    "-b",
+    "do",
+    "lane_e.do"
+  ]
+}

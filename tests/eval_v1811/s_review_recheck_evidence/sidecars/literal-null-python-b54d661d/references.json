@@ -1,0 +1,12 @@
+{
+  "completed": {
+    "filename": "completed_result.json",
+    "sha256": "2ebb9ab7faaddef3a1a1c4a3074f861e1d51a0eb8020e45584312e36b3100d54",
+    "schema_version": 1
+  },
+  "post": {
+    "filename": "post_result.json",
+    "sha256": "f26c19579620f96f85d5b5cf0acab536e1c01eb93c72ba31ee3086f4be795733",
+    "schema_version": 1
+  }
+}
