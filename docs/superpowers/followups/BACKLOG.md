@@ -39,9 +39,13 @@
 
 ### 0.4 v1.8.12 输入：v1.8.11 发版后自检（2026-10-07）
 
+> 每一项的归属版本与完成标准见 `handoffs/2026-10-07-v1.8.12-kickoff.md`「v1.6.2 外部评价复审与 v1.8.11 发版后自检」，以该表为准。
+
 | ID | 级别 | 内容 | 现状 / 建议 | 来源 |
 |---|---|---|---|---|
 | V1812-LOCAL-API-SECURITY | P0 | 本地后端无 Host / Origin 校验、无访问令牌：DNS rebinding 可同源读写数据、改服务商配置、驱动代码执行；`/runs` 等表单上传接口可被任意网页跨站提交（已实测外来 Host/Origin 均 200；密钥未明文返回） | Host 白名单（127.0.0.1 / localhost）+ 改状态请求校验 Origin + 启动时会话令牌（前端统一带头）+ 回归与浏览器验收 | 发版后自检 |
+| V1812-PREPUSH-GUARD | P0 | 含许可证值的 v1.8.11 历史与私有 ref 可能被推送（`archive/local-only/*` 命名挡不住） | 2026-10-07 已装主仓库 `.git/hooks/pre-push` 并验证；钩子源文件、安装脚本与测试随 v1.8.12 第 3 步入库 | 发版后自检 |
+| V1812-SESSION-TOKEN | P1 | 本地 API 会话令牌（纵深防御） | 用户决定 v1.8.12 不做；后端改为非回环监听、打包发布或多用户时与 V1812-LINUX 同批做 | v1.8.12 objective 评审 |
 | V1812-LOCAL-EVIDENCE-RETENTION | P1 | `local/` 无限增长：LMM 准入测试每次复制整个运行目录，脚本导出测试每次写原始日志 | 定保留策略（例如每类保留最近 N 次），与 pytest 保留设置同口径 | 磁盘写满复盘 |
 | V1812-REPO-EVIDENCE-POLICY | P1 | 仓库一个版本从 32 MB 涨到 84 MB（脚本导出 fixture 3581 个、审查证据约 1800 个文件） | 大体量证据移出 git（`local/` 或 LFS），仓库只留清单与哈希；评估证据与回归测试分目录 | 发版后自检 |
 | V1812-OPENAPI-TYPES | P1 | 前端类型手写（`api.ts` 60 个、`notebook/contracts.ts` 50 个），与后端同步靠人 | 由 FastAPI OpenAPI 生成 TypeScript 类型 + 漂移测试；v1.9.0 新界面直接使用 | v1.6.2 外部评价 #6 |
