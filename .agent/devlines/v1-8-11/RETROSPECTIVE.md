@@ -10,7 +10,7 @@ CONTEXT_RESCOPED
 
 ## Metrics
 
-- Failure frequency: 23/69 (33.3%; 33.3 per 100 events)
+- Failure frequency: 23/70 (32.9%; 32.9 per 100 events)
 - Repeat rate: 0/23 (0.0%)
 - Recurrence rate: 0/23 (0.0%)
 - MTTR: median=0 ms (sample=7; unresolved=16)
@@ -246,3 +246,4 @@ CONTEXT_RESCOPED
 - #67: `be77383a-515f-4a1d-b1b8-183151efe634` | 2026-10-07T10:07:07.636Z | GAP/backend_suite_over_duration_budget | incident=`013b79af-52e4-4173-b1d0-0ab9ed456d9b` | lesson_key=`suite-duration-per-lane` | event_sha256=`ed3aceae83df38c77ffc0bf8349454fa931614198680884922ebf75c776825fb`
 - #68: `36ac2147-38a9-41cb-ae46-65c6a115b8c1` | 2026-10-07T13:18:52.229Z | GATE/host_full_gate_v1811 | incident=`d166aee9-02bb-443f-af9f-76441d0569c1` | lesson_key=`gate-with-durations` | event_sha256=`23f84183f76fb56b14c3b3fde1c9d31fe8af8c0377207f96d81cc1c6ddc3a477`
 - #69: `6cbc4090-804b-41c7-baf6-b7208d2a163d` | 2026-10-07T13:18:52.229Z | STATE_CHANGE/suite_duration_budget_met_and_squash_release | incident=`6e177852-1ada-4186-98ed-4cbd0484aa89` | lesson_key=`derived-identifiers-leak-secrets` | event_sha256=`7a12b57b790264cdb067b885770d71623953b731b12ebf05daf1da532d5ea695`
+- #70: `1e3509d6-220c-4318-b635-82b43b8a6d98` | 2026-10-07T14:15:56.331Z | STATE_CHANGE/released | incident=`8f034355-f9de-4bef-b6b0-17975ec3eefe` | lesson_key=`enforce-private-refs-in-pre-push` | event_sha256=`1c7e393c4b155f381168789607919825e2931205f56ed2a766785c2f5d96b778`
