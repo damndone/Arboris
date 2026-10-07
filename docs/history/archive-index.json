@@ -1286,7 +1286,9 @@
    ],
    "deleted_tracked": [],
    "leftovers_tag": "archive/leftovers/workbench-v1.8.6",
-   "kept": true
+   "kept": false,
+   "removed_on": "2026-10-07",
+   "leftovers_local": "local/worktree-leftovers/workbench-v1.8.6/ (main checkout, ignored, local only)"
   },
   {
    "name": "workbench-v1.8.7",
@@ -1454,8 +1456,10 @@
    "leftover_files": [],
    "deleted_tracked": [],
    "leftovers_tag": null,
-   "kept": true,
-   "note": "Codex evaluation lane, work order B; input to v1.8.11"
+   "kept": false,
+   "note": "Codex evaluation lane, work order B; input to v1.8.11",
+   "removed_on": "2026-10-07",
+   "leftovers_local": "local/worktree-leftovers/codex-v1811-admission-oracles/ (main checkout, ignored, local only)"
   },
   {
    "name": "codex-v1811-complete-result-semantics-review",
@@ -1468,8 +1472,10 @@
    "leftover_files": [],
    "deleted_tracked": [],
    "leftovers_tag": null,
-   "kept": true,
-   "note": "v1.8.11 lane / review worktree. History carries Stata license values: not tagged or pushed; kept locally (branch + refs/private/v1.8.11-full-history). Released as squash 8b1a5390 (tag v1.8.11)."
+   "kept": false,
+   "note": "v1.8.11 lane / review worktree. History carries Stata license values: not tagged or pushed; kept locally (branch + refs/private/v1.8.11-full-history). Released as squash 8b1a5390 (tag v1.8.11).",
+   "removed_on": "2026-10-07",
+   "leftovers_local": "local/worktree-leftovers/codex-v1811-complete-result-semantics-review/ (main checkout, ignored, local only)"
   },
   {
    "name": "codex-v1811-complete-results-review",
@@ -1482,8 +1488,10 @@
    "leftover_files": [],
    "deleted_tracked": [],
    "leftovers_tag": null,
-   "kept": true,
-   "note": "v1.8.11 lane / review worktree. History carries Stata license values: not tagged or pushed; kept locally (branch + refs/private/v1.8.11-full-history). Released as squash 8b1a5390 (tag v1.8.11)."
+   "kept": false,
+   "note": "v1.8.11 lane / review worktree. History carries Stata license values: not tagged or pushed; kept locally (branch + refs/private/v1.8.11-full-history). Released as squash 8b1a5390 (tag v1.8.11).",
+   "removed_on": "2026-10-07",
+   "leftovers_local": "local/worktree-leftovers/codex-v1811-complete-results-review/ (main checkout, ignored, local only)"
   },
   {
    "name": "codex-v1811-evaluation",
@@ -1496,8 +1504,10 @@
    "leftover_files": [],
    "deleted_tracked": [],
    "leftovers_tag": null,
-   "kept": true,
-   "note": "v1.8.11 lane / review worktree. History carries Stata license values: not tagged or pushed; kept locally (branch + refs/private/v1.8.11-full-history). Released as squash 8b1a5390 (tag v1.8.11)."
+   "kept": false,
+   "note": "v1.8.11 lane / review worktree. History carries Stata license values: not tagged or pushed; kept locally (branch + refs/private/v1.8.11-full-history). Released as squash 8b1a5390 (tag v1.8.11).",
+   "removed_on": "2026-10-07",
+   "leftovers_local": "local/worktree-leftovers/codex-v1811-evaluation/ (main checkout, ignored, local only)"
   },
   {
    "name": "codex-v1811-final-oracles",
@@ -1510,8 +1520,10 @@
    "leftover_files": [],
    "deleted_tracked": [],
    "leftovers_tag": null,
-   "kept": true,
-   "note": "v1.8.11 lane / review worktree. History carries Stata license values: not tagged or pushed; kept locally (branch + refs/private/v1.8.11-full-history). Released as squash 8b1a5390 (tag v1.8.11)."
+   "kept": false,
+   "note": "v1.8.11 lane / review worktree. History carries Stata license values: not tagged or pushed; kept locally (branch + refs/private/v1.8.11-full-history). Released as squash 8b1a5390 (tag v1.8.11).",
+   "removed_on": "2026-10-07",
+   "leftovers_local": "local/worktree-leftovers/codex-v1811-final-oracles/ (main checkout, ignored, local only)"
   },
   {
    "name": "codex-v1811-fpc",
@@ -1524,8 +1536,10 @@
    "leftover_files": [],
    "deleted_tracked": [],
    "leftovers_tag": null,
-   "kept": true,
-   "note": "v1.8.11 lane / review worktree. History carries Stata license values: not tagged or pushed; kept locally (branch + refs/private/v1.8.11-full-history). Released as squash 8b1a5390 (tag v1.8.11)."
+   "kept": false,
+   "note": "v1.8.11 lane / review worktree. History carries Stata license values: not tagged or pushed; kept locally (branch + refs/private/v1.8.11-full-history). Released as squash 8b1a5390 (tag v1.8.11).",
+   "removed_on": "2026-10-07",
+   "leftovers_local": "local/worktree-leftovers/codex-v1811-fpc/ (main checkout, ignored, local only)"
   },
   {
    "name": "codex-v1811-iv-oracles",
@@ -1538,8 +1552,10 @@
    "leftover_files": [],
    "deleted_tracked": [],
    "leftovers_tag": null,
-   "kept": true,
-   "note": "v1.8.11 lane / review worktree. History carries Stata license values: not tagged or pushed; kept locally (branch + refs/private/v1.8.11-full-history). Released as squash 8b1a5390 (tag v1.8.11)."
+   "kept": false,
+   "note": "v1.8.11 lane / review worktree. History carries Stata license values: not tagged or pushed; kept locally (branch + refs/private/v1.8.11-full-history). Released as squash 8b1a5390 (tag v1.8.11).",
+   "removed_on": "2026-10-07",
+   "leftovers_local": "local/worktree-leftovers/codex-v1811-iv-oracles/ (main checkout, ignored, local only)"
   },
   {
    "name": "codex-v1811-live-harness",
@@ -1552,8 +1568,10 @@
    "leftover_files": [],
    "deleted_tracked": [],
    "leftovers_tag": null,
-   "kept": true,
-   "note": "v1.8.11 lane / review worktree. History carries Stata license values: not tagged or pushed; kept locally (branch + refs/private/v1.8.11-full-history). Released as squash 8b1a5390 (tag v1.8.11)."
+   "kept": false,
+   "note": "v1.8.11 lane / review worktree. History carries Stata license values: not tagged or pushed; kept locally (branch + refs/private/v1.8.11-full-history). Released as squash 8b1a5390 (tag v1.8.11).",
+   "removed_on": "2026-10-07",
+   "leftovers_local": "local/worktree-leftovers/codex-v1811-live-harness/ (main checkout, ignored, local only)"
   },
   {
    "name": "codex-v1811-live-harness-review",
@@ -1566,8 +1584,10 @@
    "leftover_files": [],
    "deleted_tracked": [],
    "leftovers_tag": null,
-   "kept": true,
-   "note": "v1.8.11 lane / review worktree. History carries Stata license values: not tagged or pushed; kept locally (branch + refs/private/v1.8.11-full-history). Released as squash 8b1a5390 (tag v1.8.11)."
+   "kept": false,
+   "note": "v1.8.11 lane / review worktree. History carries Stata license values: not tagged or pushed; kept locally (branch + refs/private/v1.8.11-full-history). Released as squash 8b1a5390 (tag v1.8.11).",
+   "removed_on": "2026-10-07",
+   "leftovers_local": "local/worktree-leftovers/codex-v1811-live-harness-review/ (main checkout, ignored, local only)"
   },
   {
    "name": "codex-v1811-m1",
@@ -1580,8 +1600,10 @@
    "leftover_files": [],
    "deleted_tracked": [],
    "leftovers_tag": null,
-   "kept": true,
-   "note": "v1.8.11 lane / review worktree. History carries Stata license values: not tagged or pushed; kept locally (branch + refs/private/v1.8.11-full-history). Released as squash 8b1a5390 (tag v1.8.11)."
+   "kept": false,
+   "note": "v1.8.11 lane / review worktree. History carries Stata license values: not tagged or pushed; kept locally (branch + refs/private/v1.8.11-full-history). Released as squash 8b1a5390 (tag v1.8.11).",
+   "removed_on": "2026-10-07",
+   "leftovers_local": "local/worktree-leftovers/codex-v1811-m1/ (main checkout, ignored, local only)"
   },
   {
    "name": "codex-v1811-m2",
@@ -1594,8 +1616,10 @@
    "leftover_files": [],
    "deleted_tracked": [],
    "leftovers_tag": null,
-   "kept": true,
-   "note": "v1.8.11 lane / review worktree. History carries Stata license values: not tagged or pushed; kept locally (branch + refs/private/v1.8.11-full-history). Released as squash 8b1a5390 (tag v1.8.11)."
+   "kept": false,
+   "note": "v1.8.11 lane / review worktree. History carries Stata license values: not tagged or pushed; kept locally (branch + refs/private/v1.8.11-full-history). Released as squash 8b1a5390 (tag v1.8.11).",
+   "removed_on": "2026-10-07",
+   "leftovers_local": "local/worktree-leftovers/codex-v1811-m2/ (main checkout, ignored, local only)"
   },
   {
    "name": "codex-v1811-native-did-r2-review",
@@ -1608,8 +1632,10 @@
    "leftover_files": [],
    "deleted_tracked": [],
    "leftovers_tag": null,
-   "kept": true,
-   "note": "v1.8.11 lane / review worktree. History carries Stata license values: not tagged or pushed; kept locally (branch + refs/private/v1.8.11-full-history). Released as squash 8b1a5390 (tag v1.8.11)."
+   "kept": false,
+   "note": "v1.8.11 lane / review worktree. History carries Stata license values: not tagged or pushed; kept locally (branch + refs/private/v1.8.11-full-history). Released as squash 8b1a5390 (tag v1.8.11).",
+   "removed_on": "2026-10-07",
+   "leftovers_local": "local/worktree-leftovers/codex-v1811-native-did-r2-review/ (main checkout, ignored, local only)"
   },
   {
    "name": "codex-v1811-native-did-r3-review",
@@ -1622,8 +1648,10 @@
    "leftover_files": [],
    "deleted_tracked": [],
    "leftovers_tag": null,
-   "kept": true,
-   "note": "v1.8.11 lane / review worktree. History carries Stata license values: not tagged or pushed; kept locally (branch + refs/private/v1.8.11-full-history). Released as squash 8b1a5390 (tag v1.8.11)."
+   "kept": false,
+   "note": "v1.8.11 lane / review worktree. History carries Stata license values: not tagged or pushed; kept locally (branch + refs/private/v1.8.11-full-history). Released as squash 8b1a5390 (tag v1.8.11).",
+   "removed_on": "2026-10-07",
+   "leftovers_local": "local/worktree-leftovers/codex-v1811-native-did-r3-review/ (main checkout, ignored, local only)"
   },
   {
    "name": "codex-v1811-native-did-r4-review",
@@ -1636,8 +1664,10 @@
    "leftover_files": [],
    "deleted_tracked": [],
    "leftovers_tag": null,
-   "kept": true,
-   "note": "v1.8.11 lane / review worktree. History carries Stata license values: not tagged or pushed; kept locally (branch + refs/private/v1.8.11-full-history). Released as squash 8b1a5390 (tag v1.8.11)."
+   "kept": false,
+   "note": "v1.8.11 lane / review worktree. History carries Stata license values: not tagged or pushed; kept locally (branch + refs/private/v1.8.11-full-history). Released as squash 8b1a5390 (tag v1.8.11).",
+   "removed_on": "2026-10-07",
+   "leftovers_local": "local/worktree-leftovers/codex-v1811-native-did-r4-review/ (main checkout, ignored, local only)"
   },
   {
    "name": "codex-v1811-native-did-review",
@@ -1650,8 +1680,10 @@
    "leftover_files": [],
    "deleted_tracked": [],
    "leftovers_tag": null,
-   "kept": true,
-   "note": "v1.8.11 lane / review worktree. History carries Stata license values: not tagged or pushed; kept locally (branch + refs/private/v1.8.11-full-history). Released as squash 8b1a5390 (tag v1.8.11)."
+   "kept": false,
+   "note": "v1.8.11 lane / review worktree. History carries Stata license values: not tagged or pushed; kept locally (branch + refs/private/v1.8.11-full-history). Released as squash 8b1a5390 (tag v1.8.11).",
+   "removed_on": "2026-10-07",
+   "leftovers_local": "local/worktree-leftovers/codex-v1811-native-did-review/ (main checkout, ignored, local only)"
   },
   {
    "name": "codex-v1811-s",
@@ -1664,8 +1696,10 @@
    "leftover_files": [],
    "deleted_tracked": [],
    "leftovers_tag": null,
-   "kept": true,
-   "note": "v1.8.11 lane / review worktree. History carries Stata license values: not tagged or pushed; kept locally (branch + refs/private/v1.8.11-full-history). Released as squash 8b1a5390 (tag v1.8.11)."
+   "kept": false,
+   "note": "v1.8.11 lane / review worktree. History carries Stata license values: not tagged or pushed; kept locally (branch + refs/private/v1.8.11-full-history). Released as squash 8b1a5390 (tag v1.8.11).",
+   "removed_on": "2026-10-07",
+   "leftovers_local": "local/worktree-leftovers/codex-v1811-s/ (main checkout, ignored, local only)"
   },
   {
    "name": "codex-v1811-script-adapters",
@@ -1678,8 +1712,10 @@
    "leftover_files": [],
    "deleted_tracked": [],
    "leftovers_tag": null,
-   "kept": true,
-   "note": "v1.8.11 lane / review worktree. History carries Stata license values: not tagged or pushed; kept locally (branch + refs/private/v1.8.11-full-history). Released as squash 8b1a5390 (tag v1.8.11)."
+   "kept": false,
+   "note": "v1.8.11 lane / review worktree. History carries Stata license values: not tagged or pushed; kept locally (branch + refs/private/v1.8.11-full-history). Released as squash 8b1a5390 (tag v1.8.11).",
+   "removed_on": "2026-10-07",
+   "leftovers_local": "local/worktree-leftovers/codex-v1811-script-adapters/ (main checkout, ignored, local only)"
   },
   {
    "name": "codex-v1811-script-adapters-review",
@@ -1692,8 +1728,10 @@
    "leftover_files": [],
    "deleted_tracked": [],
    "leftovers_tag": null,
-   "kept": true,
-   "note": "v1.8.11 lane / review worktree. History carries Stata license values: not tagged or pushed; kept locally (branch + refs/private/v1.8.11-full-history). Released as squash 8b1a5390 (tag v1.8.11)."
+   "kept": false,
+   "note": "v1.8.11 lane / review worktree. History carries Stata license values: not tagged or pushed; kept locally (branch + refs/private/v1.8.11-full-history). Released as squash 8b1a5390 (tag v1.8.11).",
+   "removed_on": "2026-10-07",
+   "leftovers_local": "local/worktree-leftovers/codex-v1811-script-adapters-review/ (main checkout, ignored, local only)"
   },
   {
    "name": "codex-v1811-script-bytes-r2-review",
@@ -1706,8 +1744,10 @@
    "leftover_files": [],
    "deleted_tracked": [],
    "leftovers_tag": null,
-   "kept": true,
-   "note": "v1.8.11 lane / review worktree. History carries Stata license values: not tagged or pushed; kept locally (branch + refs/private/v1.8.11-full-history). Released as squash 8b1a5390 (tag v1.8.11)."
+   "kept": false,
+   "note": "v1.8.11 lane / review worktree. History carries Stata license values: not tagged or pushed; kept locally (branch + refs/private/v1.8.11-full-history). Released as squash 8b1a5390 (tag v1.8.11).",
+   "removed_on": "2026-10-07",
+   "leftovers_local": "local/worktree-leftovers/codex-v1811-script-bytes-r2-review/ (main checkout, ignored, local only)"
   },
   {
    "name": "codex-v1811-script-bytes-review",
@@ -1720,8 +1760,10 @@
    "leftover_files": [],
    "deleted_tracked": [],
    "leftovers_tag": null,
-   "kept": true,
-   "note": "v1.8.11 lane / review worktree. History carries Stata license values: not tagged or pushed; kept locally (branch + refs/private/v1.8.11-full-history). Released as squash 8b1a5390 (tag v1.8.11)."
+   "kept": false,
+   "note": "v1.8.11 lane / review worktree. History carries Stata license values: not tagged or pushed; kept locally (branch + refs/private/v1.8.11-full-history). Released as squash 8b1a5390 (tag v1.8.11).",
+   "removed_on": "2026-10-07",
+   "leftovers_local": "local/worktree-leftovers/codex-v1811-script-bytes-review/ (main checkout, ignored, local only)"
   },
   {
    "name": "codex-v1811-script-integrity-r2",
@@ -1734,8 +1776,10 @@
    "leftover_files": [],
    "deleted_tracked": [],
    "leftovers_tag": null,
-   "kept": true,
-   "note": "v1.8.11 lane / review worktree. History carries Stata license values: not tagged or pushed; kept locally (branch + refs/private/v1.8.11-full-history). Released as squash 8b1a5390 (tag v1.8.11)."
+   "kept": false,
+   "note": "v1.8.11 lane / review worktree. History carries Stata license values: not tagged or pushed; kept locally (branch + refs/private/v1.8.11-full-history). Released as squash 8b1a5390 (tag v1.8.11).",
+   "removed_on": "2026-10-07",
+   "leftovers_local": "local/worktree-leftovers/codex-v1811-script-integrity-r2/ (main checkout, ignored, local only)"
   },
   {
    "name": "codex-v1811-script-integrity-recheck",
@@ -1748,8 +1792,10 @@
    "leftover_files": [],
    "deleted_tracked": [],
    "leftovers_tag": null,
-   "kept": true,
-   "note": "v1.8.11 lane / review worktree. History carries Stata license values: not tagged or pushed; kept locally (branch + refs/private/v1.8.11-full-history). Released as squash 8b1a5390 (tag v1.8.11)."
+   "kept": false,
+   "note": "v1.8.11 lane / review worktree. History carries Stata license values: not tagged or pushed; kept locally (branch + refs/private/v1.8.11-full-history). Released as squash 8b1a5390 (tag v1.8.11).",
+   "removed_on": "2026-10-07",
+   "leftovers_local": "local/worktree-leftovers/codex-v1811-script-integrity-recheck/ (main checkout, ignored, local only)"
   },
   {
    "name": "codex-v1811-script-public-review",
@@ -1762,8 +1808,10 @@
    "leftover_files": [],
    "deleted_tracked": [],
    "leftovers_tag": null,
-   "kept": true,
-   "note": "v1.8.11 lane / review worktree. History carries Stata license values: not tagged or pushed; kept locally (branch + refs/private/v1.8.11-full-history). Released as squash 8b1a5390 (tag v1.8.11)."
+   "kept": false,
+   "note": "v1.8.11 lane / review worktree. History carries Stata license values: not tagged or pushed; kept locally (branch + refs/private/v1.8.11-full-history). Released as squash 8b1a5390 (tag v1.8.11).",
+   "removed_on": "2026-10-07",
+   "leftovers_local": "local/worktree-leftovers/codex-v1811-script-public-review/ (main checkout, ignored, local only)"
   },
   {
    "name": "workbench-v1.8.11",
