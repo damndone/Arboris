@@ -10,6 +10,15 @@ GitHub。本目录告诉你去哪里找、怎么打开。
 | 各个 stash 里存了什么 | [stashes.md](stashes.md) |
 | 以上全部，机器可读 | [archive-index.json](archive-index.json) |
 
+## 例外：v1.8.11 的逐提交历史只在本机
+
+v1.8.11 开发中，有些 Stata 日志在脱敏前就被提交了，早期提交里留有许可证序列号与持有人。
+因此本版以一个 squash 提交合入 main（`8b1a5390`，文件树与集成分支末端完全一致），**逐提交历史不推送**：
+
+- 本机保存：集成分支与 23 个 lane / 审查分支，加 `refs/private/v1.8.11-full-history`（不是 tag，`git push --tags` 不会带走）；
+- 入库文件里原始日志的 SHA-256 已换成带密钥的占位符（`withheld-raw-sha256-*`），真实值只在本机 `local/v1811-license-raw/`；
+- 主仓库 `.git/hooks/pre-push` 拒绝推送私有 ref、这些分支、新增的许可证值和被隐去的哈希。
+
 ## 查询
 
 ```bash
@@ -62,4 +71,5 @@ git worktree remove .worktrees/view-v1.8.8               # 用完移除
 
 最近五个版本保留常驻工作目录：`workbench-v1.8.6`、`-v1.8.7`、`-v1.8.8-final`
 （即 v1.8.8 发布状态）、`-v1.8.9`、`-v1.8.10`。`workbench-v1.8.5` 于 2026-10-04 轮换移出（分支保留）。
+2026-10-07 发布 v1.8.11 后新增常驻 `workbench-v1.8.11`；按五个版本的规矩应轮换移出 `workbench-v1.8.6`，**等用户确认后再移除**（不自动删）。
 其余可随时用上面的脚本重建。

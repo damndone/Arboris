@@ -79,6 +79,10 @@
    - **只存在于本机的分支**(远端没有、也不在 main 里)同样用 tag 备份,
      命名 `archive/local-only/<名字>`。这类分支磁盘一坏就没了。
      自检:`git rev-list --count <分支> --not --remotes --tags` 必须为 0。
+   - **历史里有秘密值的分支例外**(2026-10-07 定,v1.8.11 起):不打 `archive/*` tag(这类 tag 按上条会被推送),
+     改存为 `refs/private/<名字>`(不是 tag,`git push --tags` 不会带走),分支留在本机;主仓库
+     `.git/hooks/pre-push` 拒绝推送私有 ref、这些分支、许可证值与被隐去的原始日志哈希。发版用 squash,
+     见 `docs/history/README.md`「例外」一节。
    - 未合并的分支不要动。
 6. **新建文档前先问**:是不是该写进已有的七类之一?顶层裸放和自创目录是烂账的开始。
 7. **`docs/` 顶层(superpowers 之外)的归属**(2026-07-15 整理定版):

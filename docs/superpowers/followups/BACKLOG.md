@@ -15,29 +15,45 @@
 
 ---
 
-## 0.0 最新：v1.8.10 已发布（2026-10-04）
+## 0.0 最新：v1.8.11 已发布（2026-10-07）
 
-**v1.8.10 = 扩展地基**，**已发布**（2026-10-04，main `b38740ec`，tag `v1.8.10`，发布说明
-`docs/releases/v1.8.10-release-notes.md`，证据 `evaluations/2026-10-04-v1.8.10-release-evaluation.md`）。
-立项 9 步全部交付；下方 §0.2 中已完成的项已删除（见 §3 留痕）。**下一版 v1.8.11 = 对标 Stata/SPSS**
-（用户 2026-10-04 决定，界面重做顺延一版）。
+**v1.8.11 = 对标 Stata/SPSS**，**已发布**（2026-10-07，main squash `8b1a5390`，tag `v1.8.11`，
+发布说明 `docs/releases/v1.8.11-release-notes.md`，GitHub Release 已建，gate 日志
+`evaluations/gate/2026-10-07-v1.8.11-gate.log`，版本记录 `archive/plans/2026-10-04-v1.8.11-remaining-release-train.md`）。
+立项 9 步全部交付，另含 LMM GLS 口径与后估计、单阶段 FPC。完成的 §0.3 项已删除（见 §3 留痕）。
+**下一版 v1.8.12 = 基础加固，为 v1.9.0 界面重做铺路**（用户 2026-10-07 同意先做自检清单再做界面）。
 
-### 0.3 v1.8.11 输入与 v1.8.10 新发现
+> 本版逐提交历史含 Stata 许可证值，只保留在本机 `refs/private/v1.8.11-full-history` 与 24 个本地分支；
+> 主仓库 `.git/hooks/pre-push` 拒绝推送它们。收尾仪式 §5 的 `archive/local-only/*` 推送规则对本版不适用。
+
+### 0.3 延续项
 
 | ID | 级别 | 内容 | 现状 / 建议 | 来源 |
 |---|---|---|---|---|
 | V1811-DARK-PANEL-CONTRAST | P | 深色主题的 ios-group 面板仍用固定白底，文字对比度不足；浅色/跟随系统浅色可读 | 原有问题，本轮未修改样式；发版前修复并浏览器验收，或保留本项且在发布说明列出限制 | 第 6 步①②审核；handoffs/2026-10-04-v1.8.11-step6-review-feedback.md；devline inherited_dark_result_panel_contrast |
-| V1810-FAMILY-ORACLES | F | 接入 Codex 工单 B 的 7 族对照：iv_2sls、glm:binomial、glm:poisson 一致，可登记准入并开放后估计 | 分支 `eval/v1811-admission-oracles`（tag `archive/local-only/eval-v1811-admission-oracles`），基线早于 v1.8.10；报告 `docs/superpowers/handoffs/2026-10-04-codex-v1811-admission-oracles-report.md`（在该分支） | Codex 工单 B |
-| V1810-PANEL-DID-KERNEL | F | panel_ols、did 的推断核心 `covariance_estimator=null` 且用 z；数值与 R 一致到 1e-15 | 补声明并定惯例（Stata `xtreg, fe vce(robust)`：按个体聚类 + t(G−1)） | Codex 工单 B |
-| V1810-NEGBIN | F | glm:negative_binomial 系数只准到约 1e-6（IRLS tol 1e-8 太松）；离散参数 α 固定为 1、未估计也未说明（静默降级） | 收紧收敛；改为像 `nbreg` 一样估计 α，固定 α 作高级选项并写明。需用户确认 | Codex 工单 B |
-| V1810-LMM-ORACLE | F | 线性混合效应只有 R 侧 REML 参考，Workbench 执行被本地隔离准入挡住 | 在准入环境里补对照后再登记 | Codex 工单 B |
-| V1810-AGENT-FIT-THEN-TEST | P | Agent 不能在一个方案里“先拟合模型、再对新模型做检验”（真机评测 LR 用例）；改变标准误类型时不说明原因，也不提在原模型上做 Wald | 增强 Agent 能力的首批项 | 真机评测 |
-| V1810-PROVIDER-MODEL-NAMES | P | 代码里的默认模型名仍是 `deepseek-v4-flash`（`llm/provider_store.py` 显示名表、`LlmProviderEditor.tsx` 默认值）；DeepSeek V4.1 Flash 的 API id 是 `deepseek-flash`，旧名目前仍被转发 | 本机配置已改（2026-10-04）；代码随 V189-MODEL-LIST-AUTODETECT 一起改，不再写死版本名 | 用户 |
 | V1810-FOCUS-REMAINING | P | 方案、报告两种焦点已登记未接页面；空白画布的项目 Agent 仍只读；焦点标签未移到输入框上方 | 界面重做那一版 | 第 8 步 |
 | V1810-KERNEL-CAP | D | 完整协方差上限从 500 降到 300 个参数（500 个约 4.8 MB > 2 MB 预算） | 需要更多参数时改为压缩存储或按需计算 | 第 1 步 |
 | V1810-MI-COMBOS | P | 合并结果上的后估计（D1）；多重插补与抽样设计或按组执行同用 | 现在明确拒绝 | 第 5、7 步 |
 | V1810-HAC-MORE | P | HAC 与聚类同用（Driscoll–Kraay）、其他族的 HAC | 现在明确拒绝 | 第 6 步 |
 | V1810-SURVEY-NODE-HASH | 观察 | 抽样设计字段（含 `survey_df`）不进节点哈希表单，只进运行输入 | 增量缓存目前只用于插补恢复，暂无影响；扩大缓存前要补 | 自由度惯例实现时发现 |
+
+### 0.4 v1.8.12 输入：v1.8.11 发版后自检（2026-10-07）
+
+| ID | 级别 | 内容 | 现状 / 建议 | 来源 |
+|---|---|---|---|---|
+| V1812-LOCAL-API-SECURITY | P0 | 本地后端无 Host / Origin 校验、无访问令牌：DNS rebinding 可同源读写数据、改服务商配置、驱动代码执行；`/runs` 等表单上传接口可被任意网页跨站提交（已实测外来 Host/Origin 均 200；密钥未明文返回） | Host 白名单（127.0.0.1 / localhost）+ 改状态请求校验 Origin + 启动时会话令牌（前端统一带头）+ 回归与浏览器验收 | 发版后自检 |
+| V1812-LOCAL-EVIDENCE-RETENTION | P1 | `local/` 无限增长：LMM 准入测试每次复制整个运行目录，脚本导出测试每次写原始日志 | 定保留策略（例如每类保留最近 N 次），与 pytest 保留设置同口径 | 磁盘写满复盘 |
+| V1812-REPO-EVIDENCE-POLICY | P1 | 仓库一个版本从 32 MB 涨到 84 MB（脚本导出 fixture 3581 个、审查证据约 1800 个文件） | 大体量证据移出 git（`local/` 或 LFS），仓库只留清单与哈希；评估证据与回归测试分目录 | 发版后自检 |
+| V1812-OPENAPI-TYPES | P1 | 前端类型手写（`api.ts` 60 个、`notebook/contracts.ts` 50 个），与后端同步靠人 | 由 FastAPI OpenAPI 生成 TypeScript 类型 + 漂移测试；v1.9.0 新界面直接使用 | v1.6.2 外部评价 #6 |
+| V1812-CLI-FROM-CATALOG | P1 | CLI 缺 `model_options`、加权、后估计、导出与数据操作；参数手写 | 从能力目录生成参数，补子命令 | v1.6.2 外部评价 #3 |
+| V1812-AGENT-GOD-FILES | P1 | 大文件转移到 Agent 层：`context_tools.py` 5445、`workflow_contracts.py` 4165、`notebook/service.py` 4129 行 | 按工具类别拆 `context_tools`；模型族合同与工作流合同分离 | v1.6.2 外部评价 #1 |
+| V1812-CONTRACT-LAYERING | P2 | `ModelFamilyContract` 定义在 `agent/`，被 engine、orchestrator、admission 反向依赖 | 挪到 `contracts/model/` | 发版后自检 |
+| V1812-FAMILY-LITERAL-DOWN | P2 | 共享代码中的族名分支被棘轮锁在 165 处，自 v1.8.10 未下降；`runner.py` 15 个 `run_*` 与估计阶段 14 个 `_fit_*` 与声明式模型包并存 | 每版定下降目标，逐步迁入模型包 | v1.6.2 外部评价 #2 |
+| V1812-LINUX | P1 | 仅 macOS 验证；LMM 依赖 macOS 原生隔离 | 明确目标平台；Linux 隔离方案与 CI | 已知门槛 |
+| V1811-LMM-REMAINING | P2 | LMM 的 ML 似然比检验与边际效应无对照；结果卡片只显示组 × 时间交互项；分类项名暴露公式原文 | 补对照后开放；卡片随 v1.9.0；项名映射为可读名 | v1.8.11 |
+| V1811-PUBLIC-TERM-QUOTE | P2 | 列名含单引号时 `_public_term` 返回转义名，与原列名不一致（各族共有） | 修正反转义并补测试 | 自审 |
+| V1811-SUITE-DURATION | P2 | 后端测试 18:39 / 预算 20:09，余量小；`honest_did` 纯计算约 95 s | gate 一律记录耗时；需要时优化 LP 求解 | 发版 gate |
+| V1811-FRONTEND-CSS | P2 | 6 个全局 CSS 共 5471 行、139 处写死颜色（深色模式欠账根源）、931 处内联样式 | 随 v1.9.0：主题变量 + 组件级样式 | v1.6.2 外部评价 #4 |
 
 ---
 
@@ -285,26 +301,13 @@ DetailHeader 渲染 `{runId} · {nodeKey}`（森林下 nodeKey 是 64-hex hash�
 
 `focal` 和 `explanatory_unspecified` 现在都显示 `X`（v1.6.8 把 `X?` 改掉响应"看不出变量名"的抱怨），仅 tooltip 可区分。如果 unspecified 的视觉信号还重要，需要新的呈现方案（如淡色/斜体 X）。
 
-### §2-V1.8.2-JOINT-ARMA-GARCH-MLE · 联合 ARMA(p,q)-ARCH/GARCH 条件极大似然
-
-这是新的估计核心工作包，不是 v1.8 的 bugfix。当前当 `q > 0` 时先估 ARMA、再估 ARCH/GARCH，因此不能与 Stata `arch ..., ar() ma() arch() garch()` 的联合条件极大似然、联合参数或联合 IC 做逐数值比较。完成前，产品只能使用 `REFERENCE_SEMANTICS = "directional_or_workflow_regression"`。
-
-工作包必须先冻结一个可复跑的 Stata oracle：Stata 版本与命令、Do-file hash、VIXCLS 输入 hash、缺失值处理、时间排序、ARMA/ARCH/GARCH 阶数、分布和所有估计选项。oracle 必须保存参数、标准误、`e(ll)`、AIC/AICc/BIC、收敛码/迭代信息、conditioning observations、条件方差/标准化残差和逐 origin 预测；不允许从人工抄写的“近似预期值”反推实现。
-
-实现和验收必须覆盖：
-
-1. 联合递归均值创新与条件方差的 ARMA(p,q)-ARCH/GARCH 条件极大似然，连同明确的参数约束、初始化和失败语义。
-2. 与 oracle 完全显式一致的 conditioning 观察期、缺失处理和有效样本定义；不得把 conditioning、训练/验证切分或业务日时间语义隐式改变。
-3. 在冻结 oracle fixture 上比较参数、联合 LL、AIC/AICc/BIC、收敛状态和条件方差/标准化残差；数值容差必须在 fixture 与验收前声明，不能在实现后为了通过测试临时放宽。
-4. 同一冻结 origins 上比较 one-step 预测、区间和下一期预测，并分别记录不可安全推断未来交易时间戳的限制。
-5. 用合成数据、VIXCLS 和至少一个显式收敛失败/边界案例做 RED/GREEN 回归；只有所有 oracle 维度通过，才允许把文案从 directional/workflow 改为数值复现。
-
 ---
 
 ## 3. 已清留痕（做完即删的历史，防重复排查）
 
 > 保留一版可查阅，下次收尾整份冻结进 `archive/` 时一并带走。
 
+- **v1.8.11 已完成并删除的项**（2026-10-07）：V1810-FAMILY-ORACLES、V1810-PANEL-DID-KERNEL、V1810-NEGBIN、V1810-LMM-ORACLE（另改 GLS 口径并开放 wald/lincom/nlcom）、V1810-AGENT-FIT-THEN-TEST、V1810-PROVIDER-MODEL-NAMES；§2-V1.8.2-JOINT-ARMA-GARCH-MLE（联合 MLE 对 Stata `arch`，VIX 复现；ω 与原 Stata 的差为 Stata 停止精度，见发布说明）。
 - **v1.8.10 已完成并删除的 §0.2 项**（2026-10-04）：V189-RESULT-ENVELOPE、V189-MODEL-ACCEPTANCE-KIT、V189-BY-GROUP、V189-HAC、V189-DATA-TAB-AGENT-SCOPE、V189-P7-TESTS-PORT、V189-MI-POOLING-E2E；V189-POSTEST-REGISTRY 已对 4 族完成，余下族保留在表中。
 - **v1.6.9 前置清债**：见 §1 表末「已清」块。
 - **v1.6.9 收尾卫生**：①6 个测试文件裸 `global.fetch=` 无恢复 → 统一 `vi.stubGlobal` + 只还原 fetch（`fe65cad`；注意 `vi.unstubAllGlobals()` 会连带清掉 setup 里一次性装的 ResizeObserver，故只还原 fetch）。②`did_mode` 值拼写核查 → UI 全对（DID `cohort/two_by_two/status`、CS `never/not_yet` 均正确），无需改；仅内部 `EstimatedEquationSection` 有个 `modelType.includes("twfe")` 的 OR 死分支（无 model_type 含 "twfe"，不给用户看、有家族测试钉着，不值得碰）。
