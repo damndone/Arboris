@@ -51,6 +51,7 @@
 | `v1.8.9` | 2026-09-28 | SPSS/Stata 互通、自然语言驱动与可核对的 AI 分析 | [说明](../releases/v1.8.9-release-notes.md) | [Release](https://github.com/damndone/Arboris/releases/tag/v1.8.9) | [代码](https://github.com/damndone/Arboris/tree/v1.8.9) |
 | `v1.8.10` | 2026-10-04 | 扩展地基：推断核心与后估计、检查库与准入、多重插补合并、Newey–West、按组执行、Agent 焦点 | [说明](../releases/v1.8.10-release-notes.md) | [Release](https://github.com/damndone/Arboris/releases/tag/v1.8.10) | [代码](https://github.com/damndone/Arboris/tree/v1.8.10) |
 | `v1.8.11` | 2026-10-07 | 对标 Stata/SPSS：IV/GLM/面板/DID/LMM 后估计、负二项 α、ARMA–GARCH 复现、单阶段 FPC、三语言脚本导出 | [说明](../releases/v1.8.11-release-notes.md) | [Release](https://github.com/damndone/Arboris/releases/tag/v1.8.11) | [代码](https://github.com/damndone/Arboris/tree/v1.8.11) |
+| `v1.8.12` | 2026-10-08 | 基础加固：本地服务安全、生成前端接口类型、命令行由目录生成（NB1 原生导出 Stata/Python）、合同分层、项名引号统一、共享虚拟环境安装修复 | [说明](../releases/v1.8.12-release-notes.md) | [Release](https://github.com/damndone/Arboris/releases/tag/v1.8.12) | [代码](https://github.com/damndone/Arboris/tree/v1.8.12) |
 
 ## 没有发布 tag 的早期版本（v1.0–v1.4.0）
 
