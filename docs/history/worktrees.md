@@ -92,6 +92,7 @@
 | `codex-v1810-evaluation` | `eval/v1810-codex` | `9ce17129` | — | `archive/local-only/eval-v1810-codex` | — | Codex 评估线，v1.8.10 工单 A；已并入 v1.8.10 | 保留（可移出） |
 | `codex-v1811-admission-oracles` | `eval/v1811-admission-oracles` | `3b43f003` | — | `archive/local-only/eval-v1811-admission-oracles` | — | Codex 评估线，工单 B；v1.8.11 的输入 | 已移除工作目录（2026-10-07） |
 | `workbench-v1.8.11` | `workbench-v1.8.11` | `d6675af4` | `v1.8.11`（main 上为 squash `8b1a5390`） | —（只在本机：`refs/private/v1.8.11-full-history`） | — | 逐提交历史早期含 Stata 许可证值，不打存档 tag、不推送 | 常驻 |
+| `workbench-v1.8.12` | `workbench-v1.8.12` | `c8621b90` | `v1.8.12`（main 上为 squash `91550d73`） | —（未存档；轮换出常驻时再打 `archive/worktree/workbench-v1.8.12`） | — |  | 常驻 |
 | 另 22 个 v1.8.11 Codex lane / 审查工作目录（`codex-v1811-*`） | `lane/v1811-*`、`eval/v1811-codex`、`codex/v1811-*` | 见 `archive-index.json` | — | —（只在本机） | — | 同上；主仓库 `.git/hooks/pre-push` 拒绝推送这些分支 | 已移除工作目录（2026-10-07）；未跟踪与被忽略的证据原样保存在本机 `local/worktree-leftovers/<名字>/`，分支保留 |
 
 `codex-c373`、`codex-c3f1` 是 Codex 自己的 worktree（`~/.codex/worktrees/`），提交 `90799cd7` 已包含在 `archive/v1.8.9-codex-wip` 中。

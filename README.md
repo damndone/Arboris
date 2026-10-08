@@ -9,7 +9,7 @@ Arboris is meant to cover the everyday work people do in Stata or SPSS, across
 disciplines, while being easier to start with: you can drive it from the menus,
 from a lineage graph, or by talking to the Agent.
 
-**Current release: v1.8.11** (2026-10-07) — [release notes](docs/releases/v1.8.11-release-notes.md) ·
+**Current release: v1.8.12** (2026-10-08) — [release notes](docs/releases/v1.8.12-release-notes.md) ·
 [all releases](docs/releases/) · [manual](docs/manual/README.md)
 
 ---
@@ -167,10 +167,10 @@ pip install -e ".[imbalanced]"  # imbalanced-learn, for SMOTE and resampling
 
 ## Where it is going
 
-Next (v1.8.11): post-estimation for IV, panel, difference-in-differences,
-mixed-effects and GLM families, and reproducible script export (Stata do-file,
-R, Python) from the lineage graph. Then a redesigned workspace with a single
-Agent that follows what you are looking at. After that: classification and time-aware
+Next, in parallel: a redesigned workspace with a single Agent that follows what
+you are looking at (v1.9.0), and backend work that does not change the API
+(v1.8.13: data operations on the command line, readable mixed-model terms,
+smaller Agent modules). After that: classification and time-aware
 machine learning, then a research pack for quantitative finance — factor
 research and strategy validation that shows why a backtest can be trusted and
 where it cannot. See [the roadmap notes](docs/superpowers/roadmap/).

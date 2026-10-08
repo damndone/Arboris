@@ -15,16 +15,23 @@
 
 ---
 
-## 0.0 最新：v1.8.11 已发布（2026-10-07）
+## 0.0 最新：v1.8.12 已发布（2026-10-08）
 
-**v1.8.11 = 对标 Stata/SPSS**，**已发布**（2026-10-07，main squash `8b1a5390`，tag `v1.8.11`，
-发布说明 `docs/releases/v1.8.11-release-notes.md`，GitHub Release 已建，gate 日志
-`evaluations/gate/2026-10-07-v1.8.11-gate.log`，版本记录 `archive/plans/2026-10-04-v1.8.11-remaining-release-train.md`）。
-立项 9 步全部交付，另含 LMM GLS 口径与后估计、单阶段 FPC。完成的 §0.3 项已删除（见 §3 留痕）。
-**下一版 v1.8.12 = 基础加固，为 v1.9.0 界面重做铺路**（用户 2026-10-07 同意先做自检清单再做界面）。
+**v1.8.12 = 基础加固**，**已发布**（2026-10-08，main squash `91550d73`，tag `v1.8.12`）：
 
-> 本版逐提交历史含 Stata 许可证值，只保留在本机 `refs/private/v1.8.11-full-history` 与 24 个本地分支；
-> 主仓库 `.git/hooks/pre-push` 拒绝推送它们。收尾仪式 §5 的 `archive/local-only/*` 推送规则对本版不适用。
+- 发布说明：`docs/releases/v1.8.12-release-notes.md`；GitHub Release 已建。
+- gate 日志：`evaluations/gate/2026-10-08-v1.8.12-gate.log`。
+- 自审与发布验收：`evaluations/2026-10-08-v1.8.12-self-review.md`。
+- 立项 8 步全部交付（第 8 步按用户决定只做项名引号）；完成项见 §3 留痕。
+- 发布时修复共享虚拟环境：editable 安装指向主仓库，加 checkout 守护与 gate 检查。
+
+**下一步：v1.9.0 界面重做与 v1.8.13 后端并行**（用户 2026-10-08 认可）：
+
+- 两条线都从 tag `v1.8.12` 开始，即 ADR-PD-001 的合同锁：HTTP 接口与生成的前端类型。
+- v1.8.13 改接口须单独提交新合同并重新生成类型，界面线明确切换后再用。
+- 开工交接：`handoffs/2026-10-08-v1.8.13-kickoff.md`。
+
+> v1.8.11 的逐提交历史含 Stata 许可证值，只保留在本机 `refs/private/v1.8.11-full-history`；`.git/hooks/pre-push` 拒绝推送。
 
 ### 0.3 延续项
 
@@ -39,7 +46,7 @@
 
 ### 0.4 v1.8.12 输入：v1.8.11 发版后自检（2026-10-07）
 
-> 每一项的归属版本与完成标准见 `handoffs/2026-10-07-v1.8.12-kickoff.md`「v1.6.2 外部评价复审与 v1.8.11 发版后自检」，以该表为准。
+> 每一项的归属版本与完成标准：v1.8.12 时见 `archive/handoff/2026-10-07-v1.8.12-kickoff.md`；v1.8.13 起见 `handoffs/2026-10-08-v1.8.13-kickoff.md`，以最新交接为准。
 
 | ID | 级别 | 内容 | 现状 / 建议 | 来源 |
 |---|---|---|---|---|
