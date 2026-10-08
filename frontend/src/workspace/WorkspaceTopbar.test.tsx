@@ -12,6 +12,7 @@ function controls(overrides: Partial<LayoutControls> = {}): LayoutControls {
     toggleLayout: vi.fn(),
     agentOpen: true,
     toggleAgent: vi.fn(),
+    mapFoldable: true,
     mapHidden: false,
     toggleMap: vi.fn(),
     ...overrides,
@@ -76,8 +77,14 @@ describe("WorkspaceTopbar", () => {
     expect(toggleMap).toHaveBeenCalled();
   });
 
-  test("lineage first has no map toggle", () => {
-    renderTopbar({ controls: controls({ layout: "lineage", effective: "lineage" }) });
+  test("no map toggle where there is no column to fold (lineage first, or nothing open)", () => {
+    renderTopbar({ controls: controls({ layout: "lineage", effective: "lineage", mapFoldable: false }) });
     expect(screen.queryByRole("button", { name: /the map/ })).not.toBeInTheDocument();
+  });
+
+  test("project home has views but no layout controls", () => {
+    renderTopbar({ controls: undefined, view: "home" });
+    expect(screen.queryByRole("group", { name: "Layout" })).not.toBeInTheDocument();
+    expect(within(screen.getByRole("tablist", { name: "View" })).getAllByRole("tab").every((t) => t.getAttribute("aria-selected") === "false")).toBe(true);
   });
 });

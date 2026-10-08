@@ -3,11 +3,19 @@
 // below. Nothing open yet says what to do next instead of showing a blank.
 
 import type { ReactNode } from "react";
+import { FoldRightIcon } from "./icons";
 
-export function StageHost({ tabs, panel }: { tabs: ReactNode; panel: ReactNode | null }) {
+export function StageHost({ tabs, panel, onFold }: { tabs: ReactNode; panel: ReactNode | null; onFold?: () => void }) {
   return (
     <div className="ws-stage-host" data-testid="workspace-stage">
-      <div className="ws-stage-host__tabs">{tabs}</div>
+      <div className="ws-stage-host__bar">
+        <div className="ws-stage-host__tabs">{tabs}</div>
+        {onFold && (
+          <button type="button" className="ws-icon-button" aria-label="Fold the details" title="Fold the details and show the whole map" onClick={onFold}>
+            <FoldRightIcon />
+          </button>
+        )}
+      </div>
       <div className="ws-stage-host__body">
         {panel ?? (
           <div className="ws-stage-host__empty">

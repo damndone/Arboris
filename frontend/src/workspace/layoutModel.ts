@@ -26,10 +26,28 @@ export function agentWidth(spec: ColumnSpec, agentOpen: boolean): number {
   return agentOpen ? spec.agent : spec.rail;
 }
 
-/** Map column width for a layout, given the shell's measured width. */
-export function mapWidthFor(layout: Layout, shellWidth: number, spec: ColumnSpec, agentOpen: boolean): number {
-  if (layout === "results") return spec.map;
-  return Math.max(spec.map, shellWidth - agentWidth(spec, agentOpen) - spec.inspector);
+export interface RegionState {
+  /** The layout on screen (after the wide-view rule). */
+  layout: Layout;
+  /** Whether the stage shows: something is open and it is not folded away. */
+  stageOpen: boolean;
+  /** Whether the user folded the map column away (results first only). */
+  mapHidden: boolean;
+  agentOpen: boolean;
+}
+
+/** Map column width. With the stage closed the map takes everything the Agent leaves. */
+export function mapWidthFor(state: RegionState, shellWidth: number, spec: ColumnSpec): number {
+  const rest = shellWidth - agentWidth(spec, state.agentOpen);
+  if (!state.stageOpen) return Math.max(spec.map, rest);
+  if (state.layout === "lineage") return Math.max(spec.map, rest - spec.inspector);
+  return state.mapHidden ? 0 : spec.map;
+}
+
+/** A narrow map is a navigator (tree of cards); a wide one is the full graph. */
+export function mapPresentation(state: RegionState): "graph" | "tree" | "none" {
+  if (!state.stageOpen || state.layout === "lineage") return "graph";
+  return state.mapHidden ? "none" : "tree";
 }
 
 // Momentum projection (UIScrollView's normal deceleration, per millisecond):

@@ -60,6 +60,8 @@ import { useGlobalShortcuts } from "./useGlobalShortcuts";
 import { BottomPanel } from "./BottomPanel";
 import { RunHistoryToggle } from "./RunHistoryToggle";
 import { WorkbenchWorkspace } from "../workspace/WorkbenchWorkspace";
+import { WorkspaceProjectStart } from "../workspace/WorkspaceProjectStart";
+import { HomeOnlyShell } from "./HomeOnlyShell";
 import { useWorkspaceMode } from "../workspace/workspaceMode";
 import { SearchPalette } from "./SearchPalette";
 import { CommandPalette } from "./CommandPalette";
@@ -329,6 +331,7 @@ function ForestWorkbench({
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const { forest, loading, error, refetch } = useForestData(projectRoot);
+  const workspaceMode = useWorkspaceMode();
   const appShellContext = useOutletContext<AppShellStatusContext>();
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [pendingFocusTarget, setPendingFocusTarget] =
@@ -857,6 +860,20 @@ function ForestWorkbench({
     selectedView !== "home";
   const body = waitForPersistedGenesisDrafts ? (
     <Loading />
+  ) : !shellRunId && workspaceMode === "new" ? (
+    <WorkspaceProjectStart
+      projectRoot={projectRoot}
+      view={selectedView}
+      legacyFamilyCount={forest.familyCount}
+      legacyRunCount={forest.familyRunCount}
+      onOpenWizard={openGenesisWizard}
+      onOpenSettings={() => setSettingsOpen(true)}
+      notebookActiveRunId={notebookActiveRunId}
+      onMaterializedDraft={(response) => {
+        draftHandlers.onForkDraft(response);
+        void refetch();
+      }}
+    />
   ) : !shellRunId && selectedView === "notebook" ? (
     <NotebookOnlyShell
       projectRoot={projectRoot}
@@ -943,55 +960,6 @@ function ForestWorkbench({
         </RailRefreshContext.Provider>
         {genesisWizardDrawer}
       </ProjectRootProvider>
-    </div>
-  );
-}
-
-function HomeOnlyShell({
-  projectRoot,
-  onOpenSettings,
-}: {
-  projectRoot: string;
-  onOpenSettings: () => void;
-}) {
-  const navigate = useNavigate();
-
-  return (
-    <div
-      data-testid="workbench-home-shell"
-      style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}
-    >
-      <div
-        role="toolbar"
-        aria-label="Project toolbar"
-        style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 16px", height: 40, borderBottom: "1px solid var(--separator)" }}
-      >
-        <ProjectSwitcher projectRoot={projectRoot} />
-        <span style={{ color: "var(--label-secondary)", fontSize: 12 }}>Home</span>
-        <button
-          type="button"
-          data-testid="workbench-home-graph"
-          onClick={() => navigate(window.location.pathname)}
-          style={{ marginLeft: "auto", padding: "4px 10px", borderRadius: 6, border: "1px solid var(--separator)", background: "transparent", color: "var(--label)", cursor: "pointer", fontSize: 12 }}
-        >
-          Graph
-        </button>
-        <button
-          type="button"
-          data-testid="workbench-home-shell-settings"
-          onClick={onOpenSettings}
-          style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid var(--separator)", background: "transparent", color: "var(--label)", cursor: "pointer", fontSize: 12 }}
-        >
-          Settings
-        </button>
-      </div>
-      <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
-        <WorkbenchHomeView
-          projectRoot={projectRoot}
-          onOpenSettings={onOpenSettings}
-          onOpenProject={(root) => navigate(`/p/${rootToSlug(root)}/graph`)}
-        />
-      </div>
     </div>
   );
 }
@@ -1964,7 +1932,7 @@ function WorkbenchShell({
     />
   );
 
-  if (workspaceMode === "new" && state.view !== "home") {
+  if (workspaceMode === "new") {
     return (
       <AgentNavigationContext.Provider value={openAgentNavigation}>
         <WorkbenchWorkspace

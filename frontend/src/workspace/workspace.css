@@ -307,14 +307,19 @@
   min-height: 0;
 }
 
-.ws-stage-host__tabs {
+.ws-stage-host__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
   flex: 0 0 auto;
+  padding-right: var(--space-2);
   border-bottom: var(--hairline) solid var(--separator-faint);
   background: var(--bg-card-2);
 }
 
-.ws-stage-host__tabs:empty {
-  display: none;
+.ws-stage-host__tabs {
+  flex: 1;
+  min-width: 0;
 }
 
 .ws-stage-host__body {
@@ -349,4 +354,143 @@
 .ws-stage-host__tabs .detail-tabs__strip {
   min-height: 42px;
   padding: 0 var(--space-2);
+}
+
+/* Regions that step aside: a folded map column, a closed stage. */
+.ws-map[hidden],
+.ws-stage[hidden] {
+  display: none;
+}
+
+.ws-map__graph {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.ws-map__graph[hidden] {
+  display: none;
+}
+
+/* Something is open but the stage was folded away: one click brings it back. */
+.ws-map__reopen {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  z-index: 5;
+}
+
+/* Project home in the workspace: the same top bar over a reading column. */
+.ws-page {
+  display: grid;
+  grid-template-rows: 48px minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+  background: var(--bg-canvas);
+  color: var(--label);
+  font-family: var(--font-sans);
+  font-size: var(--text-ui);
+}
+
+.ws-page__body {
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.ws-segmented__item[aria-disabled="true"] {
+  color: var(--label-tertiary);
+  cursor: not-allowed;
+}
+
+/* Start page: a project with no runs yet. */
+.ws-start {
+  margin: auto;
+  max-width: 34rem;
+  padding: var(--space-10) var(--space-6);
+  text-align: center;
+}
+
+.ws-start__title {
+  margin: 0;
+  font-size: var(--text-title);
+  font-weight: 600;
+  letter-spacing: var(--tracking-tight);
+}
+
+.ws-start__lead {
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-body);
+  line-height: var(--leading-reading);
+  color: var(--label-secondary);
+}
+
+.ws-start__actions {
+  display: flex;
+  justify-content: center;
+  gap: var(--space-3);
+  margin-top: var(--space-6);
+}
+
+.ws-start__primary {
+  height: 34px;
+  padding: 0 var(--space-4);
+}
+
+.ws-start__actions .ws-button {
+  height: 34px;
+}
+
+.ws-start__note {
+  margin: var(--space-6) 0 0;
+  font-size: var(--text-small);
+  color: var(--label-secondary);
+}
+
+.ws-start__path {
+  margin: var(--space-6) 0 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
+  color: var(--label-tertiary);
+  overflow-wrap: anywhere;
+}
+
+/* Stage tabs: quiet chips; the open one is a raised card, not a fill. */
+.ws-stage-host__tabs .detail-tabs__item {
+  max-width: 240px;
+  border-color: transparent;
+  border-radius: var(--radius-sm);
+}
+
+.ws-stage-host__tabs .detail-tabs__item[data-active="true"] {
+  background: var(--bg-card);
+  border-color: var(--separator);
+  box-shadow: var(--shadow-1);
+}
+
+.ws-stage-host__tabs .detail-tabs__tab,
+.ws-stage-host__tabs .detail-tabs__close {
+  min-height: 0;
+  background: transparent;
+  color: var(--label-secondary);
+  font-size: var(--text-small);
+  font-weight: 500;
+}
+
+.ws-stage-host__tabs .detail-tabs__item[data-active="true"] .detail-tabs__tab,
+.ws-stage-host__tabs .detail-tabs__item[data-active="true"] .detail-tabs__close {
+  color: var(--label);
+  font-weight: 600;
+}
+
+.ws-stage-host__tabs .detail-tabs__item[data-active="true"] .detail-tabs__tab:hover,
+.ws-stage-host__tabs .detail-tabs__item[data-active="true"] .detail-tabs__close:hover {
+  color: var(--label);
+  background: var(--bg-elev);
+}
+
+.ws-stage-host__tabs .detail-tabs__close {
+  border-left: 0;
 }

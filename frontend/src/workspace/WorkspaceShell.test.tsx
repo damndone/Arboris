@@ -32,7 +32,8 @@ function renderShell(view: ViewMode = "graph", projectRoot = "/p") {
       projectRoot={projectRoot}
       view={view}
       topbar={(controls) => <Topbar controls={controls} />}
-      map={<Counter testId="map-state" />}
+      stageOpen
+      map={() => <Counter testId="map-state" />}
       stage={<Counter testId="stage-state" />}
       agent={<Counter testId="agent-state" />}
       bottom={<div>bottom</div>}
@@ -98,7 +99,8 @@ describe("WorkspaceShell", () => {
         projectRoot="/p"
         view="graph"
         topbar={(controls) => <Topbar controls={controls} />}
-        map={<Counter testId="map-state" />}
+        stageOpen
+        map={() => <Counter testId="map-state" />}
         stage={<Counter testId="stage-state" />}
         agent={<Counter testId="agent-state" />}
         bottom={<div>bottom</div>}
@@ -111,5 +113,39 @@ describe("WorkspaceShell", () => {
     localStorage.setItem("workbench:layout:/q", "lineage");
     renderShell("graph", "/q");
     expect(shell()).toHaveAttribute("data-layout", "lineage");
+  });
+
+  test("with nothing open the stage steps aside and the map shows the full graph", () => {
+    render(
+      <WorkspaceShell
+        projectRoot="/p"
+        view="graph"
+        topbar={(controls) => <Topbar controls={controls} />}
+        stageOpen={false}
+        map={(presentation) => <span data-testid="presentation">{presentation}</span>}
+        stage={<div>stage</div>}
+        agent={<div>agent</div>}
+        bottom={<div>bottom</div>}
+      />,
+    );
+    expect(shell()).toHaveAttribute("data-stage", "closed");
+    expect(screen.getByTestId("presentation")).toHaveTextContent("graph");
+    expect(screen.queryByRole("separator", { name: /map width/i })).not.toBeInTheDocument();
+  });
+
+  test("an open stage in results first narrows the map to the tree", () => {
+    render(
+      <WorkspaceShell
+        projectRoot="/p"
+        view="graph"
+        topbar={(controls) => <Topbar controls={controls} />}
+        stageOpen
+        map={(presentation) => <span data-testid="presentation">{presentation}</span>}
+        stage={<div>stage</div>}
+        agent={<div>agent</div>}
+        bottom={<div>bottom</div>}
+      />,
+    );
+    expect(screen.getByTestId("presentation")).toHaveTextContent("tree");
   });
 });

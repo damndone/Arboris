@@ -20,10 +20,13 @@ export const WORKSPACE_VIEWS: ReadonlyArray<{ id: ViewMode; label: string }> = [
 export interface WorkspaceTopbarProps {
   projectRoot: string;
   view: ViewMode;
-  controls: LayoutControls;
+  /** Absent on project home, which has no map, stage or layout. */
+  controls?: LayoutControls;
   /** Analysis-level actions (Rerun) from the shared action registry. */
   actions: ReactNode;
   newAnalysisLabel?: string;
+  /** Views that cannot open yet, with the reason shown as their tooltip. */
+  disabledViews?: Partial<Record<ViewMode, string>>;
   onView: (view: ViewMode) => void;
   onHome: () => void;
   onOpenSettings: () => void;
@@ -40,6 +43,7 @@ export function WorkspaceTopbar({
   controls,
   actions,
   newAnalysisLabel = "New analysis",
+  disabledViews = {},
   onView,
   onHome,
   onOpenSettings,
@@ -48,7 +52,7 @@ export function WorkspaceTopbar({
   return (
     <div className="ws-topbar__row" data-testid="workspace-topbar">
       <div className="ws-topbar__start">
-        {controls.effective === "results" && (
+        {controls?.mapFoldable && (
           <button
             type="button"
             className="ws-icon-button"
@@ -75,8 +79,12 @@ export function WorkspaceTopbar({
             role="tab"
             className="ws-segmented__item"
             aria-selected={view === item.id}
+            aria-disabled={disabledViews[item.id] ? true : undefined}
+            title={disabledViews[item.id]}
             data-testid={`workspace-view-${item.id}`}
-            onClick={() => onView(item.id)}
+            onClick={() => {
+              if (!disabledViews[item.id]) onView(item.id);
+            }}
           >
             {item.label}
           </button>
@@ -84,6 +92,7 @@ export function WorkspaceTopbar({
       </div>
 
       <div className="ws-topbar__end">
+        {controls && (
         <div className="ws-segmented ws-segmented--small" role="group" aria-label="Layout">
           <button
             type="button"
@@ -106,6 +115,7 @@ export function WorkspaceTopbar({
             Lineage first
           </button>
         </div>
+        )}
         <button type="button" className="ws-icon-button" aria-label="Search (⌘K)" title="Search (⌘K)" onClick={openSearch}>
           <SearchIcon />
         </button>

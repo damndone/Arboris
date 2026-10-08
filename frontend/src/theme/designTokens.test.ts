@@ -75,10 +75,13 @@ const RUNTIME_VARS = [
 function undefinedVars(defined: Set<string>): string[] {
   const hits: string[] = [];
   for (const path of files.filter((p) => /\.(css|tsx?)$/.test(p) && !isTest(p))) {
-    readFileSync(path, "utf8").split("\n").forEach((line, index) => {
+    const text = readFileSync(path, "utf8");
+    // A stylesheet may define its own component-local variables (e.g. a depth).
+    const local = new Set(path.endsWith(".css") ? [...text.matchAll(/(?:^|[;{\s])(--[\w-]+)\s*:/g)].map((m) => m[1]) : []);
+    text.split("\n").forEach((line, index) => {
       for (const match of line.matchAll(/var\(\s*(--[\w-]+)/g)) {
         const name = match[1];
-        if (defined.has(name) || RUNTIME_VARS.includes(name)) continue;
+        if (defined.has(name) || local.has(name) || RUNTIME_VARS.includes(name)) continue;
         hits.push(`${relative(SRC, path)}:${index + 1} ${name}`);
       }
     });

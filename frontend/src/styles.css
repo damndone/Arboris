@@ -52,15 +52,35 @@ select {
   font: inherit;
 }
 
+/* v1.9.0: a plain button is a quiet, bordered control; the one primary action
+ * on a surface opts in with data-variant="primary". (Before, every unstyled
+ * button was a saturated accent fill, which made every page shout.) */
 button {
-  min-height: 36px;
-  border: 1px solid var(--tint-fill);
-  border-radius: 5px;
+  min-height: 32px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--label);
+  cursor: pointer;
+  font-weight: 500;
+  padding: 5px 12px;
+  transition: background var(--duration-fade) var(--ease-standard), border-color var(--duration-fade) var(--ease-standard);
+}
+
+button:where(:hover:not(:disabled)) {
+  border-color: var(--border-strong);
+  background: var(--bg-elev);
+}
+
+button[data-variant="primary"] {
+  border-color: var(--tint-fill);
   background: var(--tint-fill);
   color: var(--on-tint);
-  cursor: pointer;
-  font-weight: 600;
-  padding: 6px 14px;
+}
+
+button[data-variant="primary"]:where(:hover:not(:disabled)) {
+  border-color: var(--tint-fill-pressed);
+  background: var(--tint-fill-pressed);
 }
 
 button:disabled {

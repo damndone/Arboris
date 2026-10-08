@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test } from "vitest";
 import {
   columnSpec,
   effectiveLayout,
+  mapPresentation,
   mapWidthFor,
   projectedPosition,
   readAgentOpen,
@@ -19,10 +20,22 @@ describe("column widths", () => {
 
   test("results first keeps a map column; lineage first gives the map what the inspector and Agent leave", () => {
     const spec = columnSpec(1512);
-    expect(mapWidthFor("results", 1512, spec, true)).toBe(280);
-    expect(mapWidthFor("lineage", 1512, spec, true)).toBe(1512 - 380 - 360);
-    expect(mapWidthFor("lineage", 1512, spec, false)).toBe(1512 - 52 - 360);
-    expect(mapWidthFor("lineage", 600, spec, true)).toBe(280);
+    const open = { layout: "results" as const, stageOpen: true, mapHidden: false, agentOpen: true };
+    expect(mapWidthFor(open, 1512, spec)).toBe(280);
+    expect(mapWidthFor({ ...open, mapHidden: true }, 1512, spec)).toBe(0);
+    expect(mapWidthFor({ ...open, layout: "lineage" }, 1512, spec)).toBe(1512 - 380 - 360);
+    expect(mapWidthFor({ ...open, layout: "lineage", agentOpen: false }, 1512, spec)).toBe(1512 - 52 - 360);
+    expect(mapWidthFor({ ...open, layout: "lineage" }, 600, spec)).toBe(280);
+  });
+
+  test("with the stage closed the map takes the whole width, as the full graph", () => {
+    const spec = columnSpec(1512);
+    const closed = { layout: "results" as const, stageOpen: false, mapHidden: false, agentOpen: true };
+    expect(mapWidthFor(closed, 1512, spec)).toBe(1512 - 380);
+    expect(mapPresentation(closed)).toBe("graph");
+    expect(mapPresentation({ ...closed, stageOpen: true })).toBe("tree");
+    expect(mapPresentation({ ...closed, stageOpen: true, mapHidden: true })).toBe("none");
+    expect(mapPresentation({ ...closed, stageOpen: true, layout: "lineage" })).toBe("graph");
   });
 });
 

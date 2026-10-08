@@ -14,6 +14,7 @@ import dagre from "dagre";
 import "../tokens/lineage.css";
 import { GraphNode } from "./GraphNode";
 import { GraphTooltip } from "./GraphTooltip";
+import { AutoFitOnResize } from "./AutoFitOnResize";
 import type {
   GraphViewModel,
   GraphViewNode,
@@ -879,6 +880,7 @@ export function GraphCanvas({
           onLayout={handleLayout}
         />
         <CanvasLegend />
+        <AutoFitOnResize containerRef={rootRef} />
       </ReactFlow>
       <GraphTooltip
         node={hover?.node ?? null}

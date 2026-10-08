@@ -13,6 +13,7 @@ import {
   agentWidth,
   columnSpec,
   effectiveLayout,
+  mapPresentation,
   mapWidthFor,
   readAgentOpen,
   readLayout,
@@ -33,15 +34,22 @@ export interface LayoutControls {
   toggleLayout: () => void;
   agentOpen: boolean;
   toggleAgent: () => void;
+  /** Whether a map column can be folded right now (stage open, results first or a wide view). */
+  mapFoldable: boolean;
   mapHidden: boolean;
   toggleMap: () => void;
 }
+
+export type MapPresentation = "graph" | "tree";
 
 export interface WorkspaceShellProps {
   projectRoot: string;
   view: ViewMode;
   topbar: (controls: LayoutControls) => ReactNode;
-  map: ReactNode;
+  /** Whether the stage shows. Wide views always show it; Analysis shows it when something is open. */
+  stageOpen: boolean;
+  /** The map region; a narrow column gets the tree, a wide map the full graph. */
+  map: (presentation: MapPresentation) => ReactNode;
   stage: ReactNode;
   agent: ReactNode;
   bottom: ReactNode;
@@ -80,12 +88,15 @@ function releaseVelocity(samples: DragState["samples"]): number {
   return last.t > first.t ? (last.x - first.x) / (last.t - first.t) : 0;
 }
 
-export function WorkspaceShell({ projectRoot, view, topbar, map, stage, agent, bottom }: WorkspaceShellProps) {
+export function WorkspaceShell({ projectRoot, view, topbar, stageOpen, map, stage, agent, bottom }: WorkspaceShellProps) {
   const shellRef = useRef<HTMLDivElement>(null);
   const shellWidth = useShellWidth(shellRef);
   const [layout, setLayoutState] = useState<Layout>(() => readLayout(projectRoot));
   const [agentOpen, setAgentOpen] = useState(readAgentOpen);
-  const [mapHidden, setMapHidden] = useState(false);
+  // The Analysis map column shows by default; Data, Tables, Report and Plans
+  // are wide documents, so their map column starts folded.
+  const [analysisMapHidden, setAnalysisMapHidden] = useState(false);
+  const [wideMapHidden, setWideMapHidden] = useState(true);
   const [dragWidth, setDragWidth] = useState<number | null>(null);
   const drag = useRef<DragState | null>(null);
 
@@ -93,7 +104,7 @@ export function WorkspaceShell({ projectRoot, view, topbar, map, stage, agent, b
 
   const setLayout = useCallback((next: Layout) => {
     setLayoutState(next);
-    setMapHidden(false);
+    setAnalysisMapHidden(false);
     writeLayout(projectRoot, next);
   }, [projectRoot]);
   const toggleLayout = useCallback(() => setLayout(layout === "results" ? "lineage" : "results"), [layout, setLayout]);
@@ -103,7 +114,6 @@ export function WorkspaceShell({ projectRoot, view, topbar, map, stage, agent, b
       return !open;
     });
   }, []);
-  const toggleMap = useCallback(() => setMapHidden((hidden) => !hidden), []);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -123,9 +133,14 @@ export function WorkspaceShell({ projectRoot, view, topbar, map, stage, agent, b
   const spec = columnSpec(windowWidth());
   const effective = effectiveLayout(layout, view);
   const wideView = WIDE_VIEWS.has(view);
-  const lineageWidth = mapWidthFor("lineage", shellWidth, spec, agentOpen);
-  const targetMap = mapHidden && effective === "results" ? 0 : mapWidthFor(effective, shellWidth, spec, agentOpen);
-  const controls: LayoutControls = { layout, effective, setLayout, toggleLayout, agentOpen, toggleAgent, mapHidden, toggleMap };
+  const mapHidden = wideView ? wideMapHidden : analysisMapHidden;
+  const toggleMap = () => (wideView ? setWideMapHidden(!wideMapHidden) : setAnalysisMapHidden(!analysisMapHidden));
+  const regions = { layout: effective, stageOpen, mapHidden, agentOpen };
+  const lineageWidth = mapWidthFor({ ...regions, layout: "lineage", stageOpen: true }, shellWidth, spec);
+  const targetMap = mapWidthFor(regions, shellWidth, spec);
+  const presentation = mapPresentation(regions);
+  const mapFoldable = wideView || (stageOpen && effective === "results");
+  const controls: LayoutControls = { layout, effective, setLayout, toggleLayout, agentOpen, toggleAgent, mapFoldable, mapHidden, toggleMap };
 
   const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
     event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -158,12 +173,16 @@ export function WorkspaceShell({ projectRoot, view, topbar, map, stage, agent, b
       data-testid="workspace-shell"
       data-layout={effective}
       data-agent={agentOpen ? "open" : "folded"}
+      data-stage={stageOpen ? "open" : "closed"}
+      data-map={presentation}
       className={`ws-shell${dragWidth !== null ? " ws-shell--dragging" : ""}`}
       style={style}
     >
       <header className="ws-topbar" role="banner">{topbar(controls)}</header>
-      <nav className="ws-map" aria-label="Map" hidden={targetMap === 0 && dragWidth === null}>{map}</nav>
-      {!wideView && (
+      <nav className="ws-map" aria-label="Map" hidden={presentation === "none" && dragWidth === null}>
+        {map(dragWidth !== null || presentation !== "tree" ? "graph" : "tree")}
+      </nav>
+      {stageOpen && !wideView && (
         <div
           className="ws-divider"
           role="separator"
@@ -187,7 +206,7 @@ export function WorkspaceShell({ projectRoot, view, topbar, map, stage, agent, b
           }}
         />
       )}
-      <main className="ws-stage" aria-label="Stage">
+      <main className="ws-stage" aria-label="Stage" hidden={!stageOpen}>
         <div className="ws-stage__surface">{stage}</div>
       </main>
       <aside className="ws-agent" aria-label="Agent">
