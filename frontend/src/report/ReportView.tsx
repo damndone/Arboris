@@ -209,20 +209,20 @@ export function ReportViewContent({ focusRequest = 0 }: { focusRequest?: number 
       {workspace.current && workspace.currentQualityStatus && workspace.currentQualityStatus !== "exportable" && (
         <div
           data-testid="report-quality-issues"
-          style={{ fontSize: 12, color: "var(--diff-removed, #b35900)", marginBottom: 12 }}
+          style={{ fontSize: 12, color: "var(--diff-removed)", marginBottom: 12 }}
         >
           This revision needs attention before formal export: {workspace.current.report_quality?.violations?.map((item) => typeof item === "string" ? item : item.message).join("; ") || workspace.currentQualityStatus}.
         </div>
       )}
 
       {workspace.error && (
-        <div role="alert" style={{ fontSize: 13, color: "var(--diff-removed, #b35900)", marginBottom: 12 }}>
+        <div role="alert" style={{ fontSize: 13, color: "var(--diff-removed)", marginBottom: 12 }}>
           {workspace.error}
         </div>
       )}
 
       {workspace.figureInventoryError && (
-        <div role="alert" style={{ fontSize: 13, color: "var(--diff-removed, #b35900)", marginBottom: 12 }}>
+        <div role="alert" style={{ fontSize: 13, color: "var(--diff-removed)", marginBottom: 12 }}>
           {workspace.figureInventoryError}
         </div>
       )}
@@ -231,7 +231,7 @@ export function ReportViewContent({ focusRequest = 0 }: { focusRequest?: number 
         <div
           data-testid="report-post-estimation-load-error"
           role="alert"
-          style={{ fontSize: 13, color: "var(--diff-removed, #b35900)", marginBottom: 12 }}
+          style={{ fontSize: 13, color: "var(--diff-removed)", marginBottom: 12 }}
         >
           {workspace.postEstimationLoadError}
         </div>

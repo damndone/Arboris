@@ -172,7 +172,7 @@ export function ContextMenu() {
           padding: 6,
           minWidth: 240,
           boxShadow:
-            "0 16px 40px rgba(0,0,0,0.75), 0 0 0 1px var(--separator)",
+            "var(--shadow-pop), 0 0 0 1px var(--separator)",
           zIndex: 1000,
         }}
       >
@@ -254,7 +254,7 @@ function ContextMenuCommand({
         borderRadius: 8,
         background: "transparent",
         border: 0,
-        color: danger ? "var(--danger, #c5221f)" : "var(--label)",
+        color: danger ? "var(--status-fails-fg)" : "var(--label)",
         cursor: "pointer",
         textAlign: "left",
         font: "inherit",
@@ -284,7 +284,7 @@ function RunDeletionLoading({
         display: "grid",
         placeItems: "center",
         padding: 20,
-        background: "rgba(0, 0, 0, 0.48)",
+        background: "var(--scrim)",
       }}
     >
       <section
@@ -295,8 +295,8 @@ function RunDeletionLoading({
           width: "min(420px, 100%)",
           borderRadius: 14,
           padding: 22,
-          background: "var(--bg-card, #fff)",
-          color: "var(--label, #1d1d1f)",
+          background: "var(--bg-card)",
+          color: "var(--label)",
         }}
       >
         <p role="status" style={{ margin: 0 }}>{message}</p>

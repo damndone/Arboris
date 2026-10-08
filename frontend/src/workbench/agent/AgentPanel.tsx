@@ -440,7 +440,7 @@ export function AgentPanel({ runId, projectRoot }: { runId: string; projectRoot:
         <p
           data-testid="agent-turn-error"
           role="status"
-          style={{ margin: "6px 0", color: "var(--danger, #b42318)", fontSize: 12 }}
+          style={{ margin: "6px 0", color: "var(--status-fails-fg)", fontSize: 12 }}
         >
           {terminalFailure}
         </p>

@@ -162,14 +162,14 @@ function CSEventStudyChart({ dyn }: { dyn: CSDynamicAgg }) {
   const pts = pts0.map((p) => `${sx(p.i)},${sy(p.coef)}`).join(" ");
   return (
     <svg width={W} height={H} aria-label="cs-event-study-chart">
-      <line x1={pad} y1={sy(0)} x2={W - pad} y2={sy(0)} stroke="#ccc" />
+      <line x1={pad} y1={sy(0)} x2={W - pad} y2={sy(0)} stroke="var(--chart-grid)" />
       {zeroIdx >= 0 && (
         <line
           x1={sx(zeroIdx)}
           y1={0}
           x2={sx(zeroIdx)}
           y2={H}
-          stroke="#f55"
+          stroke="var(--status-fails-fg)"
           strokeDasharray="4 3"
         />
       )}
@@ -180,11 +180,11 @@ function CSEventStudyChart({ dyn }: { dyn: CSDynamicAgg }) {
           y1={sy(p.lo)}
           x2={sx(p.i)}
           y2={sy(p.hi)}
-          stroke="#4a6cf7"
+          stroke="var(--chart-1)"
           opacity={0.5}
         />
       ))}
-      <polyline points={pts} fill="none" stroke="#4a6cf7" strokeWidth={2} />
+      <polyline points={pts} fill="none" stroke="var(--chart-1)" strokeWidth={2} />
     </svg>
   );
 }

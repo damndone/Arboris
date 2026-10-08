@@ -129,7 +129,7 @@ export function LogsPanel({ runId, projectRoot }: BottomPanelContext) {
               e.kind === "terminal"
                 ? "var(--label)"
                 : e.kind === "step_blocked"
-                  ? "var(--review, #ff9f0a)"
+                  ? "var(--review)"
                   : "var(--label-secondary)",
           }}
         >
@@ -140,7 +140,7 @@ export function LogsPanel({ runId, projectRoot }: BottomPanelContext) {
             {e.kind}
           </span>
           {e.step && (
-            <span style={{ minWidth: 90, color: "var(--tint, #0a84ff)" }}>
+            <span style={{ minWidth: 90, color: "var(--tint)" }}>
               {e.step}
             </span>
           )}

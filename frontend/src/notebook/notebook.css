@@ -40,7 +40,7 @@
 
 .nb-planning-progress li[data-status="completed"]::marker {
   content: "✓  ";
-  color: var(--success, #30d158);
+  color: var(--status-holds-fg);
 }
 
 .nb-planning-progress li[data-status="active"] {
@@ -60,9 +60,9 @@
   flex-wrap: wrap;
   gap: 8px 12px;
   padding: 10px 12px;
-  border: 1px solid color-mix(in oklch, var(--orange, #d97706) 48%, transparent);
+  border: 1px solid color-mix(in oklch, var(--orange) 48%, transparent);
   border-radius: 8px;
-  background: color-mix(in oklch, var(--orange, #d97706) 9%, transparent);
+  background: color-mix(in oklch, var(--orange) 9%, transparent);
   color: var(--label-secondary);
 }
 
@@ -104,10 +104,10 @@
 }
 
 .nb-notebook-new-analysis-popover {
-  background: var(--background, #fff);
-  border: 1px solid var(--separator, rgba(128, 128, 128, 0.3));
+  background: var(--bg-canvas);
+  border: 1px solid var(--separator);
   border-radius: 8px;
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.14);
+  box-shadow: var(--shadow-pop);
   display: grid;
   gap: 8px;
   min-width: 270px;
@@ -172,7 +172,7 @@
 
 .nb-option-batch-action {
   margin-left: auto;
-  color: var(--tint, #3b82f6);
+  color: var(--tint);
 }
 
 .nb-option-batch-body {
@@ -183,7 +183,7 @@
 }
 
 .nb-option-card {
-  border: 1px solid var(--separator, rgba(128, 128, 128, 0.3));
+  border: 1px solid var(--separator);
   border-radius: 8px;
   padding: 12px;
   display: flex;
@@ -193,7 +193,7 @@
 
 /* Only the backend's batch decision receives recommendation styling. */
 .nb-option-card[data-recommended="true"] {
-  border-color: var(--accent, #3b82f6);
+  border-color: var(--tint);
   border-left-width: 3px;
 }
 
@@ -217,18 +217,18 @@
 }
 
 .nb-option-risk[data-risk="low"] {
-  color: var(--green, #30d158);
-  background: color-mix(in oklch, var(--green, #30d158) 12%, transparent);
+  color: var(--green);
+  background: color-mix(in oklch, var(--green) 12%, transparent);
 }
 
 .nb-option-risk[data-risk="medium"] {
-  color: var(--orange, #d97706);
-  background: color-mix(in oklch, var(--orange, #d97706) 12%, transparent);
+  color: var(--orange);
+  background: color-mix(in oklch, var(--orange) 12%, transparent);
 }
 
 .nb-option-risk[data-risk="high"] {
-  color: var(--red, #dc2626);
-  background: color-mix(in oklch, var(--red, #dc2626) 12%, transparent);
+  color: var(--red);
+  background: color-mix(in oklch, var(--red) 12%, transparent);
 }
 
 .nb-option-axes {
@@ -238,7 +238,7 @@
 }
 
 .nb-axis {
-  border: 1px solid var(--separator, rgba(128, 128, 128, 0.3));
+  border: 1px solid var(--separator);
   border-radius: 999px;
   padding: 2px 10px;
   font-size: 11px;
@@ -254,8 +254,8 @@
 
 .nb-axis[data-axis="freshness"][data-value="stale"],
 .nb-axis[data-axis="validation"][data-value="invalid"] {
-  border-color: var(--warning, #d97706);
-  color: var(--warning, #d97706);
+  border-color: var(--status-caution-fg);
+  color: var(--status-caution-fg);
 }
 
 .nb-option-rationale {
@@ -275,7 +275,7 @@
 
 .nb-option-blocked {
   margin: 0;
-  color: var(--warning, #d97706);
+  color: var(--status-caution-fg);
 }
 
 .nb-option-actions,
@@ -287,7 +287,7 @@
 }
 
 .nb-button {
-  border: 1px solid var(--separator, rgba(128, 128, 128, 0.3));
+  border: 1px solid var(--separator);
   border-radius: 6px;
   padding: 4px 10px;
   background: transparent;
@@ -302,19 +302,19 @@
 }
 
 .nb-button-primary:not(:disabled) {
-  background: var(--accent, #3b82f6);
-  border-color: var(--accent, #3b82f6);
-  color: #fff;
+  background: var(--tint-fill);
+  border-color: var(--tint-fill);
+  color: var(--on-tint);
 }
 
 /* --- states -------------------------------------------------------- */
 
 .nb-error,
 .nb-contract-failure {
-  border: 1px solid var(--danger, #dc2626);
+  border: 1px solid var(--status-fails-fg);
   border-radius: 8px;
   padding: 12px;
-  color: var(--danger, #dc2626);
+  color: var(--status-fails-fg);
 }
 
 .nb-error-code {
@@ -329,7 +329,7 @@
 }
 
 .nb-success {
-  border: 1px solid var(--separator, rgba(128, 128, 128, 0.3));
+  border: 1px solid var(--separator);
   border-radius: 8px;
   padding: 12px;
 }
@@ -344,7 +344,7 @@
 /* --- visible slice ------------------------------------------------- */
 
 .nb-context-slice {
-  border: 1px dashed var(--separator, rgba(128, 128, 128, 0.4));
+  border: 1px dashed var(--separator);
   border-radius: 8px;
   padding: 0;
 }
@@ -364,7 +364,7 @@
 }
 
 .nb-context-summary-action {
-  color: var(--tint, #3b82f6);
+  color: var(--tint);
   font-size: 11px;
   white-space: nowrap;
 }
@@ -379,7 +379,7 @@
 }
 
 .nb-context-details-body {
-  border-top: 1px solid var(--separator, rgba(128, 128, 128, 0.3));
+  border-top: 1px solid var(--separator);
   padding: 12px;
   display: flex;
   flex-direction: column;
@@ -387,11 +387,11 @@
 }
 
 .nb-memory-controls {
-  border: 1px solid color-mix(in oklch, var(--tint, #3b82f6) 52%, transparent);
+  border: 1px solid color-mix(in oklch, var(--tint) 52%, transparent);
   border-radius: 10px;
   padding: 10px 12px;
-  background: color-mix(in oklch, var(--tint, #3b82f6) 12%, transparent);
-  box-shadow: inset 3px 0 0 color-mix(in oklch, var(--tint, #3b82f6) 76%, transparent);
+  background: color-mix(in oklch, var(--tint) 12%, transparent);
+  box-shadow: inset 3px 0 0 color-mix(in oklch, var(--tint) 76%, transparent);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -424,7 +424,7 @@
   background-color: color-mix(in oklch, var(--label-secondary) 24%, transparent);
   background-image: radial-gradient(
     circle at 8px 50%,
-    var(--bg-card, #fff) 0 5px,
+    var(--bg-card) 0 5px,
     transparent 5.5px
   );
   cursor: pointer;
@@ -435,17 +435,17 @@
 }
 
 .nb-memory-switch:checked {
-  border-color: var(--tint, #3b82f6);
-  background-color: var(--tint, #3b82f6);
+  border-color: var(--tint-fill);
+  background-color: var(--tint-fill);
   background-image: radial-gradient(
     circle at calc(100% - 8px) 50%,
-    #fff 0 5px,
+    var(--on-tint) 0 5px,
     transparent 5.5px
   );
 }
 
 .nb-memory-switch:focus-visible {
-  outline: 2px solid var(--focus-ring, var(--tint, #3b82f6));
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 
@@ -483,7 +483,7 @@
 /* --- confirmation and selection ------------------------------------ */
 
 .nb-confirmation {
-  border: 1px solid var(--accent, #3b82f6);
+  border: 1px solid var(--tint);
   border-radius: 8px;
   padding: 12px;
   display: flex;
@@ -498,15 +498,15 @@
   gap: 6px 10px;
   margin-top: 10px;
   padding: 10px 12px;
-  border: 1px solid color-mix(in oklch, var(--danger, #dc2626) 48%, transparent);
+  border: 1px solid color-mix(in oklch, var(--status-fails-fg) 48%, transparent);
   border-radius: 8px;
-  background: color-mix(in oklch, var(--danger, #dc2626) 9%, transparent);
+  background: color-mix(in oklch, var(--status-fails-fg) 9%, transparent);
   color: var(--label-secondary);
 }
 
 .nb-dataset-start,
 .nb-draft-handoff {
-  border: 1px solid var(--separator, rgba(128, 128, 128, 0.3));
+  border: 1px solid var(--separator);
   border-radius: 10px;
   padding: 18px;
   display: flex;
@@ -526,11 +526,11 @@
 }
 
 .nb-dataset-start [role="alert"] {
-  color: var(--danger, #dc2626);
+  color: var(--status-fails-fg);
 }
 
 .nb-draft-handoff {
-  border-color: var(--accent, #3b82f6);
+  border-color: var(--tint);
 }
 
 .nb-draft-handoff code {
@@ -541,12 +541,12 @@
 }
 
 .nb-selection-actions {
-  border-left: 3px solid var(--accent, #3b82f6);
-  border: 1px solid var(--separator, rgba(128, 128, 128, 0.3));
+  border-left: 3px solid var(--tint);
+  border: 1px solid var(--separator);
   border-left-width: 3px;
   border-radius: 8px;
-  background: var(--surface-elevated, var(--bg-canvas, #1c1c1e));
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-pop);
   padding: 8px 12px;
   display: flex;
   flex-direction: column;
@@ -569,11 +569,11 @@
   flex-wrap: wrap;
   gap: 8px;
   padding-top: 2px;
-  border-top: 1px solid var(--separator, rgba(128, 128, 128, 0.3));
+  border-top: 1px solid var(--separator);
 }
 
 .nb-selection-composer {
-  border: 1px solid var(--separator, rgba(128, 128, 128, 0.3));
+  border: 1px solid var(--separator);
   border-radius: 8px;
   padding: 12px;
   display: flex;
@@ -591,10 +591,10 @@
   width: 100%;
   box-sizing: border-box;
   resize: vertical;
-  border: 1px solid var(--separator, rgba(128, 128, 128, 0.3));
+  border: 1px solid var(--separator);
   border-radius: 6px;
   padding: 8px;
-  background: var(--background-secondary, transparent);
+  background: var(--bg-card-2, transparent);
   color: var(--label);
   font: inherit;
 }
@@ -611,7 +611,7 @@
 }
 
 .nb-user-intent {
-  border: 1px solid var(--separator, rgba(128, 128, 128, 0.3));
+  border: 1px solid var(--separator);
   border-radius: 10px;
   display: grid;
   gap: 8px;
@@ -624,9 +624,9 @@
   gap: 2px;
   justify-self: start;
   padding: 3px;
-  border: 1px solid var(--separator, rgba(128, 128, 128, 0.3));
+  border: 1px solid var(--separator);
   border-radius: 8px;
-  background: var(--background-secondary, transparent);
+  background: var(--bg-card-2, transparent);
 }
 
 .nb-interaction-mode-button {
@@ -634,7 +634,7 @@
   border: 0;
   border-radius: 5px;
   background: transparent;
-  color: var(--secondary-label, var(--label));
+  color: var(--label-secondary, var(--label));
   cursor: pointer;
   font: inherit;
   font-size: 12px;
@@ -644,8 +644,8 @@
 }
 
 .nb-interaction-mode-button[aria-pressed="true"] {
-  background: var(--accent, #1677ff);
-  color: var(--accent-foreground, #fff);
+  background: var(--tint-fill);
+  color: var(--on-tint);
 }
 
 .nb-interaction-mode-button:disabled {
@@ -654,12 +654,12 @@
 }
 
 .nb-interaction-mode-help {
-  color: var(--secondary-label, var(--label));
+  color: var(--label-secondary, var(--label));
   font-size: 12px;
   line-height: 1.4;
   margin: -2px 0 0;
 }
 
 .nb-user-intent label { color: var(--label); font-size: 13px; font-weight: 650; }
-.nb-user-intent textarea { background: var(--background-secondary, transparent); border: 1px solid var(--separator, rgba(128, 128, 128, 0.3)); border-radius: 7px; box-sizing: border-box; color: var(--label); font: inherit; padding: 9px; resize: vertical; width: 100%; }
+.nb-user-intent textarea { background: var(--bg-card-2, transparent); border: 1px solid var(--separator); border-radius: 7px; box-sizing: border-box; color: var(--label); font: inherit; padding: 9px; resize: vertical; width: 100%; }
 .nb-user-intent button { justify-self: start; }

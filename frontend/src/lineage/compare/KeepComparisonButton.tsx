@@ -68,7 +68,7 @@ export function KeepComparisonButton({
         <span
           role="alert"
           data-testid="keep-comparison-error"
-          style={{ marginLeft: 8, fontSize: 12, color: "var(--danger, #f55)" }}
+          style={{ marginLeft: 8, fontSize: 12, color: "var(--status-fails-fg)" }}
         >
           {error}
         </span>

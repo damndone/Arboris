@@ -70,7 +70,7 @@ export function DataGrid({
     });
   }
 
-  if (error) return <div role="alert" style={{ color: "var(--red, #c00)", fontSize: 12 }}>{error}</div>;
+  if (error) return <div role="alert" style={{ color: "var(--red)", fontSize: 12 }}>{error}</div>;
   if (!page) return <div style={{ color: "var(--label-secondary)", fontSize: 12 }}>Loading rows…</div>;
 
   const last = Math.min(page.offset + page.rows.length, page.total_rows);

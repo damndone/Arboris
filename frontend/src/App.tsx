@@ -16,6 +16,7 @@ import { DraftGraphRoute } from "./pipelineDrafts/DraftGraphRoute";
 import { LauncherRoute } from "./launcher/LauncherRoute";
 import { WorkbenchHome } from "./workbench/WorkbenchRouteContainer";
 import { rootToSlug, slugToRoot } from "./workbench/projectSlug";
+import "./theme/tokens.css";
 import "./styles.css";
 
 export function validatePanelPrediction(s: {

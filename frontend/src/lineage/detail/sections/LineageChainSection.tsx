@@ -144,11 +144,11 @@ export function LineageChainSection({ node }: { node: GraphViewNode }) {
                   border: "1px solid var(--separator)",
                   background:
                     n.nodeKey === node.nodeKey
-                      ? "var(--tint-bg, rgba(10,132,255,0.12))"
+                      ? "var(--tint-bg)"
                       : "var(--bg-card-2, transparent)",
                   color:
                     n.nodeKey === node.nodeKey
-                      ? "var(--tint, #0a84ff)"
+                      ? "var(--tint)"
                       : "var(--label)",
                   cursor: n.nodeKey === node.nodeKey ? "default" : "pointer",
                   fontSize: 11,

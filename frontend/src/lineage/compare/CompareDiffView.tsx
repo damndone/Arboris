@@ -15,8 +15,8 @@ const SECTION_TITLES: Array<[keyof NodeComparisonResult["sections"], string]> = 
   ["upstream_path", "Upstream path"],
 ];
 
-const REMOVED_COLOR = "var(--diff-removed, #b35900)";
-const ADDED_COLOR = "var(--diff-added, #1a7f37)";
+const REMOVED_COLOR = "var(--diff-removed)";
+const ADDED_COLOR = "var(--diff-added)";
 
 export function CompareDiffView({ result }: { result: NodeComparisonResult }) {
   if (result.same_node) {

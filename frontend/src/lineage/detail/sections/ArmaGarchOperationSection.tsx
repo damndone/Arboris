@@ -82,7 +82,7 @@ export function ArmaGarchOperationSection({ node }: { node: GraphViewNode }) {
       </div>
       <ArmaGarchControls columns={columns} preview={null} value={value} onChange={setValue} />
       {errors.length > 0 && (
-        <ul data-testid="arma-garch-op-errors" style={{ color: "var(--accent-negative, #e57373)", fontSize: 11 }}>
+        <ul data-testid="arma-garch-op-errors" style={{ color: "var(--status-fails-fg)", fontSize: 11 }}>
           {errors.map((message) => (
             <li key={message}>{message}</li>
           ))}
@@ -98,12 +98,12 @@ export function ArmaGarchOperationSection({ node }: { node: GraphViewNode }) {
           {status === "submitting" ? "Forking child…" : "Rerun as new child model"}
         </button>
         {status === "done" && (
-          <span data-testid="arma-garch-op-done" style={{ color: "var(--accent-positive, #4caf50)" }}>
+          <span data-testid="arma-garch-op-done" style={{ color: "var(--status-holds-fg)" }}>
             Branch created
           </span>
         )}
         {status === "error" && (
-          <span data-testid="arma-garch-op-error" style={{ color: "var(--accent-negative, #e57373)" }}>
+          <span data-testid="arma-garch-op-error" style={{ color: "var(--status-fails-fg)" }}>
             {error}
           </span>
         )}

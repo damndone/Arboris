@@ -28,12 +28,12 @@ function SchemaDiff({ preview }: { preview: CodeExecutePreview }) {
         Rows {preview.row_count_before} → {preview.row_count_after}
       </div>
       {preview.columns_added.map((column) => (
-        <div key={`add-${column}`} style={{ color: "var(--ok, #4ade80)" }}>
+        <div key={`add-${column}`} style={{ color: "var(--ok)" }}>
           + {column}
         </div>
       ))}
       {preview.columns_removed.map((column) => (
-        <div key={`remove-${column}`} style={{ color: "var(--danger, #f87171)" }}>
+        <div key={`remove-${column}`} style={{ color: "var(--status-fails-fg)" }}>
           − {column}
         </div>
       ))}
@@ -212,7 +212,7 @@ export function CodeExecuteSection({ node }: { node: GraphViewNode }) {
           flexDirection: "column",
           gap: 8,
           padding: 10,
-          background: "var(--bg-card-2, rgba(255,255,255,0.04))",
+          background: "var(--bg-card-2)",
           borderRadius: 8,
           fontSize: 12,
         }}
@@ -262,8 +262,8 @@ export function CodeExecuteSection({ node }: { node: GraphViewNode }) {
             padding: 8,
             borderRadius: 6,
             border: "1px solid var(--separator)",
-            background: "var(--bg-input, rgba(0,0,0,0.25))",
-            color: "var(--text-primary, #e5e7eb)",
+            background: "var(--field-bg)",
+            color: "var(--label)",
             resize: "vertical",
           }}
         />
@@ -311,7 +311,7 @@ export function CodeExecuteSection({ node }: { node: GraphViewNode }) {
             style={{
               whiteSpace: "pre-wrap",
               fontFamily: "var(--font-mono, ui-monospace, monospace)",
-              color: "var(--danger, #f87171)",
+              color: "var(--status-fails-fg)",
               maxHeight: 200,
               overflow: "auto",
             }}
@@ -331,7 +331,7 @@ export function CodeExecuteSection({ node }: { node: GraphViewNode }) {
                   padding: 6,
                   maxHeight: 140,
                   overflow: "auto",
-                  background: "var(--bg-input, rgba(0,0,0,0.25))",
+                  background: "var(--field-bg)",
                   borderRadius: 6,
                   fontSize: 11,
                 }}
@@ -347,7 +347,7 @@ export function CodeExecuteSection({ node }: { node: GraphViewNode }) {
               data-testid="code-execute-risk-warning"
               style={{
                 padding: 8,
-                border: "1px solid var(--danger, #f87171)",
+                border: "1px solid var(--status-fails-fg)",
                 borderRadius: 6,
                 lineHeight: 1.45,
               }}
@@ -378,7 +378,7 @@ export function CodeExecuteSection({ node }: { node: GraphViewNode }) {
                 {status === "authorizing" ? "Authorizing…" : "Authorize high-risk operation"}
               </button>
             ) : (
-              <div data-testid="code-execute-risk-authorized" style={{ color: "var(--ok, #4ade80)" }}>
+              <div data-testid="code-execute-risk-authorized" style={{ color: "var(--ok)" }}>
                 Risk authorization granted · expires {riskAuthorization.expires_at}
               </div>
             )}
@@ -386,13 +386,13 @@ export function CodeExecuteSection({ node }: { node: GraphViewNode }) {
         )}
 
         {status === "complete" && (
-          <div data-testid="code-execute-complete" style={{ color: "var(--ok, #4ade80)" }}>
+          <div data-testid="code-execute-complete" style={{ color: "var(--ok)" }}>
             Applied{operationId ? ` · Operation Record ${operationId}` : ""}
           </div>
         )}
 
         {status === "error" && error && (
-          <div data-testid="code-execute-fetch-error" style={{ color: "var(--danger, #f87171)" }}>
+          <div data-testid="code-execute-fetch-error" style={{ color: "var(--status-fails-fg)" }}>
             {error}
           </div>
         )}

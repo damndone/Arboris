@@ -149,7 +149,7 @@ function EditableOperation({
           flexDirection: "column",
           gap: 8,
           padding: 10,
-          background: "var(--bg-card-2, rgba(255,255,255,0.04))",
+          background: "var(--bg-card-2)",
           borderRadius: 8,
           fontSize: 12,
         }}
@@ -201,12 +201,12 @@ function EditableOperation({
                 : "Preview source changes"}
           </button>
           {status === "done" && (
-            <span data-testid="operation-rerun-done" style={{ color: "var(--accent-positive, #4caf50)" }}>
+            <span data-testid="operation-rerun-done" style={{ color: "var(--status-holds-fg)" }}>
               {error ?? "Branch created"}
             </span>
           )}
           {status === "error" && (
-            <span data-testid="operation-rerun-error" style={{ color: "var(--accent-negative, #e57373)" }}>
+            <span data-testid="operation-rerun-error" style={{ color: "var(--status-fails-fg)" }}>
               {error}
             </span>
           )}
@@ -260,7 +260,7 @@ function ReadOnlyOperation({
           flexDirection: "column",
           gap: 4,
           padding: 10,
-          background: "var(--bg-card-2, rgba(255,255,255,0.04))",
+          background: "var(--bg-card-2)",
           borderRadius: 8,
           fontSize: 12,
         }}

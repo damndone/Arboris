@@ -43,9 +43,9 @@ test("floating node controls use the Report review header baseline", () => {
 });
 
 test("Workbench scroll surfaces use one light-gray scrollbar treatment", () => {
-  expect(lineageStylesheet).toMatch(
-    /--scrollbar-thumb:\s+rgba\(196, 200, 206, 0\.72\);/,
-  );
+  const tokens = readFileSync("src/theme/tokens.css", "utf8");
+  expect(tokens).toMatch(/--scrollbar-thumb: #C9C8C3;/);
+  expect(tokens).toMatch(/--scrollbar-thumb: rgba\(196, 200, 206, 0\.72\);/);
   expect(lineageStylesheet).toContain(
     "scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);",
   );

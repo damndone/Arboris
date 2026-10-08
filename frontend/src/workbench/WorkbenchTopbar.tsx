@@ -135,7 +135,7 @@ export function ProjectSwitcher({ projectRoot }: { projectRoot: string }) {
             padding: 6,
             minWidth: 260,
             boxShadow:
-              "0 16px 40px rgba(0,0,0,0.75), 0 0 0 1px var(--separator)",
+              "var(--shadow-pop), 0 0 0 1px var(--separator)",
             zIndex: 1000,
           }}
         >
@@ -275,8 +275,8 @@ export function WorkbenchTopbar({
         gap: 16,
         padding: "0 16px",
         height: 40,
-        borderBottom: "1px solid var(--separator, #2e2e30)",
-        background: "var(--surface-elevated, transparent)",
+        borderBottom: "1px solid var(--separator)",
+        background: "var(--bg-card, transparent)",
       }}
     >
       <div
@@ -366,8 +366,8 @@ function ViewTabButton({
       style={{
         padding: "8px 12px",
         border: 0,
-        background: active ? "var(--tint-bg, rgba(10,132,255,0.12))" : "transparent",
-        color: active ? "var(--tint, #0a84ff)" : "var(--label-secondary)",
+        background: active ? "var(--tint-bg)" : "transparent",
+        color: active ? "var(--tint)" : "var(--label-secondary)",
         cursor: "pointer",
         fontSize: 13,
         fontWeight: active ? 600 : 400,

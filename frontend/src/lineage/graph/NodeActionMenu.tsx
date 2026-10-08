@@ -293,7 +293,7 @@ export function NodeActionMenu({
           padding: 6,
           minWidth: 240,
           boxShadow:
-            "0 16px 40px rgba(0,0,0,0.75), 0 0 0 1px var(--separator)",
+            "var(--shadow-pop), 0 0 0 1px var(--separator)",
           zIndex: 1000,
         }}
       >

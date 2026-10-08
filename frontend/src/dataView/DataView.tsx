@@ -177,14 +177,14 @@ export function DataView({ projectRoot, runId: runIdProp }: { projectRoot: strin
           Saved as run {saved.slice(-8)}; it is re-estimating with the new metadata.
         </div>
       )}
-      {error && <div role="alert" style={{ color: "var(--red, #c00)", fontSize: 12 }}>{error}</div>}
+      {error && <div role="alert" style={{ color: "var(--red)", fontSize: 12 }}>{error}</div>}
       {!error && runStatus !== null && !ready && (
         <div data-testid="data-view-running" style={{ fontSize: 12, color: "var(--label-secondary)" }}>
           This run is still {runStatus}; its data appears when it finishes.
         </div>
       )}
       {!error && ready && runStatus !== "completed" && (
-        <div role="alert" style={{ fontSize: 12, color: "var(--red, #c00)" }}>
+        <div role="alert" style={{ fontSize: 12, color: "var(--red)" }}>
           This run ended {runStatus}; its datasets may be incomplete.
         </div>
       )}

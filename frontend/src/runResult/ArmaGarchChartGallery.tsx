@@ -179,14 +179,14 @@ export function ArmaGarchChartGallery({
           title="Conditional volatility (sd_t)"
           rows={rowsOf(charts.conditionalVolatility)}
           valueKey="conditional_volatility"
-          color="#f55"
+          color="var(--status-fails-fg)"
           ai={ai("conditionalVolatility")}
         />
         <SeriesChart
           title="Conditional variance (h_t)"
           rows={rowsOf(charts.conditionalVariance)}
           valueKey="conditional_variance"
-          color="#f55"
+          color="var(--status-fails-fg)"
           ai={ai("conditionalVariance")}
         />
         <SeriesChart
@@ -220,8 +220,8 @@ export function ArmaGarchChartGallery({
           rows={inSample}
           observedKey="observed"
           bands={[
-            { lowerKey: "garch_lower", upperKey: "garch_upper", color: "#4a6cf7", label: "ARMA-GARCH" },
-            { lowerKey: "arma_lower", upperKey: "arma_upper", color: "#8e8e93", label: "ARMA-only" },
+            { lowerKey: "garch_lower", upperKey: "garch_upper", color: "var(--chart-1)", label: "ARMA-GARCH" },
+            { lowerKey: "arma_lower", upperKey: "arma_upper", color: "var(--chart-axis)", label: "ARMA-only" },
           ]}
           ai={ai("inSampleIntervalComparison")}
         />
@@ -230,7 +230,7 @@ export function ArmaGarchChartGallery({
           rows={rolling}
           observedKey="observed_value"
           bands={[
-            { lowerKey: "lower_bound", upperKey: "upper_bound", color: "#4a6cf7", label: "plug-in conditional" },
+            { lowerKey: "lower_bound", upperKey: "upper_bound", color: "var(--chart-1)", label: "plug-in conditional" },
           ]}
           markKey="quantile_exception"
           ai={ai("rollingInterval")}

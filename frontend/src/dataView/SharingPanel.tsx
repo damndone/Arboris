@@ -48,7 +48,7 @@ export function SharingPanel({ projectRoot }: { projectRoot: string }) {
     };
   }, [projectRoot]);
 
-  if (error) return <div role="alert" style={{ color: "var(--red, #c00)", fontSize: 12 }}>{error}</div>;
+  if (error) return <div role="alert" style={{ color: "var(--red)", fontSize: 12 }}>{error}</div>;
   if (!view) return <div style={{ fontSize: 12, color: "var(--label-secondary)" }}>Loading sharing policy…</div>;
 
   const provider = view.active_provider;

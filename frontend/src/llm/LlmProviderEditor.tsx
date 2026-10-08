@@ -32,8 +32,8 @@ const shellStyle: CSSProperties = {
   width: "100%",
   boxSizing: "border-box",
   padding: "28px clamp(20px, 5vw, 72px)",
-  background: "var(--bg-canvas, #101012)",
-  color: "var(--label, #f5f5f7)",
+  background: "var(--bg-canvas)",
+  color: "var(--label)",
 };
 
 const inputStyle: CSSProperties = {
@@ -41,18 +41,18 @@ const inputStyle: CSSProperties = {
   boxSizing: "border-box",
   marginTop: 6,
   padding: "9px 10px",
-  border: "1px solid var(--separator, #3a3a3c)",
+  border: "1px solid var(--separator)",
   borderRadius: 7,
-  background: "var(--bg-card-2, rgba(255,255,255,0.05))",
-  color: "var(--label, #f5f5f7)",
+  background: "var(--bg-card-2)",
+  color: "var(--label)",
 };
 
 const actionStyle: CSSProperties = {
-  border: "1px solid var(--separator, #3a3a3c)",
+  border: "1px solid var(--separator)",
   borderRadius: 8,
   padding: "8px 13px",
-  background: "var(--bg-card-2, rgba(255,255,255,0.06))",
-  color: "var(--label, #f5f5f7)",
+  background: "var(--bg-card-2)",
+  color: "var(--label)",
   cursor: "pointer",
 };
 
@@ -257,15 +257,15 @@ export function LlmProviderEditor({ provider, isCopy = false, onSaved, onBack }:
       <header style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 24 }}>
         <button type="button" onClick={onBack} style={{ ...actionStyle, background: "transparent" }}>← Back</button>
         <h1 id="llm-provider-editor-title" style={{ margin: 0, fontFamily: "var(--font-serif, serif)", fontSize: 25 }}>{isEditing ? "Edit provider" : "Add provider"}</h1>
-        <button type="button" onClick={() => void handleSave()} disabled={saving} style={{ ...actionStyle, marginLeft: "auto", background: "var(--tint, #0a84ff)", color: "#fff" }}>{saving ? "Saving…" : "Save"}</button>
+        <button type="button" onClick={() => void handleSave()} disabled={saving} style={{ ...actionStyle, marginLeft: "auto", background: "var(--tint-fill)", color: "var(--on-tint)" }}>{saving ? "Saving…" : "Save"}</button>
         <button type="button" onClick={onBack} disabled={saving} style={actionStyle}>Cancel</button>
       </header>
 
-      {requestError && <div role="alert" data-testid="llm-provider-editor-error" style={{ color: "var(--danger, #ff453a)", marginBottom: 14 }}>{requestError}</div>}
-      {success && <div aria-live="polite" data-testid="llm-provider-editor-success" style={{ color: "var(--green, #30d158)", marginBottom: 14 }}>{success}</div>}
+      {requestError && <div role="alert" data-testid="llm-provider-editor-error" style={{ color: "var(--status-fails-fg)", marginBottom: 14 }}>{requestError}</div>}
+      {success && <div aria-live="polite" data-testid="llm-provider-editor-success" style={{ color: "var(--green)", marginBottom: 14 }}>{success}</div>}
 
       <main style={{ maxWidth: 980, margin: "0 auto", display: "grid", gap: 18 }}>
-        <section style={{ padding: 20, border: "1px solid var(--separator, #3a3a3c)", borderRadius: 14, background: "var(--bg-card-2, rgba(255,255,255,0.04))" }}>
+        <section style={{ padding: 20, border: "1px solid var(--separator)", borderRadius: 14, background: "var(--bg-card-2)" }}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 16 }}>
             <label>Provider preset
               <select aria-label="provider preset" defaultValue="" onChange={handlePreset} style={inputStyle}>
@@ -275,11 +275,11 @@ export function LlmProviderEditor({ provider, isCopy = false, onSaved, onBack }:
             </label>
             <label>Provider ID
               <input aria-label="provider id" value={id} readOnly={isEditing} disabled={isEditing} onChange={(event) => setId(event.target.value)} style={inputStyle} />
-              {fieldErrors.id && <span style={{ display: "block", marginTop: 5, color: "var(--danger, #ff453a)" }}>{fieldErrors.id}</span>}
+              {fieldErrors.id && <span style={{ display: "block", marginTop: 5, color: "var(--status-fails-fg)" }}>{fieldErrors.id}</span>}
             </label>
             <label>Provider name
               <input aria-label="provider name" value={name} onChange={(event) => setName(event.target.value)} style={inputStyle} />
-              {fieldErrors.name && <span style={{ display: "block", marginTop: 5, color: "var(--danger, #ff453a)" }}>{fieldErrors.name}</span>}
+              {fieldErrors.name && <span style={{ display: "block", marginTop: 5, color: "var(--status-fails-fg)" }}>{fieldErrors.name}</span>}
             </label>
             <label>Icon
               <input aria-label="icon" value={icon} onChange={(event) => setIcon(event.target.value)} style={inputStyle} />
@@ -295,9 +295,9 @@ export function LlmProviderEditor({ provider, isCopy = false, onSaved, onBack }:
                 <input aria-label="api key" type={showApiKey ? "text" : "password"} value={apiKey} placeholder={provider?.key_present ? "Leave blank to keep current key" : "Paste an API key"} onChange={(event) => { invalidateDiscovery(); setApiKey(event.target.value); if (event.target.value) setClearApiKey(false); }} onBlur={() => void handleRefreshModels(true)} style={{ ...inputStyle, marginTop: 0, flex: 1 }} />
                 <button type="button" aria-label={showApiKey ? "Hide API key" : "Show API key"} onClick={() => setShowApiKey((visible) => !visible)} style={actionStyle}>{showApiKey ? "Hide" : "Show"}</button>
               </div>
-              {provider?.key_present && <div style={{ marginTop: 6, color: "var(--label-secondary, #98989d)", fontSize: 12 }}>An API key is already configured.</div>}
-              {provider?.key_present && <button type="button" aria-label="Clear API key" onClick={() => { invalidateDiscovery(); setApiKey(""); setClearApiKey(true); }} style={{ ...actionStyle, marginTop: 8, color: "var(--danger, #ff453a)" }}>Clear API key</button>}
-              {clearApiKey && <span data-testid="llm-provider-key-cleared" style={{ display: "block", marginTop: 5, color: "var(--danger, #ff453a)" }}>The existing key will be cleared.</span>}
+              {provider?.key_present && <div style={{ marginTop: 6, color: "var(--label-secondary)", fontSize: 12 }}>An API key is already configured.</div>}
+              {provider?.key_present && <button type="button" aria-label="Clear API key" onClick={() => { invalidateDiscovery(); setApiKey(""); setClearApiKey(true); }} style={{ ...actionStyle, marginTop: 8, color: "var(--status-fails-fg)" }}>Clear API key</button>}
+              {clearApiKey && <span data-testid="llm-provider-key-cleared" style={{ display: "block", marginTop: 5, color: "var(--status-fails-fg)" }}>The existing key will be cleared.</span>}
             </label>
           </div>
           <label style={{ display: "block", marginTop: 16 }}>Base URL
@@ -305,12 +305,12 @@ export function LlmProviderEditor({ provider, isCopy = false, onSaved, onBack }:
               <input aria-label="base url" value={baseUrl} onChange={(event) => { invalidateDiscovery(); setBaseUrl(event.target.value); }} onBlur={() => void handleRefreshModels(true)} style={{ ...inputStyle, marginTop: 0, flex: 1 }} />
               <button type="button" onClick={() => void handleProbe()} disabled={probeLoading} style={actionStyle}>{probeLoading ? "Testing…" : "Test connection"}</button>
             </div>
-            {fieldErrors.baseUrl && <span style={{ display: "block", marginTop: 5, color: "var(--danger, #ff453a)" }}>{fieldErrors.baseUrl}</span>}
-            {probeMessage && <span aria-live="polite" style={{ display: "block", marginTop: 5, color: probeMessage === "Connection successful" ? "var(--green, #30d158)" : "var(--danger, #ff453a)" }}>{probeMessage}</span>}
+            {fieldErrors.baseUrl && <span style={{ display: "block", marginTop: 5, color: "var(--status-fails-fg)" }}>{fieldErrors.baseUrl}</span>}
+            {probeMessage && <span aria-live="polite" style={{ display: "block", marginTop: 5, color: probeMessage === "Connection successful" ? "var(--green)" : "var(--status-fails-fg)" }}>{probeMessage}</span>}
           </label>
         </section>
 
-        <details style={{ padding: 18, border: "1px solid var(--separator, #3a3a3c)", borderRadius: 14, background: "var(--bg-card-2, rgba(255,255,255,0.04))" }}>
+        <details style={{ padding: 18, border: "1px solid var(--separator)", borderRadius: 14, background: "var(--bg-card-2)" }}>
           <summary style={{ cursor: "pointer", fontWeight: 600 }}>Advanced options</summary>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 16, marginTop: 16 }}>
             <label>API format
@@ -327,38 +327,38 @@ export function LlmProviderEditor({ provider, isCopy = false, onSaved, onBack }:
           </div>
         </details>
 
-        <section style={{ padding: 20, border: "1px solid var(--separator, #3a3a3c)", borderRadius: 14, background: "var(--bg-card-2, rgba(255,255,255,0.04))" }}>
+        <section style={{ padding: 20, border: "1px solid var(--separator)", borderRadius: 14, background: "var(--bg-card-2)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
             <h2 style={{ margin: 0, fontSize: 16 }}>Model mapping</h2>
             <button type="button" onClick={() => void handleRefreshModels()} disabled={modelsLoading} style={{ ...actionStyle, marginLeft: "auto" }}>{modelsLoading ? "Refreshing…" : "Refresh models"}</button>
             <button type="button" onClick={addModel} style={actionStyle}>Add model</button>
           </div>
-          {modelsMessage && <div aria-live="polite" style={{ color: modelsMessage === "Models refreshed" ? "var(--green, #30d158)" : "var(--danger, #ff453a)", marginBottom: 10 }}>{modelsMessage}</div>}
+          {modelsMessage && <div aria-live="polite" style={{ color: modelsMessage === "Models refreshed" ? "var(--green)" : "var(--status-fails-fg)", marginBottom: 10 }}>{modelsMessage}</div>}
           <label>Default model
             <input aria-label="default model" list="llm-discovered-models" value={model} onChange={(event) => setModel(event.target.value)} style={inputStyle} />
             <datalist id="llm-discovered-models">{models.map((entry) => <option key={entry.request_model} value={entry.request_model}>{entry.display_name}</option>)}</datalist>
-            {fieldErrors.model && <span style={{ display: "block", marginTop: 5, color: "var(--danger, #ff453a)" }}>{fieldErrors.model}</span>}
+            {fieldErrors.model && <span style={{ display: "block", marginTop: 5, color: "var(--status-fails-fg)" }}>{fieldErrors.model}</span>}
           </label>
           <div style={{ display: "grid", gap: 8, marginTop: 16 }}>
             {models.map((entry, index) => (
-              <div key={`${entry.request_model}-${index}`} data-testid={`llm-provider-model-row-${entry.request_model}`} style={{ display: "grid", gridTemplateColumns: "1.2fr 1.2fr 0.8fr auto auto", gap: 8, alignItems: "center", padding: 10, borderTop: "1px solid var(--separator, #3a3a3c)" }}>
+              <div key={`${entry.request_model}-${index}`} data-testid={`llm-provider-model-row-${entry.request_model}`} style={{ display: "grid", gridTemplateColumns: "1.2fr 1.2fr 0.8fr auto auto", gap: 8, alignItems: "center", padding: 10, borderTop: "1px solid var(--separator)" }}>
                 <input aria-label={`display name ${entry.request_model}`} value={entry.display_name} onChange={(event) => updateModel(index, { display_name: event.target.value })} style={inputStyle} />
                 <input aria-label={`request model ${entry.request_model}`} value={entry.request_model} onChange={(event) => updateModel(index, { request_model: event.target.value })} style={inputStyle} />
                 <label style={{ fontSize: 12 }}>Context window
                   <input aria-label={`context window ${entry.request_model}`} type="number" value={entry.context_window_tokens ?? ""} onChange={(event) => updateModel(index, { context_window_tokens: event.target.value ? Number(event.target.value) : null })} style={inputStyle} />
                 </label>
                 <label style={{ fontSize: 12, whiteSpace: "nowrap" }}><input aria-label={`supports 1M ${entry.request_model}`} type="checkbox" checked={entry.supports_1m} onChange={(event) => updateModel(index, { supports_1m: event.target.checked })} /> Supports 1M
-                  <div style={{ color: "var(--label-secondary, #98989d)", marginTop: 6 }}>{formatContextWindow(entry.context_window_tokens)} · {entry.supports_1m ? "Yes" : "No"}</div>
+                  <div style={{ color: "var(--label-secondary)", marginTop: 6 }}>{formatContextWindow(entry.context_window_tokens)} · {entry.supports_1m ? "Yes" : "No"}</div>
                 </label>
-                <button type="button" aria-label={`Remove model ${entry.request_model}`} onClick={() => removeModel(index)} style={{ ...actionStyle, color: "var(--danger, #ff453a)" }}>Remove</button>
+                <button type="button" aria-label={`Remove model ${entry.request_model}`} onClick={() => removeModel(index)} style={{ ...actionStyle, color: "var(--status-fails-fg)" }}>Remove</button>
               </div>
             ))}
           </div>
         </section>
 
-        <section style={{ padding: 20, border: "1px solid var(--separator, #3a3a3c)", borderRadius: 14, background: "var(--bg-card-2, rgba(255,255,255,0.04))" }}>
+        <section style={{ padding: 20, border: "1px solid var(--separator)", borderRadius: 14, background: "var(--bg-card-2)" }}>
           <h2 style={{ margin: "0 0 10px", fontSize: 16 }}>Sanitized config preview</h2>
-          <pre data-testid="llm-provider-config-preview" style={{ margin: 0, padding: 14, overflow: "auto", background: "var(--bg-canvas, #101012)", color: "var(--label-secondary, #98989d)", fontFamily: "var(--font-mono, monospace)", fontSize: 12 }}>{preview}</pre>
+          <pre data-testid="llm-provider-config-preview" style={{ margin: 0, padding: 14, overflow: "auto", background: "var(--bg-canvas)", color: "var(--label-secondary)", fontFamily: "var(--font-mono, monospace)", fontSize: 12 }}>{preview}</pre>
         </section>
       </main>
     </div>

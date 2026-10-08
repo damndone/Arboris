@@ -708,7 +708,7 @@ export function DataColumnCastSection({ node }: { node: GraphViewNode }) {
           flexDirection: "column",
           gap: 8,
           padding: 10,
-          background: "var(--bg-card-2, rgba(255,255,255,0.04))",
+          background: "var(--bg-card-2)",
           borderRadius: 8,
           fontSize: 12,
         }}
@@ -877,7 +877,7 @@ export function DataColumnCastSection({ node }: { node: GraphViewNode }) {
           </div>
         )}
         {status === "complete" && (
-          <div data-testid="data-cast-complete" style={{ color: "var(--accent-positive, #4caf50)" }}>
+          <div data-testid="data-cast-complete" style={{ color: "var(--status-holds-fg)" }}>
             Cast confirmed · Operation Record {operationId ?? "created"} · new child data node created
           </div>
         )}

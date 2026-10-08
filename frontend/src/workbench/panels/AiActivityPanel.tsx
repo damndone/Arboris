@@ -153,7 +153,7 @@ function ActivityRow({
         </div>
         <div style={{ marginTop: 3 }}>{record.instruction}</div>
         {failed && (
-          <div style={{ marginTop: 3, color: "var(--danger, #b00020)" }}>
+          <div style={{ marginTop: 3, color: "var(--status-fails-fg)" }}>
             {record.error ?? "Report generation failed"}
           </div>
         )}
@@ -175,7 +175,7 @@ function ActivityRow({
         </div>
         <div style={{ fontWeight: 600, margin: "3px 0" }}>{record.goal}</div>
         {record.status !== "completed" && (
-          <div style={{ color: "var(--danger, #b00020)" }}>
+          <div style={{ color: "var(--status-fails-fg)" }}>
             {record.error ?? "Notebook planning failed"}
           </div>
         )}
@@ -199,7 +199,7 @@ function ActivityRow({
           <div style={{ marginTop: 4 }}>{renderMarkdown(record.answer ?? "")}</div>
         </details>
       ) : (
-        <div style={{ color: "var(--danger, #b00020)" }}>{record.error}</div>
+        <div style={{ color: "var(--status-fails-fg)" }}>{record.error}</div>
       )}
     </div>
   );
@@ -279,7 +279,7 @@ function OperationActivityRow({
       <div style={{ marginTop: 3, fontWeight: 600 }}>
         <NavigationButton navigationRef={record.operation} openNavigation={openNavigation} />
         {" · "}
-        <span style={{ color: verified ? "var(--success, #1a7f37)" : "var(--danger, #b00020)" }}>
+        <span style={{ color: verified ? "var(--status-holds-fg)" : "var(--status-fails-fg)" }}>
           {verified ? "verified" : "verification failed"}
         </span>
       </div>
@@ -337,7 +337,7 @@ function NavigationButton({
         border: 0,
         padding: 0,
         background: "transparent",
-        color: "var(--tint, #0a84ff)",
+        color: "var(--tint)",
         cursor: navigationRef.available && openNavigation ? "pointer" : "default",
         font: "inherit",
         textAlign: "left",

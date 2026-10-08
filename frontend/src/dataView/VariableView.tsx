@@ -168,7 +168,7 @@ export function VariableView({
         </button>
       </div>
       {pending.problem && (
-        <div role="alert" style={{ color: "var(--red, #c00)", fontSize: 12, marginBottom: 6 }}>
+        <div role="alert" style={{ color: "var(--red)", fontSize: 12, marginBottom: 6 }}>
           {pending.problem}
         </div>
       )}
@@ -194,7 +194,7 @@ export function VariableView({
         </div>
       )}
       {error && (
-        <div role="alert" style={{ color: "var(--red, #c00)", fontSize: 12, marginBottom: 6 }}>{error}</div>
+        <div role="alert" style={{ color: "var(--red)", fontSize: 12, marginBottom: 6 }}>{error}</div>
       )}
       <div className="wb-result-table-scroll" tabIndex={0} aria-label="Variables" style={{ maxHeight: "60vh", overflowY: "auto" }}>
         <table className="wb-result-table" style={{ borderCollapse: "collapse", fontSize: 12 }}>

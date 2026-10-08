@@ -210,7 +210,7 @@ export function CompareNodeSection({ node }: { node: GraphViewNode }) {
           {busy ? "Removing…" : "Remove comparison"}
         </button>
         {error && (
-          <span role="alert" style={{ fontSize: 12, color: "var(--danger, #f55)" }}>
+          <span role="alert" style={{ fontSize: 12, color: "var(--status-fails-fg)" }}>
             {error}
           </span>
         )}

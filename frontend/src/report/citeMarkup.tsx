@@ -44,8 +44,8 @@ export function CiteChip({
           margin: "0 2px",
           borderRadius: 999,
           fontSize: 11,
-          border: "1px solid var(--diff-removed, #b35900)",
-          color: "var(--diff-removed, #b35900)",
+          border: "1px solid var(--diff-removed)",
+          color: "var(--diff-removed)",
         }}
       >
         unverified
@@ -65,7 +65,7 @@ export function CiteChip({
         borderRadius: 999,
         fontSize: 11,
         border: "1px solid var(--separator)",
-        background: "var(--bg-card-2, rgba(0,0,0,0.05))",
+        background: "var(--bg-card-2)",
         // global `button` paints WHITE text; chips must use the label color.
         color: "var(--label)",
         minHeight: 0,

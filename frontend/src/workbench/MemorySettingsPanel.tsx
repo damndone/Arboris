@@ -36,16 +36,16 @@ const controlStyle: React.CSSProperties = {
   justifyContent: "space-between",
   gap: 16,
   padding: "12px 0",
-  borderBottom: "1px solid var(--separator, #3a3a3c)",
+  borderBottom: "1px solid var(--separator)",
 };
 
 const buttonStyle: React.CSSProperties = {
   minHeight: 0,
-  border: "1px solid var(--separator, #3a3a3c)",
+  border: "1px solid var(--separator)",
   borderRadius: 8,
   padding: "6px 10px",
-  background: "var(--bg-card-2, rgba(255,255,255,0.06))",
-  color: "var(--label, #f5f5f7)",
+  background: "var(--bg-card-2)",
+  color: "var(--label)",
   cursor: "pointer",
 };
 
@@ -57,18 +57,18 @@ const confirmationBackdropStyle: React.CSSProperties = {
   alignItems: "center",
   justifyContent: "center",
   padding: 20,
-  background: "rgba(0, 0, 0, 0.28)",
+  background: "var(--scrim)",
 };
 
 const confirmationDialogStyle: React.CSSProperties = {
   width: "min(100%, 440px)",
   boxSizing: "border-box",
-  border: "1px solid var(--separator, #3a3a3c)",
+  border: "1px solid var(--separator)",
   borderRadius: 12,
   padding: 18,
-  background: "var(--bg-card, #fff)",
-  color: "var(--label, #1c1c1e)",
-  boxShadow: "0 18px 48px rgba(0, 0, 0, 0.22)",
+  background: "var(--bg-card)",
+  color: "var(--label)",
+  boxShadow: "var(--shadow-modal)",
 };
 
 const switchTrackStyle = (enabled: boolean, disabled: boolean): React.CSSProperties => ({
@@ -80,8 +80,8 @@ const switchTrackStyle = (enabled: boolean, disabled: boolean): React.CSSPropert
   padding: 2,
   border: "none",
   borderRadius: 999,
-  background: enabled ? "var(--accent, #0a84ff)" : "var(--switch-off, #78788066)",
-  boxShadow: enabled ? "inset 0 0 0 1px rgba(0,0,0,0.08)" : "inset 0 0 0 1px rgba(0,0,0,0.12)",
+  background: enabled ? "var(--tint-fill)" : "var(--border-strong)",
+  boxShadow: "inset 0 0 0 1px var(--border)",
   cursor: disabled ? "wait" : "pointer",
   opacity: disabled ? 0.6 : 1,
   transition: "background-color 160ms ease, box-shadow 160ms ease",
@@ -92,8 +92,8 @@ const switchThumbStyle = (enabled: boolean): React.CSSProperties => ({
   width: 16,
   height: 16,
   borderRadius: "50%",
-  background: "#fff",
-  boxShadow: "0 1px 3px rgba(0,0,0,0.28)",
+  background: "var(--on-tint)",
+  boxShadow: "var(--shadow-1)",
   transform: enabled ? "translateX(28px)" : "translateX(0)",
   transition: "transform 160ms ease",
 });
@@ -303,14 +303,14 @@ export function MemorySettingsPanel({ projectRoot }: { projectRoot: string }) {
           <h3 style={{ margin: 0 }}>{library === "global" ? "Global library" : "Project library"}</h3>
           {active.length > 0 ? <button type="button" disabled={busy} onClick={() => void beginArchive(library, active.map((entry) => entry.memory_id))} style={buttonStyle}>Archive active</button> : null}
         </div>
-        {entries.length === 0 ? <p style={{ color: "var(--label-secondary, #98989d)" }}>No approved memory yet.</p> : (
+        {entries.length === 0 ? <p style={{ color: "var(--label-secondary)" }}>No approved memory yet.</p> : (
           <ul style={{ paddingLeft: 0, listStyle: "none", display: "grid", gap: 8 }}>
-            {entries.map((entry) => <li key={`${entry.memory_id}@${entry.revision}`} style={{ border: "1px solid var(--separator, #3a3a3c)", borderRadius: 8, padding: 10 }}>
+            {entries.map((entry) => <li key={`${entry.memory_id}@${entry.revision}`} style={{ border: "1px solid var(--separator)", borderRadius: 8, padding: 10 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
                 <span><code>{entry.memory_id}@{entry.revision}</code> · {entry.state}</span>
                 {entry.state === "active" ? <button type="button" disabled={busy} onClick={() => void beginArchive(library, [entry.memory_id])} style={buttonStyle}>Archive</button> : null}
               </div>
-              <small style={{ color: "var(--label-secondary, #98989d)" }}>{entry.memory_kind} · {entry.domain_tags.join(", ") || "untagged"} · {entry.apply_mode === "suggest_default" ? "May suggest a default" : "Information only"}</small>
+              <small style={{ color: "var(--label-secondary)" }}>{entry.memory_kind} · {entry.domain_tags.join(", ") || "untagged"} · {entry.apply_mode === "suggest_default" ? "May suggest a default" : "Information only"}</small>
               <div style={{ marginTop: 6 }}>{entry.compact_lesson}</div>
             </li>)}
           </ul>
@@ -322,7 +322,7 @@ export function MemorySettingsPanel({ projectRoot }: { projectRoot: string }) {
   return (
     <section data-testid="memory-settings-panel" aria-label="Memory settings" style={{ maxWidth: 760 }}>
       <h2 style={{ margin: "0 0 6px" }}>Memory</h2>
-      <p style={{ marginTop: 0, color: "var(--label-secondary, #98989d)" }}>Memory is off by default. A project never inherits global memory unless you explicitly enable it here.</p>
+      <p style={{ marginTop: 0, color: "var(--label-secondary)" }}>Memory is off by default. A project never inherits global memory unless you explicitly enable it here.</p>
       {error ? <div role="alert">{error}</div> : null}
       {renderToggle("Global library", globalSettings.library_enabled, () => void beginSetting(
         globalSettings.library_enabled ? "disable_global_library" : "enable_global_library",
@@ -363,7 +363,7 @@ export function MemorySettingsPanel({ projectRoot }: { projectRoot: string }) {
       ))}
       <section aria-label="Pending memory candidate review" style={{ marginTop: 20 }}>
         <h3 style={{ margin: "0 0 6px" }}>Pending review</h3>
-        <p style={{ marginTop: 0, color: "var(--label-secondary, #98989d)" }}>
+        <p style={{ marginTop: 0, color: "var(--label-secondary)" }}>
           Approving a candidate only adds a reviewed memory entry. It never runs analysis or changes a Draft.
         </p>
         {candidateError && candidatesProjectRoot === projectRoot ? <p role="status">{candidateError}</p> : (

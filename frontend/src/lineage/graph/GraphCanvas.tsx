@@ -742,7 +742,7 @@ export function GraphCanvas({
         animated: true,
         style: {
           ...(e.style ?? {}),
-          stroke: "var(--tint, #0a84ff)",
+          stroke: "var(--tint)",
           strokeWidth: 2,
           opacity: 1,
         },

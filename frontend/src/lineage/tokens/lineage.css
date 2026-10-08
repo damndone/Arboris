@@ -1,184 +1,7 @@
 /* frontend/src/lineage/tokens/lineage.css
- * V1.5.0 design tokens, OKLCH-derived from uiux/handoff/tokens.ts.
- * V1.5.1 T6: tokens promoted from .lineage-root scope to :root so the
- * whole app (Submit / History / Lineage) can share one palette and
- * the data-theme switch propagates everywhere. The .lineage-root rule
- * is preserved for the typography + background declarations only.
- *
- * Dark-only --extras (panel-bg, border-strong, etc.) added at the end
- * for styles.css consumers that don't have a direct match in the
- * original lineage vocabulary.
- *
- * Resolution order:
- *   :root                          → dark default (no data-theme attr)
- *   :root[data-theme="dark"]       → explicit dark (same as default)
- *   :root[data-theme="light"]      → light overrides
+ * Component styles for the lineage canvas, node details and panels.
+ * Tokens live in src/theme/tokens.css (v1.9.0); this file only reads them.
  */
-
-:root,
-:root[data-theme="dark"] {
-  /* Surfaces — warm near-black, slight olive cast (printer's ink) */
-  --bg-canvas:        oklch(0.165 0.006 70);
-  --bg-card:          oklch(0.20  0.006 70);
-  --bg-card-2:        oklch(0.24  0.006 70);
-  --bg-elev:          oklch(0.28  0.006 70);
-  --separator:        rgba(255, 250, 240, 0.08);
-  --separator-faint:  rgba(255, 250, 240, 0.045);
-  --scrollbar-thumb:  rgba(196, 200, 206, 0.72);
-  --scrollbar-track:  transparent;
-
-  /* Typography — warm cream */
-  --label:            oklch(0.94 0.008 75);
-  --label-secondary:  oklch(0.72 0.008 75);
-  --label-tertiary:   oklch(0.50 0.008 75);
-
-  /* Editorial accent — muted ink-blue */
-  --tint:             oklch(0.72 0.08 240);
-  --tint-hover:       oklch(0.78 0.08 240);
-  --ink:              oklch(0.72 0.08 240);
-
-  /* Burnished status colours (never bright) */
-  --orange:           oklch(0.74 0.10 65);
-  --orange-bg:        color-mix(in oklch, var(--orange) 18%, transparent);
-  --red:              oklch(0.62 0.13 25);
-  --green:            oklch(0.70 0.07 155);
-
-  /* Stage colours — near-mono with subtle hue rotation. */
-  --stage-source:     oklch(0.58 0.008 75);
-  --stage-eda:        oklch(0.66 0.04 220);
-  --stage-clean:      oklch(0.66 0.04 250);
-  --stage-transform:  oklch(0.72 0.10 65);
-  --stage-model:      oklch(0.70 0.06 200);
-  --stage-diag:       oklch(0.62 0.04 280);
-  --stage-viz:        oklch(0.66 0.04 320);
-  --stage-report:     oklch(0.74 0.06 75);
-
-  /* v1.6.5 variable-role palette (canvas badges + role edges) */
-  --role-outcome:                  oklch(0.66 0.14 250);
-  --role-focal:                    oklch(0.72 0.16 150);
-  --role-treatment:                oklch(0.74 0.15 65);
-  --role-covariates:               oklch(0.66 0.02 280);
-  --role-explanatory-unspecified:  oklch(0.70 0.02 280);
-  --role-instruments:              oklch(0.66 0.18 310);
-  --role-exposure:                 oklch(0.74 0.10 220);
-  --role-unit:                     oklch(0.64 0.20 10);
-  --role-time:                     oklch(0.80 0.14 95);
-  --role-cluster:                  oklch(0.74 0.12 230);
-
-  /* Trust status — adapter buckets (ok / review / caution / blocker) */
-  --ok:               oklch(0.70 0.07 155);
-  --review:           oklch(0.74 0.10 65);
-  --caution:          oklch(0.62 0.13 25);
-  --blocker:          oklch(0.52 0.20 25); /* v1.6.6 ④ — deeper, filled red */
-
-  /* Typeface stacks */
-  --font-serif:       "Iowan Old Style", "Source Serif Pro", "Charter", Georgia, "Songti SC", "Noto Serif CJK SC", serif;
-  --font-sans:        -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-  --font-mono:        ui-monospace, "SF Mono", Menlo, Consolas, "Roboto Mono", monospace;
-
-  /* T6 — extra semantic tokens for styles.css (Submit / History shell).
-   * Naming preserves V1.4.x semantics where possible; no new vocabulary
-   * unless required. */
-  --border-strong:    rgba(255, 250, 240, 0.16);
-  --border:           rgba(255, 250, 240, 0.10);
-  --panel-bg:         var(--bg-card);
-  --panel-error-bg:   color-mix(in oklch, var(--red) 14%, var(--bg-canvas));
-  --panel-error-fg:   oklch(0.86 0.10 25);
-  --field-bg:         var(--bg-card-2);
-  --field-invalid-bg: color-mix(in oklch, var(--red) 12%, var(--bg-card-2));
-  --field-error-fg:   oklch(0.82 0.12 25);
-  --field-hint-fg:    var(--label-tertiary);
-  --focus-ring:       oklch(0.78 0.10 240);
-  --hint-warn-fg:     oklch(0.82 0.10 65);
-  --hint-warn-bg:     color-mix(in oklch, var(--orange) 14%, var(--bg-canvas));
-  --badge-ok-fg:      oklch(0.82 0.10 155);
-  --badge-ok-bg:      color-mix(in oklch, var(--green) 18%, var(--bg-card));
-  --badge-ok-border:  color-mix(in oklch, var(--green) 38%, transparent);
-  --badge-warn-fg:    oklch(0.84 0.10 65);
-  --badge-warn-bg:    color-mix(in oklch, var(--orange) 18%, var(--bg-card));
-  --badge-warn-border:color-mix(in oklch, var(--orange) 38%, transparent);
-  --badge-neutral-fg: var(--label-secondary);
-  --badge-neutral-bg: var(--bg-card-2);
-  --badge-neutral-border: var(--separator);
-  --table-header-bg:  var(--bg-card-2);
-  --table-row-border: var(--separator-faint);
-  --code-bg:          var(--bg-card-2);
-}
-
-/* Light theme — neutral white canvas with softly separated surfaces */
-:root[data-theme="light"] {
-  --bg-canvas:        oklch(1 0 0);
-  --bg-card:          oklch(1 0 0);
-  --bg-card-2:        oklch(0.97 0 0);
-  --bg-elev:          oklch(0.94 0 0);
-  --separator:        rgba(15, 23, 42, 0.12);
-  --separator-faint:  rgba(15, 23, 42, 0.06);
-
-  --label:            oklch(0.22 0.010 75);
-  --label-secondary:  oklch(0.40 0.010 75);
-  --label-tertiary:   oklch(0.55 0.008 75);
-
-  --tint:             oklch(0.48 0.10 240);
-  --tint-hover:       oklch(0.54 0.10 240);
-  --ink:              oklch(0.48 0.10 240);
-
-  --orange:           oklch(0.62 0.12 65);
-  --orange-bg:        color-mix(in oklch, var(--orange) 18%, transparent);
-  --red:              oklch(0.55 0.16 25);
-  --green:            oklch(0.55 0.08 155);
-
-  --stage-source:     oklch(0.50 0.010 75);
-  --stage-eda:        oklch(0.50 0.04 220);
-  --stage-clean:      oklch(0.48 0.05 250);
-  --stage-transform:  oklch(0.55 0.13 65);
-  --stage-model:      oklch(0.50 0.06 200);
-  --stage-diag:       oklch(0.48 0.06 280);
-  --stage-viz:        oklch(0.52 0.05 320);
-  --stage-report:     oklch(0.55 0.08 75);
-
-  /* v1.6.5 variable-role palette (light) */
-  --role-outcome:                  oklch(0.52 0.16 250);
-  --role-focal:                    oklch(0.56 0.16 150);
-  --role-treatment:                oklch(0.60 0.15 65);
-  --role-covariates:               oklch(0.52 0.02 280);
-  --role-explanatory-unspecified:  oklch(0.58 0.02 280);
-  --role-instruments:              oklch(0.52 0.18 310);
-  --role-exposure:                 oklch(0.56 0.12 220);
-  --role-unit:                     oklch(0.54 0.20 10);
-  --role-time:                     oklch(0.62 0.15 95);
-  --role-cluster:                  oklch(0.56 0.13 230);
-
-  --ok:               oklch(0.55 0.08 155);
-  --review:           oklch(0.62 0.12 65);
-  --caution:          oklch(0.55 0.16 25);
-  --blocker:          oklch(0.48 0.22 25); /* v1.6.6 ④ — deeper, filled red */
-
-  /* Light overrides for the T6 extras */
-  --border-strong:    rgba(15, 23, 42, 0.20);
-  --border:           rgba(15, 23, 42, 0.12);
-  --panel-bg:         oklch(1 0 0);
-  --panel-error-bg:   color-mix(in oklch, var(--red) 10%, oklch(1 0 0));
-  --panel-error-fg:   oklch(0.40 0.16 25);
-  --field-bg:         oklch(1 0 0);
-  --field-invalid-bg: color-mix(in oklch, var(--red) 8%, oklch(1 0 0));
-  --field-error-fg:   oklch(0.42 0.16 25);
-  --field-hint-fg:    var(--label-tertiary);
-  --focus-ring:       oklch(0.72 0.14 240);
-  --hint-warn-fg:     oklch(0.42 0.13 65);
-  --hint-warn-bg:     color-mix(in oklch, var(--orange) 12%, oklch(1 0 0));
-  --badge-ok-fg:      oklch(0.38 0.10 155);
-  --badge-ok-bg:      color-mix(in oklch, var(--green) 16%, oklch(1 0 0));
-  --badge-ok-border:  color-mix(in oklch, var(--green) 55%, transparent);
-  --badge-warn-fg:    oklch(0.42 0.12 65);
-  --badge-warn-bg:    color-mix(in oklch, var(--orange) 14%, oklch(1 0 0));
-  --badge-warn-border:color-mix(in oklch, var(--orange) 55%, transparent);
-  --badge-neutral-fg: var(--label-secondary);
-  --badge-neutral-bg: oklch(0.94 0 0);
-  --badge-neutral-border: rgba(15, 23, 42, 0.18);
-  --table-header-bg:  oklch(0.96 0 0);
-  --table-row-border: rgba(15, 23, 42, 0.07);
-  --code-bg:          oklch(0.97 0 0);
-}
 
 /* Lineage canvas root — keeps explicit font / color / bg declarations.
  * Tokens above already cascade from :root, so these three properties
@@ -214,14 +37,14 @@
   color: var(--orange);
 }
 .ln-pill--red {
-  background: rgba(255, 69, 58, 0.10);
+  background: var(--status-fails-bg);
   color: var(--red);
 }
 
 /* Button */
 .ln-btn-primary {
-  background: var(--tint);
-  color: #fff;
+  background: var(--tint-fill);
+  color: var(--on-tint);
   border: 0;
   padding: 9px 16px;
   border-radius: 8px;
@@ -252,9 +75,9 @@
 }
 .ln-callout--orange { background: var(--orange-bg); }
 .ln-callout--orange .ln-callout-title { color: var(--orange); }
-.ln-callout--red { background: rgba(255, 69, 58, 0.10); }
+.ln-callout--red { background: var(--status-fails-bg); }
 .ln-callout--red .ln-callout-title { color: var(--red); }
-.ln-callout--green { background: rgba(48, 209, 88, 0.10); }
+.ln-callout--green { background: var(--status-holds-bg); }
 .ln-callout--green .ln-callout-title { color: var(--green); }
 .ln-callout-title { font-weight: 600; font-size: 14px; }
 .ln-callout-body { color: var(--label); font-size: 13.5px; margin-top: 6px; line-height: 1.5; }
@@ -349,7 +172,7 @@
   font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 700;
-  color: #fff;
+  color: var(--on-role);
   background: var(--role-color, var(--label-tertiary));
   border-radius: 4px;
   padding: 0 5px;
@@ -374,7 +197,7 @@
 /* v1.6.6 ④ — blocker is the strongest: filled (not outlined) so it reads
    as a hard problem, visually above caution's outlined red. */
 .ln-graph-node__badge--blocker {
-  color: #fff;
+  color: var(--on-tint);
   background: var(--blocker);
   border-color: var(--blocker);
 }
@@ -418,7 +241,7 @@
  * --tint (accent) so it reads as "system-suggested" rather than
  * stage-coloured. */
 .ln-graph-node--search-hit {
-  box-shadow: 0 0 0 2px var(--tint, #0a84ff);
+  box-shadow: 0 0 0 2px var(--tint);
 }
 
 /* F5: the current ⌘K cursor result — stronger than a plain search hit
@@ -427,8 +250,8 @@
  * (the cursor node is always also a hit). */
 .ln-graph-node--search-cursor {
   box-shadow:
-    0 0 0 3px var(--amber, #ffc107),
-    0 0 12px 2px var(--amber-glow, rgba(255, 193, 7, 0.5));
+    0 0 0 3px var(--highlight),
+    0 0 12px 2px var(--highlight-glow);
 }
 
 /* ─── Canvas chrome (T8.6a) ─────────────────────────────────────────
@@ -693,19 +516,19 @@
   padding: 4px 9px;
 }
 .run-rail__row--compact[data-active="true"] {
-  background: var(--tint);
-  border-color: var(--tint);
-  color: #fff;
+  background: var(--tint-fill);
+  border-color: var(--tint-fill);
+  color: var(--on-tint);
   padding-left: 9px;
 }
 .run-rail__row--compact[data-active="true"] .run-rail__id,
 .run-rail__row--compact[data-active="true"] .run-rail__time {
-  color: #fff;
+  color: var(--on-tint);
 }
 .run-rail__row--compact[data-active="true"] .run-rail__pill {
-  background: color-mix(in oklch, #fff 14%, var(--tint));
-  border-color: color-mix(in oklch, #fff 42%, var(--tint));
-  color: #fff;
+  background: color-mix(in oklch, var(--on-tint) 14%, var(--tint-fill));
+  border-color: color-mix(in oklch, var(--on-tint) 42%, var(--tint-fill));
+  color: var(--on-tint);
 }
 .run-rail__id {
   font-family: var(--font-mono);
@@ -866,7 +689,7 @@
   border: 1px solid var(--separator);
   border-radius: 8px;
   overflow: hidden;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  box-shadow: var(--shadow-2);
 }
 .lineage-root .react-flow__controls-button {
   background: transparent;
@@ -914,7 +737,7 @@
   background: var(--bg-card-2);
   border: 1px solid var(--separator);
   border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--shadow-modal);
   pointer-events: none;
   z-index: 1000;
   font-family: var(--font-sans);
@@ -1010,8 +833,8 @@
   overflow: hidden;
 }
 .detail-tabs__item[data-active="true"] {
-  background: var(--tint);
-  border-color: var(--tint);
+  background: var(--tint-fill);
+  border-color: var(--tint-fill);
 }
 .detail-tabs__tab,
 .detail-tabs__close {
@@ -1034,7 +857,7 @@
 }
 .detail-tabs__item[data-active="true"] .detail-tabs__tab,
 .detail-tabs__item[data-active="true"] .detail-tabs__close {
-  color: #fff;
+  color: var(--on-tint);
 }
 .detail-tabs__close {
   width: auto;
@@ -1048,8 +871,8 @@
 }
 .detail-tabs__item[data-active="true"] .detail-tabs__tab:hover,
 .detail-tabs__item[data-active="true"] .detail-tabs__close:hover {
-  color: #fff;
-  background: color-mix(in oklch, var(--tint) 84%, #000);
+  color: var(--on-tint);
+  background: var(--tint-fill-pressed);
 }
 .detail-tabs__notice {
   margin-top: 6px;
@@ -1085,7 +908,7 @@
   height: 100%;
   border: 1px dashed var(--separator);
   border-radius: 8px;
-  background: var(--bg-card-2, rgba(120, 120, 128, 0.06));
+  background: var(--bg-card-2);
   overflow: hidden;
 }
 .ln-var-container__header {
@@ -1136,14 +959,14 @@
 }
 .ln-var-chip:hover,
 .ln-var-chip:focus-visible {
-  border-color: var(--tint, #0a84ff);
+  border-color: var(--tint);
   background: var(--bg-canvas);
   outline: none;
 }
 .ln-var-chip[data-selected="true"] {
-  border-color: var(--tint, #0a84ff);
-  box-shadow: 0 0 0 1px var(--tint, #0a84ff);
-  background: var(--tint-bg, rgba(10, 132, 255, 0.12));
+  border-color: var(--tint);
+  box-shadow: 0 0 0 1px var(--tint);
+  background: var(--tint-bg);
 }
 .ln-var-chip__role {
   grid-area: role;
@@ -1154,7 +977,7 @@
   font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 700;
-  color: #fff;
+  color: var(--on-role);
   background: var(--role-color, var(--label-tertiary));
   border-radius: 4px;
   padding: 1px 5px;
@@ -1176,4 +999,12 @@
   white-space: nowrap;
   color: var(--label-tertiary);
   font-size: 10.5px;
+}
+
+/* React Flow's attribution reads the theme like everything else. */
+.lineage-root .react-flow__attribution {
+  background: transparent;
+}
+.lineage-root .react-flow__attribution a {
+  color: var(--label-tertiary);
 }

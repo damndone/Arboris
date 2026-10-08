@@ -237,7 +237,7 @@ export function DatasetExportPanel({
           {busy === "export" ? "Exporting…" : "Export"}
         </button>
       </div>
-      {error && <div role="alert" style={{ color: "var(--red, #c00)", marginTop: 6 }}>{error}</div>}
+      {error && <div role="alert" style={{ color: "var(--red)", marginTop: 6 }}>{error}</div>}
       {report && (
         <div data-testid="dataset-export-report" style={{ marginTop: 6, color: "var(--label-secondary)" }}>
           <div>

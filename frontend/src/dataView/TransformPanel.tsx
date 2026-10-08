@@ -297,7 +297,7 @@ export function TransformPanel({
       {preview && (
         <div data-testid="transform-preview" style={{ marginTop: 6, color: "var(--label-secondary)" }}>
           {preview.blocked ? (
-            <span role="alert" style={{ color: "var(--red, #c00)" }}>Blocked: {preview.blocked}</span>
+            <span role="alert" style={{ color: "var(--red)" }}>Blocked: {preview.blocked}</span>
           ) : (
             <>
               Rows {preview.rowsBefore} → {preview.rowsAfter} · {preview.outputColumns.length} variables
@@ -306,7 +306,7 @@ export function TransformPanel({
           )}
         </div>
       )}
-      {error && <div role="alert" style={{ color: "var(--red, #c00)", marginTop: 6 }}>{error}</div>}
+      {error && <div role="alert" style={{ color: "var(--red)", marginTop: 6 }}>{error}</div>}
     </section>
   );
 }

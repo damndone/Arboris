@@ -204,7 +204,7 @@ export function renderMarkdown(
               margin: "8px 0",
               padding: "8px 10px",
               borderRadius: 6,
-              background: "var(--bg-card-2, rgba(0,0,0,0.05))",
+              background: "var(--bg-card-2)",
               overflowX: "auto",
               fontSize: "0.92em",
             }}

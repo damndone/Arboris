@@ -55,10 +55,10 @@ function RecentProjectCard({
           minHeight: 92,
           padding: 16,
           textAlign: "left",
-          border: "1px solid var(--separator, #3a3a3c)",
+          border: "1px solid var(--separator)",
           borderRadius: 12,
-          background: "var(--bg-card-2, rgba(255,255,255,0.04))",
-          color: "var(--label, #f5f5f7)",
+          background: "var(--bg-card-2)",
+          color: "var(--label)",
           cursor: probing ? "default" : "pointer",
         }}
       >
@@ -68,7 +68,7 @@ function RecentProjectCard({
             <span
               style={{
                 marginLeft: 8,
-                color: "var(--tint, #0a84ff)",
+                color: "var(--tint)",
                 fontSize: 11,
                 fontWeight: 500,
               }}
@@ -82,7 +82,7 @@ function RecentProjectCard({
           style={{
             display: "block",
             marginTop: 8,
-            color: "var(--label-secondary, #98989d)",
+            color: "var(--label-secondary)",
             fontSize: 12,
             overflow: "hidden",
             textOverflow: "ellipsis",
@@ -95,7 +95,7 @@ function RecentProjectCard({
           style={{
             display: "block",
             marginTop: 8,
-            color: "var(--label-tertiary, #8e8e93)",
+            color: "var(--label-tertiary)",
             fontSize: 11,
           }}
         >
@@ -226,19 +226,19 @@ export function WorkbenchHomeView({
         overflow: "auto",
         padding: "32px clamp(20px, 5vw, 72px) 56px",
         boxSizing: "border-box",
-        color: "var(--label, #f5f5f7)",
+        color: "var(--label)",
       }}
     >
       <div style={{ maxWidth: 1080, margin: "0 auto" }}>
         <header style={{ display: "flex", gap: 16, alignItems: "flex-start", flexWrap: "wrap" }}>
           <div>
-            <p style={{ margin: "0 0 8px", color: "var(--label-secondary, #98989d)", fontSize: 12, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+            <p style={{ margin: "0 0 8px", color: "var(--label-secondary)", fontSize: 12, letterSpacing: "0.08em", textTransform: "uppercase" }}>
               Workbench
             </p>
             <h1 id="workbench-home-title" style={{ margin: 0, fontSize: 30, letterSpacing: "-0.02em" }}>
               Project home
             </h1>
-            <p style={{ margin: "10px 0 0", color: "var(--label-secondary, #98989d)" }}>
+            <p style={{ margin: "10px 0 0", color: "var(--label-secondary)" }}>
               Continue an analysis, switch projects, or start a new one.
             </p>
           </div>
@@ -248,7 +248,7 @@ export function WorkbenchHomeView({
                 type="button"
                 data-testid="workbench-home-new-project"
                 onClick={createProject}
-                style={{ padding: "9px 14px", borderRadius: 8, border: "1px solid var(--tint, #0a84ff)", background: "var(--tint, #0a84ff)", color: "white", cursor: "pointer" }}
+                style={{ padding: "9px 14px", borderRadius: 8, border: "1px solid var(--tint-fill)", background: "var(--tint-fill)", color: "var(--on-tint)", cursor: "pointer" }}
               >
                 New project
               </button>
@@ -259,16 +259,16 @@ export function WorkbenchHomeView({
         {currentProject && (
           <article
             data-testid="workbench-home-current-project"
-            style={{ marginTop: 28, padding: 20, borderRadius: 14, border: "1px solid var(--tint, #0a84ff)", background: "var(--tint-bg, rgba(10,132,255,0.12))" }}
+            style={{ marginTop: 28, padding: 20, borderRadius: 14, border: "1px solid var(--tint)", background: "var(--tint-bg)" }}
           >
-            <span style={{ color: "var(--label-secondary, #98989d)", fontSize: 12 }}>Continue current project</span>
+            <span style={{ color: "var(--label-secondary)", fontSize: 12 }}>Continue current project</span>
             <h2 style={{ margin: "7px 0 4px", fontSize: 20 }}>{projectName(projectRoot)}</h2>
-            <span className="mono" style={{ color: "var(--label-secondary, #98989d)", fontSize: 12 }}>{projectRoot}</span>
+            <span className="mono" style={{ color: "var(--label-secondary)", fontSize: 12 }}>{projectRoot}</span>
             <button
               type="button"
               data-testid="workbench-home-continue"
               onClick={() => openProject(projectRoot)}
-              style={{ display: "block", marginTop: 16, padding: "8px 12px", borderRadius: 7, border: "1px solid var(--separator, #3a3a3c)", background: "transparent", color: "var(--label, #f5f5f7)", cursor: "pointer" }}
+              style={{ display: "block", marginTop: 16, padding: "8px 12px", borderRadius: 7, border: "1px solid var(--separator)", background: "transparent", color: "var(--label)", cursor: "pointer" }}
             >
               Open project
             </button>
@@ -278,10 +278,10 @@ export function WorkbenchHomeView({
         <section aria-labelledby="recent-projects-title" style={{ marginTop: 32 }}>
           <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12 }}>
             <h2 id="recent-projects-title" style={{ margin: 0, fontSize: 17 }}>Recent projects</h2>
-            <span style={{ color: "var(--label-tertiary, #8e8e93)", fontSize: 12 }}>{recents.length} saved</span>
+            <span style={{ color: "var(--label-tertiary)", fontSize: 12 }}>{recents.length} saved</span>
           </div>
           {recents.length === 0 ? (
-            <p data-testid="workbench-home-empty-recent" style={{ color: "var(--label-secondary, #98989d)" }}>
+            <p data-testid="workbench-home-empty-recent" style={{ color: "var(--label-secondary)" }}>
               No recent projects yet. Create a project to begin.
             </p>
           ) : (
@@ -298,7 +298,7 @@ export function WorkbenchHomeView({
             </ul>
           )}
           {projectError && (
-            <p role="alert" style={{ color: "var(--danger, #ff453a)" }}>
+            <p role="alert" style={{ color: "var(--status-fails-fg)" }}>
               {projectError}
             </p>
           )}
@@ -307,28 +307,28 @@ export function WorkbenchHomeView({
         <section
           data-testid="workbench-home-llm-card"
           aria-labelledby="llm-status-title"
-          style={{ marginTop: 32, padding: 20, borderRadius: 14, border: "1px solid var(--separator, #3a3a3c)", background: "var(--bg-card-2, rgba(255,255,255,0.04))" }}
+          style={{ marginTop: 32, padding: 20, borderRadius: 14, border: "1px solid var(--separator)", background: "var(--bg-card-2)" }}
         >
           <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16 }}>
             <div>
               <h2 id="llm-status-title" style={{ margin: 0, fontSize: 17 }}>LLM connection</h2>
-              <p style={{ margin: "7px 0 0", color: "var(--label-secondary, #98989d)", fontSize: 13 }}>The active provider used by Ask AI.</p>
+              <p style={{ margin: "7px 0 0", color: "var(--label-secondary)", fontSize: 13 }}>The active provider used by Ask AI.</p>
             </div>
             {onOpenSettings && (
-              <button type="button" onClick={onOpenSettings} style={{ padding: "6px 10px", borderRadius: 7, border: "1px solid var(--separator, #3a3a3c)", background: "transparent", color: "var(--label, #f5f5f7)", cursor: "pointer" }}>
+              <button type="button" onClick={onOpenSettings} style={{ padding: "6px 10px", borderRadius: 7, border: "1px solid var(--separator)", background: "transparent", color: "var(--label)", cursor: "pointer" }}>
                 Configure
               </button>
             )}
           </div>
-          {llm.status === "loading" && <p data-testid="workbench-home-llm-loading" aria-live="polite" style={{ color: "var(--label-secondary, #98989d)" }}>Loading connection status…</p>}
-          {llm.status === "error" && <p data-testid="workbench-home-llm-error" role="alert" style={{ color: "var(--danger, #ff453a)" }}>{llm.error}</p>}
+          {llm.status === "loading" && <p data-testid="workbench-home-llm-loading" aria-live="polite" style={{ color: "var(--label-secondary)" }}>Loading connection status…</p>}
+          {llm.status === "error" && <p data-testid="workbench-home-llm-error" role="alert" style={{ color: "var(--status-fails-fg)" }}>{llm.error}</p>}
           {llm.status === "ready" && (
             <dl data-testid="workbench-home-llm-ready" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 14, margin: "18px 0 0" }}>
-              <div><dt style={{ color: "var(--label-secondary, #98989d)", fontSize: 12 }}>Provider</dt><dd style={{ margin: "4px 0 0" }}>{llm.config.provider_name ?? "Not configured"}</dd></div>
-              <div><dt style={{ color: "var(--label-secondary, #98989d)", fontSize: 12 }}>Model</dt><dd className="mono" style={{ margin: "4px 0 0", fontSize: 12 }}>{llm.config.model ?? "—"}</dd></div>
-              <div><dt style={{ color: "var(--label-secondary, #98989d)", fontSize: 12 }}>Context</dt><dd style={{ margin: "4px 0 0" }}>{formatContextWindow(llm.config.context_window_tokens)}</dd></div>
-              <div><dt style={{ color: "var(--label-secondary, #98989d)", fontSize: 12 }}>1M context</dt><dd style={{ margin: "4px 0 0" }}>{llm.config.supports_1m ? "Supported" : "Not enabled"}</dd></div>
-              <div><dt style={{ color: "var(--label-secondary, #98989d)", fontSize: 12 }}>API key</dt><dd style={{ margin: "4px 0 0" }}>{llm.config.key_present ? "Configured" : "Missing"}</dd></div>
+              <div><dt style={{ color: "var(--label-secondary)", fontSize: 12 }}>Provider</dt><dd style={{ margin: "4px 0 0" }}>{llm.config.provider_name ?? "Not configured"}</dd></div>
+              <div><dt style={{ color: "var(--label-secondary)", fontSize: 12 }}>Model</dt><dd className="mono" style={{ margin: "4px 0 0", fontSize: 12 }}>{llm.config.model ?? "—"}</dd></div>
+              <div><dt style={{ color: "var(--label-secondary)", fontSize: 12 }}>Context</dt><dd style={{ margin: "4px 0 0" }}>{formatContextWindow(llm.config.context_window_tokens)}</dd></div>
+              <div><dt style={{ color: "var(--label-secondary)", fontSize: 12 }}>1M context</dt><dd style={{ margin: "4px 0 0" }}>{llm.config.supports_1m ? "Supported" : "Not enabled"}</dd></div>
+              <div><dt style={{ color: "var(--label-secondary)", fontSize: 12 }}>API key</dt><dd style={{ margin: "4px 0 0" }}>{llm.config.key_present ? "Configured" : "Missing"}</dd></div>
             </dl>
           )}
         </section>

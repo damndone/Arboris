@@ -826,7 +826,7 @@ function ForestWorkbench({
         padding: 22,
         overflowY: "auto",
         background: "var(--bg-canvas)",
-        boxShadow: "-12px 0 24px rgba(0, 0, 0, 0.22)",
+        boxShadow: "var(--shadow-pop)",
         zIndex: 10,
       }}
     >
@@ -961,7 +961,7 @@ function HomeOnlyShell({
       <div
         role="toolbar"
         aria-label="Project toolbar"
-        style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 16px", height: 40, borderBottom: "1px solid var(--separator, #2e2e30)" }}
+        style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 16px", height: 40, borderBottom: "1px solid var(--separator)" }}
       >
         <ProjectSwitcher projectRoot={projectRoot} />
         <span style={{ color: "var(--label-secondary)", fontSize: 12 }}>Home</span>
@@ -1020,7 +1020,7 @@ function NotebookOnlyShell({
           gap: 10,
           padding: "0 16px",
           height: 40,
-          borderBottom: "1px solid var(--separator, #2e2e30)",
+          borderBottom: "1px solid var(--separator)",
         }}
       >
         <ProjectSwitcher projectRoot={projectRoot} />
@@ -1093,8 +1093,8 @@ function EmptyProjectCanvas({
           gap: 16,
           padding: "0 16px",
           height: 40,
-          borderBottom: "1px solid var(--separator, #2e2e30)",
-          background: "var(--surface-elevated, transparent)",
+          borderBottom: "1px solid var(--separator)",
+          background: "var(--bg-card, transparent)",
         }}
       >
           <ProjectSwitcher projectRoot={projectRoot} />
@@ -1168,8 +1168,8 @@ function EmptyProjectCanvas({
                 padding: "8px 18px",
                 borderRadius: 8,
                 border: 0,
-                background: "var(--tint, #0a84ff)",
-                color: "#fff",
+                background: "var(--tint-fill)",
+                color: "var(--on-tint)",
                 fontSize: 13,
                 fontWeight: 600,
                 cursor: "pointer",
@@ -1207,7 +1207,7 @@ function BlockedRunNotice({
         style={{
           maxWidth: 560,
           padding: 24,
-          border: "1px solid var(--danger, #d33)",
+          border: "1px solid var(--status-fails-fg)",
           borderRadius: 12,
           background: "var(--bg-card-2)",
         }}
@@ -1994,8 +1994,8 @@ function WorkbenchShell({
                 padding: "4px 10px",
                 borderRadius: 6,
                 border: 0,
-                background: "var(--tint-bg, rgba(10,132,255,0.12))",
-                color: "var(--tint, #0a84ff)",
+                background: "var(--tint-bg)",
+                color: "var(--tint)",
                 cursor: "pointer",
                 fontSize: 12,
               }}

@@ -50,7 +50,7 @@ function ResolvedScriptExport({ projectRoot, runId, target }: { projectRoot: str
       <label style={{ fontSize: 12 }}><input type="checkbox" checked={requireNative} onChange={event => { setRequireNative(event.target.checked); setResult(null); setError(null); }} /> Require all steps to run natively</label>
       <button type="button" onClick={() => void generate()}>{busy ? 'Exporting…' : 'Export script'}</button>
     </fieldset>
-    {error && <p role="alert" style={{ color: 'var(--status-danger)', overflowWrap: 'anywhere' }}>{error}</p>}
+    {error && <p role="alert" style={{ color: 'var(--status-fails-fg)', overflowWrap: 'anywhere' }}>{error}</p>}
     {result && <div aria-live="polite" style={{ fontSize: 12, overflowWrap: 'anywhere' }}>
       <p>{result.fully_native ? 'All steps run natively.' : 'Includes completed Workbench snapshots.'}</p>
       <ul style={{ paddingLeft: 18 }}>{result.coverage.map(item => <li key={item.step_id}>{item.operation} · {item.status}{item.note && <div>{item.note}</div>}</li>)}</ul>
