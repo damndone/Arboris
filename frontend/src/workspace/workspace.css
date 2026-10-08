@@ -616,3 +616,10 @@
   min-width: 0;
   min-height: 0;
 }
+
+.ws-segmented--icons .ws-segmented__item {
+  position: relative;
+  width: 32px;
+  padding: 0;
+  justify-content: center;
+}

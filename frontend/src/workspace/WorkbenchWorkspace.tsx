@@ -4,7 +4,7 @@
 // overlays) into the new regions, so both shells share one source of state
 // while the new one is behind its switch (design spec §8.8).
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { AgentPanel } from "../workbench/agent/AgentPanel";
 import { LogsPanel } from "../workbench/panels/LogsPanel";
@@ -24,6 +24,7 @@ import { useWorkbench } from "../workbench/WorkbenchStateProvider";
 import { useTopbarActions } from "../workbench/useTopbarActions";
 import { rootToSlug } from "../workbench/projectSlug";
 import { RunsTable } from "./RunsTable";
+import { AgentColumnComposer } from "./agent/AgentColumnComposer";
 import { MapTree } from "./MapTree";
 import { StageHost } from "./StageHost";
 import { WorkspaceBottomPanel, type BottomTab } from "./WorkspaceBottomPanel";
@@ -106,6 +107,12 @@ export function WorkbenchWorkspace({
   // step brings them back.
   const [stageFolded, setStageFolded] = useState(false);
   useEffect(() => setStageFolded(false), [state.selectedKey]);
+  // Choosing a step from project home (search, the command palette) shows it.
+  const lastSelected = useRef(state.selectedKey);
+  useEffect(() => {
+    if (state.selectedKey !== lastSelected.current && state.selectedKey && state.view === "home") dispatch.setView("graph");
+    lastSelected.current = state.selectedKey;
+  }, [state.selectedKey, state.view, dispatch]);
 
   const topbarFor = (controls?: Parameters<Parameters<typeof WorkspaceShell>[0]["topbar"]>[0]) => (
     <WorkspaceTopbar
@@ -182,7 +189,7 @@ export function WorkbenchWorkspace({
             main
           )
         }
-        agent={<AgentPanel runId={runId} projectRoot={projectRoot} />}
+        agent={<AgentPanel runId={runId} projectRoot={projectRoot} composer={<AgentColumnComposer />} />}
         bottom={<WorkspaceBottomPanel projectRoot={projectRoot} tabs={bottomTabs} />}
       />
       {overlays}

@@ -1,0 +1,164 @@
+/* frontend/src/workspace/agent/agentColumnComposer.css */
+
+.ws-composer-wrap {
+  flex: 0 0 auto;
+  padding: var(--space-2) var(--space-3) var(--space-3);
+}
+
+.ws-composer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
+  border: var(--hairline) solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-2);
+  transition: border-color var(--duration-fade) var(--ease-standard), box-shadow var(--duration-fade) var(--ease-standard);
+}
+
+.ws-composer:focus-within {
+  border-color: color-mix(in oklch, var(--tint) 55%, var(--border));
+  box-shadow: var(--shadow-2), 0 0 0 3px color-mix(in oklch, var(--tint) 16%, transparent);
+}
+
+.ws-composer__focus {
+  display: flex;
+  min-width: 0;
+  padding-top: 2px;
+}
+
+.ws-composer__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  background: var(--tint-bg);
+  color: var(--tint-label);
+  font-size: var(--text-small);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ws-composer__dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: var(--radius-pill);
+  background: currentColor;
+}
+
+.ws-composer textarea {
+  width: 100%;
+  min-height: 44px;
+  max-height: 200px;
+  margin: 0;
+  padding: 2px var(--space-1) 0 0;
+  border: 0;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: var(--label);
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
+  line-height: 1.45;
+  box-shadow: none;
+}
+
+.ws-composer textarea::placeholder {
+  color: var(--label-tertiary);
+}
+
+.ws-composer__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 32px;
+}
+
+.ws-composer__spacer {
+  flex: 1;
+}
+
+.ws-composer__status {
+  font-size: var(--text-small);
+  color: var(--label-secondary);
+}
+
+.ws-composer__model select {
+  max-width: 9.5rem;
+  min-height: 0;
+  height: 28px;
+  padding: 0 22px 0 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background-color: transparent;
+  color: var(--label-secondary);
+  font-size: var(--text-small);
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.ws-composer__model select:hover:not(:disabled) {
+  background-color: var(--bg-elev);
+  color: var(--label);
+}
+
+.ws-composer__send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--tint-fill);
+  color: var(--on-tint);
+  cursor: pointer;
+}
+
+.ws-composer__send:hover:not(:disabled) {
+  background: var(--tint-fill-pressed);
+}
+
+.ws-composer__send:disabled {
+  opacity: 1;
+  background: var(--bg-pressed);
+  color: var(--label-tertiary);
+}
+
+.ws-composer__send--stop {
+  background: var(--label);
+  color: var(--bg-card);
+}
+
+.ws-composer__send:focus-visible,
+.ws-composer__model select:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.ws-composer__error {
+  margin: var(--space-2) var(--space-1) 0;
+  font-size: var(--text-small);
+  color: var(--status-fails-fg);
+}
+
+.ws-composer__note {
+  margin: var(--space-2) 0 0;
+  text-align: center;
+  font-size: var(--text-caption);
+  color: var(--label-tertiary);
+}
+
+/* The capability catalog's trigger, sized for this bar. */
+.ws-composer__bar > *:first-child button {
+  min-height: 0;
+}

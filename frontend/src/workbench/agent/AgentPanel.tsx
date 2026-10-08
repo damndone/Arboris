@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useAgentSurface } from "./AgentSurfaceContext";
 import { agentAuditExportUrl } from "./agentApi";
 import { AgentComposer } from "./AgentComposer";
@@ -251,7 +251,16 @@ function navigationButtonLabel(ref: {
   return `Open ${relation} ${label}`;
 }
 
-export function AgentPanel({ runId, projectRoot }: { runId: string; projectRoot: string }) {
+export function AgentPanel({
+  runId,
+  projectRoot,
+  composer,
+}: {
+  runId: string;
+  projectRoot: string;
+  /** v1.9.0: a host may supply its own composer (the workspace Agent column). */
+  composer?: ReactNode;
+}) {
   const agent = useAgentSurface();
   const [editingProposalId, setEditingProposalId] = useState<string | null>(null);
   const [revisionDraft, setRevisionDraft] = useState("");
@@ -723,7 +732,7 @@ export function AgentPanel({ runId, projectRoot }: { runId: string; projectRoot:
           })}
         </aside>
       )}
-      <AgentComposer showScope={false} variant="terminal" />
+      {composer ?? <AgentComposer showScope={false} variant="terminal" />}
     </section>
   );
 }

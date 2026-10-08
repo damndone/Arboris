@@ -65,10 +65,23 @@ export const SearchIcon = () => (
 
 export const SettingsIcon = () => (
   <Icon>
-    <path d="M2 4.5h7.5M12.5 4.5H14M2 11.5h1.5M6.5 11.5H14" />
-    <circle cx="11" cy="4.5" r="1.5" />
-    <circle cx="5" cy="11.5" r="1.5" />
+    <circle cx="8" cy="8" r="2.1" />
+    <path d="M8 1.75v1.6M8 12.65v1.6M14.25 8h-1.6M3.35 8h-1.6M12.42 3.58l-1.13 1.13M4.71 11.29l-1.13 1.13M12.42 12.42l-1.13-1.13M4.71 4.71 3.58 3.58" />
+    <circle cx="8" cy="8" r="4.6" />
   </Icon>
+);
+
+export const SendIcon = () => (
+  <Icon>
+    <path d="M8 12.75V3.5" />
+    <path d="M4.25 7.25 8 3.5l3.75 3.75" />
+  </Icon>
+);
+
+export const StopIcon = () => (
+  <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" focusable="false">
+    <rect x="2" y="2" width="8" height="8" rx="1.5" fill="currentColor" />
+  </svg>
 );
 
 export const PlusIcon = () => (

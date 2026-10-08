@@ -5,11 +5,13 @@
 import type { ReactNode } from "react";
 import type { ViewMode } from "../workbench/state/urlSchema";
 import { ProjectSwitcher } from "../workbench/WorkbenchTopbar";
+import { ThemeToggle } from "../theme";
 import type { LayoutControls } from "./WorkspaceShell";
 import { BrandIcon, LineageIcon, PlusIcon, ResultsIcon, SearchIcon, SettingsIcon, SidebarIcon } from "./icons";
 import "./workspaceTopbar.css";
 
 export const WORKSPACE_VIEWS: ReadonlyArray<{ id: ViewMode; label: string }> = [
+  { id: "home", label: "Home" },
   { id: "data", label: "Data" },
   { id: "graph", label: "Analysis" },
   { id: "table", label: "Tables" },
@@ -33,8 +35,11 @@ export interface WorkspaceTopbarProps {
   onNewAnalysis?: () => void;
 }
 
+/** The node search listens for this; ⌘K opens the same palette. */
+export const OPEN_SEARCH_EVENT = "workbench:open-search";
+
 function openSearch() {
-  window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true }));
+  window.dispatchEvent(new Event(OPEN_SEARCH_EVENT));
 }
 
 export function WorkspaceTopbar({
@@ -63,10 +68,10 @@ export function WorkspaceTopbar({
             <SidebarIcon />
           </button>
         )}
-        <button type="button" className="ws-topbar__brand" aria-label="Arboris home" onClick={onHome}>
+        <span className="ws-topbar__brand ws-topbar__brand--static">
           <BrandIcon />
-          <span aria-hidden="true">Arboris</span>
-        </button>
+          <span>Arboris</span>
+        </span>
         <span className="ws-topbar__rule" aria-hidden="true" />
         <ProjectSwitcher projectRoot={projectRoot} />
       </div>
@@ -93,7 +98,7 @@ export function WorkspaceTopbar({
 
       <div className="ws-topbar__end">
         {controls && (
-        <div className="ws-segmented ws-segmented--small" role="group" aria-label="Layout">
+        <div className="ws-segmented ws-segmented--icons" role="group" aria-label="Layout">
           <button
             type="button"
             className="ws-segmented__item"
@@ -102,7 +107,7 @@ export function WorkspaceTopbar({
             onClick={() => controls.setLayout("results")}
           >
             <ResultsIcon />
-            Results first
+            <span className="ws-visually-hidden">Results first</span>
           </button>
           <button
             type="button"
@@ -112,7 +117,7 @@ export function WorkspaceTopbar({
             onClick={() => controls.setLayout("lineage")}
           >
             <LineageIcon />
-            Lineage first
+            <span className="ws-visually-hidden">Lineage first</span>
           </button>
         </div>
         )}
@@ -120,12 +125,18 @@ export function WorkspaceTopbar({
           <SearchIcon />
         </button>
         {onNewAnalysis && (
-          <button type="button" className="ws-button ws-button--primary" onClick={onNewAnalysis}>
+          <button
+            type="button"
+            className="ws-button ws-button--primary"
+            title="Import data and set up a model in this project"
+            onClick={onNewAnalysis}
+          >
             <PlusIcon />
             {newAnalysisLabel}
           </button>
         )}
         {actions}
+        <ThemeToggle />
         <button type="button" className="ws-icon-button" aria-label="Settings" title="Settings" onClick={onOpenSettings}>
           <SettingsIcon />
         </button>

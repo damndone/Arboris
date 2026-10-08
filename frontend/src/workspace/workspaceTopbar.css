@@ -77,3 +77,12 @@
   font-size: var(--text-ui);
   font-weight: 400;
 }
+
+/* The theme switch is shared with the classic shell; size it for this bar. */
+.ws-topbar__end .theme-toggle {
+  flex: 0 0 auto;
+}
+
+.ws-topbar__end > * {
+  flex-shrink: 0;
+}

@@ -98,8 +98,14 @@ export function SearchPalette() {
         setOpen(false);
       }
     };
+    // v1.9.0: the workspace's search button opens the same palette.
+    const onOpenRequest = () => setOpen(true);
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("workbench:open-search", onOpenRequest);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("workbench:open-search", onOpenRequest);
+    };
   }, [open]);
 
   // When opening, seed input with the current committed query (so the

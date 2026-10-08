@@ -1914,8 +1914,8 @@ function WorkbenchShell({
   const overlays = (
     <>
       {state.view !== "home" && <ContextMenu />}
-      {state.view !== "home" && <SearchPalette />}
-      {state.view !== "home" && <CommandPalette projectRoot={projectRoot} />}
+      {(state.view !== "home" || workspaceMode === "new") && <SearchPalette />}
+      {(state.view !== "home" || workspaceMode === "new") && <CommandPalette projectRoot={projectRoot} />}
       {state.view !== "home" && <RawJsonModal open={rawJsonOpen} onClose={() => setRawJsonOpen(false)} node={selectedNode} />}
       {reportReviewFloating}
       {nodePanelFloating}

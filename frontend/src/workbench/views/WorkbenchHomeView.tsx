@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { formatRelativeTime } from "../../lineage/runRail/runFormat";
 import { ApiError, fetchRuns } from "../../api";
 import { fetchLlmConfig } from "../../llm/llmApi";
 import type { LlmConfigInfo } from "../../llm/llmTypes";
@@ -99,7 +100,7 @@ function RecentProjectCard({
             fontSize: 11,
           }}
         >
-          {probing ? "Opening…" : `Last opened ${recent.lastOpened}`}
+          {probing ? "Opening…" : `Last opened ${formatRelativeTime(recent.lastOpened)}`}
         </span>
       </button>
     </li>
@@ -261,16 +262,17 @@ export function WorkbenchHomeView({
             data-testid="workbench-home-current-project"
             style={{ marginTop: 28, padding: 20, borderRadius: 14, border: "1px solid var(--tint)", background: "var(--tint-bg)" }}
           >
-            <span style={{ color: "var(--label-secondary)", fontSize: 12 }}>Continue current project</span>
+            <span style={{ color: "var(--label-secondary)", fontSize: 12 }}>Current project</span>
             <h2 style={{ margin: "7px 0 4px", fontSize: 20 }}>{projectName(projectRoot)}</h2>
             <span className="mono" style={{ color: "var(--label-secondary)", fontSize: 12 }}>{projectRoot}</span>
             <button
               type="button"
               data-testid="workbench-home-continue"
+              data-variant="primary"
               onClick={() => openProject(projectRoot)}
-              style={{ display: "block", marginTop: 16, padding: "8px 12px", borderRadius: 7, border: "1px solid var(--separator)", background: "transparent", color: "var(--label)", cursor: "pointer" }}
+              style={{ display: "block", marginTop: 16 }}
             >
-              Open project
+              Back to the analysis
             </button>
           </article>
         )}
@@ -312,7 +314,7 @@ export function WorkbenchHomeView({
           <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16 }}>
             <div>
               <h2 id="llm-status-title" style={{ margin: 0, fontSize: 17 }}>LLM connection</h2>
-              <p style={{ margin: "7px 0 0", color: "var(--label-secondary)", fontSize: 13 }}>The active provider used by Ask AI.</p>
+              <p style={{ margin: "7px 0 0", color: "var(--label-secondary)", fontSize: 13 }}>The model provider the Agent uses.</p>
             </div>
             {onOpenSettings && (
               <button type="button" onClick={onOpenSettings} style={{ padding: "6px 10px", borderRadius: 7, border: "1px solid var(--separator)", background: "transparent", color: "var(--label)", cursor: "pointer" }}>
