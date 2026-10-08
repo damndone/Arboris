@@ -55,11 +55,8 @@ from ..agent.core import AgentCore
 from ..agent.events import AgentEventStream
 from ..agent.model import OpenAICompatibleModelAdapter
 from ..agent.navigation import AgentNavigationProjector, AgentNavigationRef
-from ..agent.operations import (
-    OperationRecordStore,
-    OperationRegistry,
-    OperationValidationError,
-)
+from ..agent.operations import OperationRecordStore, OperationRegistry
+from ..contracts.common.errors import OperationValidationError
 from ..agent.execution import OperationClaimConflict
 from ..agent.orchestrator import WorkbenchOrchestrator
 from ..agent.proposals import ProposalConfirmationError, ProposalStaleError, ProposalStore
@@ -73,8 +70,29 @@ from ..services.dataset_view import run_labels
 from ..egress import egress_project
 from ..llm.config import load_llm_config
 from ..lineage.node_index import NODE_INDEX_FILENAME
+from .responses.agent import (
+    AgentActivity,
+    AgentAuditExport,
+    AgentCapabilities,
+    AgentEvents,
+    AgentOperationProjection,
+    AgentProposalList,
+    AgentSession,
+    AgentTurn,
+    AgentTurnCancelling,
+    AnalysisLoopContext,
+    AnalysisLoopIntent,
+    AnalysisLoopPackets,
+    AnalysisLoopProposal,
+    ForkProposal,
+    NavigationProjectionResponse,
+    OperationReconciled,
+    ProposalConfirmed,
+    ProposalStatus,
+)
+from .typed_routes import TypedAPIRoute
 
-router = APIRouter()
+router = APIRouter(route_class=TypedAPIRoute)
 
 MAX_CONTEXT_CHARS = 24_000
 MAX_QUESTION_CHARS = 4_000
@@ -718,9 +736,10 @@ def _get_session(
     root: Path,
     session_id: str,
 ) -> tuple[JsonlSessionRepository, AgentEventStream, dict[str, Any]]:
-    repository, events = _stores(root)
+    # Look the session up without creating storage, so a read of an unknown
+    # session leaves the project untouched.
     try:
-        metadata = repository.get_metadata(session_id)
+        metadata = JsonlSessionRepository(root / "workbench", create=False).get_metadata(session_id)
     except (KeyError, ValueError) as exc:
         raise WorkbenchAPIError(
             status_code=404,
@@ -728,6 +747,7 @@ def _get_session(
             message="Agent session was not found in this project.",
             details={"session_id": session_id},
         ) from exc
+    repository, events = _stores(root)
     return repository, events, metadata
 
 
@@ -984,7 +1004,7 @@ def _current_proposal_context_fingerprint(
 def create_agent_session(
     project_root: str,
     body: AgentSessionCreateRequest,
-) -> dict[str, Any]:
+) -> AgentSession:
     root = _project_root(project_root)
     repository, events = _stores(root)
     session_id = f"agent_{body.role}_{uuid4().hex}"
@@ -1111,7 +1131,7 @@ def create_agent_session(
 
 
 @router.get("/agent/sessions/{session_id}")
-def get_agent_session(session_id: str, project_root: str) -> dict[str, Any]:
+def get_agent_session(session_id: str, project_root: str) -> AgentSession:
     root = _project_root(project_root)
     repository, _events, metadata = _get_session(root, session_id)
     return _public_session(repository, session_id, metadata, load_llm_config())
@@ -1122,7 +1142,7 @@ def get_agent_audit_export(
     session_id: str,
     project_root: str,
     format: Literal["json", "markdown", "html"] = Query("json"),
-) -> dict[str, Any] | Response:
+) -> AgentAuditExport | Response:
     root = _project_root(project_root)
     _get_session(root, session_id)
     audit = build_agent_audit(root, session_id)
@@ -1136,7 +1156,7 @@ def get_agent_audit_export(
 
 
 @router.get("/agent/sessions/{session_id}/proposals")
-def get_agent_proposals(session_id: str, project_root: str) -> dict[str, Any]:
+def get_agent_proposals(session_id: str, project_root: str) -> AgentProposalList:
     root = _project_root(project_root)
     repository, _events, _metadata = _get_session(root, session_id)
     return {"proposals": _public_proposals(ProposalStore(repository.root), session_id)}
@@ -1146,7 +1166,7 @@ def get_agent_proposals(session_id: str, project_root: str) -> dict[str, Any]:
 def get_agent_session_projection(
     session_id: str,
     project_root: str,
-) -> dict[str, Any]:
+) -> NavigationProjectionResponse:
     root = _project_root(project_root)
     _repository, _events, _metadata = _get_session(root, session_id)
     try:
@@ -1167,7 +1187,7 @@ def get_agent_graph_navigation(
     run_id: str = Query(min_length=1),
     node_ref: str | None = Query(default=None),
     forest_node_key: str | None = Query(default=None),
-) -> dict[str, Any]:
+) -> NavigationProjectionResponse:
     root = _project_root(project_root)
     projection = AgentNavigationProjector(root).graph(
         run_id=run_id,
@@ -1185,7 +1205,7 @@ def get_agent_graph_navigation(
 
 
 @router.get("/agent/activity")
-def get_agent_activity(project_root: str) -> dict[str, Any]:
+def get_agent_activity(project_root: str) -> AgentActivity:
     """Return the durable, read-only operation projection for AI Activity."""
 
     root = _project_root(project_root)
@@ -1202,7 +1222,7 @@ def get_agent_activity(project_root: str) -> dict[str, Any]:
 def get_agent_capabilities(
     project_root: str,
     scope: str | None = None,
-) -> dict[str, Any]:
+) -> AgentCapabilities:
     """Return registry-owned operation capabilities without creating storage."""
 
     root = _project_root(project_root)
@@ -1293,7 +1313,7 @@ def _analysis_loop_packet_bundle(
 def get_analysis_loop_packets(
     run_id: str,
     project_root: str,
-) -> dict[str, Any]:
+) -> AnalysisLoopPackets:
     """Read persisted Analysis Loop facts for one graph run.
 
     This endpoint is deliberately read-only.  It never builds a packet or
@@ -1407,7 +1427,7 @@ def inspect_agent_analysis_loop_context(
     session_id: str,
     project_root: str,
     body: AnalysisLoopContextRequest,
-) -> dict[str, Any]:
+) -> AnalysisLoopContext:
     """Return one scope of typed analysis-loop context, read-only.
 
     The HTTP seam intentionally accepts already-structured packet payloads so
@@ -1446,7 +1466,7 @@ def submit_agent_analysis_loop_intent(
     session_id: str,
     project_root: str,
     body: AnalysisLoopIntentRequest,
-) -> dict[str, Any]:
+) -> AnalysisLoopIntent:
     """Classify one untrusted intent without creating a proposal or effect."""
 
     root = _project_root(project_root)
@@ -1464,7 +1484,7 @@ def create_agent_analysis_loop_proposal(
     session_id: str,
     project_root: str,
     body: AnalysisLoopProposalRequest,
-) -> dict[str, Any]:
+) -> AnalysisLoopProposal:
     """Resolve persisted OLS facts and create one confirmation-gated proposal."""
 
     root = _project_root(project_root)
@@ -1742,7 +1762,7 @@ def _ensure_fork_source_session(
 def create_agent_fork_proposal(
     project_root: str,
     body: AgentForkProposalRequest,
-) -> dict[str, Any]:
+) -> ForkProposal:
     """Create a confirmation-gated graph.fork proposal from verified context."""
 
     root = _project_root(project_root)
@@ -1849,7 +1869,7 @@ def get_agent_operation_projection(
     session_id: str,
     record_id: str,
     project_root: str,
-) -> dict[str, Any]:
+) -> AgentOperationProjection:
     root = _project_root(project_root)
     repository, _events, metadata = _get_session(root, session_id)
     store = OperationRecordStore(repository.root)
@@ -1879,7 +1899,7 @@ def decline_agent_proposal(
     proposal_id: str,
     project_root: str,
     body: AgentProposalDeclineRequest | None = None,
-) -> dict[str, Any]:
+) -> ProposalStatus:
     root = _project_root(project_root)
     repository, events, metadata = _get_session(root, session_id)
     store = ProposalStore(repository.root)
@@ -1920,7 +1940,7 @@ def revise_agent_proposal(
     proposal_id: str,
     project_root: str,
     body: AgentProposalRevisionRequest,
-) -> dict[str, Any]:
+) -> ProposalStatus:
     root = _project_root(project_root)
     repository, events, metadata = _get_session(root, session_id)
     store = ProposalStore(repository.root)
@@ -2003,7 +2023,7 @@ async def confirm_agent_proposal(
     proposal_id: str,
     project_root: str,
     body: AgentProposalConfirmRequest,
-) -> dict[str, Any]:
+) -> ProposalConfirmed:
     root = _project_root(project_root)
     repository, events, metadata = _get_session(root, session_id)
     store = ProposalStore(repository.root)
@@ -2129,7 +2149,7 @@ async def reconcile_agent_operation(
     session_id: str,
     record_id: str,
     project_root: str,
-) -> dict[str, Any]:
+) -> OperationReconciled:
     """Idempotently reconcile one confirmed operation against its child run.
 
     Non-terminal children leave the record `running` unchanged; a terminal
@@ -2173,7 +2193,7 @@ async def run_agent_turn(
     session_id: str,
     project_root: str,
     body: AgentTurnRequest,
-) -> dict[str, Any]:
+) -> AgentTurn:
     root = _project_root(project_root)
     repository, events, metadata = _get_session(root, session_id)
     turn_key = _active_turn_key(root, session_id)
@@ -2283,7 +2303,7 @@ async def _run_reserved_agent_turn(
 async def abort_agent_turn(
     session_id: str,
     project_root: str,
-) -> dict[str, Any]:
+) -> AgentTurnCancelling:
     """Request cancellation of the one active provider/tool turn for a session."""
 
     root = _project_root(project_root)
@@ -2305,7 +2325,7 @@ def get_agent_events(
     session_id: str,
     project_root: str,
     after_seq: int = Query(default=0, ge=0),
-) -> dict[str, Any]:
+) -> AgentEvents:
     root = _project_root(project_root)
     _repository, events, _metadata = _get_session(root, session_id)
     return {

@@ -8,20 +8,25 @@ from workbench.cli import app
 
 
 def _invoke(monkeypatch, tmp_path: Path, extra_args: list[str]) -> dict[str, object]:
+    """The keyword arguments `workbench run` hands the workflow.
+
+    The CLI submits through the same run service as POST /runs (v1.8.12), so
+    the seam is the service's workflow call, after the form is parsed.
+    """
     captured: dict[str, object] = {}
 
     def fake_run_workflow(*_args, **kwargs):
         captured.update(kwargs)
-        return {"run_id": "stub-run"}
+        return {"run_id": _args[1], "status": "completed"}
 
     import workbench.cli as cli_module
-    import workbench.orchestrator as orch
+    import workbench.services.run_service as run_service
 
-    monkeypatch.setattr(orch, "run_workflow", fake_run_workflow)
+    monkeypatch.setattr(run_service, "_run_workflow", fake_run_workflow)
     monkeypatch.setattr(cli_module, "_lineage_url", lambda *_a: "http://example/run")
 
+    CliRunner().invoke(app, ["create", str(tmp_path), "proj"])
     project = tmp_path / "proj"
-    project.mkdir()
     data = tmp_path / "data.csv"
     data.write_text("y,x\n1,2\n3,4\n", encoding="utf-8")
 

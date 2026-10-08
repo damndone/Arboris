@@ -136,6 +136,7 @@ def _write_manifest(
     rerun_reason: str | None = None,
     source_lineage: dict[str, Any] | None = None,
     rerun_from: dict[str, Any] | None = None,
+    dataset_source: dict[str, Any] | None = None,
     source_run_id: str | None = None,
     execution_profile: dict[str, object] | None = None,
 ) -> None:
@@ -153,6 +154,7 @@ def _write_manifest(
                 "rerun_reason",
                 "source_lineage",
                 "rerun_from",
+                "dataset_source",
                 "source_run_id",
                 "execution_profile",
                 "containment_evidence",
@@ -183,6 +185,7 @@ def _write_manifest(
         ("rerun_reason", rerun_reason),
         ("source_lineage", source_lineage),
         ("rerun_from", rerun_from),
+        ("dataset_source", dataset_source),
         ("source_run_id", source_run_id),
     ):
         if value is not None:

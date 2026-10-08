@@ -14,6 +14,7 @@ import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
+from evidence_retention import run_dir
 from test_script_export_lineage_builder import data_path, model_path, wald_path, finished
 from workbench.app import app
 from workbench.artifacts import read_json
@@ -22,12 +23,18 @@ from workbench.script_export.plan import ScriptExportRefusal
 from workbench.services.script_export import export_analysis_script
 
 
-EVIDENCE = Path(os.environ.get("WB_SCRIPT_PUBLIC_REVIEW_EVIDENCE", str(Path(__file__).resolve().parents[1] / "local/v1811-script-public-integrity" / __import__("uuid").uuid4().hex)))
-EVIDENCE.mkdir(parents=True, exist_ok=True)
+def evidence():
+    """Created on first record, never at import; bounded by tests/evidence_retention.py."""
+    override = os.environ.get("WB_SCRIPT_PUBLIC_REVIEW_EVIDENCE")
+    if override:
+        path = Path(override)
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+    return run_dir("script-public-integrity")
 
 
 def record(name, payload):
-    path = EVIDENCE / (name+".json")
+    path = evidence() / (name+".json")
     assert not path.exists()
     path.write_text(json.dumps(payload, indent=2, default=str)+"\n")
 

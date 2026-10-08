@@ -403,6 +403,16 @@ def test_the_policy_api_edits_column_levels_and_shows_the_audit(project_run, mon
     assert refused.status_code == 422
     assert "everything" in refused.json()["error"]["message"]
 
+    replaced = client.put(
+        "/projects/egress/policy", params=params,
+        json={"providers": {"deepseek": {"allow": ["workbench_state", "schema"]}}, "columns": {"educ": "sensitive"}},
+    )
+    assert replaced.status_code == 200, replaced.text
+    assert replaced.json()["policy"]["providers"] == {"deepseek": {"allow": ["schema", "workbench_state"]}}
+    assert replaced.json()["policy"]["columns"] == {"educ": "sensitive"}
+    assert replaced.json()["policy_source"].endswith("workbench/egress/policy.json")
+    client.put("/projects/egress/policy", params=params, json={})
+
     with egress_project(root):
         _send(monkeypatch, _conversation("show_dataset_rows", ROWS_RESULT), REMOTE)
     records = client.get("/projects/egress/audit", params=params).json()["records"]

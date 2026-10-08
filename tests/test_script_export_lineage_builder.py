@@ -82,7 +82,7 @@ def test_current_model_bridge_preserves_explicit_cluster_column(model_path):
     assert kernel["df_resid"] == 39
     inputs = read_json(project / "runs" / model_run / "run_inputs.json")
     assert inputs["executed_payload"]["entity_col"] == "g"
-    assert inputs["rerun_from"]["source_artifact_id"] == derived.artifact_id
+    assert inputs["dataset_source"]["source_artifact_id"] == derived.artifact_id
 
 
 def test_lineage_builder_is_available_for_server_owned_completed_paths():

@@ -177,7 +177,7 @@ def _family_takes_covariance(model_type: str) -> bool:
     Unknown here (auto routing picks the family later) counts as applying, so
     the request is recorded; the executed estimator is in the kernel.
     """
-    from ..agent.workflow_contracts import MODEL_FAMILY_CONTRACTS
+    from ..contracts.model.family import MODEL_FAMILY_CONTRACTS
 
     contract = MODEL_FAMILY_CONTRACTS.get(model_type)
     return True if contract is None else bool(contract.allows_covariance)

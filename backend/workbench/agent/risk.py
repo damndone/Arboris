@@ -15,7 +15,7 @@ from threading import RLock
 from typing import Any
 from uuid import uuid4
 
-from .storage import append_jsonl_atomic, read_jsonl
+from ..jsonl_store import append_jsonl_atomic, read_jsonl
 
 
 def _now() -> datetime:

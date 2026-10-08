@@ -16,7 +16,7 @@ function providerPath(providerId: string, suffix = ""): string {
 
 function sanitizedUpsertInput(input: ProviderUpsertInput): ProviderUpsertInput {
   const body = { ...input };
-  if (body.api_key !== undefined && body.api_key.trim() === "") {
+  if (body.api_key != null && body.api_key.trim() === "") {
     delete body.api_key;
   }
   if (body.clear_api_key !== true) {

@@ -6,6 +6,7 @@ import {
   AgentSurfaceContext,
   type AgentSurfaceContextValue,
 } from "./AgentSurfaceContext";
+import { agentCapabilitiesFixture, llmModelFixture, operationCapabilityFixture } from "../../apiFixtures";
 
 function value(overrides: Partial<AgentSurfaceContextValue> = {}): AgentSurfaceContextValue {
   return {
@@ -22,8 +23,8 @@ function value(overrides: Partial<AgentSurfaceContextValue> = {}): AgentSurfaceC
     contextPercent: 6.4,
     model: "deepseek-v4-flash",
     modelOptions: [
-      { display_name: "DeepSeek V4 Flash", request_model: "deepseek-v4-flash", context_window_tokens: 32_000, supports_1m: false },
-      { display_name: "DeepSeek Chat", request_model: "deepseek-chat", context_window_tokens: 64_000, supports_1m: false },
+      llmModelFixture({ display_name: "DeepSeek V4 Flash", request_model: "deepseek-v4-flash", context_window_tokens: 32_000, supports_1m: false }),
+      llmModelFixture({ display_name: "DeepSeek Chat", request_model: "deepseek-chat", context_window_tokens: 64_000, supports_1m: false }),
     ],
     setModel: vi.fn(),
     sessionStatus: "idle",
@@ -172,13 +173,12 @@ describe("AgentComposer", () => {
 
   it("opens the registry-backed capability boundary", () => {
     mount(value({
-      capabilityCatalog: {
-        capabilities: [],
+      capabilityCatalog: agentCapabilitiesFixture({
         boundary: {
           advisory: [{ id: "a", label: "Compare results", description: "Read-only explanation" }],
           unsupported: [{ id: "u", label: "Arbitrary file operations", description: "Not supported" }],
         },
-      },
+      }),
     }));
     fireEvent.click(screen.getByTestId("agent-capability-trigger"));
     expect(screen.getByTestId("agent-capability-advisory")).toHaveTextContent("Compare results");
@@ -187,8 +187,8 @@ describe("AgentComposer", () => {
 
   it("turns an executable capability example into an editable prompt", () => {
     const context = value({
-      capabilityCatalog: {
-        capabilities: [{
+      capabilityCatalog: agentCapabilitiesFixture({
+        capabilities: [operationCapabilityFixture({
           operation_id: "graph.fork",
           operation_version: "v1",
           effect_level: "mutation",
@@ -199,9 +199,8 @@ describe("AgentComposer", () => {
           ui_description: "Create a new Chain branch from the current verified node.",
           example_prompts: ["Create a new branch from the current node."],
           natural_language_enabled: true,
-        }],
-        boundary: { advisory: [], unsupported: [] },
-      },
+        })],
+      }),
     });
     mount(context);
 

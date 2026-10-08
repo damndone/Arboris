@@ -5,12 +5,19 @@ import math
 from workbench.contracts.common.envelope import thaw_json
 from ..syntax import identifier,literal,refuse
 
-PY_MODEL_HELPER = '''import statsmodels.formula.api as smf
+PY_MODEL_HELPER = '''import ast
+import statsmodels.formula.api as smf
 from scipy import stats
 
 def wb_public(name):
-    if name.startswith("Q('") and name.endswith("')"):
-        return name[3:-2]
+    # Q(<string literal>) names a column; the literal may use either quote and escapes.
+    if name.startswith("Q(") and name.endswith(")"):
+        try:
+            column = ast.literal_eval(name[2:-1])
+        except (ValueError, SyntaxError):
+            return name
+        if isinstance(column, str):
+            return column
     return name
 
 def wb_model(fit, names=None, df=None, distribution=None, link="identity"):
@@ -189,7 +196,7 @@ def ols(step,ctx):
     return lines+model_checks(step,ctx,p,result)
 
 
-def generalized(step,ctx,*,python_call,r_family,stata_command,glm=False,inverse_link="log"):
+def generalized(step,ctx,*,python_call,r_family,stata_command,glm=False,inverse_link="log",nb1=False):
     ctx.distributions[step.step_id]='z'
     p,d,result,lines=prepare(step,ctx);l=ctx.language
     if p.get('weights'):refuse('Weighted generalized model export requires survey design', 'SURVEY_DESIGN_REQUIRED')
@@ -199,7 +206,8 @@ def generalized(step,ctx,*,python_call,r_family,stata_command,glm=False,inverse_
         if glm:lines += ['from statsmodels.genmod import families',f'wb_fit = smf.glm({formula(p,l)!r}, data={d}, family=families.{python_call}()).fit(maxiter=100, tol=1e-12)']
         else:
             fit_options=', method="newton", tol=1e-12, maxiter=500' if python_call=='negativebinomial' else ', maxiter=100'
-            lines.append(f'wb_fit = smf.{python_call}({formula(p,l)!r}, data={d}).fit(disp=False{fit_options})')
+            model_options=', loglike_method="nb1"' if nb1 else ''
+            lines.append(f'wb_fit = smf.{python_call}({formula(p,l)!r}, data={d}{model_options}).fit(disp=False{fit_options})')
         lines.append(f'{result} = wb_model(wb_fit, distribution="z", link={inverse_link!r})')
     elif l=='r':
         if r_family=='negative_binomial':
@@ -224,7 +232,7 @@ def generalized(step,ctx,*,python_call,r_family,stata_command,glm=False,inverse_
         else:
             lines.append(f'{result} <- wb_model(wb_fit, aliases=wb_aliases)')
     else:
-        lines.append(f'{stata_command} {formula(p,l)}'+(', iterate(100) tolerance(1e-12)' if stata_command in {'logit','probit','poisson','nbreg'} else ''))
+        lines.append(f'{stata_command} {formula(p,l)}'+(', dispersion(constant)' if nb1 else '')+(' iterate(100) tolerance(1e-12)' if nb1 else ', iterate(100) tolerance(1e-12)' if stata_command in {'logit','probit','poisson','nbreg'} else ''))
     return lines+model_checks(step,ctx,p,result)
 
 
@@ -232,10 +240,14 @@ def logit(step,ctx):return generalized(step,ctx,python_call='logit',r_family='bi
 def probit(step,ctx):return generalized(step,ctx,python_call='probit',r_family='binomial(link="probit")',stata_command='probit',inverse_link='probit')
 def poisson(step,ctx):return generalized(step,ctx,python_call='poisson',r_family='poisson(link="log")',stata_command='poisson')
 def negative_binomial(step,ctx):
+    """Estimated-dispersion NB2 (dispersion mean) or NB1 (dispersion constant), observed information."""
     options=step.parameters.get('model_options',{})
-    if options.get('dispersion','mean')!='mean' or options.get('alpha') is not None:
-        refuse('Native NB export is limited to estimated-dispersion NB2', 'UNSUPPORTED_EXPORT_COMBINATION')
-    return generalized(step,ctx,python_call='negativebinomial',r_family='negative_binomial',stata_command='nbreg')
+    dispersion=options.get('dispersion','mean')
+    if dispersion not in {'mean','constant'} or options.get('alpha') is not None:
+        refuse('Native NB export is limited to estimated-dispersion NB2 and NB1', 'UNSUPPORTED_EXPORT_COMBINATION')
+    if dispersion=='constant' and ctx.language=='r':
+        refuse('R has no reference NB1 (constant-dispersion) estimator', 'UNSUPPORTED_EXPORT_COMBINATION')
+    return generalized(step,ctx,python_call='negativebinomial',r_family='negative_binomial',stata_command='nbreg',nb1=dispersion=='constant')
 
 
 def glm_binomial(step,ctx):

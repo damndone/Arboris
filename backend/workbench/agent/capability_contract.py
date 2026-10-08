@@ -314,7 +314,7 @@ def _model_capabilities() -> list[CapabilityContract]:
     from workbench.engine.capabilities import build_capabilities
 
     live_operations = _live_natural_language_operation_ids()
-    from .workflow_contracts import MODEL_FAMILY_CONTRACTS
+    from ..contracts.model.family import MODEL_FAMILY_CONTRACTS
 
     selectable = {
         str(entry["key"]): entry for entry in build_capabilities()["model_types"]

@@ -91,7 +91,7 @@ def _validate_model_family_weights(
     future family fail closed unless it explicitly declares the weight kind.
     """
 
-    from ...agent.workflow_contracts import MODEL_FAMILY_CONTRACTS
+    from ...contracts.model.family import MODEL_FAMILY_CONTRACTS
 
     contract = MODEL_FAMILY_CONTRACTS.get(model_type)
     allowed = frozenset(contract.allows_weights) if contract is not None else frozenset()
@@ -548,7 +548,7 @@ def _survey_estimator_for(model_type: str, y: str, x: list[str]):
     a family that has not said how it fits under arbitrary weights does not get a
     design-based variance invented on its behalf.
     """
-    from ...agent.workflow_contracts import MODEL_FAMILY_CONTRACTS
+    from ...contracts.model.family import MODEL_FAMILY_CONTRACTS
     from ...survey.adapters import glm_estimator_spec
 
     contract = MODEL_FAMILY_CONTRACTS.get(model_type)

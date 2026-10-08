@@ -196,8 +196,8 @@ def test_a_synthetic_family_is_projected_without_touching_consumers():
     Same shape of proof as the engine's orthogonality test: register a family
     that exists only inside this test and check its evidence still travels.
     """
-    from workbench.agent.result_shapes import register_result_shape
-    from workbench.agent.workflow_contracts import ModelFamilyContract
+    from workbench.contracts.model.result_shapes import register_result_shape
+    from workbench.contracts.model.family import ModelFamilyContract
     from workbench.contracts.model.result_envelope import project_result_evidence
 
     register_result_shape(

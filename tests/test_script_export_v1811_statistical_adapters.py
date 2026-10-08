@@ -16,6 +16,7 @@ from scipy import stats
 from workbench.script_export.plan import LANGUAGES, ScriptPlan, ScriptStep, ScriptSource, ScriptExportRefusal
 from workbench.script_export.render import export_script
 from workbench.postestimation.registry import VALIDATED
+from evidence_retention import run_dir
 from test_script_export_data_oracles import execute
 
 REPO = Path(__file__).resolve().parents[1]
@@ -27,8 +28,8 @@ TOL = {"coefficients": {"abs": 1e-8, "rel": 0}, "std_errors": {"abs": 1e-6, "rel
 
 
 def directory(label):
-    path = REPO / "local/v1811-script-adapter-runs" / f"{label}_{uuid4().hex[:10]}"
-    path.mkdir(parents=True)
+    path = run_dir("script-adapter-runs") / f"{label}_{uuid4().hex[:10]}"
+    path.mkdir()
     return path
 
 
@@ -55,7 +56,7 @@ def run_exported(exported, plan, path, monkeypatch, *, expect_failure=False):
         log = path / "analysis.log"
         if log.exists():
             raw = log.read_bytes()
-            local = REPO / "local/v1811-script-statistical-adapters" / path.name / log.name
+            local = run_dir("script-adapter-raw-logs") / path.name / log.name
             local.parent.mkdir(parents=True, exist_ok=True)
             assert not local.exists()
             local.write_bytes(raw); local.chmod(0o600)

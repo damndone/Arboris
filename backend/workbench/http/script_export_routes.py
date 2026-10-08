@@ -10,8 +10,10 @@ from ..api_errors import WorkbenchAPIError
 from ..egress import EgressPolicyError
 from ..script_export.plan import ScriptExportRefusal
 from ..services.script_export import export_analysis_script, list_script_export_targets
+from .responses.script_export import ScriptExportResult, ScriptExportTargets
+from .typed_routes import TypedAPIRoute
 
-router = APIRouter()
+router = APIRouter(route_class=TypedAPIRoute)
 
 
 class ScriptExportRequest(BaseModel):
@@ -22,7 +24,7 @@ class ScriptExportRequest(BaseModel):
 
 
 @router.get('/runs/{run_id}/script-export/targets')
-def script_export_targets_endpoint(run_id: str, project_root: str, model_target: str):
+def script_export_targets_endpoint(run_id: str, project_root: str, model_target: str) -> ScriptExportTargets:
     try:
         return list_script_export_targets(Path(project_root), run_id, model_target)
     except ScriptExportRefusal as exc:
@@ -30,7 +32,7 @@ def script_export_targets_endpoint(run_id: str, project_root: str, model_target:
 
 
 @router.post('/runs/{run_id}/script-export')
-def script_export_endpoint(run_id: str, project_root: str, request: ScriptExportRequest):
+def script_export_endpoint(run_id: str, project_root: str, request: ScriptExportRequest) -> ScriptExportResult:
     try:
         result = export_analysis_script(Path(project_root), run_id, request.target, request.language, require_native=request.require_native)
     except EgressPolicyError as exc:

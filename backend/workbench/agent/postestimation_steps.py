@@ -26,6 +26,7 @@ from ..contracts.model.inference_kernel import (
 from ..contracts.model.result_envelope_registry import declaration_for
 from ..postestimation import PostestimationRefusal
 from ..postestimation.estimation_data import estimation_design
+from ..contracts.model.postestimation_steps import STEP_SHAPES as _STEP_SHAPES
 from ..postestimation.registry import OPERATIONS, VALIDATED, run_operation
 
 OPERATION_PREFIX = "postestimation."
@@ -33,98 +34,9 @@ DISPATCHER_KEY = "workbench.agent.workflow_runtime.postestimation"
 VALIDATOR_KEY = "postestimation"
 RESULT_SCHEMA = "workbench.postestimation.result/v1"
 
-_MODEL_REF = (
-    "Model node to read, as shown in the graph (`model:logit_1`, or its forest key); "
-    "the model must belong to `model_run_id`, or to the workflow's target run when that is omitted. "
-    "For a model fitted earlier in this same plan, use `step:<step_id>:<branch_id>`; "
-    "the named producer declares that branch, and its dependency is added automatically. "
-    "Do not guess a future run id or model node id."
-)
-_MODEL_RUN = "Run that owns `model_ref`; omit it for the workflow's target run."
-_LEVEL = "Confidence level, default 0.95."
 _LR_PROPOSAL_NOTES = {
     "zh": "LR 比较同一样本上嵌套模型的似然，因此要求模型方差；稳健、聚类或抽样设计方差不适用于这个 LR。你也可以选择在原模型上做 Wald 检验，保留原来的标准误口径。",
     "en": "LR compares the likelihoods of nested models on the same sample and requires model-based variance. Robust, clustered or design-based variance is unsuitable for this LR. You can instead choose a Wald test on the original model, retaining its original covariance.",
-}
-
-# operation -> (summary, fields, required, field types)
-_STEP_SHAPES: Mapping[str, tuple[str, Mapping[str, str], tuple[str, ...], Mapping[str, str]]] = {
-    "wald": (
-        "Jointly test linear restrictions on a completed model's coefficients (Wald). "
-        "Reads the model's stored covariance; F or chi-square follows the model's own inference.",
-        {
-            "model_ref": _MODEL_REF,
-            "model_run_id": _MODEL_RUN,
-            "constraints": (
-                "Non-empty list of {terms, value}: `terms` maps coefficient names to weights and "
-                "the restriction is sum(weight * coefficient) = value. Joint significance of x1 "
-                "and x2 is [{terms: {x1: 1}, value: 0}, {terms: {x2: 1}, value: 0}]."
-            ),
-        },
-        ("model_ref", "constraints"),
-        {"model_ref": "string", "model_run_id": "string", "constraints": "list"},
-    ),
-    "lincom": (
-        "Estimate a linear combination of a completed model's coefficients, with its standard "
-        "error, test and confidence interval.",
-        {
-            "model_ref": _MODEL_REF,
-            "model_run_id": _MODEL_RUN,
-            "terms": "Object mapping coefficient names to weights.",
-            "constant": "Number added to the combination, default 0.",
-            "level": _LEVEL,
-        },
-        ("model_ref", "terms"),
-        {"model_ref": "string", "model_run_id": "string", "terms": "object", "constant": "number", "level": "number"},
-    ),
-    "nlcom": (
-        "Estimate a smooth function of a completed model's coefficients by the delta method.",
-        {
-            "model_ref": _MODEL_REF,
-            "model_run_id": _MODEL_RUN,
-            "expression": (
-                "Arithmetic over coefficient names: + - * / **, exp, log, sqrt; write a name that is "
-                "not an identifier as b[\"name\"]. Example: x1 / x2."
-            ),
-            "level": _LEVEL,
-        },
-        ("model_ref", "expression"),
-        {"model_ref": "string", "model_run_id": "string", "expression": "string", "level": "number"},
-    ),
-    "lr": (
-        "Likelihood-ratio test of a restricted model nested in a fuller one. Both must be "
-        "estimated on the same rows with model-based (not robust or clustered) variance. "
-        "If the user's original model has robust, clustered or design-based variance, explain "
-        "that LR uses the model likelihood and requires two new fits with model-based variance; "
-        "keep the original model and actively offer a Wald test using its original covariance "
-        "as an alternative. Do not automatically add a Wald step merely because the user asks "
-        "you to offer that option; include it only when execution of Wald is requested. "
-        "Fit both branches and then reference them in one plan with one confirmation.",
-        {
-            "model_ref": "The fuller model. " + _MODEL_REF,
-            "model_run_id": _MODEL_RUN,
-            "restricted_model_ref": "The restricted model nested in it. " + _MODEL_REF,
-            "restricted_model_run_id": "Run that owns the restricted model; omit for the target run.",
-        },
-        ("model_ref", "restricted_model_ref"),
-        {
-            "model_ref": "string", "model_run_id": "string",
-            "restricted_model_ref": "string", "restricted_model_run_id": "string",
-        },
-    ),
-    "margins": (
-        "Marginal effects of regressors on the predicted outcome: averaged over the estimation "
-        "sample (`at: average`) or at the regressors' means (`at: means`).",
-        {
-            "model_ref": _MODEL_REF,
-            "model_run_id": _MODEL_RUN,
-            "variables": "Non-empty list of regressor names.",
-            "at": "`average` (default) or `means`.",
-            "level": _LEVEL,
-        },
-        ("model_ref", "variables"),
-        {"model_ref": "string", "model_run_id": "string", "variables": "list", "at": "string", "level": "number"},
-    ),
 }
 
 def _execution_error(message: str) -> Exception:
@@ -153,7 +65,7 @@ def model_step_reference(ref: Any) -> tuple[str, str] | None:
 
 def bind_model_step_dependencies(step: dict, by_id: Mapping, contracts: Mapping) -> None:
     """Declare producer edges before the workflow's cycle/order validation."""
-    from .operations import OperationValidationError
+    from ..contracts.common.errors import OperationValidationError
 
     for field in contracts[step["operation_id"]].model_reference_fields:
         binding = model_step_reference(step["spec"].get(field))
@@ -231,7 +143,7 @@ def model_id_from_ref(ref: Any) -> str:
 
 def validate_postestimation_spec(operation_id: str, spec: Mapping[str, Any]) -> None:
     """Shape checks at plan time; the statistics are checked when the step runs."""
-    from .operations import OperationValidationError
+    from ..contracts.common.errors import OperationValidationError
 
     operation = operation_id.removeprefix(OPERATION_PREFIX)
     try:

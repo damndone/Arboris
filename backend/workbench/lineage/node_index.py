@@ -14,16 +14,26 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ..artifacts import write_json
+from typing_extensions import TypedDict
+
+from ..artifacts import read_json, write_json
+from .rerun_provenance import node_level_rerun_from
 
 NODE_INDEX_FILENAME = "node_index.json"
+
+
+class CasRef(TypedDict):
+    """Where a node's content lives: its hash and the run-relative artifact."""
+
+    node_hash: str
+    artifact: str
 
 
 def _entry(node_hash: str, producing_stage: str, payload: str) -> dict:
     return {
         "node_hash": node_hash,
         "producing_stage": producing_stage,
-        "cas_ref": {"node_hash": node_hash, "artifact": payload},
+        "cas_ref": CasRef(node_hash=node_hash, artifact=payload),
     }
 
 
@@ -77,7 +87,20 @@ def write_node_index(
         upload_hash=upload_hash, raw_payload=_raw_payload(run_root),
         extra_entries=extra_entries,
     )
+    _attach_node_level_rerun_from(run_root, idx)
     write_json(run_root / NODE_INDEX_FILENAME, idx)
+
+
+def _attach_node_level_rerun_from(run_root: Path, idx: dict) -> None:
+    """A context-driven rerun's produced node records where it came from."""
+
+    try:
+        run_inputs = read_json(run_root / "run_inputs.json")
+    except (FileNotFoundError, OSError, ValueError):
+        return
+    produced = node_level_rerun_from(run_inputs) if isinstance(run_inputs, dict) else None
+    if produced is not None and produced[0] in idx:
+        idx[produced[0]]["rerun_from"] = produced[1]
 
 
 def _raw_payload(run_root: Path) -> str:

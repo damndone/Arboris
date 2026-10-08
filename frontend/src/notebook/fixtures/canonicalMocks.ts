@@ -13,6 +13,7 @@
  */
 
 import { readFileSync } from "node:fs";
+import type { Schema } from "../../apiTypes";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -36,11 +37,18 @@ export type CanonicalFixtureName =
   | "option_execution"
   | "ets_result";
 
-export function readCanonicalFixture(
-  name: CanonicalFixtureName,
-): Record<string, unknown> {
+/** Each fixture's wire shape (tests/test_canonical_wire_fixtures.py checks
+ * the files against these declared responses). */
+type CanonicalWire = {
+  notebook_option_revision: Schema<"OptionRevisionV10">;
+  notebook_option_revision_v11: Schema<"OptionRevisionV11">;
+  option_execution: Schema<"ExecutionView">;
+  ets_result: Record<string, unknown>;
+};
+
+export function readCanonicalFixture<N extends CanonicalFixtureName>(name: N): CanonicalWire[N] {
   const text = readFileSync(resolve(FIXTURE_DIR, `${name}.json`), "utf8");
-  return JSON.parse(text) as Record<string, unknown>;
+  return JSON.parse(text) as CanonicalWire[N];
 }
 
 export function canonicalOptionRevision(): NotebookOptionRevision {

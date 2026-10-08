@@ -1,13 +1,10 @@
 import { apiUrl } from "../../../api";
+import type { RequestOf, ResponseOf } from "../../../apiTypes";
 import type { AskAIContextPacket } from "./askAiContextPacket";
 export { fetchLlmConfig } from "../../../llm/llmApi";
 export type { LlmConfigInfo } from "../../../llm/llmTypes";
 
-export interface AskAIResponse {
-  text: string;
-  model?: string;
-  context_fingerprint?: string | null;
-}
+export type AskAIResponse = ResponseOf<"/llm/chat", "post">;
 
 export async function askAiForNode(
   packet: AskAIContextPacket,
@@ -21,7 +18,7 @@ export async function askAiForNode(
       question,
       packet,
       response_guardrails: packet.response_guardrails,
-    }),
+    } satisfies RequestOf<"/llm/chat", "post">),
   });
   if (!response.ok) {
     throw new Error(await extractErrorMessage(response));

@@ -652,6 +652,7 @@ def _submit_run(
     rerun_reason: str = "initial",
     op_overrides: dict | None = None,
     rerun_from: dict[str, Any] | None = None,
+    dataset_source: dict[str, Any] | None = None,
     workbench_context: dict[str, Any] | None = None,
     run_family_id: str | None = None,
     before_dispatch: Callable[[str], None] | None = None,
@@ -796,6 +797,8 @@ def _submit_run(
         "from_node": from_node,
         "rerun_from": rerun_from,
     }
+    if dataset_source is not None:
+        source_lineage["dataset_source"] = dataset_source
 
     write_run_inputs(
         run.root,
@@ -805,6 +808,7 @@ def _submit_run(
         override_hash=override_hash(op_overrides) if op_overrides else None,
         dag_hash=dag_hash(sha, form_for_persist),
         rerun_from=rerun_from,
+        dataset_source=dataset_source,
         source_lineage=source_lineage,
         workbench_context=workbench_context,
         contract_summary=contract_summary,
@@ -833,6 +837,7 @@ def _submit_run(
         rerun_reason=rerun_reason if rerun_of is not None else None,
         source_lineage=source_lineage if rerun_of is not None else None,
         rerun_from=rerun_from,
+        dataset_source=dataset_source,
         source_run_id=rerun_of,
         execution_profile=execution_profile,
     )

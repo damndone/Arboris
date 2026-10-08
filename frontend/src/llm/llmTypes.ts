@@ -1,69 +1,16 @@
-export interface LlmModel {
-  display_name: string;
-  request_model: string;
-  context_window_tokens: number | null;
-  supports_1m: boolean;
-  /** v1.7 G2: model accepts image content — gates the send-the-chart opt-in. */
-  supports_vision?: boolean;
-}
+/**
+ * LLM provider API shapes, as the backend declares them (see apiTypes.ts).
+ * Only the client-side preset list is defined here.
+ */
+import type { Schema } from "../apiTypes";
 
-export interface LlmProvider {
-  id: string;
-  name: string;
-  icon: string;
-  notes: string;
-  website_url: string | null;
-  base_url: string | null;
-  model: string;
-  timeout_s: number;
-  models: LlmModel[];
-  key_present: boolean;
-}
-
-export interface LlmProvidersResponse {
-  active_provider_id: string | null;
-  providers: LlmProvider[];
-}
-
-export interface LlmConfigInfo {
-  configured: boolean;
-  base_url: string | null;
-  model: string | null;
-  key_present: boolean;
-  timeout_s: number;
-  provider_id: string | null;
-  provider_name: string | null;
-  source: "local" | "environment" | "none";
-  context_window_tokens: number | null;
-  supports_1m: boolean;
-  /** v1.7 G2: whether the active model can accept the rendered chart image. */
-  supports_vision?: boolean;
-}
-
-export interface ProviderUpsertInput {
-  id?: string;
-  name?: string;
-  icon?: string;
-  notes?: string;
-  website_url?: string | null;
-  base_url?: string;
-  model?: string;
-  api_key?: string;
-  timeout_s?: number;
-  models?: LlmModel[];
-  clear_api_key?: boolean;
-}
-
-export interface ModelsDiscoveryInput {
-  base_url: string;
-  api_key: string;
-  timeout_s?: number;
-}
-
-export interface ModelsDiscoveryResult {
-  models: LlmModel[];
-  message: string;
-}
+export type LlmModel = Schema<"ProviderModel">;
+export type LlmProvider = Schema<"PublicProvider">;
+export type LlmProvidersResponse = Schema<"ProviderList">;
+export type LlmConfigInfo = Schema<"LlmConfig">;
+export type ProviderUpsertInput = Schema<"ProviderUpsertRequest">;
+export type ModelsDiscoveryInput = Schema<"ModelsDiscoveryRequest">;
+export type ModelsDiscoveryResult = Schema<"DiscoveredModels">;
 
 export interface LlmProviderPreset {
   name: string;

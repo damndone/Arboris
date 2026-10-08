@@ -184,7 +184,7 @@ describe("contracts — the canonical v1.8.1 mocks parse into the locked shape",
   });
 
   it("defaults unversioned v1.0 optional option fields", () => {
-    const raw = { ...readCanonicalFixture("notebook_option_revision") };
+    const raw: Record<string, unknown> = { ...readCanonicalFixture("notebook_option_revision") };
     delete raw.contract_version;
     delete raw.rationale;
     delete raw.assumptions;
@@ -239,7 +239,7 @@ describe("contracts — a packet that does not match the lock is rejected, not c
   });
 
   it("rejects an execution packet missing a freshness fingerprint", () => {
-    const raw = { ...readCanonicalFixture("option_execution") };
+    const raw: Record<string, unknown> = { ...readCanonicalFixture("option_execution") };
     delete raw.freshness_dependency_fingerprint;
     expect(() => parseOptionExecution(raw)).toThrow("freshness_dependency_fingerprint");
   });

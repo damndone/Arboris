@@ -261,7 +261,7 @@ describe("graphAdapter", () => {
       ...makeNode("n1", { stage: "model", trust: "warning", decision_points: [dp] }),
       // Fabricated future-version field on the node payload:
       editable_schema: [{ key: "alpha", type: "number" }],
-    } as LineageNode & { stage?: string | null };
+    } as unknown as LineageNode;
     const graph = {
       ...makeV3Graph([node]),
       // Fabricated future-version field at the top level:

@@ -50,7 +50,7 @@ def test_ols_cluster_variable_is_a_scalar_text_wire_field():
 
 
 def test_covariance_editors_follow_family_contracts():
-    from workbench.agent.workflow_contracts import MODEL_FAMILY_CONTRACTS
+    from workbench.contracts.model.family import MODEL_FAMILY_CONTRACTS
 
     entries = {entry["key"]: entry for entry in build_capabilities()["model_types"]}
     for family, contract in MODEL_FAMILY_CONTRACTS.items():

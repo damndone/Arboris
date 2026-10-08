@@ -4,11 +4,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from workbench.agent.workflow_contracts import (
-    MODEL_FAMILY_CONTRACTS,
-    OperationValidationError,
-    validate_model_genesis_spec,
-)
+from workbench.agent.workflow_contracts import validate_model_genesis_spec
+from workbench.contracts.model.family import MODEL_FAMILY_CONTRACTS
+from workbench.contracts.common.errors import OperationValidationError
 from workbench.engine.capabilities import V186_MODEL_CAPABILITY_METADATA, build_capabilities
 from workbench.engine.packs.loader import bootstrap_builtin_packs
 from workbench.engine.registry import DEFAULT_BY_Y_TYPE, resolve

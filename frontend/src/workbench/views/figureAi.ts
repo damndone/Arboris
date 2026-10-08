@@ -1,29 +1,17 @@
 import { apiUrl } from "../../api";
+import type { RequestOf, ResponseOf, Schema } from "../../apiTypes";
 
 /** Serve-time context that lets the AI interpret a chart from its numbers. */
-export interface FigureAiContext {
-  figure_context_version: string;
-  run_id: string;
-  figure: { artifact_id: string; path: string; chart_type: string; sha256: string | null };
-  source:
-    | {
-        artifact_id: string;
-        path: string;
-        kind: string;
-        sha256: string | null;
-        preview_json: string;
-        preview_truncated: boolean;
-      }
-    | null;
-  guidance: string;
+export type FigureAiContext = Schema<"FigureAiContext">;
+
+/** What the AI is told about a figure: the server's context, or one a chart
+ * builds from its own persisted numeric artifact with its own notice and
+ * guardrails. /llm/chat takes the packet as client-declared context. */
+export type FigureAiPacket = Omit<FigureAiContext, "context_visibility_notice" | "response_guardrails"> & {
   context_visibility_notice: Record<string, unknown>;
   response_guardrails: Record<string, unknown>;
-}
-
-export interface FigureAiAnswer {
-  text: string;
-  model?: string;
-}
+};
+export type FigureAiAnswer = ResponseOf<"/llm/chat", "post">;
 
 export async function fetchFigureAiContext(
   projectRoot: string,
@@ -43,7 +31,7 @@ export async function fetchFigureAiContext(
 }
 
 export async function askAiAboutFigure(
-  context: FigureAiContext,
+  context: FigureAiPacket,
   question: string,
   /** G2 step 2: only set after the user explicitly opted into sending the PNG. */
   imageDataUrl?: string,
@@ -57,7 +45,7 @@ export async function askAiAboutFigure(
       packet: context,
       response_guardrails: context.response_guardrails,
       ...(imageDataUrl ? { image_data_url: imageDataUrl } : {}),
-    }),
+    } satisfies RequestOf<"/llm/chat", "post">),
   });
   if (!response.ok) {
     throw new Error(await extractError(response));

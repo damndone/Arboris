@@ -34,6 +34,7 @@ from typing import Any, Callable, Optional
 from .compare_nodes import CompareNodeStore, compare_forest_projection
 from .family import scan_family
 from .headset import HEADSET_SCHEMA_VERSION, build_headset
+from .rerun_provenance import node_rerun_from_candidates, settle_node_rerun_from
 
 RUN_MANIFEST_FILENAME = "run_manifest.json"
 
@@ -92,6 +93,15 @@ def build_project_forest(
                 for rid in node.get("runs", []):
                     if rid not in existing.get("runs", []):
                         existing.setdefault("runs", []).append(rid)
+                settle_node_rerun_from(
+                    existing,
+                    node_rerun_from_candidates(existing) + node_rerun_from_candidates(node),
+                )
+                # The run-level fallback marker attributes a node to the one
+                # run that produced it; a node now shared by several runs no
+                # longer qualifies (the head-set applies the same rule).
+                if len(existing.get("runs", [])) != 1:
+                    existing.pop("produced_by_rerun_request_id", None)
                 incoming_created_at = str(node.get("presentation_created_at") or node.get("created_at") or "")
                 if incoming_created_at > presentation_created_at.get(key, ""):
                     for field in ("display_label", "summary", "decision_points"):

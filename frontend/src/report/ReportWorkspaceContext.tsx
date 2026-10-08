@@ -469,7 +469,7 @@ export function ReportWorkspaceProvider({
               return {
                 artifact_id: item.artifact_id,
                 chart_type: context.figure.chart_type,
-                path: context.figure.path,
+                path: context.figure.path ?? undefined,
                 source: context.source,
               } satisfies ReportFigure;
             } catch {
@@ -764,8 +764,7 @@ export function ReportWorkspaceProvider({
           };
       let persistedRecord = record;
       if (projectRoot) {
-        const saved = await saveAiReport({ projectRoot, runId, record });
-        persistedRecord = { ...record, ...(saved?.record ?? {}) };
+        persistedRecord = { ...record, ...(await saveAiReport({ projectRoot, runId, record })) };
       }
       if (activeRunIdRef.current === runId) {
         setCurrent(persistedRecord);
@@ -918,8 +917,7 @@ export function ReportWorkspaceProvider({
       };
       let persistedRecord = record;
       if (projectRoot) {
-        const saved = await saveAiReport({ projectRoot, runId: record.scope.run_id, record });
-        persistedRecord = { ...record, ...(saved?.record ?? {}) };
+        persistedRecord = { ...record, ...(await saveAiReport({ projectRoot, runId: record.scope.run_id, record })) };
       }
       setCurrent(persistedRecord);
       setHistory(reportsForRun(saveReportRecord(historyRoot, persistedRecord), persistedRecord.scope.run_id));

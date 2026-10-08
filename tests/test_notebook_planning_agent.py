@@ -27,7 +27,8 @@ from workbench.agent.notebook.producer import (
     generate_option_batch,
     option_drafts_from_submissions,
 )
-from workbench.agent.operations import OperationRegistry, OperationValidationError
+from workbench.agent.operations import OperationRegistry
+from workbench.contracts.common.errors import OperationValidationError
 from workbench.agent.notebook.store import ProjectionSource, WorkflowSource
 from workbench.agent.context_compiler import (
     attach_domain_memory_projection,

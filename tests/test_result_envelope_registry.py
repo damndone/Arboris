@@ -37,7 +37,7 @@ BACKEND = Path(__file__).resolve().parent.parent / "backend" / "workbench"
 
 
 def test_every_model_family_and_every_model_handler_has_a_declaration() -> None:
-    from workbench.agent.workflow_contracts import MODEL_FAMILY_CONTRACTS
+    from workbench.contracts.model.family import MODEL_FAMILY_CONTRACTS
     from workbench.engine.packs.loader import bootstrap_builtin_packs
     from workbench.engine.registry import MODEL_REGISTRY
 
@@ -58,7 +58,7 @@ def test_every_model_family_and_every_model_handler_has_a_declaration() -> None:
 
 
 def test_declarations_agree_with_the_family_contract_result_shape() -> None:
-    from workbench.agent.workflow_contracts import MODEL_FAMILY_CONTRACTS
+    from workbench.contracts.model.family import MODEL_FAMILY_CONTRACTS
 
     for family, contract in MODEL_FAMILY_CONTRACTS.items():
         assert declaration_for(family).result_shape == contract.result_shape, family

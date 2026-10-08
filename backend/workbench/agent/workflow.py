@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from ..exploration_log import ExplorationLog
-from .operations import OperationValidationError
-from .storage import append_jsonl_atomic, read_jsonl
+from ..contracts.common.errors import OperationValidationError
+from ..jsonl_store import append_jsonl_atomic, read_jsonl
 from .workflow_contracts import WORKFLOW_TEMPLATE, validate_workflow_steps
 
 

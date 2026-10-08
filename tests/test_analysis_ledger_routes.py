@@ -55,11 +55,11 @@ EXEMPT: dict[tuple[str, str], str] = {
     ("POST", "/notebooks/projection/from-run-dataset"): NO_ANALYSIS,
     ("PUT", "/notebooks/{notebook_id}/focus"): NO_ANALYSIS,
     ("POST", "/notebooks/{notebook_id}/context/compile"): NO_ANALYSIS,
+    ("POST", "/notebooks/{notebook_id}/options"): "display projection; records the shown context trace only",
     ("DELETE", "/notebooks/{notebook_id}/planning/{attempt_id}"): NO_ANALYSIS,
     ("POST", "/notebooks/{notebook_id}/options/propose"): NO_ANALYSIS,
     ("POST", "/notebooks/{notebook_id}/options/{option_id}/revalidate"): NO_ANALYSIS,
     ("POST", "/notebooks/{notebook_id}/options/{option_id}/confirm"): "confirmation only; dispatch is recorded",
-    ("POST", "/notebooks/{notebook_id}/options/{option_id}/authorize-execution"): NO_ANALYSIS,
     ("POST", "/notebooks/{notebook_id}/options/{option_id}/decision"): NO_ANALYSIS,
     ("POST", "/notebooks/{notebook_id}/options/{option_id}/execute"): "completion bookkeeping for a dispatched run",
     # Settings, providers, memory, comparisons, reports of existing results.

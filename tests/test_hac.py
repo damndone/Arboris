@@ -175,11 +175,9 @@ def test_dates_are_ordered_as_dates_and_checked_for_an_even_frequency(tmp_path) 
 
 def test_the_agent_requests_hac_on_model_genesis_and_on_a_rerun() -> None:
     from workbench.agent.recipes.registry import build_option_vocabulary
-    from workbench.agent.workflow_contracts import (
-        MODEL_FAMILY_CONTRACTS,
-        OperationValidationError,
-        validate_model_genesis_spec,
-    )
+    from workbench.agent.workflow_contracts import validate_model_genesis_spec
+    from workbench.contracts.model.family import MODEL_FAMILY_CONTRACTS
+    from workbench.contracts.common.errors import OperationValidationError
 
     branches = [{"branch_id": "b", "outcome": "y", "predictors": ["x1"]}]
     spec = {"model_family": "ols", "branches": branches, "covariance": "hac",

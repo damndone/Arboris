@@ -73,6 +73,9 @@ class LocalMemoryPreferenceStore:
         ):
             raise LocalMemoryPreferenceError("local preference root is unavailable")
         self._lock = RLock()
+        # Create the lock file at startup so that reading settings never writes.
+        with self._locked_directory():
+            pass
 
     def global_settings(self) -> GlobalMemorySettings:
         document = self._read()

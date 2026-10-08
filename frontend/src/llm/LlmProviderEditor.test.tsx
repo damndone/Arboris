@@ -10,6 +10,7 @@ import {
 } from "./llmApi";
 import { providerPresets } from "./providerPresets";
 import type { LlmProvider } from "./llmTypes";
+import { llmModelFixture } from "../apiFixtures";
 
 vi.mock("./llmApi", () => ({
   activateLlmProvider: vi.fn(),
@@ -32,12 +33,12 @@ const provider: LlmProvider = {
   model: "gpt-4o",
   timeout_s: 60,
   models: [
-    {
+    llmModelFixture({
       display_name: "GPT-4o",
       request_model: "gpt-4o",
       context_window_tokens: 128000,
       supports_1m: false,
-    },
+    }),
   ],
   key_present: true,
 };
@@ -51,19 +52,19 @@ describe("LlmProviderEditor", () => {
     vi.mocked(updateLlmProvider).mockResolvedValue(savedProvider);
     vi.mocked(probeLlmProvider).mockResolvedValue(provider);
     vi.mocked(discoverLlmProviderModels).mockResolvedValue({
-      models: [{ display_name: "deepseek-flash", request_model: "deepseek-flash", context_window_tokens: null, supports_1m: false }],
+      models: [llmModelFixture({ display_name: "deepseek-flash", request_model: "deepseek-flash", context_window_tokens: null, supports_1m: false })],
       message: "Models discovered",
     });
     vi.mocked(refreshLlmProviderModels).mockResolvedValue({
       ...provider,
       model: "gpt-4.1",
       models: [
-        {
+        llmModelFixture({
           display_name: "GPT-4.1",
           request_model: "gpt-4.1",
           context_window_tokens: 1048576,
           supports_1m: true,
-        },
+        }),
       ],
     });
   });
@@ -165,7 +166,7 @@ describe("LlmProviderEditor", () => {
     expect(screen.queryByTestId("add-deepseek-v4-models")).not.toBeInTheDocument();
     vi.mocked(refreshLlmProviderModels).mockResolvedValueOnce({
       ...deepSeekProvider,
-      models: [{ display_name: "deepseek-flash", request_model: "deepseek-flash", context_window_tokens: null, supports_1m: false }],
+      models: [llmModelFixture({ display_name: "deepseek-flash", request_model: "deepseek-flash", context_window_tokens: null, supports_1m: false })],
     });
     fireEvent.click(screen.getByRole("button", { name: /refresh models/i }));
     expect(await screen.findByTestId("llm-provider-model-row-deepseek-flash")).toBeInTheDocument();
@@ -216,7 +217,7 @@ describe("LlmProviderEditor", () => {
     fireEvent.click(screen.getByRole("button", { name: /refresh models/i }));
     await waitFor(() => expect(discoverLlmProviderModels).toHaveBeenCalled());
     fireEvent.change(screen.getByLabelText("base url"), { target: { value: "https://new.example" } });
-    resolve({ models: [{ display_name: "old-model", request_model: "old-model", context_window_tokens: null, supports_1m: false }], message: "Models discovered" });
+    resolve({ models: [llmModelFixture({ display_name: "old-model", request_model: "old-model", context_window_tokens: null, supports_1m: false })], message: "Models discovered" });
     await waitFor(() => expect(screen.getByRole("button", { name: /refresh models/i })).not.toBeDisabled());
     expect(screen.queryByTestId("llm-provider-model-row-old-model")).not.toBeInTheDocument();
   });

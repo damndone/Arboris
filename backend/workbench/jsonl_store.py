@@ -1,4 +1,4 @@
-"""Small atomic JSONL primitives shared by agent stores."""
+"""Small atomic JSONL primitives shared by the Agent, run event and capability stores."""
 
 from __future__ import annotations
 

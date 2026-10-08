@@ -48,6 +48,23 @@ git worktree remove .worktrees/view-v1.8.8               # 用完移除
 从它新建分支：`git worktree add -b <新分支> .worktrees/<目录> v1.8.8`——v1.8.9 就是这样
 从 v1.8.8 重建的。
 
+## 移除工作目录之前
+
+所有 checkout 共用一个虚拟环境，其中 Workbench 的 editable 安装必须指向主仓库目录（主 checkout），不能指向任何 `.worktrees/*`。
+
+2026-10-07 移除 `workbench-v1.8.6` 时，安装正好指向它：
+
+- 此前，未自带 `PYTHONPATH` 的子进程测试加载的一直是 v1.8.6 的代码。
+- 此后，`workbench` 命令无法启动。
+
+v1.8.12 改正：安装指向主仓库，再加一个按所在 checkout 选择代码的守护。移除任何工作目录之前先运行：
+
+```bash
+.venv/bin/python scripts/check_dev_env.py
+```
+
+全部 `ok` 才移除。gate 每次也会运行这项检查。
+
 ## 各类存档
 
 - **发布版本**：`v*` tag，v1.4.1 起每版都有；发布说明在 `docs/releases/`。

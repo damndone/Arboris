@@ -46,6 +46,9 @@ from .http.egress_routes import router as egress_router
 from .http.script_export_routes import router as script_export_router
 from .http.graph_routes import router as graph_router
 from .http.llm_routes import router as llm_router
+from .http.local_request_guard import LocalRequestGuard
+from .http.responses.system import Health
+from .http.typed_routes import TypedAPIRoute
 from .http.memory_routes import router as memory_router
 from .http.notebook_routes import router as notebook_router
 from .http.projects_routes import router as projects_router
@@ -60,6 +63,10 @@ async def _lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="Local Econometrics Workbench", lifespan=_lifespan)
+# Routes declare their response type by return annotation (documented, unvalidated).
+app.router.route_class = TypedAPIRoute
+# Refuse foreign hosts and cross-site writes before any route runs.
+app.add_middleware(LocalRequestGuard)
 register_error_handlers(app)
 app.state.notebook_capability_bindings = None
 app.state.notebook_execution_gateway = None
@@ -313,7 +320,7 @@ def _validate_supported_deployment() -> None:
 
 
 @app.get("/health")
-def health() -> dict[str, object]:
+def health() -> Health:
     runtime = getattr(app.state, "capability_factory_runtime", None)
     return {
         "status": "ok",

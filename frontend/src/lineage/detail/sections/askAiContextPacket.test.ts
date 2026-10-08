@@ -73,13 +73,11 @@ describe("buildAskAIContextPacket", () => {
           {
             name: "model-summary.json",
             mime: "application/json",
-            sizeBytes: 128,
             ai_visibility: "metadata_only",
           },
           {
             name: "report.pdf",
             mime: "application/pdf",
-            sizeBytes: 2048,
             ai_visibility: "metadata_only",
           },
         ],
@@ -121,7 +119,6 @@ describe("buildAskAIContextPacket", () => {
       {
         name: "training-data.csv",
         mime: "text/csv",
-        sizeBytes: 4096,
         sha256: "sha256:abc123",
         ai_visibility: "metadata_only",
         summary: "Rows and columns only",

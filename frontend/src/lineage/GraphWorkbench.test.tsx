@@ -23,6 +23,8 @@ function node(overrides: Partial<LineageNode>): LineageNode {
     payload_ref: null,
     decision_points: [],
     annotations: [],
+    stage: null,
+    node_hash: null,
     ...overrides,
   };
 }

@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { DraftGraphCanvas } from "./DraftGraphCanvas";
 import type { PipelineDraftV1 } from "../api";
+import { draftSourceRefFixture } from "../apiFixtures";
 
 const draft: PipelineDraftV1 = {
   draft_id: "draft_1",
@@ -8,6 +9,7 @@ const draft: PipelineDraftV1 = {
   created_at: "",
   updated_at: "",
   status: "draft",
+  created_from: null,
   graph: {
     nodes: [
       {
@@ -17,6 +19,7 @@ const draft: PipelineDraftV1 = {
         run_input_id: "run_1",
         input_fingerprint: "i",
         schema_fingerprint: "s",
+        columns_summary: [],
         status: "bound",
       },
       {
@@ -27,7 +30,7 @@ const draft: PipelineDraftV1 = {
         schema_id: "ols@v1",
         editable_schema: [],
         editable_schema_hash: "h",
-        source_ref: {},
+        source_ref: draftSourceRefFixture(),
         source_params: {},
         params: {},
       },

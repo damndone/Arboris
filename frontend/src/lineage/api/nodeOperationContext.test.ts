@@ -45,6 +45,63 @@ describe("resolveNodeOperationContext", () => {
     );
   });
 
+  it("records ambiguous node-level provenance and the Compare-with-source decision", () => {
+    const seed = makeOwnerResolutionSeedFixture();
+    const provenance = {
+      owner_run_id: "run_source",
+      op_node_id: "model:shared_ols",
+      node_hash: "hash_source_model",
+      context_fingerprint: "nocv1:source",
+      rerun_request_id: "req_a",
+    };
+    const conflicts = [provenance, { ...provenance, rerun_request_id: "req_b" }];
+    const result = resolveNodeOperationContext({
+      forest: {
+        ...seed.forest,
+        nodes: seed.forest.nodes.map((node) =>
+          node.nodeKey === seed.sharedNodeKey ? { ...node, rerunFromConflicts: conflicts } : node,
+        ),
+      },
+      selected_forest_node_key: seed.sharedNodeKey,
+      active_head_run_id: seed.activeHeadRunId,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.reason);
+    expect(result.context.rerun_from).toBeUndefined();
+    expect(result.context.rerun_from_conflicts).toEqual(conflicts);
+    expect(result.context.resolver_trace).toEqual(
+      expect.arrayContaining(["compare_with_source: blocked (provenance_ambiguous)"]),
+    );
+  });
+
+  it("records which provenance Compare with source uses", () => {
+    const seed = makeOwnerResolutionSeedFixture();
+    const provenance = {
+      owner_run_id: "run_source",
+      op_node_id: "model:shared_ols",
+      node_hash: "hash_source_model",
+      context_fingerprint: "nocv1:source",
+      rerun_request_id: "req_a",
+    };
+    const result = resolveNodeOperationContext({
+      forest: {
+        ...seed.forest,
+        nodes: seed.forest.nodes.map((node) =>
+          node.nodeKey === seed.sharedNodeKey ? { ...node, rerunFrom: provenance } : node,
+        ),
+      },
+      selected_forest_node_key: seed.sharedNodeKey,
+      active_head_run_id: seed.activeHeadRunId,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.reason);
+    expect(result.context.resolver_trace).toEqual(
+      expect.arrayContaining(["compare_with_source: node_level_rerun_from"]),
+    );
+  });
+
   it("prefers active head when it owns the shared node and is not runs[0]", () => {
     const seed = makeOwnerResolutionSeedFixture();
     const result = resolveNodeOperationContext({

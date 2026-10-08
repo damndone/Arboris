@@ -564,7 +564,7 @@ def test_chain_execution_lease_rejects_competing_active_head_and_releases_after_
 
 
 def test_jsonl_store_ignores_only_a_partial_trailing_record(tmp_path: Path) -> None:
-    from workbench.agent.storage import read_jsonl
+    from workbench.jsonl_store import read_jsonl
 
     path = tmp_path / "records.jsonl"
     path.write_text('{"status":"submitted"}\n{"status":"incomplete"', encoding="utf-8")

@@ -17,7 +17,7 @@ import pandas as pd
 import pytest
 
 from tests.test_data_column_cast import _source_project
-from workbench.agent.operations import OperationValidationError
+from workbench.contracts.common.errors import OperationValidationError
 from workbench.agent.workflow import (
     PERSISTED_STEP_OUTPUT,
     WorkflowExecutionError,

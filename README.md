@@ -122,12 +122,30 @@ Open the address Vite prints, create a project and upload a data file. To use
 the Agent, add an LLM provider under **Settings** (any OpenAI-compatible API;
 DeepSeek is the one the live evaluations use).
 
-From the command line, without the UI:
+From the command line, without the UI. The commands are generated from the
+same declarations the API and the Agent use, and run through the same
+services, so a command-line run is recorded like any other:
 
 ```bash
 workbench create /tmp workbench-demo
+workbench models                          # the model catalog; `workbench models negative_binomial` lists its options
 workbench run /tmp/workbench-demo examples/datasets/cross_section.csv wage --x education
 ```
+
+`workbench run` prints the run id on stdout (`RUN=$(workbench run ...)`) and
+takes every field of the run form, for example
+`--model-type negative_binomial --model-options '{"dispersion": "constant"}'`
+(JSON options also accept `@file.json`). Post-estimation and script export
+work on the run:
+
+```bash
+workbench postestimation wald /tmp/workbench-demo "$RUN" --model-ref model:negative_binomial_1 \
+    --constraints '[{"terms": {"x1": 1}, "value": 0}, {"terms": {"x2": 1}, "value": 0}]'
+workbench export-targets /tmp/workbench-demo "$RUN" --model model:negative_binomial_1
+workbench export-script /tmp/workbench-demo "$RUN" --target artifact:<id> --language stata --require-native --output .
+```
+
+`workbench --help` and `workbench <command> --help` list everything.
 
 Optional extras:
 
@@ -176,6 +194,21 @@ Agent state uses a project-local JSONL and file-lock control plane, so the
 deployment contract is **single worker**: the backend rejects
 `WORKBENCH_WORKERS` or `WEB_CONCURRENCY` other than `1` at startup.
 
+The backend answers only this computer's UI. It accepts only loopback host
+names (`localhost`, `127.0.0.1`, `[::1]`), which defeats DNS rebinding, and it
+refuses any request whose `Origin` is not the UI. It also refuses cross-site
+writes, so another web page, even one on another local port, cannot drive or
+read it. Refused requests return `403` with a `LOCAL_REQUEST_*_REJECTED` code
+and are logged to `~/.workbench/egress_audit.jsonl`. The CLI and scripts send
+no `Origin` and are unaffected. The default UI origin is Vite's
+`http://localhost:5173`; listing one loopback name also covers the other two
+on the same port. Allowances are explicit only:
+
+```bash
+WORKBENCH_ALLOWED_ORIGINS=http://localhost:5190   # a Vite dev server on another port (comma-separated)
+WORKBENCH_ALLOWED_HOSTS=workbench.test            # extra host names (comma-separated)
+```
+
 ## Development
 
 ```bash
@@ -192,6 +225,29 @@ worktree? Link the shared dependencies first — never `npm install` inside one:
 bash scripts/link-shared-deps.sh <worktree-path>
 ```
 
+All checkouts share one virtualenv. Its editable install names the main
+checkout, so `workbench` and `uvicorn workbench.api:app` run the released code
+from anywhere, while a process started inside a worktree (or by one) imports
+that worktree. Reinstall from the main checkout after merging a release; the
+gate checks the install and the `workbench` command:
+
+```bash
+.venv/bin/python scripts/install_dev_env.py   # from the main checkout
+.venv/bin/python scripts/check_dev_env.py     # what the gate runs
+```
+
+Install the pre-push guard once per clone. It refuses pushes of private refs,
+license-bearing history, license header values and withheld raw-log hashes:
+
+```bash
+python3 scripts/install_git_hooks.py
+```
+
+Large raw evidence stays in the ignored `local/`; the repository keeps
+manifests and hashes, and a per-version size budget is part of the suite
+(`scripts/repo_evidence_budget.py`). New evaluation sources go under
+`evaluations/<version>/`, outside the test suite.
+
 | Path | Contents |
 |---|---|
 | `backend/workbench/` | Engine, model packs, contracts, HTTP layer, Agent |
@@ -200,7 +256,7 @@ bash scripts/link-shared-deps.sh <worktree-path>
 | `docs/manual/` | User manual and developer handbook |
 | `docs/releases/` | Release notes, one per version |
 | `docs/superpowers/` | Working documents: objectives, evaluations, roadmap, backlog |
-| `scripts/` | Gate, live Agent evaluations, shared-dependency linking, contained launcher |
+| `scripts/` | Gate, live Agent evaluations, shared-dependency linking, contained launcher, git hooks, repository size budget |
 
 Branches are deleted after they merge; every deleted branch tip is preserved
 under an `archive/branch-tip/*` tag.

@@ -23,8 +23,10 @@ from ..egress import (
     save_policy,
 )
 from ..llm.config import load_llm_config
+from .responses.egress import EgressAudit, EgressPolicyView
+from .typed_routes import TypedAPIRoute
 
-router = APIRouter()
+router = APIRouter(route_class=TypedAPIRoute)
 
 
 def _root(raw: str) -> Path:
@@ -75,13 +77,13 @@ def _view(root: Path, policy: EgressPolicy) -> dict[str, Any]:
 
 
 @router.get("/projects/egress")
-def egress_policy_endpoint(project_root: str) -> dict[str, Any]:
+def egress_policy_endpoint(project_root: str) -> EgressPolicyView:
     root = _root(project_root)
     return _view(root, _policy(root))
 
 
 @router.put("/projects/egress/policy")
-def replace_egress_policy_endpoint(project_root: str, document: dict[str, Any]) -> dict[str, Any]:
+def replace_egress_policy_endpoint(project_root: str, document: dict[str, Any]) -> EgressPolicyView:
     root = _root(project_root)
     try:
         policy = parse_policy(document)
@@ -99,7 +101,7 @@ class ColumnSensitivityPatch(BaseModel):
 
 
 @router.patch("/projects/egress/columns")
-def patch_column_sensitivity_endpoint(project_root: str, patch: ColumnSensitivityPatch) -> dict[str, Any]:
+def patch_column_sensitivity_endpoint(project_root: str, patch: ColumnSensitivityPatch) -> EgressPolicyView:
     root = _root(project_root)
     policy = _policy(root)
     columns = dict(policy.columns)
@@ -113,7 +115,7 @@ def patch_column_sensitivity_endpoint(project_root: str, patch: ColumnSensitivit
 
 
 @router.get("/projects/egress/audit")
-def egress_audit_endpoint(project_root: str, limit: int = 50) -> dict[str, Any]:
+def egress_audit_endpoint(project_root: str, limit: int = 50) -> EgressAudit:
     root = _root(project_root)
     if not 1 <= limit <= 500:
         raise WorkbenchAPIError(status_code=422, code="EGRESS_AUDIT_LIMIT", message="limit must be between 1 and 500")

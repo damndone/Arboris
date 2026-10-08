@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { DatasetVariable, EgressView } from "./dataViewApi";
+import type { ContentClass, DatasetVariable, EgressView } from "./dataViewApi";
 
 const api = {
   fetchEgress: vi.fn(),
@@ -23,7 +23,7 @@ vi.mock("./dataViewApi", async (importOriginal) => ({
 import { SharingPanel } from "./SharingPanel";
 import { VariableView } from "./VariableView";
 
-const REMOTE_DEFAULT = ["workbench_state", "schema", "metadata", "aggregate", "model_result"];
+const REMOTE_DEFAULT: ContentClass[] = ["workbench_state", "schema", "metadata", "aggregate", "model_result"];
 
 function egressView(overrides: Partial<EgressView> = {}): EgressView {
   return {
@@ -64,7 +64,7 @@ describe("SharingPanel", () => {
   });
 
   it("saves a project override for the active provider and can return to the default", async () => {
-    const allowed = [...REMOTE_DEFAULT, "rows"];
+    const allowed: ContentClass[] = [...REMOTE_DEFAULT, "rows"];
     api.replaceEgressPolicy.mockResolvedValueOnce(
       egressView({
         policy: { version: 1, providers: { deepseek: { allow: allowed } }, columns: {} },

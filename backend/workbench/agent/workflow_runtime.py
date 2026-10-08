@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
+from ..formula_terms import quote_column
 from ..api_errors import WorkbenchAPIError
 from ..artifacts import read_json, register_artifact, sha256_file, write_json, write_text_durable
 from ..data_operations import (
@@ -62,11 +63,10 @@ from .workflow import WorkflowDraft, WorkflowExecutionError, WorkflowStepResult
 from .workflow_contracts import (
     STEP_REPLAYABLE_BY_RECIPE,
     WORKFLOW_STEP_SPEC_CONTRACTS,
-    family_context_columns,
     genesis_run_params,
-    model_family_contract,
     workflow_dispatcher_key,
 )
+from ..contracts.model.family import family_context_columns, model_family_contract
 
 
 _NUMERIC_DERIVATION_SCHEMA = "workflow-derived-numeric.v1"
@@ -2557,7 +2557,7 @@ def _fitted_term_positions(fitted: Any, terms: list[str]) -> list[int]:
     names = [str(item) for item in getattr(fitted.model, "exog_names", [])]
     positions: list[int] = []
     for term in terms:
-        fitted_name = f"Q({term!r})"
+        fitted_name = quote_column(term)
         try:
             positions.append(names.index(fitted_name))
         except ValueError as exc:
@@ -3326,7 +3326,7 @@ def _execute_workflow_report(
     log_path = root / "workbench" / "exploration" / f"{draft.workflow_id}.jsonl"
     events = []
     if log_path.is_file():
-        from ..agent.storage import read_jsonl
+        from ..jsonl_store import read_jsonl
 
         events = read_jsonl(log_path)
     steps = {

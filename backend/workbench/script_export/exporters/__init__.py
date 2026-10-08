@@ -54,9 +54,16 @@ def generalized_capability(step):
 
 def nb_capability(step):
     options = step.parameters.get('model_options',{})
-    if options.get('dispersion','mean') != 'mean' or options.get('alpha') is not None:
-        return 'Only estimated-dispersion NB2 is validated; NB1 and fixed-alpha inference require Workbench.'
-    return generalized_capability(step)
+    if options.get('alpha') is not None or options.get('dispersion','mean') not in {'mean','constant'}:
+        return 'Only estimated-dispersion NB2 and NB1 are validated; fixed-alpha inference requires Workbench.'
+    reason = generalized_capability(step)
+    if reason or options.get('dispersion','mean') == 'mean':
+        return reason
+    # NB1 (constant dispersion): Stata nbreg, dispersion(constant) and
+    # statsmodels loglike_method="nb1" fit the same likelihood; R has no
+    # reference NB1 estimator, so its script keeps the Workbench result.
+    return {l:LanguageExporter(None,'snapshot','R has no reference NB1 (constant-dispersion) estimator; NB1 requires Workbench in R.') if l=='r'
+            else LanguageExporter(models.negative_binomial,'native') for l in LANGUAGES}
 
 
 def glm_capability(step):

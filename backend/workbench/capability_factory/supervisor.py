@@ -16,7 +16,7 @@ import fcntl
 from pathlib import Path
 from typing import Any, ClassVar, Mapping
 
-from ..agent.storage import append_jsonl_atomic, read_jsonl
+from ..jsonl_store import append_jsonl_atomic, read_jsonl
 from ..custom_capability.canonical import domain_digest
 from .dispatch import DispatchReservation
 

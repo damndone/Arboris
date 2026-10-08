@@ -397,7 +397,8 @@ def test_data_node_can_start_a_real_ols_run_with_cross_run_lineage(tmp_path: Pat
     child_inputs = json.loads((project / "runs" / child_run_id / "run_inputs.json").read_text())
     assert child_inputs["rerun_of"] == run_id
     assert child_inputs["from_node"] == effect.child_node_id
-    assert child_inputs["source_lineage"]["rerun_from"]["source_artifact_id"] == effect.artifact_id
+    assert child_inputs["source_lineage"]["dataset_source"]["source_artifact_id"] == effect.artifact_id
+    assert child_inputs["source_lineage"]["rerun_from"] is None
 
     manifest_path = project / "runs" / child_run_id / "run_manifest.json"
     for _ in range(400):

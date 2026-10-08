@@ -25,11 +25,8 @@ from ..agent.notebook.memory_defaults import (
     DOMAIN_MEMORY_DEFAULT_VOCABULARY_VERSION,
 )
 from ..agent.recipe_contracts import RECIPE_CONTRACTS
-from ..agent.workflow_contracts import (
-    MODEL_FAMILY_CONTRACTS,
-    notebook_workflow_capability_ids,
-    workflow_step_vocabulary,
-)
+from ..agent.workflow_contracts import notebook_workflow_capability_ids, workflow_step_vocabulary
+from ..contracts.model.family import MODEL_FAMILY_CONTRACTS
 from ..agent.p7_pack_registry import p7_pack_registry
 from ..agent.notebook import NotebookService, OptionDraft, TypedProposal
 from ..agent.notebook.evidence import DataEvidencePackV1, INSPECTIONS, InspectionRequest
@@ -69,12 +66,23 @@ from ..capability_factory.notebook_catalog import (
     CapabilityBindingCatalogError,
 )
 from ..capability_factory.notebook_bridge import AuthorizedCapabilityExecutionGateway
-from ..capability_factory.execution_authorization import (
-    ExecutionAuthorizationError,
-    OptionExecutionAuthorization,
+from .responses.notebook import (
+    Dispatched,
+    ExecutionCompleted,
+    Materialized,
+    NotebookOptions,
+    NotebookProjection,
+    NotebookTrace,
+    NotebookView,
+    OptionConfirmed,
+    OptionDecisionRecorded,
+    OptionRevalidated,
+    PlanningCancelled,
+    PlanningContextView,
 )
+from .typed_routes import TypedAPIRoute
 
-router = APIRouter()
+router = APIRouter(route_class=TypedAPIRoute)
 
 NOTEBOOK_PROVIDER_TIMEOUT_S = 300.0
 
@@ -182,12 +190,6 @@ class ConfirmOptionRequest(_StrictModel):
     option_revision: int = Field(ge=1)
     proposal_id: str = Field(min_length=1, max_length=200)
     proposal_revision: int = Field(ge=1)
-
-
-class AuthorizeOptionExecutionRequest(_StrictModel):
-    """Untrusted receipt envelope; the service rechecks every server-owned pin."""
-
-    authorization: dict[str, Any]
 
 
 class DecisionRequest(_StrictModel):
@@ -1306,7 +1308,7 @@ def _request_error(exc: Exception) -> WorkbenchAPIError:
 @router.post("/notebooks", status_code=201)
 def create_notebook_endpoint(
     request: Request, project_root: str, body: NotebookCreateRequest
-) -> dict[str, Any]:
+) -> NotebookView:
     _root, service = _service(request, project_root)
     try:
         return service.create_notebook(
@@ -1326,7 +1328,7 @@ def create_notebook_endpoint(
 @router.post("/notebooks/projection")
 def ensure_notebook_projection_endpoint(
     request: Request, project_root: str, body: NotebookProjectionRequest
-) -> dict[str, Any]:
+) -> NotebookProjection:
     """Ensure a source-bound default projection; this is the new UI boundary."""
 
     _root, service = _service(request, project_root)
@@ -1371,7 +1373,7 @@ def ensure_notebook_dataset_projection_from_run_endpoint(
     request: Request,
     project_root: str,
     body: RunDatasetNotebookProjectionRequest,
-) -> dict[str, Any]:
+) -> NotebookProjection:
     """Start a fresh analysis from a selected run's server-verified upload."""
 
     _root, service = _service(request, project_root)
@@ -1399,7 +1401,7 @@ def ensure_notebook_dataset_projection_from_run_endpoint(
 
 
 @router.get("/notebooks")
-def list_notebooks_endpoint(request: Request, project_root: str) -> list[dict[str, Any]]:
+def list_notebooks_endpoint(request: Request, project_root: str) -> list[NotebookView]:
     _root, service = _service(request, project_root)
     return [notebook.to_dict() for notebook in service.list_notebooks()]
 
@@ -1407,7 +1409,7 @@ def list_notebooks_endpoint(request: Request, project_root: str) -> list[dict[st
 @router.get("/notebooks/{notebook_id}")
 def get_notebook_endpoint(
     request: Request, project_root: str, notebook_id: str
-) -> dict[str, Any]:
+) -> NotebookView:
     _root, service = _service(request, project_root)
     try:
         return service.get_notebook(notebook_id).to_dict()
@@ -1421,7 +1423,7 @@ def set_notebook_focus_endpoint(
     project_root: str,
     notebook_id: str,
     body: NotebookFocusRequest,
-) -> dict[str, Any]:
+) -> NotebookView:
     """Persist the user's intent/mode before the planner proposes options."""
 
     _root, service = _service(request, project_root)
@@ -1451,7 +1453,7 @@ def compile_notebook_context_endpoint(
     project_root: str,
     notebook_id: str,
     focused_run_id: str | None = None,
-) -> dict[str, Any]:
+) -> PlanningContextView:
     root, service = _service(request, project_root)
     try:
         context, trace = _compile(
@@ -1498,7 +1500,7 @@ async def cancel_planning_attempt_endpoint(
     project_root: str,
     notebook_id: str,
     attempt_id: str,
-) -> dict[str, str]:
+) -> PlanningCancelled:
     root, service = _service(request, project_root)
     service.get_notebook(notebook_id)
     key = _planning_attempt_key(root, notebook_id, attempt_id)
@@ -1516,7 +1518,7 @@ async def propose_options_endpoint(
     project_root: str,
     notebook_id: str,
     body: ProposeOptionsRequest,
-) -> dict[str, Any]:
+) -> NotebookOptions:
     root, service = _service(request, project_root)
     trace: TraceWriter | None = None
     planning_started = False
@@ -1714,19 +1716,21 @@ async def propose_options_endpoint(
         raise _request_error(exc) from exc
 
 
-@router.get("/notebooks/{notebook_id}/options")
+@router.post("/notebooks/{notebook_id}/options")
 def list_options_endpoint(
     request: Request,
     project_root: str,
     notebook_id: str,
     focused_run_id: str | None = None,
-) -> dict[str, Any]:
+) -> NotebookOptions:
     """Return the current options against one freshly compiled context.
 
-    This is intentionally a read-time projection. It evaluates freshness for
-    display and records the bounded context trace, but it never creates an
-    option revision. That lets a browser remount without turning navigation
-    into a new agent-generation event.
+    This is a display projection. It evaluates freshness for display and
+    records the bounded context trace, but it never creates an option
+    revision. That lets a browser remount without turning navigation into a
+    new agent-generation event. Because it records the trace it is a POST:
+    GET routes never write (V1812-LOCAL-API-SECURITY), and only
+    state-changing methods are held to the local Origin check.
     """
 
     root, service = _service(request, project_root)
@@ -1764,7 +1768,7 @@ def list_options_endpoint(
 @router.get("/notebooks/{notebook_id}/traces/{trace_id}")
 def get_notebook_trace_endpoint(
     request: Request, project_root: str, notebook_id: str, trace_id: str
-) -> dict[str, Any]:
+) -> NotebookTrace:
     """Replay the typed trace for a notebook without exposing other scopes."""
 
     root, service = _service(request, project_root)
@@ -1795,7 +1799,7 @@ def revalidate_option_endpoint(
     notebook_id: str,
     option_id: str,
     body: RevalidateOptionRequest,
-) -> dict[str, Any]:
+) -> OptionRevalidated:
     root, service = _service(request, project_root)
     try:
         context, trace = _compile(root, service, notebook_id)
@@ -1824,7 +1828,7 @@ def confirm_option_endpoint(
     notebook_id: str,
     option_id: str,
     body: ConfirmOptionRequest,
-) -> dict[str, Any]:
+) -> OptionConfirmed:
     root, service = _service(request, project_root)
     try:
         context, trace = _compile(root, service, notebook_id)
@@ -1884,7 +1888,7 @@ def confirm_and_execute_option_endpoint(
     notebook_id: str,
     option_id: str,
     body: ConfirmOptionRequest,
-) -> dict[str, Any]:
+) -> Dispatched:
     """Explicitly dispatch one low-risk bound option through server CF4.
 
     The request carries only the current option/proposal pins.  Authorization,
@@ -1930,7 +1934,7 @@ def materialize_option_endpoint(
     project_root: str,
     notebook_id: str,
     option_id: str,
-) -> dict[str, Any]:
+) -> Materialized:
     root, service = _service(request, project_root)
     try:
         context, trace = _compile(root, service, notebook_id)
@@ -1951,48 +1955,6 @@ def materialize_option_endpoint(
         raise _request_error(exc) from exc
 
 
-@router.post("/notebooks/{notebook_id}/options/{option_id}/authorize-execution")
-def authorize_option_execution_endpoint(
-    request: Request,
-    project_root: str,
-    notebook_id: str,
-    option_id: str,
-    body: AuthorizeOptionExecutionRequest,
-) -> dict[str, Any]:
-    """Legacy control-plane seam for unbound compatibility records.
-
-    A capability-bound V1.2 option cannot use this client-envelope route. Its
-    authorization is constructed by the server only inside
-    ``confirm-and-execute``.
-    """
-
-    root, service = _service(request, project_root)
-    try:
-        current = service.store.read_option(notebook_id, option_id).current_revision
-        if getattr(current, "capability_resolution_binding_ref", None) is not None:
-            raise OptionRevisionStale(
-                "capability execution authorization is server-owned; use explicit confirm-and-execute",
-                option_id=option_id,
-                option_revision=current.option_revision,
-                reason="authorization_server_owned",
-            )
-        context, trace = _compile(root, service, notebook_id)
-        authorization = OptionExecutionAuthorization.from_dict(body.authorization)
-        persisted = service.authorize_option_execution(
-            notebook_id,
-            option_id,
-            context=context,
-            authorization=authorization,
-        )
-        return {"authorization": persisted.to_dict(), "trace_id": trace.trace_id}
-    except NotebookOptionError as exc:
-        raise _notebook_error(exc) from exc
-    except ExecutionAuthorizationError as exc:
-        raise _request_error(exc) from exc
-    except (OSError, ValueError, KeyError) as exc:
-        raise _request_error(exc) from exc
-
-
 @router.post("/notebooks/{notebook_id}/options/{option_id}/decision")
 def record_decision_endpoint(
     request: Request,
@@ -2000,7 +1962,7 @@ def record_decision_endpoint(
     notebook_id: str,
     option_id: str,
     body: DecisionRequest,
-) -> dict[str, Any]:
+) -> OptionDecisionRecorded:
     root, service = _service(request, project_root)
     try:
         notebook = service.get_notebook(notebook_id)
@@ -2032,7 +1994,7 @@ def complete_option_execution_endpoint(
     notebook_id: str,
     option_id: str,
     body: ExecuteOptionRequest,
-) -> dict[str, Any]:
+) -> ExecutionCompleted:
     root, service = _service(request, project_root)
     try:
         if (

@@ -12,6 +12,7 @@ from workbench.contracts.model.linear_mixed_effects import (
     LmmModelInput,
 )
 from workbench.contracts.common.envelope import ContractError
+from workbench.formula_terms import quote_column
 
 
 class LmmInputError(ValueError):
@@ -40,10 +41,10 @@ def build_lmm_formula(
     """Build the v1 fixed-effects formula with quoted column names."""
 
     terms = [
-        f"C(Q({group!r}), Treatment(reference={reference_group!r})) * Q({time!r})"
+        f"C({quote_column(group)}, Treatment(reference={reference_group!r})) * {quote_column(time)}"
     ]
-    terms.extend(f"Q({control!r})" for control in controls)
-    return f"Q({outcome!r}) ~ " + " + ".join(terms)
+    terms.extend(f"{quote_column(control)}" for control in controls)
+    return f"{quote_column(outcome)} ~ " + " + ".join(terms)
 
 
 @dataclass(frozen=True)

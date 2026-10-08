@@ -64,35 +64,16 @@ describe("controlFactory", () => {
     }
   });
 
-  it("preserves visible_when (rendered, not hidden, day-1 not enforced)", () => {
-    const control: EditableControl = {
-      kind: "select", key: "covariance", label: "Covariance",
-      options: ["robust"], value: "robust",
-      visible_when: { model_type: "ols" },
-    };
-    render(<>{renderControl(control, vi.fn())}</>);
-    expect(screen.getByRole("combobox")).toBeTruthy();
+  it("edits select, multiselect, columns, text and toggle in place; shows the rest read-only", () => {
+    expect([...ENABLED_CONTROL_KINDS].sort()).toEqual(["columns", "multiselect", "select", "text", "toggle"]);
+    for (const kind of CONTROL_KINDS.filter((item) => !ENABLED_CONTROL_KINDS.has(item))) {
+      const { unmount } = render(<>{renderControl({ kind, key: "k", label: "Tau", value: 0.5 }, vi.fn())}</>);
+      const placeholder = screen.getByTestId(`control-${kind}`);
+      expect(placeholder).toHaveAttribute("aria-disabled", "true");
+      expect(placeholder).toHaveTextContent("Tau: 0.5");
+      unmount();
+    }
   });
-
-  it("all 8 control kinds are enabled (v1.6.6: radio/slider/text/textarea/toggle made interactive)", () => {
-    expect([...ENABLED_CONTROL_KINDS].sort()).toEqual([...CONTROL_KINDS].sort());
-  });
-
-  // ── v1.6.6: the 5 previously read-only controls are now interactive ──
-
-  it("radio renders options and emits onChange with the picked value", () => {
-    const onChange = vi.fn();
-    const control: EditableControl = {
-      kind: "radio", key: "method", label: "Method",
-      options: ["twfe", "cs", "sa"], value: "twfe",
-    };
-    render(<>{renderControl(control, onChange)}</>);
-    const cs = screen.getByLabelText("cs") as HTMLInputElement;
-    expect(cs.checked).toBe(false);
-    fireEvent.click(cs);
-    expect(onChange).toHaveBeenCalledWith("method", "cs");
-  });
-
   it("toggle reflects boolean value and flips it on click", () => {
     const onChange = vi.fn();
     const control: EditableControl = {
@@ -105,22 +86,6 @@ describe("controlFactory", () => {
     expect(onChange).toHaveBeenCalledWith("robust", false);
   });
 
-  it("slider reads min/max/step and emits a number", () => {
-    const onChange = vi.fn();
-    const control: EditableControl = {
-      kind: "slider", key: "alpha", label: "Alpha",
-      min: 0, max: 1, step: 0.05, value: 0.1, unit: "",
-    };
-    render(<>{renderControl(control, onChange)}</>);
-    const range = screen.getByRole("slider") as HTMLInputElement;
-    expect(range.value).toBe("0.1");
-    expect(range.min).toBe("0");
-    expect(range.max).toBe("1");
-    expect(range.step).toBe("0.05");
-    fireEvent.change(range, { target: { value: "0.25" } });
-    expect(onChange).toHaveBeenCalledWith("alpha", 0.25);
-  });
-
   it("text emits the string value on change", () => {
     const onChange = vi.fn();
     const control: EditableControl = {
@@ -131,17 +96,5 @@ describe("controlFactory", () => {
     expect(input.value).toBe("hi");
     fireEvent.change(input, { target: { value: "hello" } });
     expect(onChange).toHaveBeenCalledWith("title", "hello");
-  });
-
-  it("textarea emits the string value on change", () => {
-    const onChange = vi.fn();
-    const control: EditableControl = {
-      kind: "textarea", key: "notes", label: "Notes", value: "a",
-    };
-    render(<>{renderControl(control, onChange)}</>);
-    const area = screen.getByLabelText("Notes") as HTMLTextAreaElement;
-    expect(area.value).toBe("a");
-    fireEvent.change(area, { target: { value: "ab" } });
-    expect(onChange).toHaveBeenCalledWith("notes", "ab");
   });
 });

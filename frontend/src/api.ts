@@ -1,142 +1,32 @@
+import type { ResponseOf, Schema } from "./apiTypes";
 import * as XLSX from "xlsx";
 import type { GraphResponse } from "./lineage/types";
 import type { HeadSetResponse } from "./lineage/api/graphViewTypes";
 import type { ManualRerunPatch } from "./lineage/detail/sections/manualRerunPatch";
 
-export type ProjectResponse = {
-  project_root: string;
-};
+export type ProjectResponse = Schema<"ProjectCreated">;
 
 export type RunStatus = "completed" | "blocked" | string;
 
-export type RunResponse = {
-  run_id: string;
-  status: RunStatus;
-};
+export type RunResponse = Schema<"RunSubmitted">;
 
-export type RunDeletionPreview = {
-  run_id: string;
-  deletable: boolean;
-  blocking_descendant_run_ids: string[];
-  blocking_status: string | null;
-  artifact_counts: Record<string, number>;
-  report_count: number;
-  agent_session_ids: string[];
-  agent_event_session_ids: string[];
-  proposal_ids: string[];
-  operation_record_ids: string[];
-  retained_shared_record_ids: string[];
-  fingerprint: string;
-};
+export type RunDeletionPreview = Schema<"RunDeletionPreview">;
 
-export type RunDeletionReceipt = {
-  run_id: string;
-  deleted_agent_session_ids: string[];
-  deleted_agent_event_session_ids: string[];
-  deleted_proposal_ids: string[];
-  deleted_operation_record_ids: string[];
-};
+export type RunDeletionReceipt = Schema<"RunDeletionReceipt">;
 
-export type BatchRunSummary = {
-  y: string;
-  run_id: string;
-  status: string;
-  model_id: string | null;
-  model_type: string | null;
-};
+export type BatchRunSummary = Schema<"BatchRunEntry">;
 
-export type BatchRunResponse = {
-  status: string;
-  runs: BatchRunSummary[];
-};
+export type BatchRunResponse = Schema<"BatchRunSubmitted">;
 
-export type RunSummary = {
-  run_id: string;
-  status: string;
-  mode: string;
-  started_at: string | null;
-  y: string | null;
-  x: string[] | null;
-};
+export type RunSummary = Schema<"RunSummary">;
 
-export type IssueRecord = {
-  severity?: string;
-  code?: string;
-  message?: string;
-  evidence?: Record<string, unknown>;
-  issue_id?: string;
-  affected_stage?: string;
-  variables?: string[];
-  metric?: string;
-  value?: number | null;
-  threshold?: number | null;
-  template_key?: string;
-  template_params?: Record<string, unknown>;
-  recommended_action_key?: string;
-  is_user_action_required?: boolean;
-};
+export type IssueRecord = Schema<"IssueRecord">;
 
-export type TrustStatus = "ok" | "usable_with_caution" | "blocked" | "failed";
+export type TrustStatus = Schema<"PreviewRunStatus">["status"];
 
-export type TrustLabel =
-  | "analysis_running"
-  | "ready_to_interpret"
-  | "interpret_with_caution"
-  | "not_ready_to_interpret"
-  | "run_failed"
-  | "lifecycle_unavailable"
-  | "legacy_unavailable"
-  | "contract_unavailable";
+export type TrustLabel = Schema<"DiagnosticSummaryPreview">["trust_label"];
 
-export type DiagnosticSummaryPreview = {
-  available: boolean;
-  preview_contract_version: string;
-  source_schema_version: string;
-  preview_status: string;
-  contract_warnings: string[];
-  run_lifecycle_status: string;
-  run_status?: {
-    status: TrustStatus;
-    status_scope: string;
-    safe_to_generate_report: boolean;
-    safe_to_interpret: string;
-    has_blockers: boolean;
-    has_warnings: boolean;
-    has_cautions: boolean;
-    model_results_available: boolean;
-  };
-  trust_label: TrustLabel;
-  trust_counts?: {
-    blockers: number;
-    warnings: number;
-    cautions: number;
-    info: number;
-  };
-  primary_reasons: Array<{
-    reason_id: string;
-    reason_key: string;
-    severity: string;
-    message: string;
-    message_params?: Record<string, unknown>;
-    affected_variables: string[];
-    linked_issue_ids: string[];
-  }>;
-  model_identity?: {
-    primary_model_id: string;
-    model_label: string;
-    model_type: string;
-    y_variable: string;
-    n_observations: number;
-    x_variables?: string[];
-    x_variable_count?: number;
-    standard_error_type?: string;
-  };
-  artifact_manifest?: Record<string, unknown>;
-  diagnostic_highlights?: Array<Record<string, unknown>>;
-  coefficient_risk?: CoefficientRisk;
-  interpretation_restrictions?: Array<Record<string, unknown>>;
-  recommended_actions?: Array<Record<string, unknown>>;
-};
+export type DiagnosticSummaryPreview = Schema<"DiagnosticSummaryPreview">;
 
 export type CoefficientRisk = {
   primary_model_id: string;
@@ -174,132 +64,24 @@ export type CoefficientRisk = {
  * `model_run_id` differ whenever the workflow created the model it describes.
  * `result` is the server's typed payload; its keys vary by operation, so a
  * renderer reads what it recognises rather than assuming a fixed shape. */
-export type PostEstimationResult = {
-  artifact_id: string;
-  artifact_type: string;
-  operation_id: string;
-  run_id: string;
-  model_run_id: string;
-  workflow_id: string;
-  workflow_step_id: string;
-  pack_family?: string;
-  source_sha256?: string;
-  request_fingerprint?: string;
-  result_sha256?: string;
-  result_schema?: string;
-  result: Record<string, unknown>;
-};
+export type PostEstimationResult = Schema<"PostEstimationResult">;
 
-export type PredictionResearchEvidence = {
-  status: "validated" | "legacy" | "unavailable";
-  consumer?: string;
-  model_id?: string;
-  protocol?: string;
-  validation?: string;
-  comparability?: string;
-  message?: string;
-  legacy_artifacts?: Array<{
-    artifact_id?: string;
-    model_id?: string;
-    model_type?: string;
-    status?: string;
-    nobs?: number;
-    cv_folds?: number;
-    sampling_method?: string | null;
-    metrics?: Record<string, number | null>;
-  }>;
-  development?: { cv?: Array<Record<string, unknown>> };
-  structure?: { kind?: string; group_column?: string | null; time_column?: string | null };
-  split_plan_hash?: string;
-  split_parameters?: Record<string, unknown>;
-  oos?: { n?: number; metrics?: Record<string, number | null> };
-  baseline?: { model_id?: string; metrics?: Record<string, number | null> };
-  controls?: PredictionControlEvidence[];
-  limits?: string[];
-};
+export type PredictionResearchEvidence = NonNullable<Schema<"RunDetail">["prediction_evidence"]>;
 
-export type PredictionControlEvidence = {
-  control?: string;
-  seed?: number | null;
-  status?: string;
-  metrics?: Record<string, number | null>;
-  metric_gap?: Record<string, number | null>;
-  fold_importance?: Array<Record<string, unknown>>;
-  receipt?: Record<string, unknown>;
-};
+export type PredictionControlEvidence = Schema<"PredictionControl">;
 
-export type RunDetail = RunSummary & {
-  lineage: Array<{ source: string; artifact_id: string }>;
-  artifact_counts: Record<string, number>;
-  errors: { issues: IssueRecord[] };
-  model_results?: ModelResult[];
-  diagnostic_summary_preview?: DiagnosticSummaryPreview;
-  post_estimation_results?: PostEstimationResult[];
-  prediction_evidence?: PredictionResearchEvidence | null;
-  /** Durable deterministic report packets projected from diagnostic_summary. */
-  table_1?: Array<Record<string, unknown>>;
-  statistical_evidence?: Record<string, unknown> | null;
-  term_labels?: Record<string, string>;
-  labels?: {
-    variable_labels?: Record<string, string>;
-    value_labels?: Record<string, Record<string, string>>;
-  };
-  model_family_evidence?: Record<string, unknown> | null;
-  /** v1.8.10: the declared, bounded family projection -- the same object the
-   * Agent's result summary carries -- for the report writer's citable facts. */
-  family_evidence?: Record<string, unknown> | null;
-};
+export type RunDetail = Schema<"RunDetail">;
 
-export type CoefficientRecord = {
-  estimate?: number | null;
-  std_error?: number | null;
-  p_value?: number | null;
-  p_value_display?: string | null;
-  ci_lower?: number | null;
-  ci_upper?: number | null;
-  source_id?: string;
-  /** Pooled multiple imputation: this coefficient's Barnard-Rubin df (null when
-   * infinite) and fraction of missing information. */
-  df?: number | null;
-  fmi?: number | null;
-};
+export type CoefficientRecord = Schema<"CoefficientRecord">;
 
-export type ModelResult = {
-  model_id: string;
-  model_type?: string;
-  r_squared?: number | null;
-  r_squared_adj?: number | null;
-  pseudo_r2?: number | null;
-  llf?: number | null;
-  aic?: number | null;
-  bic?: number | null;
-  nobs?: number;
-  coefficients: Record<string, CoefficientRecord>;
-  dispersion?: string | null;
-  alpha_estimated?: boolean;
-  alpha_fixed_value?: number | null;
-  ancillary_parameters?: {name: string; estimate: number; std_error: number;
-    conf_low: number | null; conf_high: number | null; scale: string}[];
-  overdispersion_test?: {statistic: number; df: number; p_value: number; distribution: string} | null;
-  information_matrix?: string;
-  warnings?: Array<string | {code: string; message: string}>;
-};
+export type ModelResult = Schema<"ModelResult">;
 
-export type ArtifactItem = {
-  artifact_id: string;
-  path: string;
-  artifact_type: string;
-  step: string;
-  sha256: string;
-};
+export type ArtifactItem = Schema<"ArtifactItem">;
 
-export type ArtifactGroup = {
-  artifact_type: string;
-  items: ArtifactItem[];
-};
+export type ArtifactGroup = Schema<"ArtifactGroup">;
 
-export type RunsListResponse = { runs: RunSummary[] };
-export type ArtifactsResponse = { groups: ArtifactGroup[] };
+export type RunsListResponse = Schema<"RunList">;
+export type ArtifactsResponse = Schema<"ArtifactGroups">;
 
 export type ColumnRole = "y" | "x" | "id" | "time" | "ignore";
 export type ColumnDtype = "numeric" | "string" | "datetime" | "other";
@@ -334,19 +116,7 @@ export type FilePreview = {
   transpose_warning?: string | null;
 };
 
-export type ArmaGarchTransformPreflight = {
-  schema_version: 1;
-  source_row_count: number;
-  analysis_row_count: number;
-  diagnostics: Array<Record<string, unknown>>;
-  transform_profiles: Record<string, Record<string, unknown>>;
-  recommendation: {
-    transform_id: "level" | "log_level" | "diff_1" | "log_return_pct";
-    score: number;
-    reason: string;
-  };
-  transform_confirmation_required: true;
-};
+export type ArmaGarchTransformPreflight = Schema<"TransformPreflight">;
 
 export type ApiErrorEnvelope = {
   code: string;
@@ -792,12 +562,7 @@ export function isStatisticalFile(name: string): boolean {
   return STATISTICAL_FILE_PATTERN.test(name);
 }
 
-type StatisticalUploadPreview = {
-  columns: string[];
-  rows: Record<string, unknown>[];
-  total_rows: number;
-  labels: Record<string, unknown>;
-};
+type StatisticalUploadPreview = ResponseOf<"/uploads/preview", "post">;
 
 async function readStatisticalRows(
   projectRoot: string,
@@ -830,7 +595,7 @@ export async function previewFile(
     rows = statistical.rows;
     headerNames = statistical.columns;
     totalRows = statistical.total_rows;
-    declaredMissing = (statistical.labels as { user_missing_values?: unknown } | undefined)?.user_missing_values;
+    declaredMissing = statistical.labels.user_missing_values;
   } else {
     const buffer =
       typeof file.arrayBuffer === "function"
@@ -1231,144 +996,23 @@ export async function getRunGraph(
   return readResponse<GraphResponse>(response);
 }
 
-export type DraftExecutionMode = "rerun_child" | "new_run" | "genesis";
+export type DraftExecutionMode = Schema<"PipelineDraft">["default_execution_mode"];
 
-export type PipelineDraftNode =
-  | {
-      node_id: string;
-      node_type: "input.dataset";
-      source_type: "run_input" | "upload";
-      run_input_id?: string;
-      upload_sha?: string;
-      dataset_snapshot_id?: string;
-      schema_fingerprint: string;
-      input_fingerprint: string;
-      row_count?: number;
-      column_count?: number;
-      columns_summary?: Array<{ name: string; dtype?: string }>;
-      status: "bound" | "missing" | "invalid";
-    }
-  | {
-      node_id: string;
-      node_type: "model";
-      model_family?: string;
-      model_type?: string;
-      schema_id?: string;
-      editable_schema?: unknown[];
-      editable_schema_hash?: string;
-      source_ref?: Record<string, string>;
-      source_params?: Record<string, unknown>;
-      params: Record<string, unknown>;
-      status?: "pending" | "configured" | "invalid";
-    }
-  | {
-      node_id: string;
-      node_type: "input.upload";
-      upload: { sha256: string; filename: string };
-      sheet_names: string[];
-      columns?: string[];
-      status: "bound" | "missing" | "invalid";
-    }
-  | {
-      node_id: string;
-      node_type: "table";
-      params: { sheet_name?: string; transpose?: boolean } & Record<string, unknown>;
-      columns: string[];
-      status: "pending" | "configured" | "invalid";
-    };
+export type PipelineDraftNode = Schema<"DraftGraph">["nodes"][number];
 
-export type PipelineDraftV1 = {
-  draft_id: string;
-  schema_version: "pipeline_draft.v1";
-  created_at: string;
-  updated_at: string;
-  status: string;
-  created_from?: Record<string, string>;
-  notebook_provenance?: Record<string, string>;
-  graph: {
-    nodes: PipelineDraftNode[];
-    edges: Array<{ from: string; to: string }>;
-  };
-  default_execution_mode: DraftExecutionMode;
-};
+export type PipelineDraftV1 = Schema<"PipelineDraft">;
 
-export type PipelineDraftResponse = {
-  draft: PipelineDraftV1;
-  draft_hash: string;
-};
+export type PipelineDraftResponse = Schema<"StoredPipelineDraft">;
 
-export type DraftValidationResult = {
-  ok: boolean;
-  status: "valid" | "invalid" | "blocked";
-  executable: boolean;
-  checks: Array<{
-    code: string;
-    level: "error" | "warning" | "info";
-    message: string;
-    node_id?: string;
-    blocking: boolean;
-  }>;
-  resolved_execution: {
-    genesis?: boolean;
-    execution_mode?: DraftExecutionMode;
-    compare_source_available?: boolean;
-    rerun_from_run_id?: string;
-    rerun_from_model_node_id?: string;
-    rerun_from_op_node_id?: string;
-  };
-  validated_execution_mode?: DraftExecutionMode;
-  validated_draft_hash?: string;
-  validated_at: string;
-};
+export type DraftValidationResult = Schema<"DraftValidation">;
 
-export type DraftExecutionResult = {
-  ok: boolean;
-  run_id: string;
-  draft_id: string;
-  executed_draft_hash: string;
-  execution_mode: DraftExecutionMode;
-  deduped?: boolean;
-  produced_lineage: {
-    genesis?: boolean;
-    execution_mode?: DraftExecutionMode;
-    rerun_from_run_id?: string;
-    rerun_from_model_node_id?: string;
-    rerun_from_op_node_id?: string;
-  };
-  focus: {
-    status: "ready" | "pending_index";
-    run_id: string;
-    target_model_node_id?: string;
-    poll?: {
-      genesis?: boolean;
-      execution_mode?: DraftExecutionMode;
-      rerun_from_run_id?: string;
-      rerun_from_model_node_id?: string;
-      rerun_from_op_node_id?: string;
-    };
-  };
-};
+export type DraftExecutionResult = Schema<"DraftExecution">;
 
-export type PipelineDraftFromNodeRequest = {
-  source_run_id: string;
-  source_model_node_id: string;
-  source_op_node_id: string;
-  source_node_hash: string;
-  source_forest_node_key?: string;
-  source_context_fingerprint: string;
-};
+export type PipelineDraftFromNodeRequest = Schema<"PipelineDraftFromNodeRequest">;
 
-export type PipelineDraftPatchRequest = {
-  model_node_id: string;
-  base_draft_hash: string;
-  params: Record<string, unknown>;
-};
+export type PipelineDraftPatchRequest = Schema<"PipelineDraftPatchRequest">;
 
-export type PipelineDraftExecuteRequest = {
-  validated_draft_hash: string;
-  execution_mode: DraftExecutionMode;
-  idempotency_key?: string;
-};
+export type PipelineDraftExecuteRequest = Schema<"PipelineDraftExecuteRequest">;
 
 function draftUrl(projectRoot: string, path: string): string {
   return apiUrl(`${path}?project_root=${encodeURIComponent(projectRoot)}`);
@@ -1444,17 +1088,7 @@ export async function executePipelineDraft(
   return readResponse<DraftExecutionResult>(response);
 }
 
-export type PipelineDraftSummary = {
-  draft_id: string;
-  status: string;
-  model_type?: string | null;
-  source_run_id?: string | null;
-  source_model_node_id?: string | null;
-  source_op_node_id?: string | null;
-  source_node_hash?: string | null;
-  draft_hash: string;
-  updated_at?: string | null;
-};
+export type PipelineDraftSummary = Schema<"PipelineDraftSummary">;
 
 export async function listPipelineDrafts(
   projectRoot: string,
@@ -1477,7 +1111,7 @@ export async function deletePipelineDraft(
 
 // ── v1.6.8 — graph-native genesis (uploads / genesis draft / node patch / project forest) ──
 
-export type UploadResult = { sha256: string; filename: string };
+export type UploadResult = Schema<"UploadStored">;
 
 /** Upload a dataset file standalone (POST /uploads, multipart form).
  *  Content-addressable: the server stores by sha256 so genesis draft chains
@@ -1496,12 +1130,7 @@ export async function uploadDataset(
   return readResponse<UploadResult>(response);
 }
 
-export type PipelineDraftGenesisRequest = {
-  upload_sha256: string;
-  filename: string;
-  sheet_names: string[];
-  columns: string[];
-};
+export type PipelineDraftGenesisRequest = Schema<"PipelineDraftGenesisRequest">;
 
 /** Create a parentless genesis draft chain (source → table → model). */
 export async function createGenesisDraft(
@@ -1516,10 +1145,7 @@ export async function createGenesisDraft(
   return readResponse<PipelineDraftResponse>(response);
 }
 
-export type DraftNodePatchRequest = {
-  params: Record<string, unknown>;
-  columns?: string[];
-};
+export type DraftNodePatchRequest = Schema<"DraftNodePatchRequest">;
 
 /** Configure one genesis draft node in place (PATCH .../nodes/{nodeId}).
  *  `columns` applies to table nodes only. */
@@ -1587,41 +1213,7 @@ export interface NodeWriteOperationRequestV1 {
   rerun_reason?: string;
 }
 
-export interface RerunResponseV1 {
-  run_id: string;
-  new_run_id: string;
-  new_active_head_id: string;
-  focus: { forest_node_key: string; op_node_id: string; node_hash: string } | null;
-  rerun_from: {
-    owner_run_id: string;
-    op_node_id: string;
-    node_hash: string | null;
-    forest_node_key: string | null;
-  };
-  accepted_context?: {
-    context_version: "node-operation-context/v1";
-    context_fingerprint: string;
-    owner_run_id: string;
-    op_node_id: string;
-    node_hash: string;
-    validated_at: string;
-  };
-  produced_lineage?: {
-    produced_owner_run_id: string;
-    produced_op_node_id?: string | null;
-    produced_node_hash?: string | null;
-    rerun_request_id: string;
-    rerun_from: {
-      owner_run_id: string;
-      op_node_id: string;
-      node_hash: string;
-      context_fingerprint: string;
-      patch_id?: string;
-      rerun_request_id: string;
-    };
-    status: "indexed" | "pending_index";
-  } | null;
-}
+export type RerunResponseV1 = Schema<"RerunSubmitted">;
 
 export interface LegacyRerunFromNodeArgs {
   fromNode: string;
@@ -1731,22 +1323,9 @@ export function connectRunEvents(
 // A comparison is stored server-side and projected into the forest as a node
 // joining its two endpoints, so a conclusion survives a reload.
 
-export type CompareNodeEndpoint = {
-  run_id: string;
-  node_id: string;
-  node_hash: string;
-  forest_node_key: string;
-};
+export type CompareNodeEndpoint = Schema<"CompareEndpoint">;
 
-export type CompareNodeRecord = {
-  compare_id: string;
-  schema_id: string;
-  left: CompareNodeEndpoint;
-  right: CompareNodeEndpoint;
-  relation: "ancestor_descendant" | "unrelated";
-  created_at: string;
-  packet: Record<string, unknown>;
-};
+export type CompareNodeRecord = Schema<"CompareNodeView">;
 
 export async function createCompareNode(
   projectRoot: string,
@@ -1770,34 +1349,23 @@ export async function createCompareNode(
 export async function deleteCompareNode(
   projectRoot: string,
   compareId: string,
-): Promise<{ deleted: string }> {
+): Promise<ResponseOf<"/compare-nodes/{compare_id}", "delete">> {
   const response = await fetch(
     apiUrl(
       `/compare-nodes/${encodeURIComponent(compareId)}?project_root=${encodeURIComponent(projectRoot)}`,
     ),
     { method: "DELETE" },
   );
-  return readResponse<{ deleted: string }>(response);
+  return readResponse<ResponseOf<"/compare-nodes/{compare_id}", "delete">>(response);
 }
 
 // v1.8.9 step 5 — SPSS/Stata dataset export with a loss report.
 
-export type DatasetExportFormat = "sav" | "zsav" | "dta" | "csv" | "xlsx";
+export type DatasetExportFormat = Schema<"DatasetExportReport">["format"];
 
-export type DatasetExportNote = { column: string; field: string; message: string };
+export type DatasetExportNote = Schema<"DatasetExportNote">;
 
-export type DatasetExportResult = {
-  artifact_id: string;
-  filename: string;
-  download_url: string;
-  report: {
-    format: DatasetExportFormat;
-    rows: number;
-    columns: number;
-    renamed: Record<string, string>;
-    notes: DatasetExportNote[];
-  };
-};
+export type DatasetExportResult = Schema<"DatasetExportResult">;
 
 export type DatasetExportFilter = { column: string; op: string; value?: unknown };
 
@@ -1812,12 +1380,7 @@ export type DatasetExportOptions = {
   filename?: string | null;
 };
 
-export type DatasetExportPreview = DatasetExportResult["report"] & {
-  source_rows: number;
-  column_names: string[];
-  sample: Record<string, unknown>[];
-  filename: string;
-};
+export type DatasetExportPreview = Schema<"DatasetExportPreview">;
 
 function exportBody(nodeId: string, options: DatasetExportFormat | DatasetExportOptions): string {
   const chosen = typeof options === "string" ? { format: options } : options;
@@ -1843,18 +1406,9 @@ export async function exportDataset(
   return readResponse<DatasetExportResult>(response);
 }
 
-export interface AnalysisScriptExportResult {
-  artifact_id: string;
-  filename: string;
-  language: 'stata' | 'r' | 'python';
-  fully_native: boolean;
-  coverage: Array<{ step_id: string; operation: string; status: string; note: string }>;
-  required_packages: string[];
-}
+export type AnalysisScriptExportResult = Schema<"ScriptExportResult">;
 
-export interface ScriptExportTargets {
-  targets: Array<{ target: string; label: string }>;
-}
+export type ScriptExportTargets = Schema<"ScriptExportTargets">;
 
 export async function listScriptExportTargets(projectRoot: string, runId: string, modelTarget: string): Promise<ScriptExportTargets> {
   const response = await fetch(apiUrl(`/runs/${encodeURIComponent(runId)}/script-export/targets?project_root=${encodeURIComponent(projectRoot)}&model_target=${encodeURIComponent(modelTarget)}`));

@@ -5,6 +5,7 @@ import {
   type DraftEntry,
 } from "./draftRegistry";
 import type { PipelineDraftV1, PipelineDraftSummary } from "../../api";
+import { draftSummaryFixture, runCreatedFromFixture } from "../../apiFixtures";
 
 const draft = (id: string, status = "draft"): PipelineDraftV1 => ({
   draft_id: id,
@@ -12,7 +13,7 @@ const draft = (id: string, status = "draft"): PipelineDraftV1 => ({
   created_at: "t",
   updated_at: "t",
   status,
-  created_from: { source_node_hash: "hash_a", source_op_node_id: "model#0" },
+  created_from: runCreatedFromFixture({ source_node_hash: "hash_a", source_op_node_id: "model#0" }),
   graph: { nodes: [], edges: [] },
   default_execution_mode: "rerun_child",
 });
@@ -65,7 +66,7 @@ describe("draftReducer", () => {
 
   it("hydrate loads summaries as draft entries", () => {
     const summaries: PipelineDraftSummary[] = [
-      { draft_id: "d1", status: "draft", draft_hash: "h1", source_node_hash: "hash_a", source_op_node_id: "model#0" },
+      draftSummaryFixture({ draft_id: "d1", draft_hash: "h1", source_node_hash: "hash_a", source_op_node_id: "model#0" }),
     ];
     const r = draftReducer(emptyRegistry(), { type: "hydrate", summaries });
     expect((r.get("d1") as DraftEntry).lifecycleState).toBe("draft");

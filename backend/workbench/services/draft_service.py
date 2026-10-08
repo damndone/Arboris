@@ -93,11 +93,9 @@ def _project_native_family_params_for_execution(
 ) -> dict[str, Any]:
     """Project canonical family controls through the declared wire builder."""
 
-    from ..agent.workflow_contracts import (
-        OperationValidationError,
-        model_family_contract,
-        validate_model_genesis_spec,
-    )
+    from ..agent.workflow_contracts import validate_model_genesis_spec
+    from ..contracts.model.family import model_family_contract
+    from ..contracts.common.errors import OperationValidationError
 
     model_type = params.get("model_type") or model.get("model_type")
     try:

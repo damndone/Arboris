@@ -1,18 +1,6 @@
 import { apiUrl, readResponse } from "../../api";
-import type {
-  AgentContextPacket,
-  AgentCapabilityCatalog,
-  AgentActivityItem,
-  AgentActivityEventItem,
-  AgentEvent,
-  AgentHierarchyNode,
-  AgentNavigationProjection,
-  AgentNavigationRef,
-  AgentOperationRecord,
-  AgentProposal,
-  AgentSession,
-  AgentSessionCreateRequest,
-} from "./agentTypes";
+import type { RequestOf, ResponseOf } from "../../apiTypes";
+import type { AgentContextPacket } from "./agentTypes";
 
 function agentPath(projectRoot: string, path: string): string {
   return apiUrl(`${path}?project_root=${encodeURIComponent(projectRoot)}`);
@@ -21,17 +9,17 @@ function agentPath(projectRoot: string, path: string): string {
 export function getAgentCapabilities(
   projectRoot: string,
   scope?: string,
-): Promise<AgentCapabilityCatalog> {
+): Promise<ResponseOf<"/agent/capabilities", "get">> {
   const query = new URLSearchParams({ project_root: projectRoot });
   if (scope) query.set("scope", scope);
-  return request<AgentCapabilityCatalog>(apiUrl(`/agent/capabilities?${query.toString()}`));
+  return request(apiUrl(`/agent/capabilities?${query.toString()}`));
 }
 
 export function createAgentSession(
   projectRoot: string,
-  body: AgentSessionCreateRequest,
-): Promise<AgentSession> {
-  return request<AgentSession>(agentPath(projectRoot, "/agent/sessions"), {
+  body: RequestOf<"/agent/sessions", "post">,
+): Promise<ResponseOf<"/agent/sessions", "post">> {
+  return request(agentPath(projectRoot, "/agent/sessions"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -41,8 +29,8 @@ export function createAgentSession(
 export function getAgentSession(
   projectRoot: string,
   sessionId: string,
-): Promise<AgentSession> {
-  return request<AgentSession>(
+): Promise<ResponseOf<"/agent/sessions/{session_id}", "get">> {
+  return request(
     agentPath(projectRoot, `/agent/sessions/${encodeURIComponent(sessionId)}`),
   );
 }
@@ -61,7 +49,7 @@ export function agentAuditExportUrl(
 export function getAgentSessionProjection(
   projectRoot: string,
   sessionId: string,
-): Promise<{ projection: AgentNavigationProjection }> {
+): Promise<ResponseOf<"/agent/sessions/{session_id}/projection", "get">> {
   return request(
     agentPath(
       projectRoot,
@@ -77,7 +65,7 @@ export function getAgentGraphNavigation(
     nodeRef?: string | null;
     forestNodeKey?: string | null;
   },
-): Promise<{ projection: AgentNavigationProjection }> {
+): Promise<ResponseOf<"/agent/navigation/graph", "get">> {
   const query = new URLSearchParams({
     project_root: projectRoot,
     run_id: target.runId,
@@ -91,10 +79,7 @@ export function getAgentOperationProjection(
   projectRoot: string,
   sessionId: string,
   recordId: string,
-): Promise<{
-  operation: AgentOperationRecord;
-  projection: AgentNavigationProjection;
-}> {
+): Promise<ResponseOf<"/agent/sessions/{session_id}/operations/{record_id}", "get">> {
   return request(
     agentPath(
       projectRoot,
@@ -105,33 +90,15 @@ export function getAgentOperationProjection(
 
 export function getAgentActivity(
   projectRoot: string,
-): Promise<{
-  activities: AgentActivityItem[];
-  events: AgentActivityEventItem[];
-  hierarchy?: AgentHierarchyNode | null;
-}> {
+): Promise<ResponseOf<"/agent/activity", "get">> {
   return request(agentPath(projectRoot, "/agent/activity"));
 }
 
-export type AgentForkProposalResponse = {
-  session_id: string;
-  source_session_entry_id: string;
-  proposal: AgentProposal;
-  navigation: AgentNavigationRef;
-  status: string;
-};
+export type AgentForkProposalResponse = ResponseOf<"/agent/fork-proposals", "post">;
 
 export function createAgentForkProposal(
   projectRoot: string,
-  body: {
-    session_id?: string | null;
-    chain_id?: string | null;
-    source_run_id: string;
-    source_node_ref: string;
-    source_session_entry_id?: string | null;
-    active_head_run_id: string;
-    reason?: string;
-  },
+  body: RequestOf<"/agent/fork-proposals", "post">,
 ): Promise<AgentForkProposalResponse> {
   return request(agentPath(projectRoot, "/agent/fork-proposals"), {
     method: "POST",
@@ -144,7 +111,7 @@ export function getAgentEvents(
   projectRoot: string,
   sessionId: string,
   afterSeq = 0,
-): Promise<{ events: AgentEvent[] }> {
+): Promise<ResponseOf<"/agent/sessions/{session_id}/events", "get">> {
   return request(
     `${agentPath(projectRoot, `/agent/sessions/${encodeURIComponent(sessionId)}/events`)}&after_seq=${afterSeq}`,
   );
@@ -154,12 +121,8 @@ export function confirmAgentProposal(
   projectRoot: string,
   sessionId: string,
   proposalId: string,
-  body: { revision: number; fingerprint: string; active_head_run_id: string },
-): Promise<{
-  proposal: AgentProposal;
-  operation: AgentOperationRecord;
-  status: string;
-}> {
+  body: RequestOf<"/agent/sessions/{session_id}/proposals/{proposal_id}/confirm", "post">,
+): Promise<ResponseOf<"/agent/sessions/{session_id}/proposals/{proposal_id}/confirm", "post">> {
   return request(
     agentPath(
       projectRoot,
@@ -178,7 +141,7 @@ export function declineAgentProposal(
   sessionId: string,
   proposalId: string,
   reason?: string,
-): Promise<{ proposal: AgentProposal; status: string }> {
+): Promise<ResponseOf<"/agent/sessions/{session_id}/proposals/{proposal_id}/decline", "post">> {
   return request(
     agentPath(
       projectRoot,
@@ -196,13 +159,8 @@ export function reviseAgentProposal(
   projectRoot: string,
   sessionId: string,
   proposalId: string,
-  body: {
-    base_revision: number;
-    changes: Record<string, unknown>;
-    expected_effect?: string[];
-    risks?: string[];
-  },
-): Promise<{ proposal: AgentProposal; status: string }> {
+  body: RequestOf<"/agent/sessions/{session_id}/proposals/{proposal_id}/revise", "post">,
+): Promise<ResponseOf<"/agent/sessions/{session_id}/proposals/{proposal_id}/revise", "post">> {
   return request(
     agentPath(
       projectRoot,
@@ -220,7 +178,7 @@ export function reconcileAgentOperation(
   projectRoot: string,
   sessionId: string,
   recordId: string,
-): Promise<{ operation: AgentOperationRecord; status: string }> {
+): Promise<ResponseOf<"/agent/sessions/{session_id}/operations/{record_id}/reconcile", "post">> {
   return request(
     agentPath(
       projectRoot,
@@ -236,7 +194,7 @@ export async function sendAgentTurn(
   question: string,
   signal?: AbortSignal,
   contextPacket?: Record<string, unknown>,
-): Promise<{ session: AgentSession; assistant: AgentSession["messages"][number]; status: string }> {
+): Promise<ResponseOf<"/agent/sessions/{session_id}/turns", "post">> {
   return request(
     agentPath(projectRoot, `/agent/sessions/${encodeURIComponent(sessionId)}/turns`),
     {
@@ -252,7 +210,7 @@ export async function sendAgentTurn(
 export function abortAgentTurn(
   projectRoot: string,
   sessionId: string,
-): Promise<{ status: "cancelling"; session_id: string }> {
+): Promise<ResponseOf<"/agent/sessions/{session_id}/abort", "post">> {
   return request(
     agentPath(projectRoot, `/agent/sessions/${encodeURIComponent(sessionId)}/abort`),
     { method: "POST" },

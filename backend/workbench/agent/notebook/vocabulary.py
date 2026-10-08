@@ -22,6 +22,7 @@ from __future__ import annotations
 from types import MappingProxyType
 from typing import Any
 
+from ...contracts.model.family import MODEL_FAMILY_CONTRACTS
 from ..recipe_contracts import RECIPE_CONTRACTS
 
 _TIME_SERIES_JSON_ARTIFACTS = (
@@ -76,40 +77,14 @@ DECLARED_ARTIFACT_TYPES = MappingProxyType(
 
 # The ARMA-GARCH pack owns the historical ``ts.*`` vocabulary above.  The
 # Notebook also exposes registered model capabilities whose primary result ids
-# are stable and already written by the estimation stage.  Keep this second
-# map separate: extending the pack-owned set would falsely claim that the pack
+# are stable and already written by the estimation stage; each family declares
+# them on its contract (``published_artifacts``).  Keep this second map
+# separate: extending the pack-owned set would falsely claim that the pack
 # produces cross-family model artifacts.
 _CAPABILITY_PRIMARY_ARTIFACTS = {
-    "ols": {"ols_1": "model_result"},
-    "logit": {"logit_1": "model_result"},
-    "probit": {"probit_1": "model_result"},
-    "poisson": {"poisson_1": "model_result"},
-    "negative_binomial": {"negative_binomial_1": "model_result"},
-    "panel_ols": {"panel_ols_1": "model_result"},
-    "iv_2sls": {"iv_2sls_1": "model_result"},
-    "did": {"did_1": "model_result"},
-    "cs_did": {"cs_did_1": "model_result"},
-    "sa_did": {"sa_did_1": "model_result"},
-    "dcdh": {"dcdh_1": "model_result"},
-    "glm:binomial": {"glm_1": "model_result"},
-    "glm:poisson": {"glm_1": "model_result"},
-    "glm:negative_binomial": {"glm_1": "model_result"},
-    "ordinal_logit": {
-        "ordinal_logit_1": "model_result",
-        "diagnostics_ordinal_logit_1": "diagnostic_result",
-    },
-    "multinomial_logit": {
-        "multinomial_logit_1": "model_result",
-        "diagnostics_multinomial_logit_1": "diagnostic_result",
-    },
-    "survival_cox": {
-        "survival_cox_1": "model_result",
-        "survival_evidence": "survival_evidence",
-    },
-    "anova": {"anova_1": "model_result"},
-    "quantile_regression": {"quantile_regression_1": "model_result"},
-    "linear_mixed_effects": {
-        "linear_mixed_effects_1.result": "model_result_packet"
+    **{
+        family: contract.published_artifact_types
+        for family, contract in MODEL_FAMILY_CONTRACTS.items()
     },
     "arma_garch_1": {"ts.artifact_manifest": "time_series_manifest"},
     **{

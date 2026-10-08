@@ -133,7 +133,7 @@ def assess(
     declaration: Any = None,
 ) -> dict[str, Any]:
     """Which admission items a family has, each verified against the repository."""
-    from .agent.workflow_contracts import MODEL_FAMILY_CONTRACTS
+    from .contracts.model.family import MODEL_FAMILY_CONTRACTS
 
     declared = declaration if declaration is not None else declaration_for(family)
     record = evidence.get(family, {})
@@ -180,7 +180,7 @@ def assess(
 
 def gap_list(root: Path) -> list[dict[str, Any]]:
     """Every family that is not yet admitted, with what it lacks and when."""
-    from .agent.workflow_contracts import MODEL_FAMILY_CONTRACTS
+    from .contracts.model.family import MODEL_FAMILY_CONTRACTS
 
     gaps = []
     for family in sorted(MODEL_FAMILY_CONTRACTS):

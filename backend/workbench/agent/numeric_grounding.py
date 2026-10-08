@@ -29,7 +29,7 @@ import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from decimal import ROUND_HALF_EVEN, ROUND_HALF_UP, Decimal, InvalidOperation
-from typing import Any
+from typing import Any, Literal
 
 CHECK_MESSAGE_NAME = "numeric_check"
 CALCULATE_TOOL_ID = "calculate"
@@ -78,7 +78,7 @@ class Finding:
 
     text: str
     closest: tuple[str, ...] = ()
-    kind: str = "number"
+    kind: Literal["number", "group_comparison"] = "number"
 
     def to_dict(self) -> dict[str, Any]:
         return {"text": self.text, "closest": list(self.closest), "kind": self.kind}

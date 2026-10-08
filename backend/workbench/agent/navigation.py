@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Literal, Required, get_args
+
+from typing_extensions import TypedDict
 
 from .chains import ChainStore, ForkStore
 from .events import AgentEvent, AgentEventStream
@@ -14,15 +16,50 @@ from .proposals import ProposalStore
 from .session import EntryRef, JsonlSessionRepository
 
 
+NavigationKind = Literal[
+    "graph_node", "agent_session", "agent_entry", "chain", "fork", "run", "operation", "diff", "proposal"
+]
+NavigationRelation = Literal["source", "parent", "child", "result", "audit", "context"]
+NavigationView = Literal["graph", "agent"]
+
+
+class NavigationHref(TypedDict, total=False):
+    """Where a reference opens: a view plus the identifiers it selects by."""
+
+    view: Required[NavigationView]
+    run_id: str
+    node_ref: str
+    node_hash: str
+    forest_node_key: str
+    session_id: str
+    chain_id: str
+    entry_id: str
+    fork_id: str
+    operation_record_id: str
+    diff: str
+    proposal_id: str
+
+
 @dataclass(frozen=True)
 class AgentNavigationRef:
-    kind: str
+    kind: NavigationKind
     id: str
     label: str
-    relation: str
+    relation: NavigationRelation
     available: bool
-    href: dict[str, str]
+    href: NavigationHref
     reason: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.kind not in get_args(NavigationKind):
+            raise ValueError(f"unknown navigation kind: {self.kind!r}")
+        if self.relation not in get_args(NavigationRelation):
+            raise ValueError(f"unknown navigation relation: {self.relation!r}")
+        if self.href.get("view") not in get_args(NavigationView):
+            raise ValueError(f"unknown navigation view: {self.href.get('view')!r}")
+        unknown = set(self.href) - set(NavigationHref.__annotations__)
+        if unknown:
+            raise ValueError(f"unknown navigation href keys: {sorted(unknown)}")
 
     def to_dict(self) -> dict[str, Any]:
         result: dict[str, Any] = {
@@ -1040,10 +1077,10 @@ class AgentNavigationProjector:
     def _ref(
         self,
         *,
-        kind: str,
+        kind: NavigationKind,
         identifier: str,
         label: str,
-        relation: str,
+        relation: NavigationRelation,
         available: bool,
         href: dict[str, str],
         reason: str | None = None,
@@ -1054,7 +1091,7 @@ class AgentNavigationProjector:
             label=label,
             relation=relation,
             available=available,
-            href={key: value for key, value in href.items() if value},
+            href={key: value for key, value in href.items() if value},  # type: ignore[typeddict-item]
             reason=reason,
         )
 

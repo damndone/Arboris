@@ -16,10 +16,8 @@ import json
 
 import pytest
 
-from workbench.agent.workflow_contracts import (
-    MODEL_FAMILY_CONTRACTS,
-    WORKFLOW_STEP_SPEC_CONTRACTS,
-)
+from workbench.agent.workflow_contracts import WORKFLOW_STEP_SPEC_CONTRACTS
+from workbench.contracts.model.family import MODEL_FAMILY_CONTRACTS
 
 
 def _genesis_schema() -> dict:

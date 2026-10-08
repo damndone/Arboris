@@ -9,6 +9,7 @@ import { NodeOperationContextProvider } from "../NodeOperationContextProvider";
 import type { AskAIResponse } from "./askAiClient";
 import { askAiForNode, fetchLlmConfig } from "./askAiClient";
 import { AskAISection } from "./AskAISection";
+import { chatReplyFixture } from "../../../apiFixtures";
 
 vi.mock("./askAiClient", () => ({
   askAiForNode: vi.fn(),
@@ -147,7 +148,7 @@ describe("AskAISection", () => {
     expect(screen.getByTestId("ask-ai-elapsed")).toHaveTextContent("Working · 3s");
 
     await act(async () => {
-      deferred.resolve({ text: "completed" });
+      deferred.resolve(chatReplyFixture({ text: "completed" }));
       await deferred.promise;
     });
     expect(screen.queryByTestId("ask-ai-elapsed")).toBeNull();
@@ -169,7 +170,7 @@ describe("AskAISection", () => {
     );
 
     await act(async () => {
-      deferred.resolve({ text: "stale answer from node A" });
+      deferred.resolve(chatReplyFixture({ text: "stale answer from node A" }));
       await deferred.promise;
     });
 
@@ -201,7 +202,7 @@ describe("AskAISection", () => {
     expect(vi.mocked(askAiForNode)).toHaveBeenCalledTimes(2);
 
     await act(async () => {
-      fresh.resolve({ text: "fresh answer from node A" });
+      fresh.resolve(chatReplyFixture({ text: "fresh answer from node A" }));
       await fresh.promise;
     });
     expect(screen.getByTestId("ask-ai-answer")).toHaveTextContent(
@@ -209,7 +210,7 @@ describe("AskAISection", () => {
     );
 
     await act(async () => {
-      stale.resolve({ text: "stale answer from node A" });
+      stale.resolve(chatReplyFixture({ text: "stale answer from node A" }));
       await stale.promise;
     });
 
@@ -219,9 +220,9 @@ describe("AskAISection", () => {
   });
 
   it("renders model JSON-looking response as text, not as an action", async () => {
-    vi.mocked(askAiForNode).mockResolvedValueOnce({
+    vi.mocked(askAiForNode).mockResolvedValueOnce(chatReplyFixture({
       text: '{"operation":"rerun","owner_run_id":"run_a"}',
-    });
+    }));
     const seed = makeOwnerResolutionSeedFixture();
     renderAskAISection(seed.activeHeadRunId);
 
@@ -300,7 +301,7 @@ describe("AskAISection", () => {
         screen.getByRole("button", { name: "Ask AI about this node" }),
       ).toBeEnabled();
     });
-    vi.mocked(askAiForNode).mockResolvedValueOnce({ text: "grounded" });
+    vi.mocked(askAiForNode).mockResolvedValueOnce(chatReplyFixture({ text: "grounded" }));
     fireEvent.click(screen.getByRole("button", { name: "Ask AI about this node" }));
 
     await waitFor(() => expect(askAiForNode).toHaveBeenCalledTimes(1));
@@ -355,7 +356,7 @@ describe("AskAISection", () => {
   });
 
   it("renders per-artifact Explain buttons that fire a focused question (A3)", async () => {
-    vi.mocked(askAiForNode).mockResolvedValueOnce({ text: "profile explained" });
+    vi.mocked(askAiForNode).mockResolvedValueOnce(chatReplyFixture({ text: "profile explained" }));
     const seed = makeOwnerResolutionSeedFixture();
     renderAskAISection(seed.activeHeadRunId, (node) => {
       node.artifacts = [{ name: "data_profile.json" }] as never;

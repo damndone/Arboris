@@ -132,7 +132,7 @@ def test_every_family_with_its_own_result_shape_is_readable_by_the_agent():
     needs a declared projection.
     """
     from workbench.contracts.model.result_envelope_registry import declaration_for
-    from workbench.agent.workflow_contracts import MODEL_FAMILY_CONTRACTS
+    from workbench.contracts.model.family import MODEL_FAMILY_CONTRACTS
 
     # `coefficient_intervals` is the ordinary coefficient table, which the
     # result summary already projects with its own bounds. Everything else has

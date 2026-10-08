@@ -7,7 +7,8 @@ import pandas as pd
 import pytest
 
 from tests.test_data_column_cast import _source_project
-from workbench.agent.operations import OperationRegistry, OperationValidationError
+from workbench.agent.operations import OperationRegistry
+from workbench.contracts.common.errors import OperationValidationError
 from workbench.agent.workflow_contracts import (
     WORKFLOW_STEP_OPERATIONS,
     WORKFLOW_STEP_SPEC_CONTRACTS,

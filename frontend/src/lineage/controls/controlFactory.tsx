@@ -8,8 +8,8 @@
 //     Consumers (OperationSection) call `renderControl(...)` and stay kind-agnostic.
 //   - Every EditableControl kind is registered, so a new backend kind can't crash the UI.
 //   - `visible_when` is preserved on the descriptor (forward-compat) but NOT enforced.
-//   - v1.6.6: ALL kinds are now interactive. `makePlaceholder` survives only as the
-//     defensive fallback for an unrecognised backend kind (so a new kind can't crash).
+//   - v1.8.12: the kinds are the backend's (generated). column/integer/number/
+//     object/json render as read-only placeholders, as they always did here.
 
 import type { ReactElement } from "react";
 import type { EditableControl } from "../api/graphViewTypes";
@@ -23,23 +23,29 @@ export interface ControlProps {
 
 export type ControlKind = EditableControl["kind"];
 
+/** Every kind the backend emits (generated from its ControlKind). */
 export const CONTROL_KINDS: readonly ControlKind[] = [
   "select",
-  "columns",
-  "radio",
   "multiselect",
-  "slider",
+  "column",
+  "columns",
   "text",
-  "textarea",
+  "integer",
+  "number",
   "toggle",
+  "object",
+  "json",
 ] as const;
 
-/** Kinds that are fully interactive. v1.6.6 promoted the remaining five
- *  (radio/slider/text/textarea/toggle) from read-only placeholders, so every
- *  kind is now interactive — the set equals CONTROL_KINDS. */
-export const ENABLED_CONTROL_KINDS: ReadonlySet<ControlKind> = new Set(
-  CONTROL_KINDS,
-);
+/** Kinds edited in place. The rest (a single column, numbers, structured
+ *  values) are shown read-only here; the run form edits them. */
+export const ENABLED_CONTROL_KINDS: ReadonlySet<ControlKind> = new Set<ControlKind>([
+  "select",
+  "multiselect",
+  "columns",
+  "text",
+  "toggle",
+]);
 
 // ── option normalisation ───────────────────────────────────────
 interface NormOption {
@@ -158,28 +164,7 @@ function MultiselectControl(props: ControlProps): ReactElement {
   return CheckboxListControl(props, "control-multiselect");
 }
 
-// ── v1.6.6 interactive controls (radio/toggle/slider/text/textarea) ──
-
-function RadioControl({ control, onChange }: ControlProps): ReactElement {
-  const options = normalizeOptions(control);
-  const current = String(control.value ?? "");
-  return (
-    <fieldset data-testid="control-radio" aria-label={control.label}>
-      {options.map((o) => (
-        <label key={o.value}>
-          <input
-            type="radio"
-            name={control.key}
-            aria-label={o.label}
-            checked={current === o.value}
-            onChange={() => onChange(control.key, o.value)}
-          />
-          {o.label}
-        </label>
-      ))}
-    </fieldset>
-  );
-}
+// ── v1.6.6 interactive controls (toggle/text) ──
 
 function ToggleControl({ control, onChange }: ControlProps): ReactElement {
   const checked = control.value === true;
@@ -195,38 +180,11 @@ function ToggleControl({ control, onChange }: ControlProps): ReactElement {
   );
 }
 
-function SliderControl({ control, onChange }: ControlProps): ReactElement {
-  const value = control.value === undefined ? "" : String(control.value);
-  return (
-    <input
-      type="range"
-      data-testid="control-slider"
-      aria-label={control.label}
-      value={value}
-      min={control.min}
-      max={control.max}
-      step={control.step}
-      onChange={(e) => onChange(control.key, Number(e.target.value))}
-    />
-  );
-}
-
 function TextControl({ control, onChange }: ControlProps): ReactElement {
   return (
     <input
       type="text"
       data-testid="control-text"
-      aria-label={control.label}
-      value={String(control.value ?? "")}
-      onChange={(e) => onChange(control.key, e.target.value)}
-    />
-  );
-}
-
-function TextareaControl({ control, onChange }: ControlProps): ReactElement {
-  return (
-    <textarea
-      data-testid="control-textarea"
       aria-label={control.label}
       value={String(control.value ?? "")}
       onChange={(e) => onChange(control.key, e.target.value)}
@@ -256,13 +214,15 @@ export const CONTROL_REGISTRY: Record<
   (props: ControlProps) => ReactElement
 > = {
   select: SelectControl,
-  columns: ColumnsControl,
-  radio: RadioControl,
   multiselect: MultiselectControl,
-  slider: SliderControl,
+  column: makePlaceholder("column"),
+  columns: ColumnsControl,
   text: TextControl,
-  textarea: TextareaControl,
+  integer: makePlaceholder("integer"),
+  number: makePlaceholder("number"),
   toggle: ToggleControl,
+  object: makePlaceholder("object"),
+  json: makePlaceholder("json"),
 };
 
 /** The single render entry point. Looks up the registry by kind — never switches. */

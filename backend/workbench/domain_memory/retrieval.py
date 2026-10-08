@@ -6,9 +6,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import json
-from typing import Any
+from typing import Any, Literal
 
-from .contracts import ApplicabilityPredicate, DomainMemoryContentRevision
+from .contracts import ApplicabilityPredicate, ApplyMode, DomainMemoryContentRevision
 from .preferences import EffectiveDomainMemoryPreferences
 from .scope import MemoryScope
 from .store import DomainMemoryStore
@@ -28,6 +28,9 @@ class RetrievalOmission:
         return {"memory_id": self.memory_id, "revision": self.revision, "reason": self.reason}
 
 
+RetrievalOutcome = Literal["used", "empty", "not_used", "blocked"]
+
+
 @dataclass(frozen=True, slots=True)
 class RetrievedMemoryHint:
     memory_id: str
@@ -40,7 +43,7 @@ class RetrievedMemoryHint:
     recommended_target_refs: tuple[str, ...]
     source_summary_refs: tuple[str, ...]
     match_reason: tuple[str, ...]
-    apply_mode: str
+    apply_mode: ApplyMode
     apply_mode_reason: str
     vocabulary_version: str | None
     source_scope_ref: str
@@ -73,7 +76,7 @@ class RetrievedMemoryHint:
 class DomainMemoryRetrieval:
     retrieval_ref: str
     scope_ref: str
-    outcome: str
+    outcome: RetrievalOutcome
     reason: str
     entries: tuple[RetrievedMemoryHint, ...]
     omissions: tuple[RetrievalOmission, ...]

@@ -153,6 +153,7 @@ export function LlmProviderEditor({ provider, isCopy = false, onSaved, onBack }:
           request_model: requestModel,
           context_window_tokens: null,
           supports_1m: false,
+          supports_vision: false,
         },
       ];
     });

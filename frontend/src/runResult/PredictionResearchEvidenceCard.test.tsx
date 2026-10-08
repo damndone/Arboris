@@ -6,7 +6,13 @@ describe("PredictionResearchEvidenceCard", () => {
   it("shows the validated structure, OOS baseline, and control receipts", () => {
     render(<PredictionResearchEvidenceCard evidence={{
       status: "validated",
+      consumer: "table",
       model_id: "prediction_ridge_1",
+      sample_spec_hash: "sha256:sample",
+      dataset_sha256: null,
+      split_plan_hash: "sha256:split",
+      development: { cv: [] },
+      payload_versions: {},
       structure: { kind: "grouped" },
       split_parameters: { random_seed: 7 },
       oos: { n: 4, metrics: { r2: 0.42, rmse: 1.25 } },
@@ -33,13 +39,20 @@ describe("PredictionResearchEvidenceCard", () => {
   it("labels a readable historical result as legacy and not comparable", () => {
     render(<PredictionResearchEvidenceCard evidence={{
       status: "legacy",
+      consumer: "table",
       model_id: "prediction_ridge_1",
       protocol: "legacy_random_split_v0",
       validation: "payload_not_evaluated",
       comparability: "legacy_only",
       message: "Legacy evaluation — split protocol was not persisted. The result remains readable but is not comparable with v1.8.6 predictive-research results.",
       legacy_artifacts: [{
+        artifact_id: "prediction_ridge_1",
         model_id: "prediction_ridge_1",
+        model_type: "prediction_ridge",
+        status: "completed",
+        nobs: 20,
+        cv_folds: 5,
+        sampling_method: null,
         metrics: { test_r2: 0.31, test_rmse: 1.4 },
       }],
     }} />);

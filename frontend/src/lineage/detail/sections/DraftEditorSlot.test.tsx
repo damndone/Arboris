@@ -5,6 +5,7 @@ import { DraftEditorSlot } from "./DraftEditorSlot";
 import { DraftActionsProvider, type DraftActionsValue } from "../../drafts/DraftActionsContext";
 import { emptyRegistry, draftReducer } from "../../drafts/draftRegistry";
 import type { GraphViewNode } from "../../api/graphViewTypes";
+import { draftSummaryFixture } from "../../../apiFixtures";
 
 const draftNode = (over: Partial<GraphViewNode> = {}): GraphViewNode =>
   ({ id: "draft:d1", nodeKey: "draft:d1", raw: {}, stage: "model", kind: "model",
@@ -58,7 +59,7 @@ describe("DraftEditorSlot", () => {
     // hydrated entry: draft === null
     const registry = draftReducer(emptyRegistry(), {
       type: "hydrate",
-      summaries: [{ draft_id: "d1", status: "draft", draft_hash: "h1", source_node_hash: "hash_a", source_op_node_id: "model#0" }],
+      summaries: [draftSummaryFixture({ draft_id: "d1", draft_hash: "h1", source_node_hash: "hash_a", source_op_node_id: "model#0" })],
     });
     render(
       <DraftActionsProvider value={providerValue({ registry, onEnsureLoaded })}>

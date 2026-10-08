@@ -279,6 +279,13 @@ run_domain_memory_preflight() {
   return 0
 }
 
+run_dev_env_check() {
+  # The shared virtualenv's editable install must name the main checkout and
+  # the `workbench` command must start (scripts/check_dev_env.py).
+  resolve_pytest_python || return 1
+  "$PYTHON" scripts/check_dev_env.py
+}
+
 run_devline_control_verify() {
   resolve_pytest_python || return 1
   PYTHONPATH="backend${PYTHONPATH:+:$PYTHONPATH}" \
@@ -402,6 +409,8 @@ run_quick() {
 preflight_shared_deps
 preflight_exclusive
 run_domain_memory_preflight
+
+run_stage "DEV ENVIRONMENT (shared virtualenv install, workbench command)" run_dev_env_check
 
 if [ "$mode" = "quick" ]; then
   run_quick

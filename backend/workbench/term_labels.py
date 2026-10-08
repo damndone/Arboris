@@ -12,11 +12,8 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable, Mapping
 
-_CATEGORICAL = re.compile(
-    r"^C\((?:Q\((?P<quote>['\"])(?P<qcol>.+?)(?P=quote)\)|(?P<col>[^,()]+?))"
-    r"(?:\s*,[^\[]*)?\)\[T\.(?P<level>.+)\]$"
-)
-_QUOTED = re.compile(r"^Q\((?P<quote>['\"])(?P<col>.+)(?P=quote)\)$")
+from .formula_terms import categorical_level, unquote_column
+
 _POWER = re.compile(r"^(?P<col>.+)_pow(?P<degree>[2-9])$")
 _PATSY_POWER = re.compile(r"^I\((?P<col>[^*()]+?)\s*\*\*\s*(?P<degree>[2-9])\)$")
 _SUPERSCRIPT = {"2": "²", "3": "³"}
@@ -70,17 +67,16 @@ class TermLabeler:
 
     def label(self, term: str) -> str:
         term = str(term)
-        if ":" in term and not _CATEGORICAL.match(term):
+        categorical = categorical_level(term)
+        column = unquote_column(term)
+        if ":" in term and categorical is None and column is None:
             parts = term.split(":")
             if all(parts):
                 return " × ".join(self.label(part) for part in parts)
-        match = _CATEGORICAL.match(term)
-        if match:
-            column = match.group("qcol") or match.group("col").strip()
-            return self._level_term(column, match.group("level"))
-        match = _QUOTED.match(term)
-        if match:
-            return self.variable(match.group("col"))
+        if categorical is not None:
+            return self._level_term(*categorical)
+        if column is not None:
+            return self.variable(column)
         match = _POWER.match(term) or _PATSY_POWER.match(term)
         if match:
             column = match.group("col").strip()

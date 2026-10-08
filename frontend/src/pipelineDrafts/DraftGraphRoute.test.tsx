@@ -5,6 +5,8 @@ import { vi } from "vitest";
 import * as api from "../api";
 import * as notebookApi from "../notebook/notebookApi";
 import { DraftGraphRoute } from "./DraftGraphRoute";
+import { runDetailFixture } from "../apiFixtures";
+import { draftSourceRefFixture, runCreatedFromFixture } from "../apiFixtures";
 
 vi.mock("react-router-dom", async () => {
   const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom");
@@ -42,11 +44,10 @@ function makeDraftResponse({
       created_at: "",
       updated_at: "",
       status: "draft",
-      created_from: {
-        source_type: "run",
+      created_from: runCreatedFromFixture({
         source_run_id: "run_parent",
         source_model_node_id: "model_parent",
-      },
+      }),
       graph: {
         nodes: [
           {
@@ -56,6 +57,7 @@ function makeDraftResponse({
             run_input_id: "run_1",
             input_fingerprint: "i",
             schema_fingerprint: "s",
+            columns_summary: [],
             status: "bound",
           },
           {
@@ -76,7 +78,7 @@ function makeDraftResponse({
                 ]
               : [],
             editable_schema_hash: "schema",
-            source_ref: {},
+            source_ref: draftSourceRefFixture(),
             source_params: editable ? { covariance: "" } : {},
             params: editable ? { covariance } : {},
           },
@@ -468,18 +470,23 @@ test("reconciles a materialized Notebook option after the Draft run reaches term
     produced_lineage: { genesis: true },
     focus: { status: "pending_index", run_id: "run_genesis", poll: { genesis: true } },
   });
-  vi.mocked(api.waitForRunTerminal).mockResolvedValue({
+  vi.mocked(api.waitForRunTerminal).mockResolvedValue(runDetailFixture({
     run_id: "run_genesis",
-    status: "completed",
-    mode: "auto",
-    started_at: null,
     y: "outcome",
     x: ["treatment"],
-    lineage: [],
     artifact_counts: { model_result: 1 },
-    errors: { issues: [] },
+  }));
+  vi.mocked(notebookApi.completeNotebookOptionExecution).mockResolvedValue({
+    option_id: "opt_fixture",
+    option_revision: 1,
+    run_id: "run_fixture",
+    execution_status: "succeeded",
+    artifact_validation: {},
+    artifact_validation_scope: { mode: "run", ambient_artifact_ids: [], ambient_artifact_count: 0 },
+    active_head_advanced: true,
+    lifecycle_status: "executed",
+    trace_id: "trace_fixture",
   });
-  vi.mocked(notebookApi.completeNotebookOptionExecution).mockResolvedValue({});
 
   render(
     <MemoryRouter initialEntries={["/pipeline-drafts/draft_genesis?project_root=/tmp/project"]}>

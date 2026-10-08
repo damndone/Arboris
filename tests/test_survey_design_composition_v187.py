@@ -160,7 +160,7 @@ def test_result_shape_is_an_open_extension_point():
         "register_result_shape" in source
     ), "result_shape still rejects unknown shapes with no way to declare one"
 
-    from workbench.agent.workflow_contracts import register_result_shape
+    from workbench.contracts.model.result_shapes import register_result_shape
 
     register_result_shape(
         "synthetic_shape_v187",
@@ -168,7 +168,7 @@ def test_result_shape_is_an_open_extension_point():
         payload_version="1.0",
     )
 
-    from workbench.agent.workflow_contracts import ModelFamilyContract
+    from workbench.contracts.model.family import ModelFamilyContract
 
     contract = ModelFamilyContract(
         family="synthetic_family_v187",
@@ -189,7 +189,7 @@ def test_declaring_a_result_shape_requires_its_payload_schema():
     minimal schema and version, so consumers negotiate rather than guess from
     `artifact_type`.  A shape with no schema would put us back to guessing.
     """
-    from workbench.agent.workflow_contracts import ResultShapeError, register_result_shape
+    from workbench.contracts.model.result_shapes import ResultShapeError, register_result_shape
 
     with pytest.raises(ResultShapeError):
         register_result_shape("shape_without_schema_v187", payload_schema=None, payload_version="1.0")
@@ -218,7 +218,7 @@ def test_capability_projection_names_the_families_that_take_a_sampling_weight():
     three blocks removing from the backend.  Derived from the family contracts so
     a family that gains or loses `sampling` moves the form with it.
     """
-    from workbench.agent.workflow_contracts import MODEL_FAMILY_CONTRACTS
+    from workbench.contracts.model.family import MODEL_FAMILY_CONTRACTS
     from workbench.engine.capabilities import build_capabilities
 
     published = set(build_capabilities()["survey_design"]["sampling_weight_families"])

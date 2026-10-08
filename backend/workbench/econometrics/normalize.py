@@ -4,6 +4,8 @@ from typing import Any
 
 import pandas as pd
 
+from ..formula_terms import public_term
+
 # ============================================================
 # AUTO-DETECTION (computed from data, dataset-agnostic):
 #   - Coefficient rescaling: based on absolute coefficient size
@@ -24,12 +26,7 @@ _RESCALE_PER_100_THRESHOLD = 0.01     # |coef| < this → per-100
 
 
 def _public_term(label: Any) -> str:
-    term = str(label)
-    if term.startswith("Q('") and term.endswith("')"):
-        return term[3:-2]
-    if term.startswith('Q("') and term.endswith('")'):
-        return term[3:-2]
-    return term
+    return public_term(label)
 
 
 def _json_safe_float(value: Any) -> float | None:

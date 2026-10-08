@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GenesisWizard } from "./GenesisWizard";
 import * as api from "../../api";
+import { draftSummaryFixture, modelDraftNodeFixture, tableDraftNodeFixture, uploadDraftNodeFixture } from "../../apiFixtures";
 
 vi.mock("../../capabilities/useCapabilities", () => ({
   useCapabilities: () => ({
@@ -97,31 +98,19 @@ function draftResponse(
       },
       graph: {
         nodes: [
-          {
-            node_id: "source_1",
-            node_type: "input.upload",
-            upload: { sha256: sha, filename: "data.csv" },
-            sheet_names: ["Sheet1"],
-            columns: ["y", "x"],
-            status: "bound",
-          },
-          {
-            node_id: "table_1",
-            node_type: "table",
+          uploadDraftNodeFixture({ upload: { sha256: sha, filename: "data.csv" }, sheet_names: ["Sheet1"] }),
+          tableDraftNodeFixture({
             params: { sheet_name: "Sheet1", transpose: false },
             columns: ["y", "x"],
             status: tableStatus,
-          },
-          {
-            node_id: "model_1",
-            node_type: "model",
-            model_type: modelStatus === "configured" ? "ols" : undefined,
-            params:
-              modelStatus === "configured"
-                ? { model_type: "ols", y: "y", x: ["x"] }
-                : {},
+          }),
+          // A Genesis model node starts as the "auto" selector until configured.
+          modelDraftNodeFixture({
+            model_type: modelStatus === "configured" ? "ols" : "auto",
+            schema_id: modelStatus === "configured" ? "ols@v1" : "genesis.selector@v1",
+            params: modelStatus === "configured" ? { model_type: "ols", y: "y", x: ["x"] } : {},
             status: modelStatus,
-          },
+          }),
         ],
         edges: [
           { from: "source_1", to: "table_1" },
@@ -699,7 +688,7 @@ describe("GenesisWizard", () => {
       },
     };
     vi.spyOn(api, "listPipelineDrafts").mockResolvedValue([
-      { draft_id: "draft_g1", status: "draft", draft_hash: "h1" },
+      draftSummaryFixture({ draft_id: "draft_g1", draft_hash: "h1" }),
     ]);
     vi.spyOn(api, "getPipelineDraft").mockResolvedValue(ivDraft);
     const patchSpy = vi.spyOn(api, "patchDraftNode").mockResolvedValue(ivDraft);
@@ -752,7 +741,7 @@ describe("GenesisWizard", () => {
       },
     };
     vi.spyOn(api, "listPipelineDrafts").mockResolvedValue([
-      { draft_id: "draft_g1", status: "draft", draft_hash: "h1" },
+      draftSummaryFixture({ draft_id: "draft_g1", draft_hash: "h1" }),
     ]);
     vi.spyOn(api, "getPipelineDraft").mockResolvedValue(csvDraft);
     const patchSpy = vi.spyOn(api, "patchDraftNode").mockResolvedValue(csvDraft);

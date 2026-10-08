@@ -18,6 +18,15 @@ import * as api from "../api";
 import * as notebookApi from "../notebook/notebookApi";
 import type { GraphResponse } from "../lineage/types";
 import type { HeadSetResponse } from "../lineage/api/graphViewTypes";
+import {
+  draftFixture,
+  draftSummaryFixture,
+  modelDraftNodeFixture,
+  runCreatedFromFixture,
+  tableDraftNodeFixture,
+  uploadDraftNodeFixture,
+} from "../apiFixtures";
+import { forestEdgeFixture, forestHeadFixture, forestNodeFixture } from "../apiFixtures";
 
 const routerFuture = { v7_startTransition: true, v7_relativeSplatPath: true };
 
@@ -138,9 +147,9 @@ function forestResponse(focusKey = "hash_model"): HeadSetResponse {
     schema_version: 2,
     legacy: false,
     nodes: {
-      hash_source: {
+      hash_source: forestNodeFixture({
         id: "source:upload",
-        kind: "dataset",
+        kind: "dataset_stage",
         display_label: "Source",
         stage: "source",
         summary: null,
@@ -152,8 +161,8 @@ function forestResponse(focusKey = "hash_model"): HeadSetResponse {
         producing_stage: "source",
         cas_ref: null,
         runs: ["run_a", "run_child"],
-      },
-      [focusKey]: {
+      }),
+      [focusKey]: forestNodeFixture({
         id: "model:ols_1",
         kind: "model",
         display_label: focusKey === "hash_child" ? "Child OLS" : "Original OLS",
@@ -180,11 +189,11 @@ function forestResponse(focusKey = "hash_model"): HeadSetResponse {
             value: "clustered",
           },
         ],
-      },
+      }),
     },
-    edges: [{ source: "hash_source", target: focusKey }],
+    edges: [forestEdgeFixture({ source: "hash_source", target: focusKey })],
     heads: [
-      {
+      forestHeadFixture({
         run_id: "run_a",
         head_node_hash: "hash_model",
         from_node: null,
@@ -192,8 +201,8 @@ function forestResponse(focusKey = "hash_model"): HeadSetResponse {
         rerun_reason: null,
         status: "completed",
         created_at: "2026-06-27T00:00:00Z",
-      },
-      {
+      }),
+      forestHeadFixture({
         run_id: "run_child",
         head_node_hash: "hash_child",
         from_node: "model:ols_1",
@@ -201,7 +210,7 @@ function forestResponse(focusKey = "hash_model"): HeadSetResponse {
         rerun_reason: "manual_override",
         status: "completed",
         created_at: "2026-06-27T00:01:00Z",
-      },
+      }),
     ],
   };
 }
@@ -215,7 +224,7 @@ function forkedForestResponse(): HeadSetResponse {
         ...forestResponse("hash_model").nodes.hash_model,
         runs: ["run_a", "run_null_created"],
       },
-      hash_child: {
+      hash_child: forestNodeFixture({
         id: "model:ols_1",
         kind: "model",
         display_label: "Child OLS",
@@ -242,14 +251,14 @@ function forkedForestResponse(): HeadSetResponse {
             value: "robust",
           },
         ],
-      },
+      }),
     },
     edges: [
-      { source: "hash_source", target: "hash_model" },
-      { source: "hash_source", target: "hash_child" },
+      forestEdgeFixture({ source: "hash_source", target: "hash_model" }),
+      forestEdgeFixture({ source: "hash_source", target: "hash_child" }),
     ],
     heads: [
-      {
+      forestHeadFixture({
         run_id: "run_child",
         head_node_hash: "hash_child",
         from_node: "model:ols_1",
@@ -257,8 +266,8 @@ function forkedForestResponse(): HeadSetResponse {
         rerun_reason: "manual_override",
         status: "completed",
         created_at: "2026-06-27T00:01:00Z",
-      },
-      {
+      }),
+      forestHeadFixture({
         run_id: "run_null_created",
         head_node_hash: "hash_model",
         from_node: null,
@@ -266,8 +275,8 @@ function forkedForestResponse(): HeadSetResponse {
         rerun_reason: null,
         status: "completed",
         created_at: null,
-      },
-      {
+      }),
+      forestHeadFixture({
         run_id: "run_a",
         head_node_hash: "hash_model",
         from_node: null,
@@ -275,7 +284,7 @@ function forkedForestResponse(): HeadSetResponse {
         rerun_reason: null,
         status: "completed",
         created_at: "2026-06-27T00:00:00Z",
-      },
+      }),
     ],
   };
   return response;
@@ -303,18 +312,16 @@ function mountForestAt(initialPath: string) {
     run_id: "run_child",
     new_run_id: "run_child",
     new_active_head_id: "run_child",
-    focus: {
-      forest_node_key: "hash_child",
-      op_node_id: "model:ols_1",
-      node_hash: "hash_child",
-    },
+    focus: null,
     rerun_from: {
       owner_run_id: "run_a",
       op_node_id: "model:ols_1",
       node_hash: "hash_model",
       forest_node_key: "hash_model",
     },
-  });
+    produced_lineage: null,
+    accepted_context: null,
+});
   return render(
     <MemoryRouter
       initialEntries={[initialPath]}
@@ -867,18 +874,16 @@ describe("WorkbenchRouteContainer", () => {
       run_id: "run_child",
       new_run_id: "run_child",
       new_active_head_id: "run_child",
-      focus: {
-        forest_node_key: "hash_model",
-        op_node_id: "model:ols_1",
-        node_hash: "hash_model",
-      },
+      focus: null,
       rerun_from: {
         owner_run_id: "run_a",
         op_node_id: "model:ols_1",
         node_hash: "hash_model",
         forest_node_key: "hash_model",
       },
-    });
+      produced_lineage: null,
+      accepted_context: null,
+});
     render(
       <MemoryRouter
         initialEntries={["/?tab=lineage&tabs=hash_model&active=hash_model"]}
@@ -926,7 +931,9 @@ describe("WorkbenchRouteContainer", () => {
         node_hash: "hash_model",
         forest_node_key: "hash_model",
       },
-    });
+      produced_lineage: null,
+      accepted_context: null,
+});
     render(
       <MemoryRouter
         initialEntries={["/?tab=lineage&tabs=hash_model&active=hash_model"]}
@@ -989,7 +996,8 @@ describe("WorkbenchRouteContainer", () => {
           rerun_request_id: "req_focus",
         },
       },
-    });
+      accepted_context: null,
+});
     render(
       <MemoryRouter
         initialEntries={["/?tab=lineage&tabs=hash_model&active=hash_model"]}
@@ -1123,28 +1131,16 @@ describe("WorkbenchRouteContainer", () => {
           },
           graph: {
             nodes: [
-              {
-                node_id: "source_1",
-                node_type: "input.upload",
+              uploadDraftNodeFixture({
                 upload: { sha256: "sha_abc", filename: "data.xlsx" },
                 sheet_names: ["Sheet1"],
-                columns: ["y", "x"],
-                status: "bound",
-              },
-              {
-                node_id: "table_1",
-                node_type: "table",
+              }),
+              tableDraftNodeFixture({
                 params: { sheet_name: "Sheet1", transpose: false },
                 columns: ["y", "x"],
                 status: "configured",
-              },
-              {
-                node_id: "model_1",
-                node_type: "model",
-                model_type: "ols",
-                params: { y: "y", x: ["x"] },
-                status: "configured",
-              },
+              }),
+              modelDraftNodeFixture({ params: { y: "y", x: ["x"] }, status: "configured" }),
             ],
             edges: [
               { from: "source_1", to: "table_1" },
@@ -1200,11 +1196,7 @@ describe("WorkbenchRouteContainer", () => {
 
       await act(async () => {
         resolveSummaries([
-          {
-            draft_id: "genesis_d1",
-            status: "draft",
-            draft_hash: "h_genesis",
-          },
+          draftSummaryFixture({ draft_id: "genesis_d1", draft_hash: "h_genesis", model_type: null }),
         ]);
         await Promise.resolve();
       });
@@ -1343,11 +1335,7 @@ describe("WorkbenchRouteContainer", () => {
     it("zero-run projects with a genesis draft render the draft island on the canvas instead of the empty canvas", async () => {
       vi.spyOn(api, "fetchProjectForest").mockResolvedValue(emptyForestBody());
       vi.spyOn(api, "listPipelineDrafts").mockResolvedValue([
-        {
-          draft_id: "genesis_d1",
-          status: "draft",
-          draft_hash: "h_genesis",
-        },
+        draftSummaryFixture({ draft_id: "genesis_d1", draft_hash: "h_genesis", model_type: null }),
       ]);
       vi.spyOn(api, "getPipelineDraft").mockResolvedValue(genesisDraftResponse());
       mountHome();
@@ -1360,11 +1348,7 @@ describe("WorkbenchRouteContainer", () => {
     it("draft-only genesis reload exposes a topbar resume entry back into the wizard", async () => {
       vi.spyOn(api, "fetchProjectForest").mockResolvedValue(emptyForestBody());
       vi.spyOn(api, "listPipelineDrafts").mockResolvedValue([
-        {
-          draft_id: "genesis_d1",
-          status: "draft",
-          draft_hash: "h_genesis",
-        },
+        draftSummaryFixture({ draft_id: "genesis_d1", draft_hash: "h_genesis", model_type: null }),
       ]);
       vi.spyOn(api, "getPipelineDraft").mockResolvedValue(genesisDraftResponse());
       mountHome();
@@ -1486,9 +1470,9 @@ describe("draft execute — index-wait (v1.6.9 B1)", () => {
       schema_version: 2,
       legacy: false,
       nodes: {
-        hash_source: {
+        hash_source: forestNodeFixture({
           id: "source:upload",
-          kind: "dataset",
+          kind: "dataset_stage",
           display_label: "Source",
           stage: "source",
           summary: null,
@@ -1500,8 +1484,8 @@ describe("draft execute — index-wait (v1.6.9 B1)", () => {
           producing_stage: "source",
           cas_ref: null,
           runs: ["run_a"],
-        },
-        hash_model: {
+        }),
+        hash_model: forestNodeFixture({
           id: "model:ols_1",
           kind: "model",
           display_label: "Original OLS",
@@ -1528,11 +1512,11 @@ describe("draft execute — index-wait (v1.6.9 B1)", () => {
               value: "clustered",
             },
           ],
-        },
+        }),
       },
-      edges: [{ source: "hash_source", target: "hash_model" }],
+      edges: [forestEdgeFixture({ source: "hash_source", target: "hash_model" })],
       heads: [
-        {
+        forestHeadFixture({
           run_id: "run_a",
           head_node_hash: "hash_model",
           from_node: null,
@@ -1540,53 +1524,42 @@ describe("draft execute — index-wait (v1.6.9 B1)", () => {
           rerun_reason: null,
           status: "completed",
           created_at: "2026-06-27T00:00:00Z",
-        },
+        }),
       ],
     };
   }
 
   function draftSummary(): api.PipelineDraftSummary {
-    return {
+    return draftSummaryFixture({
       draft_id: "d1",
-      status: "draft",
       draft_hash: "h1",
       source_run_id: "run_a",
       source_model_node_id: "model:ols_1",
       source_op_node_id: "model:ols_1",
       source_node_hash: "hash_model",
       model_type: "ols",
-    };
+    });
   }
 
   function draftGet(withNotebook = false): api.PipelineDraftResponse {
-    const response = {
+    const response: api.PipelineDraftResponse = {
       draft_hash: "h1",
-      draft: {
+      draft: draftFixture({
         draft_id: "d1",
-        schema_version: "pipeline_draft.v1",
         created_at: "t",
         updated_at: "t",
-        status: "draft",
-        created_from: {
-          source_type: "node",
+        created_from: runCreatedFromFixture({
+          source_run_id: "run_a",
           source_node_hash: "hash_model",
           source_op_node_id: "model:ols_1",
-        },
+        }),
         graph: {
-          nodes: [
-            {
-              node_id: "model_1",
-              node_type: "model",
-              model_type: "ols",
-              params: { y: "y", x: ["x"] },
-              status: "configured",
-            },
-          ],
+          nodes: [modelDraftNodeFixture({ params: { y: "y", x: ["x"] }, status: "configured" })],
           edges: [],
         },
         default_execution_mode: "rerun_child",
-      },
-    } as api.PipelineDraftResponse;
+      }),
+    };
     if (withNotebook) {
       response.draft.notebook_provenance = {
         notebook_id: "nb_1",

@@ -16,16 +16,14 @@ from typing import Any
 import numpy as np
 
 from ..contracts.model.result_envelope_registry import declaration_for
+from ..formula_terms import unquote_column
 
 _FACTOR = re.compile(r"^C\((?P<name>.+?)(?:,[^()]*)?\)$")
-_QUOTED = re.compile(r"^Q\(['\"](?P<name>.+)['\"]\)$")
-
-
 def term_label(term: str) -> str:
     """`region` from `C(region)`, `education` from `Q('education')`."""
-    match = _QUOTED.match(term)
-    if match:
-        return match.group("name").strip()
+    column = unquote_column(term)
+    if column is not None:
+        return column
     match = _FACTOR.match(term)
     if match:
         return term_label(match.group("name").strip())

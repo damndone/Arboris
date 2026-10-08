@@ -360,21 +360,24 @@ def test_cli_run_stdout_is_run_id_only_stderr_carries_url(
         lambda project_root, run_id: f"http://example/runs/{run_id}",
     )
 
-    def fake_run_workflow(*_args, **_kwargs):
-        return {"run_id": "stub-run-42"}
+    run_ids: list[str] = []
 
-    # run_workflow is imported lazily inside the command body; patch the
-    # source module so the import resolves to our stub.
-    import workbench.orchestrator as orch
+    def fake_run_workflow(*args, **_kwargs):
+        run_ids.append(args[1])
+        return {"run_id": args[1], "status": "completed"}
 
-    monkeypatch.setattr(orch, "run_workflow", fake_run_workflow)
+    # The CLI submits through the run service POST /runs uses (v1.8.12);
+    # stub its workflow call.
+    import workbench.services.run_service as run_service
+
+    monkeypatch.setattr(run_service, "_run_workflow", fake_run_workflow)
 
     # Click ≥8.2 separates stdout/stderr by default; the older
     # `mix_stderr=False` kwarg has been removed. We rely on the
     # default (separated) behaviour.
     runner = CliRunner()
+    runner.invoke(app, ["create", str(tmp_path), "proj"])
     project = tmp_path / "proj"
-    project.mkdir()
     data = tmp_path / "data.csv"
     data.write_text("y,x\n1,2\n3,4\n")
 
@@ -385,7 +388,7 @@ def test_cli_run_stdout_is_run_id_only_stderr_carries_url(
     assert result.exit_code == 0, result.output
     # stdout: only the run_id, with a single trailing newline. This is
     # the contract scripts depend on (e.g. `RUN_ID=$(workbench run ...)`).
-    assert result.stdout == "stub-run-42\n"
+    assert result.stdout == f"{run_ids[0]}\n"
     # stderr: human-facing URL line, prefixed with "Lineage:".
     assert "Lineage:" in result.stderr
-    assert "stub-run-42" in result.stderr
+    assert run_ids[0] in result.stderr

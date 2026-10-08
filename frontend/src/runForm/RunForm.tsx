@@ -539,7 +539,7 @@ export function RunForm(props: RunFormProps) {
       // the run to terminate (so RunResultView fetches a finished run,
       // not a half-baked one), but we stay on Submit and let the user
       // click "Open Lineage →" themselves if they want the graph.
-      let finalStatus = result.status;
+      let finalStatus: string | null = result.status;
       if (result.run_id && result.status === "running") {
         setActivity("Running workflow — waiting for completion");
         setProgressLine(null);

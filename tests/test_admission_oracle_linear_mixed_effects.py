@@ -1,6 +1,7 @@
 """Independent R admission oracle for linear_mixed_effects; real Workbench workflow."""
 import math
 import json
+import os
 import time
 import shutil
 
@@ -9,6 +10,8 @@ from workbench.app import app
 from pathlib import Path
 
 import pytest
+import evidence_retention
+from evidence_retention import run_dir
 from workbench.artifacts import read_json
 from workbench.contracts.model.inference_kernel import kernel_relative_path
 from workbench.projects import create_project
@@ -37,49 +40,68 @@ def local_contained_profile():
 
 
 @pytest.fixture(scope="module")
-def fitted(tmp_path_factory, local_contained_profile):
+def fitted(request, tmp_path_factory, local_contained_profile):
     project = create_project(tmp_path_factory.mktemp("oracle-linear_mixed_effects"), "oracle")
-    # Only the public run service can issue an admission sealed to this run's
-    # executed inputs. An environment profile alone is not that live binding.
-    # The service executes the real startup canary; this fixture never mocks it.
-    with TestClient(app) as client:
-        with (FIXTURES / "data.csv").open("rb") as source:
-            submitted = client.post("/runs", data={
-                "project_root": str(project.root), "mode": "auto",
-                "model_type": "linear_mixed_effects", "y": "y", "x": "x",
-                "model_options": json.dumps({"subject_id": "g", "time": "time",
-                    "group": "arm", "fit_method": "reml", "random_slope": False}),
-            }, files={"file": ("data.csv", source, "text/csv")})
-        assert submitted.status_code == 200, submitted.text
-        run_id = submitted.json()["run_id"]
-        deadline = time.monotonic() + 180
-        while time.monotonic() < deadline:
-            response = client.get(f"/runs/{run_id}", params={"project_root": str(project.root)})
-            assert response.status_code == 200, response.text
-            outcome = response.json()
-            if outcome["status"] in {"completed", "blocked", "failed"}:
-                break
-            time.sleep(0.05)
-        else:
-            pytest.fail("Host LMM run did not finish within 180 seconds")
-    root = project.root / "runs" / run_id
-    assert outcome["status"] == "completed", read_json(root / "errors.json")
-    manifest = read_json(root / "run_manifest.json")
-    assert manifest["execution_profile"] == "local_contained"
-    assert manifest["containment_evidence"] == "local_startup_canary"
-    read_server_owned_run_artifacts(project.root, run_id, required=True)
-    # Persist every completed host run before numerical assertions; pytest's
-    # automatic temporary-directory retention must not erase this evidence.
-    retained = Path(__file__).parents[1] / "local/v1811-lmm-host/runs" / run_id
-    retained.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(root, retained)
-    read_server_owned_run_artifacts(retained.parent.parent, run_id, required=True)
-    public = read_lmm_public_results(root)
-    assert len(public) == 1
-    assert public[0]["payload"]["converged"] is True
-    print("host evidence:", str(retained), manifest["containment_evidence"])
-    return read_json(root / kernel_relative_path('linear_mixed_effects_1')), public[0]["payload"], root
+    failures_before = request.session.testsfailed
+    run_id = None
+    try:
+        # Only the public run service can issue an admission sealed to this run's
+        # executed inputs. An environment profile alone is not that live binding.
+        # The service executes the real startup canary; this fixture never mocks it.
+        with TestClient(app) as client:
+            with (FIXTURES / "data.csv").open("rb") as source:
+                submitted = client.post("/runs", data={
+                    "project_root": str(project.root), "mode": "auto",
+                    "model_type": "linear_mixed_effects", "y": "y", "x": "x",
+                    "model_options": json.dumps({"subject_id": "g", "time": "time",
+                        "group": "arm", "fit_method": "reml", "random_slope": False}),
+                }, files={"file": ("data.csv", source, "text/csv")})
+            assert submitted.status_code == 200, submitted.text
+            run_id = submitted.json()["run_id"]
+            deadline = time.monotonic() + 180
+            while time.monotonic() < deadline:
+                response = client.get(f"/runs/{run_id}", params={"project_root": str(project.root)})
+                assert response.status_code == 200, response.text
+                outcome = response.json()
+                if outcome["status"] in {"completed", "blocked", "failed"}:
+                    break
+                time.sleep(0.05)
+            else:
+                pytest.fail("Host LMM run did not finish within 180 seconds")
+        root = project.root / "runs" / run_id
+        assert outcome["status"] == "completed", read_json(root / "errors.json")
+        manifest = read_json(root / "run_manifest.json")
+        assert manifest["execution_profile"] == "local_contained"
+        assert manifest["containment_evidence"] == "local_startup_canary"
+        read_server_owned_run_artifacts(project.root, run_id, required=True)
+        public = read_lmm_public_results(root)
+        assert len(public) == 1
+        assert public[0]["payload"]["converged"] is True
+        result = read_json(root / kernel_relative_path('linear_mixed_effects_1')), public[0]["payload"], root
+    except BaseException:
+        if run_id is not None:
+            _retain_host_run(project.root, run_id, failed_by=request.node.nodeid + " (fixture)")
+        raise
+    yield result
+    # The host run is kept only when a test on it failed or the user asked for
+    # it (WORKBENCH_KEEP_EVIDENCE=1); retention is bounded by evidence_retention.
+    if request.session.testsfailed > failures_before:
+        _retain_host_run(project.root, run_id, failed_by=request.node.nodeid)
+    elif os.environ.get("WORKBENCH_KEEP_EVIDENCE") == "1":
+        _retain_host_run(project.root, run_id)
 
+
+def _retain_host_run(project_root, run_id, *, failed_by=None):
+    source = project_root / "runs" / run_id
+    if not source.is_dir():
+        return
+    evidence = run_dir("lmm-host")
+    retained = evidence / "runs" / run_id
+    shutil.copytree(source, retained)
+    read_server_owned_run_artifacts(evidence, run_id, required=True)
+    if failed_by:
+        evidence_retention.STORE.mark_failed("lmm-host", failed_by)
+    print("host evidence:", str(retained))
 
 def test_coefficients_and_standard_errors_match_r(fitted):
     fitted, _, _ = fitted

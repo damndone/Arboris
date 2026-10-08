@@ -20,8 +20,16 @@ from ..services.draft_materialization import (
 
 from ..services.draft_service import execute_genesis_draft, execute_rerun_child_draft
 from ..api_errors import WorkbenchAPIError
+from .responses.drafts import (
+    DraftExecution,
+    DraftValidation,
+    PipelineDraftDeleted,
+    PipelineDraftList,
+    StoredPipelineDraft,
+)
+from .typed_routes import TypedAPIRoute
 
-router = APIRouter()
+router = APIRouter(route_class=TypedAPIRoute)
 
 
 class PipelineDraftFromNodeRequest(BaseModel):
@@ -87,7 +95,7 @@ def _draft_http_error(exc: Exception) -> HTTPException | WorkbenchAPIError:
 def create_pipeline_draft_from_node(
     project_root: str,
     body: PipelineDraftFromNodeRequest,
-) -> dict[str, Any]:
+) -> StoredPipelineDraft:
     try:
         stored = create_rerun_draft_from_node(
             Path(project_root),
@@ -116,7 +124,7 @@ class PipelineDraftGenesisRequest(BaseModel):
 def create_pipeline_draft_genesis(
     project_root: str,
     body: PipelineDraftGenesisRequest,
-) -> dict[str, Any]:
+) -> StoredPipelineDraft:
     """v1.6.8: parentless genesis draft chain (source -> table -> model).
 
     Same store + lifecycle as from-node drafts; created_from.source_type
@@ -141,7 +149,7 @@ def create_pipeline_draft_genesis(
 
 
 @router.get("/pipeline-drafts")
-def list_pipeline_drafts(project_root: str) -> dict[str, Any]:
+def list_pipeline_drafts(project_root: str) -> PipelineDraftList:
     try:
         drafts = _pipeline_draft_store(project_root).list()
     except Exception as exc:
@@ -150,7 +158,7 @@ def list_pipeline_drafts(project_root: str) -> dict[str, Any]:
 
 
 @router.get("/pipeline-drafts/{draft_id}")
-def get_pipeline_draft(draft_id: str, project_root: str) -> dict[str, Any]:
+def get_pipeline_draft(draft_id: str, project_root: str) -> StoredPipelineDraft:
     try:
         stored = _pipeline_draft_store(project_root).get(draft_id)
     except Exception as exc:
@@ -163,7 +171,7 @@ def patch_pipeline_draft(
     draft_id: str,
     project_root: str,
     body: PipelineDraftPatchRequest,
-) -> dict[str, Any]:
+) -> StoredPipelineDraft:
     try:
         stored = _pipeline_draft_store(project_root).update_params(
             draft_id,
@@ -189,7 +197,7 @@ def patch_pipeline_draft_node(
     node_id: str,
     project_root: str,
     body: DraftNodePatchRequest,
-) -> dict[str, Any]:
+) -> StoredPipelineDraft:
     """v1.6.8 genesis wizard step: configure table_1 / model_1 in place.
 
     Genesis-only (409 otherwise); the bound source node is immutable —
@@ -206,7 +214,7 @@ def patch_pipeline_draft_node(
 
 
 @router.delete("/pipeline-drafts/{draft_id}")
-def delete_pipeline_draft(draft_id: str, project_root: str) -> dict[str, Any]:
+def delete_pipeline_draft(draft_id: str, project_root: str) -> PipelineDraftDeleted:
     store = _pipeline_draft_store(project_root)
     # v1.6.8 F6: extract the genesis upload sha BEFORE deleting, defensively —
     # a corrupt/missing draft must still be discardable (just without blob GC).
@@ -249,7 +257,7 @@ def validate_pipeline_draft(
     draft_id: str,
     project_root: str,
     body: PipelineDraftValidateRequest,
-) -> dict[str, Any]:
+) -> DraftValidation:
     try:
         stored = _pipeline_draft_store(project_root).get(draft_id)
     except Exception as exc:
@@ -262,7 +270,7 @@ def execute_pipeline_draft(
     draft_id: str,
     project_root: str,
     body: PipelineDraftExecuteRequest,
-) -> dict[str, Any]:
+) -> DraftExecution:
     if body.execution_mode == "new_run":
         raise HTTPException(status_code=409, detail="NEW_RUN_EXECUTION_NOT_ENABLED")
 

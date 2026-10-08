@@ -387,3 +387,12 @@ def test_gate_does_not_police_a_worktree_that_carries_its_own_venv(
     assert result.returncode == 0, result.stderr
     assert "REFUSING" not in result.stderr
     assert all(line.startswith("local:") for line in invocations)
+
+
+def test_both_modes_check_the_shared_virtualenv_install(tmp_path: Path) -> None:
+    source = GATE_SCRIPT.read_text()
+    assert '"$PYTHON" scripts/check_dev_env.py' in source
+    stage = 'run_stage "DEV ENVIRONMENT (shared virtualenv install, workbench command)" run_dev_env_check'
+    assert source.index(stage) < source.index('if [ "$mode" = "quick" ]; then\n  run_quick')
+    result, _, _ = _run_gate(tmp_path, local_has_pytest=True, common_has_pytest=True)
+    assert "DEV ENVIRONMENT" in result.stdout

@@ -69,3 +69,43 @@ def test_curator_candidate_can_be_explicitly_approved_without_a_hidden_transitio
     assert response.status_code == 200
     assert response.json()["automatic_execution"] is False
     assert response.json()["validity"]["state"] == "active"
+
+
+def test_an_approved_memory_can_be_archived_and_restored_through_the_routes(tmp_path: Path) -> None:
+    client, candidates = _client(tmp_path)
+    candidate = candidates.pending(SCOPE)[0]
+    approved = client.post(
+        f"/domain-memory/review/candidates/{candidate.candidate_id}",
+        json={
+            "decision": "approved",
+            "expected_revision": candidate.revision,
+            "actor_id": "user-a",
+            "approved_at": "2026-08-01T00:00:00Z",
+            "review_after": "2026-12-01T00:00:00Z",
+        },
+    )
+    assert approved.status_code == 200, approved.text
+    memory_id = approved.json()["content"]["memory_id"]
+    validity = approved.json()["validity"]
+
+    archived = client.post(
+        f"/domain-memory/review/memories/{memory_id}/state",
+        json={
+            "expected_approval_ref": validity["approval_ref"],
+            "expected_validity_revision": validity["validity_revision"],
+            "state": "archived",
+            "actor_id": "user-a",
+            "effective_at": "2026-09-01T00:00:00Z",
+        },
+    )
+    assert archived.status_code == 200, archived.text
+    assert archived.json()["validity"]["state"] == "archived"
+    assert archived.json()["automatic_execution"] is False
+
+    restored = client.post(
+        f"/domain-memory/review/memories/{memory_id}/restore",
+        json={"actor_id": "user-a", "approved_at": "2026-09-02T00:00:00Z", "evidence_ref": "review:restore-1"},
+    )
+    assert restored.status_code == 200, restored.text
+    assert restored.json()["validity"]["state"] == "active"
+    assert restored.json()["approval"]["approver_id"] == "user-a"

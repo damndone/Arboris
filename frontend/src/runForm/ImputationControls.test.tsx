@@ -2,23 +2,20 @@ import { expect, test, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { ImputationControls } from "./ImputationControls";
 import type { Capabilities } from "../capabilities/types";
+import { capabilitiesFixture } from "../apiFixtures";
 
-const caps_one: Capabilities = {
-  schema_version: 1,
-  model_types: [],
+const caps_one: Capabilities = capabilitiesFixture({
   imputation_methods: [
-    { key: "mice", label: "MICE (Multiple Imputation)" },
+    { key: "mice", label: "MICE (Multiple Imputation)", description: "" },
   ],
-};
+});
 
-const caps_two: Capabilities = {
-  schema_version: 1,
-  model_types: [],
+const caps_two: Capabilities = capabilitiesFixture({
   imputation_methods: [
-    { key: "mice", label: "MICE" },
-    { key: "knn", label: "KNN" },
+    { key: "mice", label: "MICE", description: "" },
+    { key: "knn", label: "KNN", description: "" },
   ],
-};
+});
 
 test("with exactly one imputation method renders a checkbox", () => {
   const onChange = vi.fn();
@@ -55,7 +52,7 @@ test("renders nothing when capabilities undefined or imputation_methods empty", 
 
   rerender(
     <ImputationControls
-      capabilities={{ schema_version: 1, model_types: [], imputation_methods: [] }}
+      capabilities={capabilitiesFixture()}
       value={null}
       onChange={() => {}}
     />,

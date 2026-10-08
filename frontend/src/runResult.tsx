@@ -44,6 +44,7 @@ import { useArmaGarchArtifacts } from "./runResult/useArmaGarchArtifacts";
 import { useArmaGarchCharts } from "./runResult/useArmaGarchCharts";
 import { PredictionResearchEvidenceCard } from "./runResult/PredictionResearchEvidenceCard";
 import {CountModelResultCard} from "./runResult/CountModelResultCard";
+import { dummyCodedColumn } from "./format/formulaTerms";
 import { formatEstimate, formatPValue as formatPValueRule } from "./format/numbers";
 
 /** Stable identity so the loader effects do not re-run on every render. */
@@ -62,13 +63,13 @@ type Props = {
   ) => void;
 };
 
-function statusBadgeClass(status: string): string {
+function statusBadgeClass(status: string | null): string {
   if (status === "completed") return "badge badge-ok";
   if (status === "blocked" || status === "failed") return "badge badge-warn";
   return "badge badge-neutral";
 }
 
-function statusLabel(status: string): string {
+function statusLabel(status: string | null): string {
   if (!status) return "—";
   return status.charAt(0).toUpperCase() + status.slice(1);
 }
@@ -135,18 +136,11 @@ function dummyCodedColumnsFromModels(detail: RunDetail): Set<string> {
   const columns = new Set<string>();
   for (const model of detail.model_results ?? []) {
     for (const term of Object.keys(model.coefficients ?? {})) {
-      const parsed = parseDummyCodedColumn(term);
+      const parsed = dummyCodedColumn(term);
       if (parsed) columns.add(parsed);
     }
   }
   return columns;
-}
-
-function parseDummyCodedColumn(term: string): string | null {
-  const single = /^C\(Q\('(.+?)'\)\)\[T\./.exec(term);
-  if (single) return single[1];
-  const double = /^C\(Q\("(.+?)"\)\)\[T\./.exec(term);
-  return double?.[1] ?? null;
 }
 
 function autoDummyCodedIssue(column: string): IssueRecord {

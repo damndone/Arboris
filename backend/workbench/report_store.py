@@ -14,9 +14,37 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict, Field
+
 from .artifacts import read_json, register_artifact, write_json
 
 _REPORT_ID = re.compile(r"^rpt_[A-Za-z0-9_-]{3,100}$")
+
+
+class AiReportRecordRequest(BaseModel):
+    """The immutable evidence snapshot produced by the browser report flow."""
+
+    model_config = ConfigDict(hide_input_in_errors=True, extra="forbid")
+
+    id: str = Field(pattern=r"^rpt_[A-Za-z0-9_-]{3,100}$")
+    generatedAt: str = Field(min_length=1, max_length=100)
+    model: str | None = Field(default=None, max_length=300)
+    instruction: str = Field(min_length=1, max_length=20_000)
+    text: str = Field(min_length=1, max_length=2_000_000)
+    generatedText: str | None = Field(default=None, max_length=2_000_000)
+    scope: dict[str, Any]
+    context_fingerprints: list[str] = Field(default_factory=list, max_length=100)
+    facts: list[dict[str, Any]]
+    excluded_fact_ids: list[str] = Field(default_factory=list)
+    figures: list[dict[str, Any]] = Field(default_factory=list)
+    excluded_figure_ids: list[str] = Field(default_factory=list)
+    capability_manifest: list[dict[str, Any]] = Field(default_factory=list, max_length=100)
+    report_standard: str | None = Field(default=None, max_length=100)
+    required_capabilities: list[str] = Field(default_factory=list, max_length=50)
+    report_quality: dict[str, Any] | None = None
+    revision: dict[str, Any] | None = None
+
+
 _REPORT_REVISION_FIELDS = frozenset(
     {
         "schema_version",

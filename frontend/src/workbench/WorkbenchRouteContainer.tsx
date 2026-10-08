@@ -705,17 +705,13 @@ function ForestWorkbench({
     const nextActiveRunId = response.new_active_head_id ?? response.run_id;
     setActiveRunId(nextActiveRunId);
     const lineage = response.produced_lineage;
-    const focus = response.focus
-      ? {
-          forest_node_key: response.focus.forest_node_key,
-          op_node_id: response.focus.op_node_id,
-          node_hash: response.focus.node_hash,
-        }
-      : {
-          forest_node_key: null,
-          op_node_id: lineage?.produced_op_node_id ?? response.rerun_from.op_node_id,
-          node_hash: lineage?.produced_node_hash ?? null,
-        };
+    // The server sets no focus target on a rerun (RerunSubmitted.focus is
+    // always null); the produced lineage or the rerun source is the focus.
+    const focus = {
+      forest_node_key: null,
+      op_node_id: lineage?.produced_op_node_id ?? response.rerun_from.op_node_id,
+      node_hash: lineage?.produced_node_hash ?? null,
+    };
     setPendingFocusTarget({
       runId: nextActiveRunId,
       focus,

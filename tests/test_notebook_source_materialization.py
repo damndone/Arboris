@@ -140,7 +140,7 @@ def test_upload_only_notebook_materializes_its_source_only_after_confirmation(
     )
 
     assert confirmed.status_code == 200, confirmed.text
-    result = client.get(
+    result = client.post(
         f"/notebooks/{notebook_id}/options", params=params
     ).json()["execution_results"][option_id]
     source_index = json.loads((source_run_root / "artifacts_index.json").read_text())

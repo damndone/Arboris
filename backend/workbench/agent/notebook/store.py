@@ -34,7 +34,7 @@ from ...contracts.agent.notebook_option import (
     RECOMMENDATION_DECISION_V11_CONTRACT_VERSION,
 )
 from ..events import AgentEventStream
-from ..storage import append_jsonl_atomic, read_jsonl
+from ...jsonl_store import append_jsonl_atomic, read_jsonl
 from .errors import NotebookNotFound, OptionLegacyUnverified, OptionNotFound
 from .proposal import TypedProposal
 from .recommendation import ComparisonDecisionRecord, ServerDecisionRegistry

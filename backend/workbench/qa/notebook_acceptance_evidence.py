@@ -21,7 +21,7 @@ import stat
 from typing import Any, Mapping
 from urllib.parse import parse_qs, urlparse
 
-from workbench.agent.operations import OperationValidationError
+from ..contracts.common.errors import OperationValidationError
 from workbench.agent.workflow_contracts import validate_workflow_steps
 from workbench.qa.p7_acceptance import CompletionAuthority, CompletionEvidence
 from workbench.qa.witness import (

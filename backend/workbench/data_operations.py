@@ -79,7 +79,7 @@ class FeatureRecipePreview:
     schema_fingerprint_after: str
     fingerprint: str
     downstream_invalidation: tuple[str, ...] = ()
-    status: str = "ready"
+    status: PreviewStatus = "ready"
     reason: str | None = None
     next_step: str | None = None
 
@@ -124,6 +124,9 @@ class FeatureRecipeEffect:
             "child_node_id": self.child_node_id,
         }
 
+
+PreviewStatus = Literal["ready", "blocked"]
+"""A preview is ready to confirm, or blocked with its reason."""
 
 DataTransformOperation = Literal[
     "merge",
@@ -225,7 +228,7 @@ class DataTransformPreview:
     schema_fingerprint_after: str
     fingerprint: str
     downstream_invalidation: tuple[str, ...] = ()
-    status: str = "ready"
+    status: PreviewStatus = "ready"
     reason: str | None = None
     next_step: str | None = None
 
@@ -1296,7 +1299,7 @@ class DataColumnCastPreview:
     schema_fingerprint_after: str
     fingerprint: str
     downstream_invalidation: tuple[str, ...] = field(default_factory=tuple)
-    status: str = "ready"
+    status: PreviewStatus = "ready"
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "failure_examples", tuple(self.failure_examples))
@@ -1858,7 +1861,7 @@ class DataColumnCastItemResult:
     failure_count: int
     failure_examples: tuple[str, ...]
     new_missing_count: int
-    status: str
+    status: PreviewStatus
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -1884,7 +1887,7 @@ class DataColumnsCastPreview:
     schema_fingerprint_after: str
     fingerprint: str
     downstream_invalidation: tuple[str, ...] = field(default_factory=tuple)
-    status: str = "ready"
+    status: PreviewStatus = "ready"
 
     def to_dict(self) -> dict[str, Any]:
         return {

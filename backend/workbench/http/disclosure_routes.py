@@ -11,8 +11,11 @@ from pydantic import BaseModel, ConfigDict
 from .. import analysis_disclosure
 from ..analysis_ledger import record_ui_action
 from ..api_errors import WorkbenchAPIError
+from .responses.disclosure import AnalysisDisclosure
+from .responses.disclosure import DisclosureSettings as DisclosureSettingsView
+from .typed_routes import TypedAPIRoute
 
-router = APIRouter()
+router = APIRouter(route_class=TypedAPIRoute)
 
 
 def _root(raw: str) -> Path:
@@ -23,7 +26,7 @@ def _root(raw: str) -> Path:
 
 
 @router.get("/runs/{run_id}/analysis-disclosure")
-def analysis_disclosure_endpoint(run_id: str, project_root: str) -> dict[str, Any]:
+def analysis_disclosure_endpoint(run_id: str, project_root: str) -> AnalysisDisclosure:
     root = _root(project_root)
     if not (root / "runs" / run_id).is_dir():
         raise WorkbenchAPIError(status_code=404, code="RUN_NOT_FOUND", message=f"run {run_id} was not found")
@@ -40,7 +43,7 @@ class DisclosureSettings(BaseModel):
 
 
 @router.put("/projects/report-disclosure")
-def report_disclosure_settings_endpoint(project_root: str, settings: DisclosureSettings) -> dict[str, Any]:
+def report_disclosure_settings_endpoint(project_root: str, settings: DisclosureSettings) -> DisclosureSettingsView:
     root = _root(project_root)
     value = analysis_disclosure.write_settings(
         root, include_in_exports=settings.include_in_exports, detail=settings.detail

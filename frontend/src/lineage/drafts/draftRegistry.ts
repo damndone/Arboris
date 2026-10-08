@@ -38,11 +38,14 @@ export type DraftAction =
   | { type: "remove"; draftId: string }
   | { type: "hydrate"; summaries: PipelineDraftSummary[] };
 
+// Only drafts derived from a run carry source node fields; genesis drafts do not.
 function createdFromHash(draft: PipelineDraftV1): string | null {
-  return draft.created_from?.source_node_hash ?? null;
+  const from = draft.created_from;
+  return from?.source_type === "run" ? from.source_node_hash : null;
 }
 function createdFromOp(draft: PipelineDraftV1): string | null {
-  return draft.created_from?.source_op_node_id ?? null;
+  const from = draft.created_from;
+  return from?.source_type === "run" ? from.source_op_node_id : null;
 }
 function modelTypeOf(draft: PipelineDraftV1): string | null {
   const model = draft.graph.nodes.find((n) => n.node_type === "model");

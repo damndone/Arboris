@@ -60,10 +60,12 @@ from ..report_contract import (
     validate_report_response,
 )
 from ..report_quality import ReportQualityResult, validate_report_response_quality
+from .responses.llm import ChatReply, DiscoveredModels, LlmConfig, ProviderList, PublicProvider
+from .typed_routes import TypedAPIRoute
 
 
 
-class _SanitizedValidationRoute(APIRoute):
+class _SanitizedValidationRoute(TypedAPIRoute):
     def get_route_handler(self):
         original_route_handler = super().get_route_handler()
 
@@ -306,7 +308,7 @@ _IMAGE_DATA_URL_PREFIX = "data:image/png;base64,"
 # (not even masked; no prefix, no length). Key management stays in the env
 # file by design.
 @router.get("/llm/config")
-def llm_config() -> dict[str, Any]:
+def llm_config() -> LlmConfig:
     config = load_llm_config()
     return {
         "configured": config.is_configured(),
@@ -427,7 +429,7 @@ class ModelsDiscoveryRequest(BaseModel):
 
 
 @router.post("/llm/providers/models/discover")
-def discover_llm_provider_models(request: ModelsDiscoveryRequest) -> dict[str, Any]:
+def discover_llm_provider_models(request: ModelsDiscoveryRequest) -> DiscoveredModels:
     """Discover draft models without persisting credentials or provider state."""
     from ..llm.config import LLMConfig
 
@@ -609,7 +611,7 @@ def _load_provider_store_for_mutation() -> ProviderStore:
 
 
 @router.get("/llm/providers")
-def list_llm_providers() -> dict[str, Any]:
+def list_llm_providers() -> ProviderList:
     store = _load_provider_store_for_mutation()
     if not store.providers:
         environment_provider = environment_provider_from_env()
@@ -625,7 +627,7 @@ def list_llm_providers() -> dict[str, Any]:
 
 
 @router.post("/llm/providers")
-def create_llm_provider(request: ProviderUpsertRequest) -> dict[str, Any]:
+def create_llm_provider(request: ProviderUpsertRequest) -> PublicProvider:
     with _provider_store_mutation_lock():
         _require_create_fields(request)
         store = _load_provider_store_for_mutation()
@@ -649,7 +651,7 @@ def create_llm_provider(request: ProviderUpsertRequest) -> dict[str, Any]:
 @router.put("/llm/providers/{provider_id}")
 def update_llm_provider(
     provider_id: ProviderID, request: ProviderUpsertRequest
-) -> dict[str, Any]:
+) -> PublicProvider:
     with _provider_store_mutation_lock():
         store = _load_provider_store_for_mutation()
         existing = next((item for item in store.providers if item.id == provider_id), None)
@@ -681,7 +683,7 @@ def update_llm_provider(
 
 
 @router.post("/llm/providers/{provider_id}/activate")
-def activate_llm_provider(provider_id: ProviderID) -> dict[str, Any]:
+def activate_llm_provider(provider_id: ProviderID) -> PublicProvider:
     with _provider_store_mutation_lock():
         provider = _provider_or_error(provider_id)
         missing = _provider_configuration_gaps(provider)
@@ -700,7 +702,7 @@ def activate_llm_provider(provider_id: ProviderID) -> dict[str, Any]:
 
 
 @router.delete("/llm/providers/{provider_id}")
-def delete_llm_provider(provider_id: ProviderID) -> dict[str, Any]:
+def delete_llm_provider(provider_id: ProviderID) -> PublicProvider:
     with _provider_store_mutation_lock():
         provider = _provider_or_error(provider_id)
         store = _load_provider_store_for_mutation()
@@ -748,7 +750,7 @@ def _provider_config(provider: ProviderRecord):
 
 
 @router.post("/llm/providers/{provider_id}/models/refresh")
-def refresh_llm_provider_models(provider_id: ProviderID) -> dict[str, Any]:
+def refresh_llm_provider_models(provider_id: ProviderID) -> PublicProvider:
     with _provider_store_mutation_lock():
         provider = _provider_or_error(provider_id)
     try:
@@ -833,7 +835,7 @@ def refresh_llm_provider_models(provider_id: ProviderID) -> dict[str, Any]:
 
 
 @router.post("/llm/providers/{provider_id}/probe")
-def probe_llm_provider(provider_id: ProviderID) -> dict[str, Any]:
+def probe_llm_provider(provider_id: ProviderID) -> PublicProvider:
     with _provider_store_mutation_lock():
         provider = _provider_or_error(provider_id)
     try:
@@ -890,7 +892,7 @@ class AskAIChatRequest(BaseModel):
 
 
 @router.post("/llm/chat")
-def llm_chat(request: AskAIChatRequest) -> dict[str, Any]:
+def llm_chat(request: AskAIChatRequest) -> ChatReply:
     if request.mode not in (SUPPORTED_MODE, REPORT_MODE, FIGURE_MODE):
         raise WorkbenchAPIError(
             status_code=422,

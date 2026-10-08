@@ -12,7 +12,8 @@ from threading import RLock
 from typing import Any, Callable
 
 from .proposals import ProposalConfirmation
-from .storage import append_jsonl_atomic, read_jsonl
+from ..contracts.common.errors import OperationValidationError
+from ..jsonl_store import append_jsonl_atomic, read_jsonl
 
 
 def _now() -> str:
@@ -25,10 +26,6 @@ class OperationRecordTransitionError(RuntimeError):
 
 class UnknownOperationError(RuntimeError):
     """Raised when an agent proposes an operation that is not registered."""
-
-
-class OperationValidationError(RuntimeError):
-    """Raised when a registered operation proposal is structurally invalid."""
 
 
 OperationValidator = Callable[[dict[str, Any], dict[str, Any], dict[str, Any]], None]
@@ -1170,7 +1167,7 @@ def model_rerun_change_fields() -> tuple[str, ...]:
     to undo the nesting.
     """
     from ..survey.fields import DESIGN_FIELDS
-    from .workflow_contracts import MODEL_FAMILY_CONTRACTS
+    from ..contracts.model.family import MODEL_FAMILY_CONTRACTS
 
     # The weight columns travel with the design, not separately: a design
     # without a sampling weight is refused by the engine, so an Agent able to

@@ -3,6 +3,7 @@ import { mergeDraftsIntoModel } from "./mergeDraftsIntoModel";
 import { emptyRegistry, draftReducer } from "./draftRegistry";
 import type { GraphViewModel } from "../api/graphViewTypes";
 import type { PipelineDraftV1 } from "../../api";
+import { modelDraftNodeFixture, runCreatedFromFixture, tableDraftNodeFixture, uploadDraftNodeFixture } from "../../apiFixtures";
 
 const forestNode = (over: Partial<Record<string, unknown>> = {}) =>
   ({
@@ -38,8 +39,8 @@ const draft = (id: string, hash = "hash_a"): PipelineDraftV1 => ({
   created_at: "t",
   updated_at: "t",
   status: "draft",
-  created_from: { source_node_hash: hash, source_op_node_id: "model#0" },
-  graph: { nodes: [{ node_type: "model", node_id: "model#0", model_type: "ols", editable_schema: [] } as never], edges: [] },
+  created_from: runCreatedFromFixture({ source_node_hash: hash, source_op_node_id: "model#0" }),
+  graph: { nodes: [modelDraftNodeFixture({ node_id: "model#0" })], edges: [] },
   default_execution_mode: "rerun_child",
 });
 
@@ -64,28 +65,13 @@ const genesisDraft = (): PipelineDraftV1 => ({
   },
   graph: {
     nodes: [
-      {
-        node_id: "source_1",
-        node_type: "input.upload",
-        upload: { sha256: "sha_abc", filename: "data.xlsx" },
-        sheet_names: ["Sheet1"],
-        columns: ["y", "x"],
-        status: "bound",
-      },
-      {
-        node_id: "table_1",
-        node_type: "table",
+      uploadDraftNodeFixture({ upload: { sha256: "sha_abc", filename: "data.xlsx" }, sheet_names: ["Sheet1"] }),
+      tableDraftNodeFixture({
         params: { sheet_name: "Sheet1", transpose: false },
         columns: ["y", "x"],
         status: "configured",
-      },
-      {
-        node_id: "model_1",
-        node_type: "model",
-        model_type: "ols",
-        params: { y: "y", x: ["x"] },
-        status: "configured",
-      },
+      }),
+      modelDraftNodeFixture({ params: { y: "y", x: ["x"] }, status: "configured" }),
     ],
     edges: [
       { from: "source_1", to: "table_1" },

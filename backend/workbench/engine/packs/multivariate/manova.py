@@ -102,6 +102,8 @@ def _normalize_interactions(
 def _quote(column: str) -> str:
     """Quote a validated column name for Patsy without accepting formula text."""
 
+    # The formula is recorded in the result envelope as JSON-quoted text;
+    # workbench.formula_terms reads either quote style back.
     return f"Q({json.dumps(column, ensure_ascii=False)})"
 
 

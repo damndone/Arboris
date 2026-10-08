@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Literal, get_args
 
 from .canonical import sha256_canonical
 from .contracts import SourceRunContract, _freeze, _thaw
@@ -14,7 +14,8 @@ if TYPE_CHECKING:
 
 VALIDATION_PACKET_SCHEMA_VERSION = "validation_packet_v1"
 VALIDATION_POLICY_VERSION = "validation_policy_v1"
-_PACKET_STATUSES = frozenset({"pending", "complete", "blocked", "failed"})
+PacketStatus = Literal["pending", "complete", "blocked", "failed"]
+_PACKET_STATUSES = frozenset(get_args(PacketStatus))
 _CHECK_STATUSES = frozenset({"pass", "warning", "fail", "unknown", "not_applicable"})
 
 
@@ -100,7 +101,7 @@ class ValidationCheck:
 class ValidationPacket:
     """Immutable, replayable validation evidence for one child run."""
 
-    status: str
+    status: PacketStatus
     overall_status: str
     terminal: bool
     checks: tuple[ValidationCheck, ...]

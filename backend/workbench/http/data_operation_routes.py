@@ -21,8 +21,8 @@ from ..agent.operations import (
     OperationRecordStore,
     OperationRecordTransitionError,
     OperationRegistry,
-    OperationValidationError,
 )
+from ..contracts.common.errors import OperationValidationError
 from ..agent.orchestrator import WorkbenchOrchestrator
 from ..agent.proposals import ProposalConfirmationError, ProposalStaleError, ProposalStore
 from ..agent.risk import (
@@ -61,12 +61,28 @@ from ..code_execution import (
 )
 from ..figure_context import FigureContextError, resolve_figure_ai_context
 from ..sandbox import SandboxUnavailableError
+from .responses.data_operations import (
+    CodeExecutePreviewed,
+    ColumnCastContext,
+    ColumnCastPreviewed,
+    ColumnsCastPreviewed,
+    DataTransformApplied,
+    DataTransformPreviewed,
+    FeatureRecipeApplied,
+    FeatureRecipePreviewed,
+    FigureAiContext,
+    ModelRunStarted,
+    OperationConfirmed,
+    OperationLookup,
+    RiskAuthorized,
+)
+from .typed_routes import TypedAPIRoute
 
 # Typed operations that derive a child data node, and whose records the data
 # drawer resolves by child node id for provenance.
 _DATA_OPERATION_IDS = frozenset({"data.column.cast", "data.columns.cast", "code.execute"})
 
-router = APIRouter()
+router = APIRouter(route_class=TypedAPIRoute)
 
 
 class DataColumnCastRequest(BaseModel):
@@ -639,7 +655,7 @@ def _ensure_main_session(repository: JsonlSessionRepository, root) -> str:
 
 
 @router.post("/data-operations/column-cast/preview")
-def preview_column_cast(project_root: str, body: DataColumnCastRequest) -> dict[str, Any]:
+def preview_column_cast(project_root: str, body: DataColumnCastRequest) -> ColumnCastPreviewed:
     root = _root(project_root)
     spec = _spec(body)
     preview = _preview_or_error(root, spec, confirm=False)
@@ -650,7 +666,7 @@ def preview_column_cast(project_root: str, body: DataColumnCastRequest) -> dict[
 async def confirm_column_cast(
     project_root: str,
     body: DataColumnCastConfirmRequest,
-) -> dict[str, Any]:
+) -> OperationConfirmed:
     root = _root(project_root)
     spec = _spec(body)
     preview = _preview_or_error(root, spec, confirm=True)
@@ -783,7 +799,7 @@ async def confirm_column_cast(
 
 
 @router.post("/data-operations/columns-cast/preview")
-def preview_columns_cast(project_root: str, body: DataColumnsCastRequest) -> dict[str, Any]:
+def preview_columns_cast(project_root: str, body: DataColumnsCastRequest) -> ColumnsCastPreviewed:
     root = _root(project_root)
     spec = _batch_spec(body)
     preview = _batch_preview_or_error(root, spec, confirm=False)
@@ -794,7 +810,7 @@ def preview_columns_cast(project_root: str, body: DataColumnsCastRequest) -> dic
 async def confirm_columns_cast(
     project_root: str,
     body: DataColumnsCastConfirmRequest,
-) -> dict[str, Any]:
+) -> OperationConfirmed:
     root = _root(project_root)
     spec = _batch_spec(body)
     preview = _batch_preview_or_error(root, spec, confirm=True)
@@ -928,7 +944,7 @@ async def confirm_columns_cast(
 
 
 @router.post("/data-operations/feature-recipe/preview")
-def preview_feature_recipe_route(project_root: str, body: FeatureRecipeRequest) -> dict[str, Any]:
+def preview_feature_recipe_route(project_root: str, body: FeatureRecipeRequest) -> FeatureRecipePreviewed:
     root = _root(project_root)
     spec = _feature_recipe_spec(body)
     preview = _feature_recipe_preview_or_error(root, spec, confirm=False)
@@ -939,7 +955,7 @@ def preview_feature_recipe_route(project_root: str, body: FeatureRecipeRequest) 
 def confirm_feature_recipe_route(
     project_root: str,
     body: FeatureRecipeConfirmRequest,
-) -> dict[str, Any]:
+) -> FeatureRecipeApplied:
     root = _root(project_root)
     spec = _feature_recipe_spec(body)
     preview = _feature_recipe_preview_or_error(root, spec, confirm=True)
@@ -974,7 +990,7 @@ def confirm_feature_recipe_route(
 
 
 @router.post("/data-operations/transform/preview")
-def preview_data_transform_route(project_root: str, body: DataTransformRequest) -> dict[str, Any]:
+def preview_data_transform_route(project_root: str, body: DataTransformRequest) -> DataTransformPreviewed:
     root = _root(project_root)
     spec = _data_transform_spec(body)
     preview = _data_transform_preview_or_error(root, spec, confirm=False)
@@ -985,7 +1001,7 @@ def preview_data_transform_route(project_root: str, body: DataTransformRequest) 
 def confirm_data_transform_route(
     project_root: str,
     body: DataTransformConfirmRequest,
-) -> dict[str, Any]:
+) -> DataTransformApplied:
     root = _root(project_root)
     spec = _data_transform_spec(body)
     preview = _data_transform_preview_or_error(root, spec, confirm=True)
@@ -1017,7 +1033,7 @@ def confirm_data_transform_route(
 def start_model_from_data_node_route(
     project_root: str,
     body: DataModelRunRequest,
-) -> dict[str, Any]:
+) -> ModelRunStarted:
     """Dispatch a real OLS run from a confirmed, materialized data-operation node.
 
     This is intentionally a narrow bridge: it reuses the existing run lifecycle,
@@ -1056,7 +1072,7 @@ def start_model_from_data_node_route(
             rerun_of=body.source_run_id,
             from_node=source_node_id,
             rerun_reason="data_operation_model",
-            rerun_from={
+            dataset_source={
                 "source_run_id": body.source_run_id,
                 "op_node_id": source_node_id,
                 "source_artifact_id": body.source_artifact_id,
@@ -1093,7 +1109,7 @@ def start_model_from_data_node_route(
 
 
 @router.post("/data-operations/code-execute/preview")
-def preview_code_execute_route(project_root: str, body: CodeExecuteRequest) -> dict[str, Any]:
+def preview_code_execute_route(project_root: str, body: CodeExecuteRequest) -> CodeExecutePreviewed:
     root = _root(project_root)
     spec = _code_spec(body)
     preview = _code_preview_or_error(root, spec, confirm=False)
@@ -1104,7 +1120,7 @@ def preview_code_execute_route(project_root: str, body: CodeExecuteRequest) -> d
 def authorize_code_execute_risk(
     project_root: str,
     body: CodeExecuteRiskAuthorizationRequest,
-) -> dict[str, Any]:
+) -> RiskAuthorized:
     root = _root(project_root)
     spec = _code_spec(body)
     preview = _code_preview_or_error(root, spec, confirm=True)
@@ -1157,7 +1173,7 @@ def authorize_code_execute_risk(
 async def confirm_code_execute(
     project_root: str,
     body: CodeExecuteConfirmRequest,
-) -> dict[str, Any]:
+) -> OperationConfirmed:
     root = _root(project_root)
     spec = _code_spec(body)
     preview = _code_preview_or_error(root, spec, confirm=True)
@@ -1276,7 +1292,7 @@ def get_figure_ai_context(
     project_root: str,
     run_id: str,
     artifact_id: str,
-) -> dict[str, Any]:
+) -> FigureAiContext:
     """Resolve a figure's chart type and backing numeric source for AI interpretation."""
 
     root = _root(project_root)
@@ -1296,7 +1312,7 @@ def get_column_cast_context(
     project_root: str,
     source_run_id: str,
     source_node_id: str,
-) -> dict[str, Any]:
+) -> ColumnCastContext:
     root = _root(project_root)
     try:
         return resolve_data_column_cast_context(
@@ -1317,7 +1333,7 @@ def get_column_cast_context(
 def get_column_cast_operation_by_child_node(
     project_root: str,
     child_node_id: str,
-) -> dict[str, Any]:
+) -> OperationLookup:
     """Resolve the durable operation record from its typed child-node binding."""
 
     root = _root(project_root)
@@ -1340,10 +1356,10 @@ def get_column_cast_operation_by_child_node(
 
 
 @router.get("/data-operations/column-cast/{record_id}")
-def get_column_cast_operation(record_id: str, project_root: str) -> dict[str, Any]:
+def get_column_cast_operation(record_id: str, project_root: str) -> OperationLookup:
     root = _root(project_root)
     try:
-        record = OperationRecordStore(root / "workbench").get(record_id)
+        record = OperationRecordStore(root / "workbench", create=False).get(record_id)
     except (KeyError, ValueError) as exc:
         raise WorkbenchAPIError(
             status_code=404,

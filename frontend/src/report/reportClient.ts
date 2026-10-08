@@ -1,8 +1,11 @@
 // v1.6.11 slice C — /llm/chat client for cite-chip report generation.
 import { apiUrl } from "../api";
+import type { ResponseOf } from "../apiTypes";
 import type { CitableFact, FigureFactInput, ReportScope } from "./factTable";
 import type { ReportCapabilityManifestEntry } from "./reportEvidence";
 
+/** Report quality as reports and error details carry it, including those
+ * stored by earlier versions (hence every field but the status is optional). */
 export interface ReportQualitySummary {
   status: "exportable" | "needs_revision" | "insufficient_evidence";
   violations?: Array<{ code: string; message: string; subject?: string } | string>;
@@ -36,23 +39,12 @@ export class ReportGenerationError extends Error {
   }
 }
 
-export interface ReportResponse {
-  text: string;
-  model?: string;
-  context_fingerprint?: string | null;
-  report_quality?: ReportQualitySummary;
-}
+export type ReportResponse = ResponseOf<"/llm/chat", "post">;
 
-export interface PersistedReportMetadata {
-  fact_snapshot_hash?: string;
-  artifact_ids?: string[];
-  validation_status?: ReportQualitySummary["status"];
-}
+type SavedReport = ResponseOf<"/runs/{run_id}/ai-reports", "post">;
 
-export interface SaveReportResponse {
-  schema_version?: string;
-  record?: PersistedReportMetadata;
-}
+/** The server-derived audit fields of a saved report; never accepted as edit input. */
+export type ReportAudit = Pick<SavedReport["record"], "fact_snapshot_hash" | "artifact_ids" | "validation_status">;
 
 export type ReportFigure = FigureFactInput & { path?: string };
 
@@ -188,35 +180,30 @@ export async function saveAiReport(input: {
   projectRoot: string;
   runId: string;
   record: object;
-}): Promise<SaveReportResponse> {
+}): Promise<ReportAudit> {
   const response = await fetch(
     apiUrl(`/runs/${encodeURIComponent(input.runId)}/ai-reports?project_root=${encodeURIComponent(input.projectRoot)}`),
     { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input.record) },
   );
   if (!response.ok) throw new Error(await extractError(response));
-  const body: unknown = await response.json();
-  if (!body || typeof body !== "object" || Array.isArray(body)) return {};
-  const record = (body as { record?: unknown }).record;
+  const { record } = (await response.json()) as SavedReport;
   return {
-    schema_version: typeof (body as { schema_version?: unknown }).schema_version === "string"
-      ? (body as { schema_version: string }).schema_version
-      : undefined,
-    record: record && typeof record === "object" && !Array.isArray(record)
-      ? record as PersistedReportMetadata
-      : undefined,
+    fact_snapshot_hash: record.fact_snapshot_hash,
+    artifact_ids: record.artifact_ids,
+    validation_status: record.validation_status,
   };
 }
 
 export async function fetchAiReports(input: {
   projectRoot: string;
   runId: string;
-}): Promise<Array<Record<string, unknown>>> {
+}): Promise<ResponseOf<"/runs/{run_id}/ai-reports", "get">["reports"]> {
   const response = await fetch(
     apiUrl(`/runs/${encodeURIComponent(input.runId)}/ai-reports?project_root=${encodeURIComponent(input.projectRoot)}`),
   );
   if (!response.ok) throw new Error(await extractError(response));
-  const body = await response.json() as { reports?: unknown };
-  return Array.isArray(body.reports) ? body.reports.filter((item): item is Record<string, unknown> => !!item && typeof item === "object") : [];
+  const body = (await response.json()) as ResponseOf<"/runs/{run_id}/ai-reports", "get">;
+  return body.reports;
 }
 
 async function extractError(response: Response): Promise<string> {

@@ -33,8 +33,10 @@ from ..services.compare_node_service import (
     list_compare_nodes,
 )
 from ._deps import _backfill_schema_values
+from .responses.graph import CompareNodeDeleted, CompareNodeList, CompareNodeView, ForestGraph, RunGraph
+from .typed_routes import TypedAPIRoute
 
-router = APIRouter()
+router = APIRouter(route_class=TypedAPIRoute)
 
 
 def _annotate_editable_node(node: dict, manifest: dict, form: dict | None = None) -> None:
@@ -61,7 +63,7 @@ def _annotate_editable_nodes(body: dict, manifest: dict) -> None:
 
 
 @router.get("/graph")
-def get_project_graph(project_root: str) -> dict[str, Any]:
+def get_project_graph(project_root: str) -> ForestGraph:
     """v1.6.8 F1 — project-keyed forest (union of all family head-sets).
 
     A zero-run project returns an EMPTY forest so the canvas can render as the
@@ -71,7 +73,7 @@ def get_project_graph(project_root: str) -> dict[str, Any]:
 
 
 @router.get("/runs/{run_id}/graph")
-def get_run_graph(run_id: str, project_root: str, view: str | None = None):
+def get_run_graph(run_id: str, project_root: str, view: str | None = None) -> RunGraph | ForestGraph:
     runs_root = _resolve_project_runs_dir(project_root)
     run_root = _resolve_run_root(project_root, run_id)  # 404 if run dir missing
     store = GraphStore(runs_root=runs_root)
@@ -125,7 +127,7 @@ class CompareNodeCreateRequest(BaseModel):
 
 
 @router.post("/compare-nodes")
-def post_compare_node(project_root: str, body: CompareNodeCreateRequest) -> dict[str, Any]:
+def post_compare_node(project_root: str, body: CompareNodeCreateRequest) -> CompareNodeView:
     """Create (or reuse) the durable comparison joining two graph nodes."""
 
     runs_root = _resolve_project_runs_dir(project_root)
@@ -150,13 +152,13 @@ def post_compare_node(project_root: str, body: CompareNodeCreateRequest) -> dict
 
 
 @router.get("/compare-nodes")
-def get_compare_nodes(project_root: str) -> dict[str, Any]:
+def get_compare_nodes(project_root: str) -> CompareNodeList:
     runs_root = _resolve_project_runs_dir(project_root)
     return {"compare_nodes": [record.to_dict() for record in list_compare_nodes(runs_root)]}
 
 
 @router.delete("/compare-nodes/{compare_id}")
-def remove_compare_node(compare_id: str, project_root: str) -> dict[str, Any]:
+def remove_compare_node(compare_id: str, project_root: str) -> CompareNodeDeleted:
     runs_root = _resolve_project_runs_dir(project_root)
     if not delete_compare_node(runs_root, compare_id):
         raise WorkbenchAPIError(

@@ -1,11 +1,7 @@
 from __future__ import annotations
 
-from workbench.agent.workflow_contracts import (
-    MODEL_FAMILY_CONTRACTS,
-    ModelFamilyContract,
-    validate_model_genesis_spec,
-    validate_workflow_steps,
-)
+from workbench.agent.workflow_contracts import validate_model_genesis_spec, validate_workflow_steps
+from workbench.contracts.model.family import MODEL_FAMILY_CONTRACTS, ModelFamilyContract
 import pytest
 
 
@@ -44,7 +40,8 @@ def test_model_family_contract_declares_weight_and_split_admission() -> None:
 def test_model_family_rejects_undeclared_crosscut_capabilities(
     field: str, value: str, message: str
 ) -> None:
-    from workbench.agent.workflow_contracts import OperationValidationError, validate_model_genesis_spec
+    from workbench.agent.workflow_contracts import validate_model_genesis_spec
+    from workbench.contracts.common.errors import OperationValidationError
 
     with pytest.raises(OperationValidationError, match=message):
         validate_model_genesis_spec(_ols_spec(model_family="logit", **{field: value}))
@@ -107,7 +104,7 @@ def test_v186_model_family_contracts_admit_only_declared_options_and_build_param
 def test_v186_model_family_rejects_options_owned_by_another_family(
     model_family: str, unsupported: str
 ) -> None:
-    from workbench.agent.workflow_contracts import OperationValidationError
+    from workbench.contracts.common.errors import OperationValidationError
 
     with pytest.raises(OperationValidationError, match="model_options.*does not accept"):
         validate_model_genesis_spec(

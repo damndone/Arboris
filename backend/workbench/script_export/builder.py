@@ -17,7 +17,8 @@ import os
 import stat
 
 from ..artifacts import read_json
-from ..agent.storage import read_jsonl
+from ..lineage.rerun_provenance import dataset_source
+from ..jsonl_store import read_jsonl
 from ..agent.workflow import WorkflowStep, WorkflowStepResult, WorkflowExecutionError
 from ..agent.postestimation_steps import _resolve_model_binding
 from ..config import load_config
@@ -271,7 +272,7 @@ class _Builder:
             record, raw = self.record(run_id, artifact_id=raw_records[0]["artifact_id"])
             if _digest(raw) != inputs["upload"]["sha256"]:
                 refuse("Original upload SHA differs from the recorded source")
-            bridge = inputs.get("rerun_from")
+            bridge = dataset_source(inputs)
             if bridge:
                 ancestor = self.dataset(bridge["source_run_id"], bridge["op_node_id"])
                 source_record, source_raw = self.record(bridge["source_run_id"], artifact_id=bridge["source_artifact_id"])
@@ -279,8 +280,15 @@ class _Builder:
                 if source_node.payload_ref != source_record["path"] or source_raw != raw:
                     refuse("Dispatched model upload does not match its source lineage")
                 result = ancestor
+            elif inputs.get("rerun_of"):
+                # A rerun re-executes its parent's upload, byte for byte, so its
+                # raw data is the parent's source, wherever that came from.
+                parent = inputs["rerun_of"]
+                if (self.owner(parent)[2].get("upload") or {}).get("sha256") != inputs["upload"]["sha256"]:
+                    refuse("Cross-run source lineage is incomplete")
+                result = self.dataset(parent, "stage:raw")
             else:
-                if inputs.get("rerun_of") or inputs.get("from_node"):
+                if inputs.get("from_node"):
                     refuse("Cross-run source lineage is incomplete")
                 fmt = Path(record["path"]).suffix.removeprefix(".").lower()
                 name = "source_" + _digest(raw)[:24] + "." + fmt

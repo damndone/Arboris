@@ -159,3 +159,17 @@ def test_run_detail_route_exposes_legacy_projection_to_table_consumer(
 
     assert detail["prediction_evidence"]["status"] == "legacy"
     assert detail["prediction_evidence"]["comparability"] == "legacy_only"
+
+
+def test_projected_evidence_matches_the_declared_run_detail_type(tmp_path: Path) -> None:
+    # The run detail route serves this projection; its declared type is the
+    # frontend's. Both forms are checked here, where they are produced.
+    from response_contracts import violations
+    from workbench.http.responses.runs import LegacyPredictionEvidence, ValidatedPredictionEvidence
+
+    validated = project_prediction_evidence(packets(), consumer="table")
+    assert violations(ValidatedPredictionEvidence, validated) == []
+
+    test_reader_marks_missing_payload_contract_as_legacy_without_fabricating_split(tmp_path)
+    legacy = read_prediction_evidence_from_run_root(tmp_path / "run", consumer="table")
+    assert violations(LegacyPredictionEvidence, legacy) == []

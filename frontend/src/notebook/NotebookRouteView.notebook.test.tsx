@@ -32,11 +32,19 @@ import {
   recordNotebookDecision,
   updateNotebookFocus,
   type NotebookMaterializationResponse,
+  type NotebookOptionsResponse,
 } from "./notebookApi";
 import {
   listDomainMemoryCandidates,
   reviewDomainMemoryCandidate,
 } from "./domainMemoryApi";
+import {
+  candidateRejectedFixture,
+  notebookOptionsFixture,
+  notebookProjectionFixture,
+  notebookViewFixture,
+  planningContextFixture,
+} from "../apiFixtures";
 
 vi.mock("./notebookApi", () => ({
   cancelNotebookPlanning: vi.fn(),
@@ -108,7 +116,7 @@ function genesisMaterializationResponse() {
   };
 }
 
-const context = {
+const context = planningContextFixture({
   context_id: "ctx_1",
   context_profile: "notebook-plan/v1",
   generation_context_hash: "sha256:context",
@@ -121,56 +129,55 @@ const context = {
     total_budget_bytes: 1000,
   },
   source_manifest: [],
-  trace: [],
-};
+});
 
 describe("NotebookRouteView", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     window.localStorage.clear();
     vi.mocked(uploadDataset).mockResolvedValue({ sha256: "a".repeat(64), filename: "data.csv" });
-    vi.mocked(ensureNotebookProjection).mockResolvedValue({
+    vi.mocked(ensureNotebookProjection).mockResolvedValue(notebookProjectionFixture({
       notebook_id: "nb_1",
       run_family_id: "family_1",
       title: "Analysis",
       created_by: "user",
       active_head_run_id: null,
       user_focus: { goal: "Compare the available analysis options." },
-    });
-    vi.mocked(ensureNotebookDatasetProjection).mockResolvedValue({
+    }));
+    vi.mocked(ensureNotebookDatasetProjection).mockResolvedValue(notebookProjectionFixture({
       notebook_id: "nb_dataset",
       run_family_id: "family_dataset",
       title: "New analysis from source data",
       created_by: "user",
       active_head_run_id: null,
       user_focus: {},
-    });
-    vi.mocked(getNotebook).mockResolvedValue({
+    }));
+    vi.mocked(getNotebook).mockResolvedValue(notebookViewFixture({
       notebook_id: "nb_1",
       run_family_id: "family_1",
       title: "Analysis",
       created_by: "user",
       active_head_run_id: "run_head",
       user_focus: { goal: "Compare the available analysis options." },
-    });
+    }));
     vi.mocked(compileNotebookContext).mockResolvedValue(context);
-    vi.mocked(listNotebookOptions).mockResolvedValue({ context, options: [], trace_id: "trace_1" });
-    vi.mocked(proposeNotebookOptions).mockResolvedValue({
+    vi.mocked(listNotebookOptions).mockResolvedValue(notebookOptionsFixture({ context, options: [], trace_id: "trace_1" }));
+    vi.mocked(proposeNotebookOptions).mockResolvedValue(notebookOptionsFixture({
       context,
       options: [],
       trace_id: "trace_1",
-    });
+    }));
     vi.mocked(getNotebookTrace).mockResolvedValue({ trace_id: "trace_1", events: [] });
     vi.mocked(listNotebooks).mockResolvedValue([]);
-    vi.mocked(recordNotebookDecision).mockResolvedValue({});
-    vi.mocked(updateNotebookFocus).mockResolvedValue({
+    vi.mocked(recordNotebookDecision).mockResolvedValue(readCanonicalFixture("notebook_option_revision"));
+    vi.mocked(updateNotebookFocus).mockResolvedValue(notebookViewFixture({
       notebook_id: "nb_1",
       run_family_id: "family_1",
       title: "Analysis",
       created_by: "user",
       active_head_run_id: "run_head",
       user_focus: { goal: "Compare the available analysis options." },
-    });
+    }));
     vi.mocked(cancelNotebookPlanning).mockResolvedValue({
       attempt_id: "attempt-test",
       status: "cancelled",
@@ -179,9 +186,7 @@ describe("NotebookRouteView", () => {
       candidates: [],
       memory_authority: "server_owned",
     });
-    vi.mocked(reviewDomainMemoryCandidate).mockResolvedValue({
-      automatic_execution: false,
-    });
+    vi.mocked(reviewDomainMemoryCandidate).mockResolvedValue(candidateRejectedFixture());
   });
 
   it("loads the current project's candidate queue and dispatches explicit review", async () => {
@@ -275,11 +280,11 @@ describe("NotebookRouteView", () => {
   });
 
   it("creates a notebook, compiles context, proposes options, and renders the real surface", async () => {
-    vi.mocked(proposeNotebookOptions).mockResolvedValue({
+    vi.mocked(proposeNotebookOptions).mockResolvedValue(notebookOptionsFixture({
       context,
       options: [readCanonicalFixture("notebook_option_revision")],
       trace_id: "trace_1",
-    });
+    }));
 
     render(
       <StrictMode>
@@ -330,16 +335,16 @@ describe("NotebookRouteView", () => {
       },
     };
     vi.mocked(compileNotebookContext).mockResolvedValue(memoryContext);
-    vi.mocked(listNotebookOptions).mockResolvedValue({
+    vi.mocked(listNotebookOptions).mockResolvedValue(notebookOptionsFixture({
       context: memoryContext,
       options: [],
       trace_id: "trace_memory_empty",
-    });
-    vi.mocked(proposeNotebookOptions).mockResolvedValue({
+    }));
+    vi.mocked(proposeNotebookOptions).mockResolvedValue(notebookOptionsFixture({
       context: memoryContext,
       options: [],
       trace_id: "trace_memory_empty",
-    });
+    }));
 
     render(
       <MemoryRouter initialEntries={["/p/project/graph?view=notebook"]}>
@@ -403,14 +408,14 @@ describe("NotebookRouteView", () => {
   });
 
   it("does not ask the planner for options until the user has described the goal", async () => {
-    vi.mocked(getNotebook).mockResolvedValue({
+    vi.mocked(getNotebook).mockResolvedValue(notebookViewFixture({
       notebook_id: "nb_1",
       run_family_id: "family_1",
       title: "Analysis",
       created_by: "user",
       active_head_run_id: "run_head",
       user_focus: {},
-    });
+    }));
 
     render(
       <MemoryRouter initialEntries={["/p/project/graph?view=notebook&notebook=nb_1"]}>
@@ -477,16 +482,8 @@ describe("NotebookRouteView", () => {
 
   it("deduplicates planning after a StrictMode runless upload binds the notebook URL", async () => {
     vi.mocked(proposeNotebookOptions).mockClear();
-    let resolvePlanning: (value: {
-      context: typeof context;
-      options: unknown[];
-      trace_id: string;
-    }) => void = () => {};
-    const planning = new Promise<{
-      context: typeof context;
-      options: unknown[];
-      trace_id: string;
-    }>((resolve) => {
+    let resolvePlanning: (value: NotebookOptionsResponse) => void = () => {};
+    const planning = new Promise<NotebookOptionsResponse>((resolve) => {
       resolvePlanning = resolve;
     });
     vi.mocked(proposeNotebookOptions).mockImplementation(() => planning);
@@ -505,16 +502,16 @@ describe("NotebookRouteView", () => {
 
     await waitFor(() => expect(proposeNotebookOptions).toHaveBeenCalledTimes(1));
     const proposed = readCanonicalFixture("notebook_option_revision");
-    vi.mocked(listNotebookOptions).mockResolvedValue({
+    vi.mocked(listNotebookOptions).mockResolvedValue(notebookOptionsFixture({
       context,
       options: [proposed],
       trace_id: "trace_1",
-    });
-    resolvePlanning({
+    }));
+    resolvePlanning(notebookOptionsFixture({
       context,
       options: [proposed],
       trace_id: "trace_1",
-    });
+    }));
     await waitFor(() =>
       expect(screen.getByTestId("notebook-option-list")).toBeInTheDocument(),
     );
@@ -523,19 +520,19 @@ describe("NotebookRouteView", () => {
 
   it("reuses the sole persisted Notebook when Graph reload has no active Run", async () => {
     vi.mocked(listNotebooks).mockResolvedValue([
-      {
+      notebookViewFixture({
         notebook_id: "nb_1",
         run_family_id: "family_1",
         title: "Analysis",
         created_by: "user",
         active_head_run_id: null,
-      },
+      }),
     ]);
-    vi.mocked(listNotebookOptions).mockResolvedValue({
+    vi.mocked(listNotebookOptions).mockResolvedValue(notebookOptionsFixture({
       context,
       options: [],
       trace_id: "trace_1",
-    });
+    }));
 
     render(
       <MemoryRouter initialEntries={["/p/project/graph?view=notebook"]}>
@@ -550,20 +547,20 @@ describe("NotebookRouteView", () => {
 
   it("lets the user choose among durable Notebooks when no active Run is available", async () => {
     const durableNotebooks = [
-      {
+      notebookViewFixture({
         notebook_id: "nb_older",
         run_family_id: "family_older",
         title: "Earlier analysis",
         created_by: "user",
         active_head_run_id: "run_older",
-      },
-      {
+      }),
+      notebookViewFixture({
         notebook_id: "nb_current",
         run_family_id: "family_current",
         title: "Current analysis",
         created_by: "user",
         active_head_run_id: "run_current",
-      },
+      }),
     ];
     vi.mocked(listNotebooks).mockResolvedValue(durableNotebooks);
     vi.mocked(getNotebook).mockImplementation(async (_projectRoot, requestedNotebookId) => {
@@ -593,20 +590,20 @@ describe("NotebookRouteView", () => {
 
   it("falls back to durable Notebook choices when automatic projection is rejected", async () => {
     vi.mocked(listNotebooks).mockResolvedValue([
-      {
+      notebookViewFixture({
         notebook_id: "nb_a",
         run_family_id: "family_a",
         title: "Analysis A",
         created_by: "user",
         active_head_run_id: "run_a",
-      },
-      {
+      }),
+      notebookViewFixture({
         notebook_id: "nb_b",
         run_family_id: "family_b",
         title: "Analysis B",
         created_by: "user",
         active_head_run_id: "run_b",
-      },
+      }),
     ]);
     vi.mocked(ensureNotebookProjection).mockRejectedValue(
       Object.assign(new Error("projection unavailable"), {
@@ -629,14 +626,14 @@ describe("NotebookRouteView", () => {
       Object.assign(new Error("Notebook no longer exists"), { code: "NOTEBOOK_NOT_FOUND" }),
     );
     vi.mocked(listNotebooks).mockResolvedValue([
-      {
+      notebookViewFixture({
         notebook_id: "nb_current",
         run_family_id: "family_1",
         title: "Current analysis",
         created_by: "user",
         active_head_run_id: "run_head",
         user_focus: {},
-      },
+      }),
     ]);
 
     render(
@@ -657,19 +654,19 @@ describe("NotebookRouteView", () => {
     vi.mocked(ensureNotebookProjection).mockClear();
     vi.mocked(listNotebooks).mockClear();
     vi.mocked(listNotebooks).mockResolvedValue([
-      {
+      notebookViewFixture({
         notebook_id: "nb_1",
         run_family_id: "family_1",
         title: "Analysis",
         created_by: "user",
         active_head_run_id: "run_head",
-      },
+      }),
     ]);
-    vi.mocked(listNotebookOptions).mockResolvedValue({
+    vi.mocked(listNotebookOptions).mockResolvedValue(notebookOptionsFixture({
       context,
       options: [],
       trace_id: "trace_1",
-    });
+    }));
 
     render(
       <MemoryRouter initialEntries={["/p/project/graph?view=notebook"]}>
@@ -686,11 +683,11 @@ describe("NotebookRouteView", () => {
   it("opens Draft confirmation for an already-selected materializable option without reselecting it", async () => {
     const selected = readCanonicalFixture("notebook_option_revision_v11");
     selected.lifecycle_status = "selected";
-    vi.mocked(proposeNotebookOptions).mockResolvedValue({
+    vi.mocked(proposeNotebookOptions).mockResolvedValue(notebookOptionsFixture({
       context,
       options: [selected],
       trace_id: "trace_1",
-    });
+    }));
 
     render(
       <MemoryRouter initialEntries={["/p/project/graph?view=notebook"]}>
@@ -713,11 +710,11 @@ describe("NotebookRouteView", () => {
     const proposed = readCanonicalFixture("notebook_option_revision_v11");
     proposed.lifecycle_status = "proposed";
     const selected = { ...proposed, lifecycle_status: "selected" as const };
-    vi.mocked(proposeNotebookOptions).mockResolvedValue({
+    vi.mocked(proposeNotebookOptions).mockResolvedValue(notebookOptionsFixture({
       context,
       options: [proposed],
       trace_id: "trace_1",
-    });
+    }));
     vi.mocked(recordNotebookDecision).mockResolvedValue(selected);
 
     render(
@@ -744,11 +741,11 @@ describe("NotebookRouteView", () => {
   it("cancels Draft confirmation without silently deferring the selected option", async () => {
     const selected = readCanonicalFixture("notebook_option_revision_v11");
     selected.lifecycle_status = "selected";
-    vi.mocked(proposeNotebookOptions).mockResolvedValue({
+    vi.mocked(proposeNotebookOptions).mockResolvedValue(notebookOptionsFixture({
       context,
       options: [selected],
       trace_id: "trace_1",
-    });
+    }));
 
     render(
       <MemoryRouter initialEntries={["/p/project/graph?view=notebook"]}>
@@ -771,11 +768,11 @@ describe("NotebookRouteView", () => {
   it("opens the prepared genesis Draft in Graph after materialization succeeds", async () => {
     const selected = readCanonicalFixture("notebook_option_revision_v11");
     selected.lifecycle_status = "selected";
-    vi.mocked(listNotebookOptions).mockResolvedValue({
+    vi.mocked(listNotebookOptions).mockResolvedValue(notebookOptionsFixture({
       context,
       options: [selected],
       trace_id: "trace_1",
-    });
+    }));
     vi.mocked(confirmNotebookOption).mockResolvedValue(
       genesisMaterializationResponse(),
     );
@@ -835,13 +832,14 @@ describe("NotebookRouteView", () => {
   it("submits a normal confirmation to the server-owned confirmation endpoint", async () => {
     const selected = readCanonicalFixture("notebook_option_revision_v11");
     selected.lifecycle_status = "selected";
-    vi.mocked(listNotebookOptions).mockResolvedValue({
+    vi.mocked(listNotebookOptions).mockResolvedValue(notebookOptionsFixture({
       context,
       options: [selected],
       trace_id: "trace_1",
-    });
+    }));
     vi.mocked(confirmNotebookOption).mockResolvedValue({
       execution: {
+        ...readCanonicalFixture("option_execution"),
         option_id: selected.option_id,
         option_revision: selected.option_revision,
         proposal_id: selected.typed_proposal_id,
@@ -859,6 +857,7 @@ describe("NotebookRouteView", () => {
           not_evaluated_dimensions: [],
           issues: [],
         },
+        artifact_validation_scope: { mode: "workflow", ambient_artifact_ids: [], ambient_artifact_count: 0 },
         active_head_advanced: false,
         lifecycle_status: "executed",
       },
@@ -912,11 +911,11 @@ describe("NotebookRouteView", () => {
   it("keeps the selected option and confirmation visible when Draft preparation fails", async () => {
     const selected = readCanonicalFixture("notebook_option_revision_v11");
     selected.lifecycle_status = "selected";
-    vi.mocked(listNotebookOptions).mockResolvedValue({
+    vi.mocked(listNotebookOptions).mockResolvedValue(notebookOptionsFixture({
       context,
       options: [selected],
       trace_id: "trace_1",
-    });
+    }));
     vi.mocked(confirmNotebookOption).mockRejectedValue(
       Object.assign(new Error("Draft validation rejected the proposal"), {
         code: "OPTION_MATERIALIZATION_FAILED",
@@ -957,11 +956,11 @@ describe("NotebookRouteView", () => {
   it("replans persisted options only after an explicit user action", async () => {
     const proposed = readCanonicalFixture("notebook_option_revision_v11");
     vi.mocked(proposeNotebookOptions).mockClear();
-    vi.mocked(proposeNotebookOptions).mockResolvedValue({
+    vi.mocked(proposeNotebookOptions).mockResolvedValue(notebookOptionsFixture({
       context,
       options: [proposed],
       trace_id: "trace_1",
-    });
+    }));
 
     render(
       <MemoryRouter initialEntries={["/p/project/graph?view=notebook"]}>
@@ -983,16 +982,12 @@ describe("NotebookRouteView", () => {
       ...readCanonicalFixture("notebook_option_revision_v11"),
       option_id: "option_late",
     };
-    vi.mocked(listNotebookOptions).mockResolvedValue({
+    vi.mocked(listNotebookOptions).mockResolvedValue(notebookOptionsFixture({
       context,
       options: [current],
       trace_id: "trace_1",
-    });
-    let resolvePlanning: (value: {
-      context: typeof context;
-      options: unknown[];
-      trace_id: string;
-    }) => void = () => {};
+    }));
+    let resolvePlanning: (value: NotebookOptionsResponse) => void = () => {};
     vi.mocked(proposeNotebookOptions).mockImplementation(
       () =>
         new Promise((resolve) => {
@@ -1031,7 +1026,7 @@ describe("NotebookRouteView", () => {
       }),
     ]);
 
-    resolvePlanning({ context, options: [late], trace_id: "trace_1" });
+    resolvePlanning(notebookOptionsFixture({ context, options: [late], trace_id: "trace_1" }));
     await Promise.resolve();
     expect(screen.queryByTestId("option-card-option_late")).toBeNull();
     expect(screen.getByTestId(`option-card-${current.option_id}`)).toBeInTheDocument();
@@ -1039,11 +1034,11 @@ describe("NotebookRouteView", () => {
 
   it("reports when backend cancellation cannot be confirmed", async () => {
     const current = readCanonicalFixture("notebook_option_revision_v11");
-    vi.mocked(listNotebookOptions).mockResolvedValue({
+    vi.mocked(listNotebookOptions).mockResolvedValue(notebookOptionsFixture({
       context,
       options: [current],
       trace_id: "trace_1",
-    });
+    }));
     vi.mocked(proposeNotebookOptions).mockImplementation(
       () => new Promise(() => {}),
     );
@@ -1081,11 +1076,11 @@ describe("NotebookRouteView", () => {
 
   it("keeps current options usable when a replan times out", async () => {
     const current = readCanonicalFixture("notebook_option_revision_v11");
-    vi.mocked(listNotebookOptions).mockResolvedValue({
+    vi.mocked(listNotebookOptions).mockResolvedValue(notebookOptionsFixture({
       context,
       options: [current],
       trace_id: "trace_1",
-    });
+    }));
     vi.mocked(proposeNotebookOptions).mockRejectedValue(
       Object.assign(new Error("Notebook planning provider exceeded 120s"), {
         code: "NOTEBOOK_PLANNING_TIMEOUT",
@@ -1122,14 +1117,14 @@ describe("NotebookRouteView", () => {
   });
 
   it("exits an initial provider failure without deleting the Notebook or retrying", async () => {
-    const focused = {
+    const focused = notebookViewFixture({
       notebook_id: "nb_1",
       run_family_id: "family_1",
       title: "Analysis",
       created_by: "user",
       active_head_run_id: null,
       user_focus: { goal: "Estimate the intervention effect." },
-    };
+    });
     const idle = { ...focused, user_focus: {} };
     vi.mocked(getNotebook)
       .mockResolvedValueOnce(focused)
@@ -1175,11 +1170,11 @@ describe("NotebookRouteView", () => {
     const proposed = readCanonicalFixture("notebook_option_revision_v11");
     proposed.lifecycle_status = "proposed";
     const rejected = { ...proposed, lifecycle_status: "rejected" as const };
-    vi.mocked(listNotebookOptions).mockResolvedValue({
+    vi.mocked(listNotebookOptions).mockResolvedValue(notebookOptionsFixture({
       context,
       options: [proposed],
       trace_id: "trace_1",
-    });
+    }));
     vi.mocked(recordNotebookDecision).mockResolvedValue(rejected);
     vi.mocked(proposeNotebookOptions).mockRejectedValue(
       Object.assign(new Error("Notebook planning provider rejected the payload"), {
@@ -1217,17 +1212,13 @@ describe("NotebookRouteView", () => {
   it("runs agent revalidation when a stale option requests it", async () => {
     const stale = readCanonicalFixture("notebook_option_revision_v11");
     stale.freshness_status = "stale";
-    vi.mocked(listNotebookOptions).mockResolvedValue({
+    vi.mocked(listNotebookOptions).mockResolvedValue(notebookOptionsFixture({
       context,
       options: [stale],
       trace_id: "trace_1",
-    });
+    }));
     vi.mocked(proposeNotebookOptions).mockClear();
-    let resolveRevalidation: (value: {
-      context: typeof context;
-      options: unknown[];
-      trace_id: string;
-    }) => void = () => {};
+    let resolveRevalidation: (value: NotebookOptionsResponse) => void = () => {};
     vi.mocked(proposeNotebookOptions).mockImplementation(() => new Promise((resolve) => {
       resolveRevalidation = resolve;
     }));
@@ -1243,11 +1234,11 @@ describe("NotebookRouteView", () => {
 
     await waitFor(() => expect(proposeNotebookOptions).toHaveBeenCalledTimes(1));
     expect(screen.getByTestId("notebook-planning-progress")).toBeInTheDocument();
-    resolveRevalidation({
+    resolveRevalidation(notebookOptionsFixture({
       context,
       options: [{ ...stale, freshness_status: "fresh", option_revision: 3 }],
       trace_id: "trace_1",
-    });
+    }));
     await waitFor(() =>
       expect(screen.getByTestId(`option-card-${stale.option_id}`)).toHaveAttribute(
         "data-freshness",
@@ -1280,12 +1271,12 @@ describe("NotebookRouteView", () => {
       dataset_upload_sha256: "sha256:1111111111111111111111111111111111111111111111111111111111111111",
       run_family_id: "family_1",
     };
-    vi.mocked(listNotebookOptions).mockResolvedValue({
+    vi.mocked(listNotebookOptions).mockResolvedValue(notebookOptionsFixture({
       context,
       options: [materialized],
       materializations: { [materialized.option_id as string]: materialization },
       trace_id: "trace_1",
-    });
+    }));
 
     render(
       <MemoryRouter initialEntries={["/p/project/graph?view=notebook&notebook=nb_1"]}>
@@ -1299,7 +1290,7 @@ describe("NotebookRouteView", () => {
   });
 
   it("hydrates the newest materialized sibling rather than the first option by id", async () => {
-    const older = readCanonicalFixture("notebook_option_revision_v11") as Record<string, unknown>;
+    const older = readCanonicalFixture("notebook_option_revision_v11");
     const newer = {
       ...older,
       option_id: "opt_newer",
@@ -1330,7 +1321,7 @@ describe("NotebookRouteView", () => {
       dataset_upload_sha256: "sha256:1111111111111111111111111111111111111111111111111111111111111111",
       run_family_id: "family_1",
     });
-    vi.mocked(listNotebookOptions).mockResolvedValue({
+    vi.mocked(listNotebookOptions).mockResolvedValue(notebookOptionsFixture({
       context,
       options: [older, newer],
       materializations: {
@@ -1338,7 +1329,7 @@ describe("NotebookRouteView", () => {
         opt_newer: materialization("opt_newer", "draft_new"),
       },
       trace_id: "trace_1",
-    });
+    }));
 
     render(
       <MemoryRouter initialEntries={["/p/project/graph?view=notebook&notebook=nb_1"]}>
@@ -1354,7 +1345,7 @@ describe("NotebookRouteView", () => {
   it("hydrates a generic execution result after a reload without requiring an ETS result parser", async () => {
     const executed = readCanonicalFixture("notebook_option_revision_v11");
     executed.lifecycle_status = "executed";
-    vi.mocked(listNotebookOptions).mockResolvedValue({
+    vi.mocked(listNotebookOptions).mockResolvedValue(notebookOptionsFixture({
       context,
       options: [executed],
       execution_results: {
@@ -1374,7 +1365,7 @@ describe("NotebookRouteView", () => {
         },
       },
       trace_id: "trace_1",
-    });
+    }));
 
     render(
       <MemoryRouter initialEntries={["/p/project/graph?view=notebook&notebook=nb_1"]}>

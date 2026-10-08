@@ -12,7 +12,7 @@ from threading import RLock
 from typing import Any
 from uuid import uuid4
 
-from .storage import _exclusive_jsonl_lock
+from ..jsonl_store import _exclusive_jsonl_lock
 
 
 def _now() -> str:

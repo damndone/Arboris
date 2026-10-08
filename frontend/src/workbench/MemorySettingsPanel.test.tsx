@@ -15,6 +15,7 @@ import {
   updateGlobalMemorySettings,
   updateProjectMemorySetting,
 } from "../notebook/domainMemoryApi";
+import { candidateRejectedFixture, memoryReviewedFixture } from "../apiFixtures";
 
 vi.mock("../notebook/domainMemoryApi", () => ({
   archiveMemoryLibraryEntries: vi.fn(),
@@ -126,7 +127,7 @@ describe("MemorySettingsPanel", () => {
         memory_authority: "server_owned",
       })
       .mockResolvedValue({ candidates: [], memory_authority: "server_owned" });
-    vi.mocked(reviewDomainMemoryCandidate).mockResolvedValue({ automatic_execution: false });
+    vi.mocked(reviewDomainMemoryCandidate).mockResolvedValue(candidateRejectedFixture());
     render(<MemorySettingsPanel projectRoot="/project-a" />);
 
     expect(await screen.findByText("Inspect the registered assumption.")).toBeInTheDocument();
@@ -152,7 +153,7 @@ describe("MemorySettingsPanel", () => {
       }],
       memory_authority: "server_owned",
     }).mockResolvedValue({ candidates: [], memory_authority: "server_owned" });
-    vi.mocked(reviewDomainMemoryCandidate).mockResolvedValue({ automatic_execution: false });
+    vi.mocked(reviewDomainMemoryCandidate).mockResolvedValue(memoryReviewedFixture());
     render(<MemorySettingsPanel projectRoot="/project-a" />);
 
     await screen.findByText("Only an explicit review may publish this memory.");
@@ -239,8 +240,8 @@ describe("MemorySettingsPanel", () => {
 
   it("does not refresh a former project after its candidate review returns", async () => {
     let releaseReview: (() => void) | undefined;
-    const reviewResult = new Promise<{ automatic_execution: false }>((resolve) => {
-      releaseReview = () => resolve({ automatic_execution: false });
+    const reviewResult = new Promise<ReturnType<typeof memoryReviewedFixture>>((resolve) => {
+      releaseReview = () => resolve(memoryReviewedFixture());
     });
     const currentProject = {
       ...settings,

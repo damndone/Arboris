@@ -121,11 +121,10 @@ describe("generateReport error boundary", () => {
       projectRoot: "/tmp/project",
       runId: "run-1",
       record: { id: "rpt_abc", text: "# Report" },
-    })).resolves.toMatchObject({
-      record: {
-        fact_snapshot_hash: "hash-from-server",
-        validation_status: "exportable",
-      },
+    })).resolves.toEqual({
+      fact_snapshot_hash: "hash-from-server",
+      artifact_ids: ["ai_report_rpt_abc"],
+      validation_status: "exportable",
     });
 
     vi.unstubAllGlobals();

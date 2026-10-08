@@ -33,14 +33,16 @@ from ..context_compiler import NotebookPlanningContextV1
 from ..trace import TraceWriter
 from ..workflow_contracts import (
     GENESIS_RUN_LEVEL_FIELDS,
-    MODEL_FAMILY_SPEC_FIELDS,
     NOTEBOOK_GENESIS_MODEL_PARAMS,
-    OperationValidationError,
-    family_context_columns,
     genesis_run_params,
-    model_family_contract,
     validate_model_genesis_spec,
 )
+from ...contracts.model.family import (
+    MODEL_FAMILY_SPEC_FIELDS,
+    family_context_columns,
+    model_family_contract,
+)
+from ...contracts.common.errors import OperationValidationError
 from ..recipe_contracts import (
     RecipeValidationError,
     recipe_contract_for_model_type,

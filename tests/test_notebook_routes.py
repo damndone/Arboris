@@ -22,7 +22,7 @@ from workbench.agent.notebook.planning_agent import PlanningRefusal
 from workbench.agent.notebook.materialization import NotebookOptionMaterializer
 from workbench.agent.notebook.store import NOTEBOOK_FILENAME
 from workbench.agent.trace import TraceWriter
-from workbench.agent.storage import append_jsonl_atomic
+from workbench.jsonl_store import append_jsonl_atomic
 from workbench.contracts.agent.notebook_option import (
     EvidenceRef,
     ExpectedArtifact,
@@ -47,10 +47,8 @@ from workbench.http.notebook_routes import (
 
 def test_notebook_workflow_capability_admission_uses_published_contracts() -> None:
     from workbench.agent.notebook.vocabulary import capability_artifact_types
-    from workbench.agent.workflow_contracts import (
-        MODEL_FAMILY_CONTRACTS,
-        notebook_workflow_capability_ids,
-    )
+    from workbench.agent.workflow_contracts import notebook_workflow_capability_ids
+    from workbench.contracts.model.family import MODEL_FAMILY_CONTRACTS
 
     admitted = set(notebook_workflow_capability_ids())
 
@@ -483,7 +481,7 @@ def test_dataset_notebook_confirmation_executes_a_source_pinned_composed_workflo
         "curved",
     }
     assert workflow["post_estimation_artifact_ids"]
-    listed = client.get(f"/notebooks/{notebook_id}/options", params=params)
+    listed = client.post(f"/notebooks/{notebook_id}/options", params=params)
     assert listed.status_code == 200, listed.text
     result = listed.json()["execution_results"][option["option_id"]]
     assert result["execution_status"] == "succeeded"
@@ -617,7 +615,7 @@ def test_confirmed_p7_only_notebook_workflow_persists_one_contract_result(
 
     assert confirmed.status_code == 200, confirmed.text
     assert confirmed.json()["workflow_execution"]["status"] == "completed"
-    listed = client.get(f"/notebooks/{notebook_id}/options", params=params).json()
+    listed = client.post(f"/notebooks/{notebook_id}/options", params=params).json()
     result = listed["execution_results"][option_id]
     assert result["artifact_validation"]["issues"] == []
     index = json.loads(
@@ -1336,6 +1334,31 @@ def test_notebook_route_creates_reads_and_compiles_a_runless_notebook(
     assert compiled.json()["trace_id"].startswith("trace_")
 
 
+def test_revalidate_route_issues_a_new_revision_of_the_same_option(tmp_path: Path) -> None:
+    project = make_project(tmp_path)
+    client = TestClient(app)
+    notebook_id = _create(client, project)["notebook_id"]
+    params = {"project_root": str(project)}
+    proposed = client.post(
+        f"/notebooks/{notebook_id}/options/propose", params=params, json={"drafts": _drafts()}
+    )
+    assert proposed.status_code == 200, proposed.text
+    first = proposed.json()["options"][0]
+
+    revalidated = client.post(
+        f"/notebooks/{notebook_id}/options/{first['option_id']}/revalidate",
+        params=params,
+        json={**_drafts()[0], "proposal": model_rerun_proposal("p1_revalidated", covariance="robust")},
+    )
+
+    assert revalidated.status_code == 200, revalidated.text
+    body = revalidated.json()
+    assert body["option"]["option_id"] == first["option_id"]
+    assert body["option"]["option_revision"] > first["option_revision"]
+    assert body["context"]["notebook_id"] == notebook_id
+    assert body["trace_id"].startswith("trace_")
+
+
 def test_notebook_route_runs_option_lifecycle_through_artifact_validation(
     tmp_path: Path,
 ) -> None:
@@ -1362,7 +1385,7 @@ def test_notebook_route_runs_option_lifecycle_through_artifact_validation(
     # total budget that the server does not enforce.
     assert "planning_deadline_s" not in proposed.json()["context"]
 
-    snapshot = client.get(
+    snapshot = client.post(
         f"/notebooks/{notebook_id}/options",
         params=params,
     )
@@ -1411,7 +1434,7 @@ def test_notebook_route_runs_option_lifecycle_through_artifact_validation(
     assert confirmed.json()["execution"]["option_id"] == "opt_route_1"
     assert confirmed.json()["execution"]["run_id"] is None
 
-    after_confirm = client.get(
+    after_confirm = client.post(
         f"/notebooks/{notebook_id}/options",
         params=params,
     )
@@ -1474,7 +1497,7 @@ def test_notebook_route_runs_option_lifecycle_through_artifact_validation(
     assert completed.json()["artifact_validation"]["validation_status"] == "passed"
     assert completed.json()["lifecycle_status"] == "executed"
 
-    reloaded = client.get(
+    reloaded = client.post(
         f"/notebooks/{notebook_id}/options",
         params=params,
     )
@@ -1575,7 +1598,7 @@ def test_notebook_route_returns_typed_planning_refusal_without_persisting_option
         "fatal": False,
         "detail": "planner refused: unsafe_instruction",
     }
-    snapshot = client.get(
+    snapshot = client.post(
         f"/notebooks/{notebook['notebook_id']}/options",
         params={"project_root": str(project)},
     )
@@ -1642,7 +1665,7 @@ def test_notebook_planning_attempt_can_be_cancelled_without_persisting_options(
         "fatal": False,
         "detail": "notebook planning cancelled by user",
     }
-    snapshot = client.get(
+    snapshot = client.post(
         f"/notebooks/{notebook_id}/options",
         params=params,
     )
@@ -1739,7 +1762,7 @@ def test_notebook_route_persists_agent_decision_as_evidence_option_revision(
         notebook["notebook_id"], persisted["batch_id"]
     )
     RecommendationDecisionV11.from_dict(stored_decision.to_dict())
-    listed = client.get(
+    listed = client.post(
         f"/notebooks/{notebook['notebook_id']}/options",
         params={"project_root": str(project)},
     )
@@ -2077,7 +2100,7 @@ def test_materialize_route_creates_genesis_draft_and_confirm_is_idempotent(
     assert confirmed.status_code == 200, confirmed.text
     assert confirmed.json()["materialization"]["materialization_id"] == packet["materialization"]["materialization_id"]
 
-    listed = client.get(
+    listed = client.post(
         f"/notebooks/{notebook_id}/options",
         params=params,
     )
@@ -3003,7 +3026,7 @@ def test_model_custom_route_runs_generated_adapter_through_local_experimental_ga
         assert result_paths and result_paths[0].read_text(encoding="utf-8") == (
             '{"status":"ok","value":43}'
         )
-        listed = client.get(
+        listed = client.post(
             f"/notebooks/{notebook_id}/options", params=params
         )
         assert listed.status_code == 200, listed.text
@@ -3136,7 +3159,7 @@ def test_notebook_route_uses_server_owned_catalog_for_v12_options(
         parsed = NotebookOptionRevisionV12.from_dict(persisted)
         assert parsed.execution_allowed is False
         assert parsed.capability_resolution_binding_ref == binding.content_digest
-        listed = client.get(
+        listed = client.post(
             f"/notebooks/{notebook_id}/options",
             params=params,
         )
@@ -3291,7 +3314,7 @@ def test_external_family_focus_marks_options_stale_without_rebinding_source(
     )
     assert proposed.status_code == 200, proposed.text
 
-    after = client.get(
+    after = client.post(
         f"/notebooks/{notebook_id}/options",
         params={**params, "focused_run_id": "run_002"},
     )
@@ -3302,3 +3325,33 @@ def test_external_family_focus_marks_options_stale_without_rebinding_source(
     assert client.get(
         f"/notebooks/{notebook_id}", params=params
     ).json()["projection_source"] == {"kind": "run", "run_id": "run_001"}
+
+
+def test_execution_authorization_is_issued_only_by_the_server() -> None:
+    """There is no route for a client to submit an execution authorization.
+
+    Authorizations bind server-owned facts (capability binding, materialized
+    draft hash, admission and runtime policy); confirm-and-execute issues and
+    persists them inside the server. The former client-envelope route could
+    not succeed for any input and was removed in v1.8.12.
+    """
+    from workbench.agent.notebook.service import NotebookService as Service
+
+    paths = {getattr(route, "path", "") for route in app.routes}
+    paths |= {
+        getattr(route, "path", "")
+        for included in app.routes
+        if hasattr(included, "original_router")
+        for route in included.original_router.routes
+    }
+    assert not any(path.endswith("/authorize-execution") for path in paths)
+    assert "/notebooks/{notebook_id}/options/{option_id}/confirm-and-execute" in paths
+    # The server-side issuance the confirm path relies on stays.
+    assert callable(Service.authorize_option_execution)
+
+    response = TestClient(app).post(
+        "/notebooks/nb_x/options/opt_x/authorize-execution",
+        params={"project_root": "/tmp/none"},
+        json={"authorization": {}},
+    )
+    assert response.status_code in {404, 405}

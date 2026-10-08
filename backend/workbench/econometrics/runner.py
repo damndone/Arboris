@@ -23,6 +23,7 @@ from ..analysis_loop.policy import (
     cluster_runtime_type,
     ols_cluster_policy_v1,
 )
+from ..formula_terms import quote_column
 from .normalize import _json_safe_float, normalize_statsmodels_result
 from .optional_deps import require_optional_dependency
 
@@ -39,7 +40,7 @@ HONEST_DID_WORKERS = max(1, min(4, os.cpu_count() or 1))
 
 
 def _formula_term(column: str, categorical: bool = False) -> str:
-    quoted = f"Q({column!r})"
+    quoted = quote_column(column)
     if categorical:
         return f"C({quoted})"
     return quoted

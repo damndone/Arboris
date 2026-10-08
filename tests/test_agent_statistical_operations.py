@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import pytest
 
-from workbench.agent.operations import OperationRegistry, OperationValidationError
+from workbench.agent.operations import OperationRegistry
+from workbench.contracts.common.errors import OperationValidationError
 
 
 def _target() -> dict[str, str]:

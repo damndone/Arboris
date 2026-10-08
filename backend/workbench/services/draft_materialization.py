@@ -186,7 +186,7 @@ def _family_option_schema(
     covariance_options: tuple[str, ...] = (),
     exposes_covariance: bool = False,
 ) -> dict[str, Any]:
-    from ..agent.workflow_contracts import model_family_contract
+    from ..contracts.model.family import model_family_contract
 
     contract = model_family_contract(model_type)
     properties: dict[str, dict[str, Any]] = {}
@@ -294,7 +294,7 @@ def _genesis_model_editor_schema(
     """
 
     from ..agent.recipe_contracts import recipe_contract_for_model_type
-    from ..agent.workflow_contracts import (
+    from ..contracts.model.family import (
         DID_MODE_VALUES,
         WORKFLOW_SPLIT_KINDS,
         model_family_contract,

@@ -108,14 +108,14 @@ def test_declared_family_editor_never_falls_back_when_contract_lookup_breaks(
     monkeypatch,
 ):
     """A broken live family contract must stay visible instead of yielding an empty schema."""
-    import workbench.agent.workflow_contracts as workflow_contracts
+    import workbench.contracts.model.family as family_contracts
     from workbench.services.draft_materialization import _genesis_model_editor_schema
 
     def broken_contract_lookup(_model_type):
         raise RuntimeError("contract registry unavailable")
 
     monkeypatch.setattr(
-        workflow_contracts,
+        family_contracts,
         "model_family_contract",
         broken_contract_lookup,
     )
@@ -126,7 +126,7 @@ def test_declared_family_editor_never_falls_back_when_contract_lookup_breaks(
 
 def test_declared_family_editor_never_discards_a_broken_wire_projection():
     """A family builder failure must not silently erase its projected controls."""
-    from workbench.agent.workflow_contracts import model_family_contract
+    from workbench.contracts.model.family import model_family_contract
     from workbench.services.draft_materialization import _family_wire_projection
 
     def broken_builder(*_args, **_kwargs):

@@ -5,7 +5,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 from tests.test_data_column_cast import _source_project
-from workbench.agent.operations import OperationValidationError
+from workbench.contracts.common.errors import OperationValidationError
 from workbench.agent.workflow import WorkflowExecutor, WorkflowExecutionError, compile_workflow
 from workbench.agent.workflow_runtime import build_workflow_step_executor, collect_post_estimation_results
 from workbench.agent.read_only_policy import decide

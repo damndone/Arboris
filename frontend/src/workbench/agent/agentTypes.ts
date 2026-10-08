@@ -1,191 +1,25 @@
-export type AgentRole = "main" | "chain";
+/**
+ * Agent API shapes, as the backend declares them (see apiTypes.ts). Only the
+ * client-side context packet is defined here.
+ */
+import type { Schema } from "../../apiTypes";
 
-export type AgentMessage = {
-  entry_id: string;
-  role: "user" | "assistant" | "tool";
-  content: string;
-  /** Tool entries: the executed tool id (used as the typed status label). */
-  name?: string | null;
-  stop_reason?: string | null;
-  /** Numbers the numeric check could not match to any result. */
-  numeric_check?: { unverified?: Array<{ text: string; closest?: string[] }> } | null;
-  error?: string | null;
-  navigation?: AgentNavigationRef[];
-};
+export type AgentRole = Schema<"AgentSessionCreateRequest">["role"];
+export type AgentMessage = Schema<"AgentMessage">;
+export type AgentNavigationRef = Schema<"AgentNavigationRef">;
+export type AgentNavigationProjection = Schema<"NavigationProjectionView">;
+export type AgentHierarchyNode = Schema<"HierarchyNodeView">;
+export type AgentActivityItem = Schema<"ActivityOperationItem">;
+export type AgentActivityEventItem = Schema<"ActivityEventItem">;
+export type AgentEvent = Schema<"AgentEvent">;
+export type AgentProposal = Schema<"PublicProposal">;
+export type AgentOperationRecord = Schema<"OperationRecordView">;
+export type AgentSession = Schema<"AgentSession">;
+export type AgentModelOption = Schema<"ProviderModel">;
+export type AgentCapability = Schema<"OperationCapability">;
+export type AgentCapabilityBoundaryItem = Schema<"BoundaryItem">;
+export type AgentCapabilityCatalog = Schema<"AgentCapabilities">;
+export type AgentSessionCreateRequest = Schema<"AgentSessionCreateRequest">;
 
-export type AgentNavigationRef = {
-  kind:
-    | "graph_node"
-    | "agent_session"
-    | "agent_entry"
-    | "chain"
-    | "fork"
-    | "run"
-    | "operation"
-    | "diff"
-    | "proposal";
-  id: string;
-  label: string;
-  relation: "source" | "parent" | "child" | "result" | "audit" | "context";
-  available: boolean;
-  href: {
-    view: "graph" | "agent";
-    run_id?: string;
-    node_ref?: string;
-    node_hash?: string;
-    forest_node_key?: string;
-    session_id?: string;
-    chain_id?: string;
-    entry_id?: string;
-    fork_id?: string;
-    operation_record_id?: string;
-    diff?: string;
-    proposal_id?: string;
-  };
-  reason?: string;
-};
-
-export type AgentNavigationProjection = {
-  subject: AgentNavigationRef;
-  links: AgentNavigationRef[];
-  last_event_seq: number;
-  hierarchy?: AgentHierarchyNode | null;
-};
-
-export type AgentHierarchyNode = {
-  ref: AgentNavigationRef;
-  status: string | null;
-  children: AgentHierarchyNode[];
-};
-
-export type AgentActivityItem = {
-  kind: "operation";
-  activity_id: string;
-  at: string;
-  main: AgentNavigationRef;
-  chain: AgentNavigationRef;
-  operation: AgentNavigationRef;
-  diff: AgentNavigationRef | null;
-  status: string;
-  links: AgentNavigationRef[];
-  diff_ref: Record<string, unknown> | null;
-  verification: Record<string, unknown>;
-  effect_status?: string;
-  projection_status?: string;
-};
-
-export type AgentActivityEventItem = {
-  kind: "event";
-  activity_id: string;
-  at: string;
-  seq: number;
-  event_type: string;
-  session: AgentNavigationRef;
-  main: AgentNavigationRef;
-  chain: AgentNavigationRef;
-  command_id: string | null;
-  details: Record<string, unknown>;
-  links: AgentNavigationRef[];
-};
-
-export type AgentEvent = {
-  schema_version?: string;
-  event_id: string;
-  session_id: string;
-  seq: number;
-  event_type: string;
-  payload: Record<string, unknown>;
-  command_id: string | null;
-  created_at: string;
-};
-
-export type AgentProposal = {
-  /** What it will do, as sentences derived by the server from `changes`. */
-  readable?: string[];
-  record_type: "revision";
-  proposal_id: string;
-  operation_id: string;
-  operation_version: string;
-  revision: number;
-  session_id: string;
-  chain_id: string;
-  command_id: string | null;
-  target: Record<string, unknown>;
-  preconditions: Record<string, unknown>;
-  changes: Record<string, unknown>;
-  evidence_refs: string[];
-  expected_effect: string[];
-  risks: string[];
-  created_at: string;
-  fingerprint: string;
-  status: string;
-  confirmation?: Record<string, unknown>;
-  decision?: Record<string, unknown>;
-};
-
-export type AgentOperationRecord = {
-  record_id: string;
-  operation_id: string;
-  proposal_id: string;
-  status: string;
-  [key: string]: unknown;
-};
-
-export type AgentSession = {
-  session_id: string;
-  role: AgentRole;
-  chain_id: string;
-  status: string;
-  context_fingerprint: string | null;
-  model: string | null;
-  provider_id: string | null;
-  context_window_tokens: number | null;
-  messages: AgentMessage[];
-  proposals: AgentProposal[];
-};
-
+/** What the client tells the Agent about the current view. */
 export type AgentContextPacket = Record<string, unknown>;
-
-export type AgentModelOption = {
-  display_name: string;
-  request_model: string;
-  context_window_tokens: number | null;
-  supports_1m: boolean;
-};
-
-export type AgentCapability = {
-  operation_id: string;
-  operation_version: string;
-  effect_level: string;
-  scope: string;
-  scope_requirements: string[];
-  risk_level: string;
-  risk_authorization_policy?: string;
-  confirmation_policy: string;
-  ui_description: string;
-  example_prompts: string[];
-  natural_language_enabled: boolean;
-};
-
-export type AgentCapabilityBoundaryItem = {
-  id: string;
-  label: string;
-  description: string;
-};
-
-export type AgentCapabilityCatalog = {
-  capabilities: AgentCapability[];
-  boundary: {
-    advisory: AgentCapabilityBoundaryItem[];
-    unsupported: AgentCapabilityBoundaryItem[];
-  };
-};
-
-export type AgentSessionCreateRequest = {
-  role: AgentRole;
-  chain_id?: string;
-  run_id?: string;
-  context_packet: AgentContextPacket;
-  /** What the Agent is about (agent/focus.ts), and its display label. */
-  focus?: { kind: string; id: string; run_id?: string; label: string };
-};

@@ -4,11 +4,12 @@ import {
   fetchEgress,
   fetchEgressAudit,
   replaceEgressPolicy,
+  type ContentClass,
   type EgressAuditRecord,
   type EgressView,
 } from "./dataViewApi";
 
-const CLASS_LABELS: Record<string, string> = {
+const CLASS_LABELS: Record<ContentClass, string> = {
   workbench_state: "Workbench state (operations, lineage, contracts)",
   schema: "Column names and types",
   metadata: "Labels and missing-value codes",
@@ -26,7 +27,7 @@ function sameSet(left: string[], right: string[]): boolean {
 export function SharingPanel({ projectRoot }: { projectRoot: string }) {
   const [view, setView] = useState<EgressView | null>(null);
   const [audit, setAudit] = useState<EgressAuditRecord[]>([]);
-  const [draft, setDraft] = useState<string[]>([]);
+  const [draft, setDraft] = useState<ContentClass[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -55,7 +56,7 @@ export function SharingPanel({ projectRoot }: { projectRoot: string }) {
   const overridden = provider !== null && providerKey in view.policy.providers;
   const defaults = provider ? view.defaults[provider.locality] : [];
 
-  async function save(allow: string[] | null) {
+  async function save(allow: ContentClass[] | null) {
     if (!view) return;
     setSaving(true);
     setError(null);
@@ -93,7 +94,7 @@ export function SharingPanel({ projectRoot }: { projectRoot: string }) {
                 <input
                   type="checkbox"
                   style={{ width: "auto", margin: 0 }}
-                  aria-label={`Send ${CLASS_LABELS[contentClass] ?? contentClass}`}
+                  aria-label={`Send ${CLASS_LABELS[contentClass]}`}
                   checked={draft.includes(contentClass)}
                   onChange={(event) =>
                     setDraft((current) =>
@@ -101,7 +102,7 @@ export function SharingPanel({ projectRoot }: { projectRoot: string }) {
                     )
                   }
                 />
-                {CLASS_LABELS[contentClass] ?? contentClass}
+                {CLASS_LABELS[contentClass]}
               </label>
             ))}
           </div>

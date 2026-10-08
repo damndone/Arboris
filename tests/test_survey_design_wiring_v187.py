@@ -354,10 +354,12 @@ def test_measurement_level_rides_labels_without_changing_routing(tmp_path):
 # --------------------------------------------------------------------------
 
 def test_cli_run_accepts_survey_design_params():
-    import inspect
+    # `workbench run` is generated from the POST /runs field table (v1.8.12).
+    import typer.main
 
-    from workbench.cli import run as cli_run
+    from workbench.cli import app as cli_app
 
-    params = inspect.signature(cli_run).parameters
+    run_command = typer.main.get_command(cli_app).get_command(None, "run")
+    params = {param.name for param in run_command.params}
     for name in SURVEY_FIELDS:
         assert name in params, f"CLI run command is missing --{name.replace('_', '-')}"

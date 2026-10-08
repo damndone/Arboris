@@ -91,6 +91,26 @@
      实现配方——**是活参考不是历史,移动必须同步改代码注释里的路径**);
    - `docs/api-contracts/`、`docs/*-howto.md`、`docs/dev-browser-smoke.md`、`docs/extensions.md` = 活文档,就地更新;
    - `docs/` 顶层不再裸放版本号文件;release notes 之外的版本产物一律走 superpowers 七类。
+8. **证据存放规范**(v1.8.12 第 3 步定,2026-10-07;机器强制):
+   - **大体量原始证据不入库**:放 ignored `local/`,仓库只留清单与 SHA-256。含许可证值的原始日志另按
+     `scripts/withhold_raw_log_hashes.py` 处理,入库文件里不写其原始哈希。
+   - **测试自己留的证据**写 `local/test-evidence/<类别>/<运行>`(`tests/evidence_retention.py`):
+     每类留最近 3 份,失败或 `WORKBENCH_KEEP_EVIDENCE=1` 的永不自动删;这是“绝不自动删”唯一的有限例外。
+   - **评估与回归分开**:回归测试在 `tests/`;今后的评估脚本与小体量评估证据放仓库根目录
+     `evaluations/<版本>/`(不在 pytest `testpaths` 内),书面报告放 `docs/superpowers/evaluations/`。
+   - **v1.8.10/v1.8.11 评估目录冻结原位**(用户决定):`tests/eval_v1810/`、`tests/eval_v1811/`、
+     `tests/fixtures/eval_v1810/`、`tests/fixtures/eval_v1811/`、`tests/fixtures/agent_live_eval_v1811/`
+     允许修改、不许新增文件。其中审查脚本钉在各自清单(`*_manifest.json`)记录的提交上,不随代码维护,
+     显式点名运行时可能失败。已核实的 5 例:两例断言“负二项尚无真机评测”、两例断言“负二项后估计未开放”,
+     后来都被 v1.8.11 有意改变;一例是审查者首版脚本的冻结副本,当时记录就是失败
+     (`glm_nb_public_review_first.txt`)。只有 `*_test.py` 3 个仍在默认测试集里。
+   - **每版体积预算**:`scripts/repo_evidence_budget.py`(gate 内由 `tests/test_repo_evidence_budget.py` 执行)
+     对比上一个发布 tag:净增 ≤ 5 MiB、新增文件 ≤ 1000、单文件 ≤ 512 KiB,冻结目录不得新增。超额时列出路径;
+     确需入库的大文件写进 `scripts/repo_evidence_allowlist.json`(理由 + 上限),审查时可见。
+     放行清单里的文件改名或删除时预算检查会报错。现有条目:生成的前端 API 类型
+     `frontend/src/generated/api-schema.ts`(不是证据,随接口数增长;上限 1 MiB,用户 2026-10-08 批准)。
+   - **推送护栏入库**:`scripts/git_hooks/pre-push`,新机器或新 clone 运行 `python3 scripts/install_git_hooks.py`
+     (只写 `.git/hooks/pre-push`;已有不同内容的钩子不覆盖,除非 `--force`)。
 
 > 反面教材(2026-07-08 与 2026-07-15 两次整理前的状态):根目录躺着 v1.5.4.3 的 HANDOFF、
 > superpowers 顶层裸放两份 HANDOFF、plans/ 混进 progress 文件、五份 followups 各自 14+ 个

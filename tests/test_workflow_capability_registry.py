@@ -210,7 +210,7 @@ def test_new_workflow_declarations_project_into_agent_and_capability_surfaces() 
 def test_prediction_training_dataset_cannot_feed_inference_model() -> None:
     """Dataset roles are server-owned; resampling cannot become inference data."""
 
-    from workbench.agent.operations import OperationValidationError
+    from workbench.contracts.common.errors import OperationValidationError
     from workbench.agent.workflow_contracts import validate_workflow_steps
 
     steps = [
@@ -273,7 +273,7 @@ def test_prediction_training_dataset_can_feed_prediction_adapter() -> None:
 def test_prediction_training_dataset_cannot_feed_a_p7_inference_pack() -> None:
     """Prediction-only resampling must not become P7 inference input."""
 
-    from workbench.agent.operations import OperationValidationError
+    from workbench.contracts.common.errors import OperationValidationError
     from workbench.agent.workflow_contracts import validate_workflow_steps
 
     steps = [

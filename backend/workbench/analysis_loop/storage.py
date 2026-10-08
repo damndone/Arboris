@@ -23,7 +23,7 @@ def _now() -> str:
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     """Load Agent JSONL storage only after package initialization completes."""
 
-    from ..agent.storage import read_jsonl
+    from ..jsonl_store import read_jsonl
 
     return read_jsonl(path)
 
@@ -31,7 +31,7 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
 def _append_jsonl_atomic(path: Path, value: dict[str, Any]) -> None:
     """Append Agent JSONL storage without creating an import-time cycle."""
 
-    from ..agent.storage import append_jsonl_atomic
+    from ..jsonl_store import append_jsonl_atomic
 
     append_jsonl_atomic(path, value)
 

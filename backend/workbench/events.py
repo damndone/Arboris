@@ -7,21 +7,14 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Optional
 
+from .jsonl_store import append_jsonl_atomic, read_jsonl
 
 
 def _read_history(path: Path) -> list[dict]:
-    # Import lazily: importing ``workbench.agent.storage`` executes the agent
-    # package exports, some of which import services that depend on events.
-    # Keeping this edge lazy avoids a package-initialization cycle when this
-    # low-level event module is imported on its own.
-    from .agent.storage import read_jsonl
-
     return read_jsonl(path)
 
 
 def _append_history(path: Path, event: dict) -> None:
-    from .agent.storage import append_jsonl_atomic
-
     append_jsonl_atomic(path, event)
 
 

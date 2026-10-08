@@ -16,11 +16,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from workbench.agent.workflow_contracts import (
-    OperationValidationError,
-    genesis_run_params,
-    validate_model_genesis_spec,
-)
+from workbench.agent.workflow_contracts import genesis_run_params, validate_model_genesis_spec
+from workbench.contracts.common.errors import OperationValidationError
 from workbench.artifacts import read_json
 from workbench.combinators import pool_kernels
 from workbench.contracts.model.inference_kernel import kernel_relative_path

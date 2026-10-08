@@ -12,16 +12,17 @@ def test_cli_run_passes_imputation_json_to_workflow(tmp_path: Path, monkeypatch)
 
     def fake_run_workflow(*_args, **kwargs):
         captured.update(kwargs)
-        return {"run_id": "stub-run-imp"}
+        return {"run_id": _args[1], "status": "completed"}
 
     import workbench.cli as cli_module
-    import workbench.orchestrator as orch
+    import workbench.services.run_service as run_service
 
-    monkeypatch.setattr(orch, "run_workflow", fake_run_workflow)
+    # The CLI submits through the run service POST /runs uses (v1.8.12).
+    monkeypatch.setattr(run_service, "_run_workflow", fake_run_workflow)
     monkeypatch.setattr(cli_module, "_lineage_url", lambda *_args: "http://example/run")
 
+    CliRunner().invoke(app, ["create", str(tmp_path), "proj"])
     project = tmp_path / "proj"
-    project.mkdir()
     data = tmp_path / "data.csv"
     data.write_text("y,x\n1,2\n3,4\n", encoding="utf-8")
 

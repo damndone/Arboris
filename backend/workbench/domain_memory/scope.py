@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal, get_args
 
 from ..custom_capability.canonical import domain_digest
 
@@ -13,8 +13,10 @@ class DomainMemoryScopeError(ValueError):
 
 
 _MAX_ID = 128
-_VISIBILITY = frozenset({"private", "organization"})
-_PROMOTION = frozenset({"user", "organization"})
+Visibility = Literal["private", "organization"]
+Promotion = Literal["user", "organization"]
+_VISIBILITY = frozenset(get_args(Visibility))
+_PROMOTION = frozenset(get_args(Promotion))
 
 
 def _identifier(value: Any, field: str) -> str:
@@ -33,8 +35,8 @@ class MemoryScope:
     profile_id: str
     owner_id: str
     organization_id: str | None
-    visibility_scope: str
-    promotion_scope: str
+    visibility_scope: Visibility
+    promotion_scope: Promotion
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "namespace_id", _identifier(self.namespace_id, "namespace_id"))

@@ -15,7 +15,7 @@ import {
   askAiHistoryForNode,
   makeActivityId,
 } from "../aiActivity/aiActivityLog";
-import { askAiAboutFigure, type FigureAiContext } from "../workbench/views/figureAi";
+import { askAiAboutFigure, type FigureAiPacket } from "../workbench/views/figureAi";
 import { renderMarkdown } from "../report/markdown";
 
 const W = 560;
@@ -114,7 +114,7 @@ function Frame({
 
 const MAX_AI_ROWS = 120;
 
-function chartFigureContext(title: string, spec: ChartAiSpec): FigureAiContext {
+function chartFigureContext(title: string, spec: ChartAiSpec): FigureAiPacket {
   const sourceRows = spec.payload.rows;
   const rows = Array.isArray(sourceRows) ? sourceRows : null;
   const truncated = rows !== null && rows.length > MAX_AI_ROWS;

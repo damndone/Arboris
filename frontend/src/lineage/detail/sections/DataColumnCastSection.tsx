@@ -15,6 +15,7 @@ import {
   type DataCastOutputFormat,
   type DataColumnCastContext,
   type DataColumnCastOperationRecord,
+  type DataOperationDiff,
   type DataColumnCastTarget,
   type DataColumnsCastPreview,
   type DataTransformOperation,
@@ -198,7 +199,8 @@ function FeatureRecipeBuilder({
  * operation_id, so a new data operation renders without touching this.
  */
 function ProvenanceDiff({ record }: { record: DataColumnCastOperationRecord }) {
-  const diff = record.diff_ref;
+  // diff_ref is the operation's own diff contract; the record declares it openly.
+  const diff = record.diff_ref as DataOperationDiff | null;
   if (!diff) return null;
   const casts =
     diff.casts ??

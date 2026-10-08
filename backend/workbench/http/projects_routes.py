@@ -20,8 +20,11 @@ from ..repository.run_repository import _resolve_project_runs_dir
 from ..services.run_service import _read_upload_bytes
 from ..services.system_appearance import detect_system_appearance
 from ._deps import BYTES_PER_GB
+from .responses.projects import ProjectCreated, StatisticalUploadPreview, UploadStored
+from .responses.system import Capabilities, SystemAppearance
+from .typed_routes import TypedAPIRoute
 
-router = APIRouter()
+router = APIRouter(route_class=TypedAPIRoute)
 
 
 class ProjectRequest(BaseModel):
@@ -30,12 +33,12 @@ class ProjectRequest(BaseModel):
 
 
 @router.get("/capabilities")
-def capabilities_endpoint() -> dict:
+def capabilities_endpoint() -> Capabilities:
     return build_capabilities()
 
 
 @router.get("/system/appearance")
-def system_appearance_endpoint() -> dict[str, str | None]:
+def system_appearance_endpoint() -> SystemAppearance:
     """Expose only the local host's light/dark preference.
 
     The frontend consumes this endpoint only on loopback hosts. Remote clients
@@ -46,7 +49,7 @@ def system_appearance_endpoint() -> dict[str, str | None]:
 
 
 @router.post("/projects")
-def create_project_endpoint(request: ProjectRequest) -> dict[str, str]:
+def create_project_endpoint(request: ProjectRequest) -> ProjectCreated:
     parent_raw = request.parent.strip()
     name = request.name.strip()
     if not parent_raw:
@@ -104,7 +107,7 @@ def create_project_endpoint(request: ProjectRequest) -> dict[str, str]:
 async def upload_dataset_endpoint(
     project_root: str = Form(...),
     file: UploadFile = File(...),
-) -> dict[str, str]:
+) -> UploadStored:
     """v1.6.8 genesis: standalone content-addressable upload.
 
     Files persist server-side from wizard step 1 so genesis draft chains
@@ -130,7 +133,7 @@ PREVIEW_ROW_LIMIT = 5000
 async def preview_statistical_upload(
     project_root: str = Form(...),
     file: UploadFile = File(...),
-) -> dict[str, object]:
+) -> StatisticalUploadPreview:
     """Preview rows of an SPSS/Stata file the browser cannot parse itself.
 
     CSV and Excel are previewed client-side; this returns the same row shape

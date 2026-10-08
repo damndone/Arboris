@@ -8,6 +8,7 @@
 //
 // Spec: docs/superpowers/archive/specs/2026-05-22-v1.5.0-uiux-integration-design.md §4
 
+import type { Schema } from "../../apiTypes";
 import type { RerunFromProvenance } from "./nodeOperationContext";
 
 export type Stage =
@@ -50,42 +51,12 @@ export interface DecisionViewModel {
   confirmedAt?: string;
 }
 
-export interface ArtifactRef {
-  name: string;
-  mime: string;
-  sizeBytes?: number;
-  sha256?: string;
-  url?: string; // signed download URL (V2.0)
-}
+/** A node's artifact as the graph serves it (dataset profile, cleaning
+ *  actions, confirmed explorations). */
+export type ArtifactRef = Schema<"NodeArtifact">;
 
-/**
- * Editable form control descriptor. V1.5.0 declares the shape but does not
- * consume it; V1.5.2+ adapter and OperationSection will populate & render.
- * Mirrors `EditableControl` in uiux/handoff/api.openapi.yaml.
- */
-export interface EditableControl {
-  kind:
-    | "radio"
-    | "select"
-    | "multiselect"
-    | "slider"
-    | "text"
-    | "textarea"
-    | "toggle"
-    | "columns"; // v1.6.1: aligned with backend editable_schema (column-picker)
-  key: string;
-  label: string;
-  value?: unknown;
-  options?: Array<string | { value: unknown; label: string }>;
-  min?: number;
-  max?: number;
-  step?: number;
-  unit?: string;
-  // v1.6.1: backend-aligned annotations (correct the stale v1.5.0 shape).
-  role?: string; // semantic role (e.g. "model" — the op_type switch control)
-  required?: boolean;
-  visible_when?: Record<string, unknown>; // forward-compat; preserved, not yet enforced
-}
+/** Editable form control descriptor, as the backend declares it. */
+export type EditableControl = Schema<"EditableControlSpec">;
 
 /** v1.6.7 — lifecycle of an in-graph draft node (draft-in-graph feature).
  *  Undefined on real forest nodes. See spec §3. */
@@ -189,77 +160,16 @@ export interface GraphViewModel {
 // Backend: GET /runs/{id}/graph?view=headset (lineage/headset.py::build_headset)
 // ───────────────────────────────────────────────────────────────
 
-export interface CasRef {
-  node_hash: string;
-  artifact: string;
-}
+export type CasRef = Schema<"CasRef">;
 
-/** Raw backend NodeView — a per-run graph node decorated with node-hash identity
- *  + editable annotation. Keyed in the response by its dedup key (node_hash, or the
- *  bare node_id for non-cacheable nodes like the raw upload). */
-export interface HeadSetNodeRaw {
-  id: string;
-  kind: string;
-  display_label: string;
-  stage?: string | null;
-  summary?: string | null;
-  trust?: unknown;
-  trust_reason?: string | null;
-  parent_stage_id?: string | null;
-  created_at?: string;
-  decision_points?: unknown[];
-  node_hash: string | null;
-  producing_stage: string | null;
-  cas_ref: CasRef | null;
-  runs: string[];
-  /** v1.6.11 A2 — serve-time dataset decoration (schema/profile preview for Ask AI). */
-  artifacts?: Array<ArtifactRef & { summary?: unknown; preview?: unknown }>;
-  /** v1.6.11 C-2 — serve-time model decoration: fit metrics + n_observations +
-   *  compact coefficient rows from diagnostic_summary.json (fact-table source). */
-  stats?: Record<string, unknown>;
-  editable?: boolean;
-  op_type?: string;
-  schema_id?: string;
-  editable_schema?: EditableControl[];
-  editable_schema_source?: "capabilities" | "run_inputs";
-  editable_schema_version?: string;
-  rerun_from?: RerunFromProvenance;
-  produced_by_rerun_request_id?: string;
-}
-
-export interface HeadSetEdgeRaw {
-  source: string;
-  target: string;
-  /** v1.6.5 — edge op + params carried into the forest projection so the
-   *  canvas can render variable roles (role lives on the edge). */
-  op?: string | null;
-  params?: Record<string, unknown> | null;
-}
-
-export interface HeadRaw {
-  run_id: string;
-  head_node_hash: string | null;
-  from_node: string | null;
-  rerun_of: string | null;
-  rerun_reason: string | null;
-  status: string | null;
-  created_at: string | null;
-  rerun_from?: RerunFromProvenance | null;
-}
-
-export interface HeadSetFamilyRaw {
-  family_root: string;
-  members: string[];
-}
-
-export interface HeadSetResponse {
-  nodes: Record<string, HeadSetNodeRaw>;
-  edges: HeadSetEdgeRaw[];
-  heads: HeadRaw[];
-  families?: HeadSetFamilyRaw[];
-  schema_version: number;
-  legacy: boolean;
-}
+/** A per-run graph node decorated with node-hash identity and the editable
+ *  annotation, keyed in the response by its dedup key (node_hash, or the bare
+ *  node_id for non-cacheable nodes like the raw upload). */
+export type HeadSetNodeRaw = Schema<"ForestNodeView">;
+export type HeadSetEdgeRaw = Schema<"ForestEdge">;
+export type HeadRaw = Schema<"ForestHead">;
+export type HeadSetFamilyRaw = Schema<"ForestFamily">;
+export type HeadSetResponse = Schema<"ForestGraph">;
 
 /** UI-facing forest node: the base GraphViewNode plus head-set identity + editability.
  *  `id`/`nodeKey` are the dedup key (node_hash or bare node_id) — unique in the forest,
@@ -275,8 +185,10 @@ export interface HeadSetNode extends GraphViewNode {
   schemaId?: string;
   editableSchema?: EditableControl[];
   editableSchemaSource?: "capabilities" | "run_inputs";
-  editableSchemaVersion?: string;
+  /** Node-level provenance: the source this node was rerun from. */
   rerunFrom?: RerunFromProvenance;
+  /** Set instead of rerunFrom when the runs sharing the node record different sources. */
+  rerunFromConflicts?: RerunFromProvenance[];
   runRerunFrom?: RerunFromProvenance;
 }
 

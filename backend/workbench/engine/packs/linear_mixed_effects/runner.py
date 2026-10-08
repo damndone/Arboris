@@ -15,6 +15,7 @@ import statsmodels.formula.api as smf
 from workbench.contracts.common.envelope import PacketEnvelope
 from workbench.canonical import canonical_json_v1
 from workbench.services.pinned_run_directory import PinnedRunDirectory, PinnedRunError, SealedExecutionInput
+from workbench.formula_terms import quote_column
 
 from .covariance import REML_LIKELIHOOD_REASON, GlsFixedEffectResults
 from .diagnostics import terminal_input_error_diagnostic
@@ -39,7 +40,7 @@ def _fit_prepared(prepared: Any) -> Any:
             prepared.frame,
             groups=prepared.frame[prepared.input.subject_id],
             re_formula=(
-                "1 + " + f"Q({prepared.input.time!r})"
+                "1 + " + f"{quote_column(prepared.input.time)}"
                 if prepared.input.random_slope
                 else "1"
             ),

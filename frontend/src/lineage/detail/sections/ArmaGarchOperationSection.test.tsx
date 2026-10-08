@@ -42,7 +42,7 @@ function armaGarchNode(): HeadSetNode {
     editableSchema: [
       { kind: "select", key: "model_type", label: "Model", options: [], value: "time_series.arma_garch" },
       {
-        kind: "textarea",
+        kind: "json",
         key: "model_options",
         label: "Options",
         value: {

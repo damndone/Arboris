@@ -48,7 +48,7 @@ def test_lmm_publishes_its_parameters_like_every_other_family():
 
 def test_lmm_declares_a_model_family_contract():
     """The registry is what makes a family nameable in a composed plan."""
-    from workbench.agent.workflow_contracts import MODEL_FAMILY_CONTRACTS
+    from workbench.contracts.model.family import MODEL_FAMILY_CONTRACTS
 
     contract = MODEL_FAMILY_CONTRACTS.get("linear_mixed_effects")
     assert contract is not None, "LMM is still absent from the family registry"
@@ -94,7 +94,7 @@ def test_an_agent_can_compose_a_plan_that_starts_an_lmm():
 def test_an_lmm_plan_missing_its_repeated_measures_columns_is_refused():
     """Fail closed, and name what is missing -- a plan that ran without a
     subject column would silently fit an ordinary regression instead."""
-    from workbench.agent.operations import OperationValidationError
+    from workbench.contracts.common.errors import OperationValidationError
     from workbench.agent.workflow import compile_workflow
 
     plan = [
@@ -191,7 +191,7 @@ def test_the_agent_plan_binds_through_the_shared_model_options_gate():
 
 def _agent_model_params() -> dict:
     """Exactly what a composed plan hands the runner."""
-    from workbench.agent.workflow_contracts import MODEL_FAMILY_CONTRACTS
+    from workbench.contracts.model.family import MODEL_FAMILY_CONTRACTS
 
     contract = MODEL_FAMILY_CONTRACTS["linear_mixed_effects"]
     spec = {

@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from workbench.agent.operations import OperationRegistry, OperationValidationError
+from workbench.agent.operations import OperationRegistry
+from workbench.contracts.common.errors import OperationValidationError
 from workbench.agent.workflow_contracts import (
     WORKFLOW_STEP_SPEC_CONTRACTS,
     _validate_step_spec,

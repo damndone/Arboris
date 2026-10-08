@@ -1,165 +1,28 @@
 import { apiUrl, readResponse } from "../api";
+import type { RequestOf, ResponseOf, Schema } from "../apiTypes";
 
-export type DataColumnCastTarget = "numeric" | "string" | "datetime";
+export type DataColumnCastRequest = Schema<"DataColumnCastRequest">;
+export type DataColumnCastTarget = DataColumnCastRequest["target_dtype"];
+export type DataColumnCastContext = ResponseOf<"/data-operations/column-cast/context", "get">;
+export type DataColumnCastPreviewResponse = ResponseOf<"/data-operations/column-cast/preview", "post">;
+export type DataColumnCastPreview = DataColumnCastPreviewResponse["preview"];
+export type DataColumnsCastRequest = Schema<"DataColumnsCastRequest">;
+export type DataColumnsCastItem = DataColumnsCastRequest["casts"][number];
+export type DataCastOutputFormat = NonNullable<DataColumnsCastRequest["output_format"]>;
+export type DataColumnsCastPreviewResponse = ResponseOf<"/data-operations/columns-cast/preview", "post">;
+export type DataColumnsCastPreview = DataColumnsCastPreviewResponse["preview"];
+export type DataColumnCastItemResult = DataColumnsCastPreview["items"][number];
+export type DataColumnCastConfirmResponse = Schema<"OperationConfirmed">;
 
-export interface DataColumnCastRequest {
-  source_run_id: string;
-  source_node_id: string;
-  source_artifact_id: string;
-  column: string;
-  target_dtype: DataColumnCastTarget;
-}
+export type FeatureRecipeRequest = Schema<"FeatureRecipeRequest">;
+export type FeatureRecipeOperation = FeatureRecipeRequest["operation_id"];
+export type FeatureRecipePreviewResponse = ResponseOf<"/data-operations/feature-recipe/preview", "post">;
+export type FeatureRecipePreview = FeatureRecipePreviewResponse["preview"];
+export type FeatureRecipeConfirmResponse = ResponseOf<"/data-operations/feature-recipe/confirm", "post">;
 
-export interface DataColumnCastContext {
-  operation_id: "data.column.cast";
-  operation_version: "v1";
-  source_run_id: string;
-  source_node_id: string;
-  source_artifact_id: string;
-  source_artifact_path: string;
-  source_sha256: string;
-  row_count: number;
-  columns: Array<{ name: string; dtype: string }>;
-  downstream_invalidation: string[];
-}
-
-export interface DataColumnCastPreview {
-  operation_id: "data.column.cast";
-  operation_version: "v1";
-  source_run_id: string;
-  source_node_id: string;
-  source_artifact_id: string;
-  column: string;
-  target_dtype: DataColumnCastTarget;
-  source_sha256: string;
-  row_count: number;
-  before_dtype: string;
-  after_dtype: string;
-  success_count: number;
-  failure_count: number;
-  failure_examples: string[];
-  new_missing_count: number;
-  schema_fingerprint_before: string;
-  schema_fingerprint_after: string;
-  fingerprint: string;
-  downstream_invalidation: string[];
-  status: "ready" | "blocked";
-}
-
-export interface DataColumnsCastItem {
-  column: string;
-  target_dtype: DataColumnCastTarget;
-}
-
-export type DataCastOutputFormat = "csv" | "xlsx";
-
-export interface DataColumnsCastRequest {
-  source_run_id: string;
-  source_node_id: string;
-  source_artifact_id: string;
-  casts: DataColumnsCastItem[];
-  output_format?: DataCastOutputFormat;
-}
-
-export interface DataColumnCastItemResult {
-  column: string;
-  target_dtype: DataColumnCastTarget;
-  before_dtype: string;
-  after_dtype: string;
-  success_count: number;
-  failure_count: number;
-  failure_examples: string[];
-  new_missing_count: number;
-  status: "ready" | "blocked";
-}
-
-export interface DataColumnsCastPreview {
-  operation_id: "data.columns.cast";
-  operation_version: "v1";
-  source_run_id: string;
-  source_node_id: string;
-  source_artifact_id: string;
-  casts: DataColumnsCastItem[];
-  source_sha256: string;
-  row_count: number;
-  items: DataColumnCastItemResult[];
-  schema_fingerprint_before: string;
-  schema_fingerprint_after: string;
-  fingerprint: string;
-  downstream_invalidation: string[];
-  status: "ready" | "blocked";
-}
-
-export interface DataColumnsCastPreviewResponse {
-  spec: DataColumnsCastRequest & {
-    operation_id: "data.columns.cast";
-    operation_version: "v1";
-  };
-  preview: DataColumnsCastPreview;
-}
-
-export interface DataColumnCastPreviewResponse {
-  spec: DataColumnCastRequest & {
-    operation_id: "data.column.cast";
-    operation_version: "v1";
-  };
-  preview: DataColumnCastPreview;
-}
-
-export interface DataColumnCastConfirmResponse {
-  proposal: Record<string, unknown>;
-  operation: Record<string, unknown>;
-  status: string;
-}
-
-export type FeatureRecipeOperation = "derived_variable" | "recode" | "interaction" | "log" | "ratio";
-
-export interface FeatureRecipeRequest {
-  source_run_id: string;
-  source_node_id: string;
-  source_artifact_id: string;
-  recipe_id: string;
-  operation_id: FeatureRecipeOperation;
-  inputs: string[];
-  output: string;
-  output_type?: string;
-  parameters: Record<string, unknown>;
-  fit_scope?: "stateless" | "date_local" | "period_fitted";
-  missing_policy?: string;
-  outlier_policy?: string;
-}
-
-export interface FeatureRecipePreview {
-  operation_id: "data.feature_recipe";
-  operation_version: "v1";
-  source_run_id: string;
-  source_node_id: string;
-  source_artifact_id: string;
-  recipe: Record<string, unknown>;
-  source_sha256: string;
-  row_count: number;
-  input_columns: string[];
-  output_columns: string[];
-  schema_fingerprint_before: string;
-  schema_fingerprint_after: string;
-  fingerprint: string;
-  downstream_invalidation: string[];
-  status: "ready" | "blocked";
-  reason: string | null;
-  next_step: string | null;
-}
-
-export interface FeatureRecipePreviewResponse {
-  spec: FeatureRecipeRequest;
-  preview: FeatureRecipePreview;
-}
-
-export interface FeatureRecipeConfirmResponse {
-  status: "completed";
-  effect: Record<string, unknown>;
-  preview: FeatureRecipePreview;
-}
-
+// The transform builder's own vocabulary: the operations and parameters this
+// UI offers. The server admits operations from its registry and validates the
+// parameters per operation, so the request declares them openly.
 export type DataTransformOperation =
   | "merge"
   | "append"
@@ -208,177 +71,44 @@ export interface DataTransformParameters {
   [key: string]: unknown;
 }
 
-export interface DataTransformRequest {
-  source_run_id: string;
-  source_node_id: string;
-  source_artifact_id: string;
+export type DataTransformRequest = Omit<Schema<"DataTransformRequest">, "operation" | "parameters"> & {
   operation: DataTransformOperation;
   parameters: DataTransformParameters;
-  secondary_run_id?: string;
-  secondary_node_id?: string;
-  secondary_artifact_id?: string;
-}
+};
+export type DataTransformPreviewResponse = ResponseOf<"/data-operations/transform/preview", "post">;
+export type DataTransformPreview = DataTransformPreviewResponse["preview"];
+export type DataTransformConfirmResponse = ResponseOf<"/data-operations/transform/confirm", "post">;
 
-export interface DataTransformPreview {
-  operation_id: string;
-  operation_version: "v1";
-  source_run_id: string;
-  source_node_id: string;
-  source_artifact_id: string;
-  secondary_run_id: string | null;
-  secondary_node_id: string | null;
-  secondary_artifact_id: string | null;
-  parameters: DataTransformParameters;
-  source_sha256: string;
-  secondary_source_sha256: string | null;
-  row_count_before: number;
-  row_count_after: number;
-  input_columns: string[];
-  output_columns: string[];
-  schema_fingerprint_before: string;
-  schema_fingerprint_after: string;
-  fingerprint: string;
-  downstream_invalidation: string[];
-  status: "ready" | "blocked";
-  reason: string | null;
-  next_step: string | null;
-}
+export type DataModelRunRequest = Schema<"DataModelRunRequest">;
+export type DataModelRunResponse = ResponseOf<"/data-operations/model-run", "post">;
 
-export interface DataTransformPreviewResponse {
-  spec: DataTransformRequest;
-  preview: DataTransformPreview;
-}
+export type DataColumnCastOperationRecord = ResponseOf<"/data-operations/column-cast/by-child-node", "get">["operation"];
 
-export interface DataTransformConfirmResponse {
-  status: "completed";
-  effect: Record<string, unknown>;
-  preview: DataTransformPreview;
-}
-
-export interface DataModelRunRequest {
-  source_run_id: string;
-  source_node_id: string;
-  source_artifact_id: string;
-  model_type: "ols";
-  y: string;
-  x: string[];
-  covariance: "" | "unadjusted" | "robust" | "clustered";
-}
-
-export interface DataModelRunResponse {
-  status: string;
-  run_id: string;
-  model_type: "ols";
-  source_lineage: {
-    source_run_id: string;
-    source_node_id: string;
-    source_artifact_id: string;
-    source_node_hash: string | null;
-  };
-}
-
-/** Typed projection of the durable operation record bound to a cast child node. */
-export interface DataColumnCastOperationRecord {
-  record_id: string;
-  operation_id: string;
-  operation_version: string;
-  status: string;
-  effect_status: string;
-  projection_status: string;
-  actor_type: string;
-  diff_ref: {
-    kind: string;
-    // data.column.cast
-    column?: string;
-    before_dtype?: string;
-    after_dtype?: string;
-    // data.columns.cast
-    casts?: Array<{ column: string; before_dtype: string; after_dtype: string }>;
-    // code.execute
-    columns_added?: string[];
-    columns_removed?: string[];
-    dtype_changes?: Array<{ column: string; before_dtype: string; after_dtype: string }>;
-    row_count_before?: number;
-    row_count_after?: number;
-    source_fingerprint: string;
-    result_fingerprint: string;
-  } | null;
-  verification: {
-    status: string;
-    passed: boolean;
-    checks: Record<string, unknown>;
-  } | null;
-  outputs: Record<string, unknown>;
-}
-
-export interface CodeExecuteRequest {
-  source_run_id: string;
-  source_node_id: string;
-  source_artifact_id: string;
-  code: string;
-  language?: "python";
-  output_format?: DataCastOutputFormat;
-}
-
-export interface CodeDtypeChange {
-  column: string;
-  before_dtype: string;
-  after_dtype: string;
-}
-
-export interface CodeExecutePreview {
-  operation_id: "code.execute";
-  operation_version: "v1";
-  source_run_id: string;
-  source_node_id: string;
-  source_artifact_id: string;
-  language: "python";
-  code: string;
-  code_sha256: string;
-  output_format: DataCastOutputFormat;
-  source_sha256: string;
-  row_count_before: number;
-  row_count_after: number;
-  columns_added: string[];
-  columns_removed: string[];
-  dtype_changes: CodeDtypeChange[];
-  schema_fingerprint_before: string;
-  schema_fingerprint_after: string;
+/** The diff a data operation records (its diff_ref): one shape per operation. */
+export interface DataOperationDiff {
+  kind: string;
+  // data.column.cast
+  column?: string;
+  before_dtype?: string;
+  after_dtype?: string;
+  // data.columns.cast
+  casts?: Array<{ column: string; before_dtype: string; after_dtype: string }>;
+  // code.execute
+  columns_added?: string[];
+  columns_removed?: string[];
+  dtype_changes?: Array<{ column: string; before_dtype: string; after_dtype: string }>;
+  row_count_before?: number;
+  row_count_after?: number;
+  source_fingerprint: string;
   result_fingerprint: string;
-  result_preview_rows: Array<Record<string, unknown>>;
-  stdout: string;
-  fingerprint: string;
-  downstream_invalidation: string[];
-  status: "ready" | "blocked";
-  error: string | null;
 }
 
-export interface CodeExecutePreviewResponse {
-  spec: CodeExecuteRequest & {
-    operation_id: "code.execute";
-    operation_version: "v1";
-  };
-  preview: CodeExecutePreview;
-}
-
-export interface CodeExecuteRiskAuthorization {
-  authorization_id: string;
-  token: string;
-  operation_id: "code.execute";
-  operation_version: "v1";
-  proposal_id: string;
-  revision: number;
-  fingerprint: string;
-  active_head_run_id: string;
-  expires_at: string;
-  status: "issued";
-}
-
-export interface CodeExecuteRiskAuthorizationResponse {
-  proposal: Record<string, unknown>;
-  risk_authorization: CodeExecuteRiskAuthorization;
-  status: "risk_authorized";
-}
+export type CodeExecuteRequest = Schema<"CodeExecuteRequest">;
+export type CodeDtypeChange = Schema<"CodeDtypeChange">;
+export type CodeExecutePreviewResponse = ResponseOf<"/data-operations/code-execute/preview", "post">;
+export type CodeExecutePreview = CodeExecutePreviewResponse["preview"];
+export type CodeExecuteRiskAuthorizationResponse = ResponseOf<"/data-operations/code-execute/risk-authorize", "post">;
+export type CodeExecuteRiskAuthorization = CodeExecuteRiskAuthorizationResponse["risk_authorization"];
 
 function projectQuery(projectRoot: string): string {
   return `?project_root=${encodeURIComponent(projectRoot)}`;
@@ -401,11 +131,7 @@ export async function previewCodeExecute(
 
 export async function authorizeCodeExecuteRisk(
   projectRoot: string,
-  request: CodeExecuteRequest & {
-    preview_fingerprint: string;
-    session_id?: string;
-    acknowledge_risk: true;
-  },
+  request: RequestOf<"/data-operations/code-execute/risk-authorize", "post">,
 ): Promise<CodeExecuteRiskAuthorizationResponse> {
   const response = await fetch(
     apiUrl(`/data-operations/code-execute/risk-authorize${projectQuery(projectRoot)}`),
@@ -420,12 +146,7 @@ export async function authorizeCodeExecuteRisk(
 
 export async function confirmCodeExecute(
   projectRoot: string,
-  request: CodeExecuteRequest & {
-    preview_fingerprint: string;
-    session_id?: string;
-    risk_authorization_id: string;
-    risk_authorization_token: string;
-  },
+  request: RequestOf<"/data-operations/code-execute/confirm", "post">,
 ): Promise<DataColumnCastConfirmResponse> {
   const response = await fetch(
     apiUrl(`/data-operations/code-execute/confirm${projectQuery(projectRoot)}`),
@@ -457,7 +178,7 @@ export async function fetchDataColumnCastContext(
 export async function fetchDataColumnCastRecordByChildNode(
   projectRoot: string,
   childNodeId: string,
-): Promise<{ operation: DataColumnCastOperationRecord }> {
+): Promise<ResponseOf<"/data-operations/column-cast/by-child-node", "get">> {
   const params = new URLSearchParams({
     project_root: projectRoot,
     child_node_id: childNodeId,
@@ -465,7 +186,7 @@ export async function fetchDataColumnCastRecordByChildNode(
   const response = await fetch(
     apiUrl(`/data-operations/column-cast/by-child-node?${params.toString()}`),
   );
-  return readResponse<{ operation: DataColumnCastOperationRecord }>(response);
+  return readResponse<ResponseOf<"/data-operations/column-cast/by-child-node", "get">>(response);
 }
 
 export async function previewDataColumnCast(

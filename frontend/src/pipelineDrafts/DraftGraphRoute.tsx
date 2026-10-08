@@ -74,7 +74,7 @@ export function DraftGraphRoute() {
   // origin run in `created_from`; fall back to the bound input node's
   // `run_input_id` for older drafts that lack it.
   const sourceRunId =
-    draft?.created_from?.source_run_id ??
+    (draft?.created_from?.source_type === "run" ? draft.created_from.source_run_id : undefined) ??
     draft?.graph.nodes.find(
       (n): n is Extract<typeof n, { node_type: "input.dataset" }> =>
         n.node_type === "input.dataset",
@@ -206,9 +206,6 @@ export function DraftGraphRoute() {
                   });
                 }
                 const params = new URLSearchParams({ project_root: projectRoot, tab: "lineage" });
-                if (result.focus.target_model_node_id) {
-                  params.set("focus", result.focus.target_model_node_id);
-                }
                 const poll = result.focus.poll;
                 if (
                   result.focus.status === "pending_index" &&

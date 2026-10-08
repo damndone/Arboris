@@ -257,7 +257,7 @@ def test_synthetic_control_step_does_not_publish_unsupported_predictors() -> Non
 def test_power_step_rejects_a_source_commitment_it_cannot_consume() -> None:
     """A source declaration must not be accepted and then ignored by power."""
 
-    from workbench.agent.operations import OperationValidationError
+    from workbench.contracts.common.errors import OperationValidationError
     from workbench.agent.workflow import compile_workflow
 
     with pytest.raises(OperationValidationError, match="does not read a workflow input frame"):

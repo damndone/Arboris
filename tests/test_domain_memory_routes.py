@@ -497,3 +497,47 @@ def test_legacy_candidate_approval_uses_selected_project_store_even_after_genera
     assert [item.memory_id for item in project_review.memory_service.store.list_content()] == [
         "memory-candidate-project-approval"
     ]
+
+
+def test_retrieve_returns_an_inherited_global_memory_as_a_hint(tmp_path: Path) -> None:
+    """A non-empty retrieval: the response contract covers the hint itself."""
+    project = tmp_path / "project"
+    project.mkdir()
+    runtime = bootstrap_local_domain_memory_runtime(tmp_path / "memory")
+    memory_id = _seed_active_memory(runtime)
+    app = FastAPI()
+    app.state.domain_memory_runtime = runtime
+    app.state.domain_memory_service = runtime.service
+    app.include_router(router)
+    client = TestClient(app)
+    params = {"project_root": str(project)}
+
+    def confirm(action: str, revision: int) -> str:
+        response = client.post(
+            "/domain-memory/settings/confirmations",
+            params=params,
+            json={"action": action, "expected_revision": revision, "target_refs": []},
+        )
+        return response.json()["receipt"]
+
+    receipt = confirm("enable_global_library", 0)
+    assert client.put(
+        "/domain-memory/settings/global",
+        params=params,
+        json={"library_enabled": True, "expected_revision": 0, "confirmation_receipt": receipt},
+    ).status_code == 200
+    receipt = confirm("enable_global_inheritance", 0)
+    assert client.put(
+        "/domain-memory/settings/project",
+        params=params,
+        json={"setting": "inherit_global", "enabled": True, "expected_revision": 0, "confirmation_receipt": receipt},
+    ).status_code == 200
+
+    response = client.post("/domain-memory/retrieve", params=params, json={"facts": {"analysis_family": "ols"}})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["outcome"] == "used"
+    [hint] = body["entries"]
+    assert hint["memory_source"] == {"memory_id": memory_id, "revision": 1}
+    assert hint["memory_authority"] == "non_authoritative_hint"

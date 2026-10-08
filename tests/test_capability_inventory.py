@@ -104,7 +104,7 @@ def test_every_model_family_appears_in_the_inventory() -> None:
     someone remembering to add it here."""
 
     from workbench.agent.capability_contract import capability_inventory
-    from workbench.agent.workflow_contracts import MODEL_FAMILY_CONTRACTS
+    from workbench.contracts.model.family import MODEL_FAMILY_CONTRACTS
 
     families = {
         item.capability_id
@@ -125,7 +125,7 @@ def test_a_pack_capability_can_be_composable_without_model_genesis_admission() -
     """
 
     from workbench.agent.capability_contract import capability_inventory
-    from workbench.agent.workflow_contracts import MODEL_FAMILY_CONTRACTS
+    from workbench.contracts.model.family import MODEL_FAMILY_CONTRACTS
 
     by_id = {item.capability_id: item for item in capability_inventory()}
 

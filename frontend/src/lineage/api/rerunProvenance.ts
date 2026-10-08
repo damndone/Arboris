@@ -13,6 +13,7 @@ export type CompareWithSourceGate =
       ok: false;
       reason:
         | "missing_rerun_from"
+        | "provenance_ambiguous"
         | "provenance_mismatch"
         | "run_level_fallback_ambiguous";
     };
@@ -20,6 +21,11 @@ export type CompareWithSourceGate =
 export function getCompareWithSourceGate(
   context: NodeOperationContextV1,
 ): CompareWithSourceGate {
+  // Runs sharing the node record different sources: no source is right, and
+  // the run-level record must not stand in for it (spec §3.4).
+  if (context.rerun_from_conflicts?.length) {
+    return { ok: false, reason: "provenance_ambiguous" };
+  }
   if (context.rerun_from) {
     if (
       context.run_rerun_from &&

@@ -55,6 +55,7 @@ def write_run_inputs(
     override_hash: str | None,
     dag_hash: str,
     rerun_from: dict[str, Any] | None = None,
+    dataset_source: dict[str, Any] | None = None,
     source_lineage: dict[str, Any] | None = None,
     workbench_context: dict[str, Any] | None = None,
     contract_summary: dict[str, Any] | None = None,
@@ -76,6 +77,8 @@ def write_run_inputs(
     }
     if rerun_from is not None:
         payload["rerun_from"] = _optional_payload(rerun_from)
+    if dataset_source is not None:
+        payload["dataset_source"] = _optional_payload(dataset_source)
     if source_lineage is not None:
         payload["source_lineage"] = _optional_payload(source_lineage)
     if workbench_context is not None:

@@ -2,15 +2,15 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import { PredictionControls } from "./PredictionControls";
 import type { Capabilities } from "../capabilities/types";
+import { capabilitiesFixture } from "../apiFixtures";
 
-const caps: Capabilities = {
-  schema_version: 2, model_types: [], imputation_methods: [],
+const caps: Capabilities = capabilitiesFixture({
   prediction_models: [
-    { key: "prediction_lasso", label: "Lasso" },
-    { key: "prediction_ridge", label: "Ridge" },
+    { key: "prediction_lasso", label: "Lasso", description: "" },
+    { key: "prediction_ridge", label: "Ridge", description: "" },
   ],
   sampling_methods: [{ key: "smote", label: "SMOTE" }],
-};
+});
 
 describe("PredictionControls", () => {
   it("reports enabling via the toggle", () => {
@@ -39,7 +39,7 @@ describe("PredictionControls", () => {
   });
 
   it("renders nothing when manifest has no prediction models", () => {
-    const none: Capabilities = { schema_version: 2, model_types: [], imputation_methods: [] };
+    const none: Capabilities = capabilitiesFixture();
     const { container } = render(<PredictionControls capabilities={none} enabled={true}
       modelType="" cvFolds={5} sampling=""
       onEnabled={vi.fn()} onModelType={vi.fn()} onCvFolds={vi.fn()} onSampling={vi.fn()} />);

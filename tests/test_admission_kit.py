@@ -11,7 +11,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from workbench.admission import ADMISSION_EVIDENCE, ADMISSION_ITEMS, PLANNED, Oracle, assess, gap_list
-from workbench.agent.workflow_contracts import MODEL_FAMILY_CONTRACTS
+from workbench.contracts.model.family import MODEL_FAMILY_CONTRACTS
 from workbench.contracts.model.result_envelope_registry import declaration_for
 
 ROOT = Path(__file__).resolve().parents[1]

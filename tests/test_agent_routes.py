@@ -585,6 +585,27 @@ def test_agent_messages_include_durable_navigation_refs(tmp_path: Path) -> None:
     )
 
 
+def test_graph_projection_returns_the_node_and_its_agent_links(tmp_path: Path) -> None:
+    from test_agent_navigation import build_confirmed_rerun_fixture
+
+    fixture = build_confirmed_rerun_fixture(tmp_path)
+    with TestClient(app) as client:
+        response = client.get(
+            "/agent/navigation/graph",
+            params={
+                "project_root": str(fixture.project_root),
+                "run_id": fixture.source_run_id,
+                "node_ref": fixture.source_node_ref,
+                "forest_node_key": fixture.source_forest_node_key,
+            },
+        )
+
+    assert response.status_code == 200, response.text
+    projection = response.json()["projection"]
+    assert projection["subject"]["kind"] == "graph_node"
+    assert projection["subject"]["available"] is True
+
+
 def test_graph_projection_rejects_unknown_scope(tmp_path: Path) -> None:
     project_root = tmp_path / "project"
     project_root.mkdir()

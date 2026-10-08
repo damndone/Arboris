@@ -22,6 +22,19 @@ from ..domain_memory.preferences import DomainMemoryPreferences, DomainMemoryReq
 from ..domain_memory.scope import MemoryScope
 from ..domain_memory.service import DomainMemoryService, DomainMemoryServiceError
 from ..domain_memory.review_service import MemoryReviewService, MemoryReviewServiceError
+from .responses.memory import (
+    CandidateCreated,
+    CandidateReviewed,
+    ConfirmationReceipt,
+    MemoryArchived,
+    MemoryLibrary,
+    MemoryRetrieval,
+    MemoryReviewed,
+    MemorySettings,
+    MemoryStateChanged,
+    PendingCandidates,
+)
+from .typed_routes import TypedAPIRoute
 
 
 class _StrictModel(BaseModel):
@@ -118,7 +131,7 @@ class ArchiveBody(ArchiveConfirmationBody):
     confirmation_receipt: str = Field(min_length=1, max_length=256)
 
 
-router = APIRouter(prefix="/domain-memory", tags=["domain-memory"])
+router = APIRouter(prefix="/domain-memory", tags=["domain-memory"], route_class=TypedAPIRoute)
 
 
 def _service(request: Request) -> DomainMemoryService:
@@ -320,7 +333,7 @@ def _override(body: OverrideBody) -> DomainMemoryRequestOverride:
 
 
 @router.get("/settings")
-def get_settings(project_root: str, request: Request) -> dict[str, Any]:
+def get_settings(project_root: str, request: Request) -> MemorySettings:
     try:
         return _settings_payload(_runtime(request), project_root)
     except LocalMemoryPreferenceError as error:
@@ -330,7 +343,7 @@ def get_settings(project_root: str, request: Request) -> dict[str, Any]:
 @router.post("/settings/confirmations")
 def issue_settings_confirmation(
     body: SettingsConfirmationBody, project_root: str, request: Request
-) -> dict[str, Any]:
+) -> ConfirmationReceipt:
     runtime = _runtime(request)
     try:
         if body.target_refs:
@@ -352,7 +365,7 @@ def issue_settings_confirmation(
 
 
 @router.put("/settings/global")
-def update_global_settings(body: GlobalSettingsBody, project_root: str, request: Request) -> dict[str, Any]:
+def update_global_settings(body: GlobalSettingsBody, project_root: str, request: Request) -> MemorySettings:
     runtime = _runtime(request)
     action = "enable_global_library" if body.library_enabled else "disable_global_library"
     intent = MemoryMutationIntent(action, runtime.scope_resolver.global_scope.scope_ref, body.expected_revision, ())
@@ -369,7 +382,7 @@ def update_global_settings(body: GlobalSettingsBody, project_root: str, request:
 
 
 @router.put("/settings/project")
-def update_project_settings(body: ProjectSettingsBody, project_root: str, request: Request) -> dict[str, Any]:
+def update_project_settings(body: ProjectSettingsBody, project_root: str, request: Request) -> MemorySettings:
     runtime = _runtime(request)
     scope = _project_scope(runtime, project_root)
     action = _setting_action(body.setting, body.enabled)
@@ -398,7 +411,7 @@ def update_project_settings(body: ProjectSettingsBody, project_root: str, reques
 
 
 @router.get("/libraries/{library}")
-def list_library(library: Literal["global", "project"], project_root: str, request: Request) -> dict[str, Any]:
+def list_library(library: Literal["global", "project"], project_root: str, request: Request) -> MemoryLibrary:
     runtime = _runtime(request)
     scope = _library_scope(runtime, library, project_root)
     try:
@@ -413,7 +426,7 @@ def issue_archive_confirmation(
     body: ArchiveConfirmationBody,
     project_root: str,
     request: Request,
-) -> dict[str, Any]:
+) -> ConfirmationReceipt:
     runtime = _runtime(request)
     scope = _library_scope(runtime, library, project_root)
     try:
@@ -438,7 +451,7 @@ def archive_library_memories(
     body: ArchiveBody,
     project_root: str,
     request: Request,
-) -> dict[str, Any]:
+) -> MemoryArchived:
     runtime = _runtime(request)
     scope = _library_scope(runtime, library, project_root)
     try:
@@ -470,7 +483,7 @@ def archive_library_memories(
 
 
 @router.post("/retrieve")
-def retrieve_memory(body: RetrieveBody, project_root: str, request: Request) -> dict[str, Any]:
+def retrieve_memory(body: RetrieveBody, project_root: str, request: Request) -> MemoryRetrieval:
     runtime = _runtime(request)
     try:
         result = runtime.retrieve_for_project(
@@ -491,7 +504,7 @@ def retrieve_memory(body: RetrieveBody, project_root: str, request: Request) -> 
 
 
 @router.post("/candidates")
-def create_candidate(body: CandidateBody, request: Request, project_root: str | None = None) -> dict[str, Any]:
+def create_candidate(body: CandidateBody, request: Request, project_root: str | None = None) -> CandidateCreated:
     service = _local_candidate_service(request, project_root, require_generation=True)
     if service is None:
         _require_mutations_enabled(request)
@@ -513,7 +526,7 @@ def create_candidate(body: CandidateBody, request: Request, project_root: str | 
 
 
 @router.get("/candidates")
-def list_pending_candidates(project_root: str, request: Request) -> dict[str, Any]:
+def list_pending_candidates(project_root: str, request: Request) -> PendingCandidates:
     runtime = _runtime(request)
     return {
         "candidates": _pending_candidate_entries(runtime, project_root),
@@ -524,7 +537,7 @@ def list_pending_candidates(project_root: str, request: Request) -> dict[str, An
 @router.post("/candidates/{candidate_id}/approve")
 def approve_candidate(
     candidate_id: str, body: ApproveBody, request: Request, project_root: str | None = None
-) -> dict[str, Any]:
+) -> MemoryReviewed:
     service = _local_candidate_service(request, project_root, require_generation=False)
     if service is None:
         _require_mutations_enabled(request)
@@ -554,7 +567,7 @@ def review_candidate(
     body: CandidateReviewBody,
     request: Request,
     project_root: str | None = None,
-) -> dict[str, Any]:
+) -> CandidateReviewed:
     _require_mutations_enabled(request, project_root)
     review = _project_review_service(request, project_root)
     try:
@@ -573,7 +586,7 @@ def review_candidate(
 
 
 @router.post("/review/memories/{memory_id}/state")
-def change_memory_state(memory_id: str, body: MemoryStateBody, request: Request) -> dict[str, Any]:
+def change_memory_state(memory_id: str, body: MemoryStateBody, request: Request) -> MemoryStateChanged:
     _require_mutations_enabled(request)
     review = _review_service(request)
     try:
@@ -587,7 +600,7 @@ def change_memory_state(memory_id: str, body: MemoryStateBody, request: Request)
 
 
 @router.post("/review/memories/{memory_id}/restore")
-def restore_memory(memory_id: str, body: MemoryRestoreBody, request: Request) -> dict[str, Any]:
+def restore_memory(memory_id: str, body: MemoryRestoreBody, request: Request) -> MemoryReviewed:
     _require_mutations_enabled(request)
     review = _review_service(request)
     try:

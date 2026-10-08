@@ -196,11 +196,8 @@ def test_the_report_agent_and_disclosure_see_every_group(data: Path, tmp_path) -
 def test_the_agent_requests_by_group_on_model_genesis() -> None:
     import json
 
-    from workbench.agent.workflow_contracts import (
-        OperationValidationError,
-        genesis_run_params,
-        validate_model_genesis_spec,
-    )
+    from workbench.agent.workflow_contracts import genesis_run_params, validate_model_genesis_spec
+    from workbench.contracts.common.errors import OperationValidationError
 
     branches = [{"branch_id": "b", "outcome": "y", "predictors": ["x1"]}]
     spec = {"model_family": "ols", "branches": branches, "by_group": "region"}

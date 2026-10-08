@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 import hashlib
 import json
 import math
-from typing import Any, Mapping
+from typing import Any, Literal, Mapping, get_args
 
 
 def _canonical(value: Any) -> Any:
@@ -69,16 +69,20 @@ class SamplingSpecV1:
         }
 
 
+StructureKind = Literal["unknown", "iid", "grouped", "temporal", "panel"]
+StructureProvenance = Literal["user_confirmed", "inferred"]
+
+
 @dataclass(frozen=True)
 class StructureSpecV1:
-    kind: str = "unknown"
+    kind: StructureKind = "unknown"
     group_column: str | None = None
     time_column: str | None = None
     entity_column: str | None = None
-    provenance: str = "user_confirmed"
+    provenance: StructureProvenance = "user_confirmed"
 
     def validate(self) -> None:
-        if self.kind not in {"unknown", "iid", "grouped", "temporal", "panel"}:
+        if self.kind not in get_args(StructureKind):
             raise ContractError("PREDICTION_DATA_STRUCTURE_INVALID", "unknown data structure kind")
         if self.kind == "unknown":
             raise ContractError("PREDICTION_DATA_STRUCTURE_UNKNOWN", "data structure must be explicitly declared")

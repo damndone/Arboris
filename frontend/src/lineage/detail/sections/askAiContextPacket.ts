@@ -105,7 +105,6 @@ function sanitizeArtifactForAskAI(
   const safeArtifact: {
     name: ContextArtifact["name"];
     mime: ContextArtifact["mime"];
-    sizeBytes?: ContextArtifact["sizeBytes"];
     sha256?: ContextArtifact["sha256"];
     ai_visibility: ContextArtifact["ai_visibility"];
     summary?: unknown;
@@ -123,7 +122,6 @@ function sanitizeArtifactForAskAI(
       : [],
   );
 
-  if (artifact.sizeBytes !== undefined) safeArtifact.sizeBytes = artifact.sizeBytes;
   if (artifact.sha256 !== undefined) safeArtifact.sha256 = artifact.sha256;
 
   const extendedArtifact = artifact as ContextArtifact & {

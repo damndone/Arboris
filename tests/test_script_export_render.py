@@ -29,7 +29,7 @@ def test_registered_operations_have_explicit_language_declarations():
     renderer()
     from workbench.script_export.exporters import EXPORTERS
     from workbench.data_operation_registry import data_operation_declarations
-    from workbench.agent.workflow_contracts import MODEL_FAMILY_CONTRACTS
+    from workbench.contracts.model.family import MODEL_FAMILY_CONTRACTS
     from workbench.postestimation.registry import OPERATIONS
     required = {d.workflow_operation_id for d in data_operation_declarations()}
     required |= {'model.' + family for family in MODEL_FAMILY_CONTRACTS}
@@ -52,11 +52,11 @@ def test_require_native_reports_snapshot_steps_without_script():
 
 @pytest.mark.parametrize('language',LANGUAGES)
 def test_unsupported_native_combination_lists_the_actual_step(language):
-    step=ScriptStep('nb1','model','model.negative_binomial',{'model_type':'negative_binomial','y':'y','x':['x'],'model_options':{'dispersion':'constant'}},())
+    step=ScriptStep('nb_fixed','model','model.negative_binomial',{'model_type':'negative_binomial','y':'y','x':['x'],'model_options':{'alpha':0.5}},())
     plan=ScriptPlan('p','r',(),(step,),'1.8.11','0'*64)
     with pytest.raises(ScriptExportRefusal) as caught:renderer()(plan,language,require_native=True)
     assert caught.value.code=='NOT_FULLY_NATIVE'
-    assert caught.value.steps==('nb1',)
+    assert caught.value.steps==('nb_fixed',)
 
 
 @pytest.mark.parametrize('language',LANGUAGES)

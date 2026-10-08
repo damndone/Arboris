@@ -7,7 +7,13 @@ describe("PredictionResearchReportSections", () => {
   it("renders typed evidence in the four required report sections", () => {
     render(<PredictionResearchReportSections evidence={{
       status: "validated",
+      consumer: "report",
       model_id: "prediction_ridge_1",
+      sample_spec_hash: "sha256:sample",
+      dataset_sha256: null,
+      structure: { kind: "iid" },
+      baseline: { model_id: "mean_regressor", metrics: { r2: 0 } },
+      payload_versions: {},
       split_plan_hash: "sha256:split",
       split_parameters: { cv_folds: 3, final_holdout_fraction: 0.2 },
       development: { cv: [{ fold: 1 }, { fold: 2 }] },
@@ -28,6 +34,9 @@ describe("PredictionResearchReportSections", () => {
   it("keeps legacy report evidence readable but explicitly non-comparable", () => {
     render(<PredictionResearchReportSections evidence={{
       status: "legacy",
+      consumer: "report",
+      model_id: null,
+      legacy_artifacts: [],
       protocol: "legacy_random_split_v0",
       validation: "payload_not_evaluated",
       comparability: "legacy_only",

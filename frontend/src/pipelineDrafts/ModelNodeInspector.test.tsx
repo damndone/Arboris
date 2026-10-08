@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { vi } from "vitest";
 import { ModelNodeInspector } from "./ModelNodeInspector";
+import { draftSourceRefFixture } from "../apiFixtures";
 
 test("saves full params with base_draft_hash", () => {
   const onSave = vi.fn();
@@ -23,7 +24,7 @@ test("saves full params with base_draft_hash", () => {
           },
         ],
         editable_schema_hash: "schema",
-        source_ref: {},
+        source_ref: draftSourceRefFixture(),
         source_params: { model_type: "ols" },
         params: { model_type: "ols" },
       }}
@@ -90,7 +91,7 @@ test("shows a changed-fields summary vs source params (§6.5)", () => {
             options: ["", "robust", "clustered"] },
         ],
         editable_schema_hash: "schema",
-        source_ref: {},
+        source_ref: draftSourceRefFixture(),
         source_params: { covariance: "" },
         params: { covariance: "" },
       }}
@@ -118,7 +119,7 @@ test("keeps changed fields compact while preserving expandable exact details", (
         schema_id: "ols@v1",
         editable_schema: [],
         editable_schema_hash: "schema",
-        source_ref: {},
+        source_ref: draftSourceRefFixture(),
         source_params: {},
         params: {
           model_options: { covariance: "robust", threads: 1 },
@@ -152,7 +153,7 @@ test("separates model edit actions and gives Save the primary emphasis", () => {
         schema_id: "ols@v1",
         editable_schema: [],
         editable_schema_hash: "schema",
-        source_ref: {},
+        source_ref: draftSourceRefFixture(),
         source_params: {},
         params: {},
       }}
@@ -194,7 +195,7 @@ test("keeps the OLS Agent envelope out of the human covariance editor", () => {
           } as never,
         ],
         editable_schema_hash: "schema",
-        source_ref: {},
+        source_ref: draftSourceRefFixture(),
         source_params: {
           covariance: "robust",
           model_options: { covariance: "robust" },

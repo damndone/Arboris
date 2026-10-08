@@ -43,8 +43,10 @@ where = ["backend"]
 [tool.pytest.ini_options]
 pythonpath = ["backend", "."]
 testpaths = ["tests"]
-# tmp_path is scratch: evidence worth keeping is written to tests/fixtures or
-# the ignored local/ by the test itself. Keep the last 3 sessions, and in them
-# only the directories of failed tests (user decision, 2026-10-07).
+# tmp_path is scratch: evidence worth keeping is written to tests/fixtures or,
+# through tests/evidence_retention.py, to the ignored local/test-evidence (also
+# the last 3 runs per category, failed runs always kept). Keep the last 3
+# sessions, and in them only the directories of failed tests (user decision,
+# 2026-10-07).
 tmp_path_retention_count = 3
 tmp_path_retention_policy = "failed"

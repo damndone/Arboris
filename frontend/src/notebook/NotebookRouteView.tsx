@@ -387,7 +387,11 @@ function optionExecution(option: NotebookOptionRevision): OptionExecution {
   });
 }
 
-function narrative(notebook: NotebookRecord, options: NotebookOptionRevision[]) {
+/** What the narrative and ready view read from a notebook record. */
+type NotebookHeading = Pick<NotebookRecord, "notebook_id" | "run_family_id" | "title"> &
+  Partial<Pick<NotebookRecord, "created_at">>;
+
+function narrative(notebook: NotebookHeading, options: NotebookOptionRevision[]) {
   const occurredAt = notebook.created_at ?? new Date(0).toISOString();
   return [
     {
@@ -410,7 +414,7 @@ function narrative(notebook: NotebookRecord, options: NotebookOptionRevision[]) 
 }
 
 function readyView(
-  notebook: NotebookRecord,
+  notebook: NotebookHeading,
   context: NotebookContextSlice,
   options: NotebookOptionRevision[],
   extras: Partial<NotebookData> = {},
@@ -446,8 +450,6 @@ function replaceOption(
       notebook_id: view.notebook.notebook_id,
       run_family_id: view.notebook.run_family_id,
       title: view.notebook.narrative[0]?.text ?? "Notebook",
-      created_by: "user",
-      active_head_run_id: null,
     },
     view.notebook.contextSlice!,
     options,
@@ -710,7 +712,7 @@ export function NotebookRouteView({
         .filter((option) => option.lifecycle_status === "materialized" || option.lifecycle_status === "executed")
         .sort((a, b) => b.created_at.localeCompare(a.created_at))
         .map((option) => snapshot.materializations?.[option.option_id])
-        .find((value): value is Record<string, unknown> => value !== undefined);
+        .find((value) => value !== undefined);
       const materialization = persistedMaterialization
         ? parseOptionMaterialization(persistedMaterialization)
         : null;

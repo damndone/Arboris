@@ -23,6 +23,8 @@ import pandas as pd
 import statsmodels.formula.api as smf
 from statsmodels.stats.anova import anova_lm
 
+from ....formula_terms import quote_column
+
 SUPPORTED_SUMS_OF_SQUARES = (1, 2, 3)
 
 
@@ -62,12 +64,12 @@ def validate_anova_model_options(options: Any) -> None:
 
 def _term(column: str, *, categorical: bool, ss_type: int) -> str:
     if not categorical:
-        return f"Q('{column}')"
+        return quote_column(column)
     # Type III main effects are only interpretable under sum-to-zero coding.
     # With treatment contrasts the quantity reported as a "main effect" is the
     # effect at the reference level -- a different thing wearing the same name.
     coding = ", Sum" if ss_type == 3 else ""
-    return f"C(Q('{column}'){coding})"
+    return f"C({quote_column(column)}{coding})"
 
 
 def build_formula(y: str, x: list[str], *, categorical: list[str], interactions: list[list[str]], ss_type: int) -> str:
@@ -76,7 +78,7 @@ def build_formula(y: str, x: list[str], *, categorical: list[str], interactions:
     parts = list(main)
     for combo in interactions or []:
         parts.append(":".join(_term(c, categorical=c in cat, ss_type=ss_type) for c in combo))
-    return f"Q('{y}') ~ " + " + ".join(parts)
+    return f"{quote_column(y)} ~ " + " + ".join(parts)
 
 
 #: statsmodels labels these `Intercept` and `Residual`; the conventional
@@ -92,9 +94,10 @@ def _public_term(label: str, columns: list[str]) -> str:
     if text in _CANONICAL_TERMS:
         return _CANONICAL_TERMS[text]
     for column in sorted(columns, key=len, reverse=True):
-        text = text.replace(f"C(Q('{column}'), Sum)", column)
-        text = text.replace(f"C(Q('{column}'))", column)
-        text = text.replace(f"Q('{column}')", column)
+        quoted = quote_column(column)
+        text = text.replace(f"C({quoted}, Sum)", column)
+        text = text.replace(f"C({quoted})", column)
+        text = text.replace(quoted, column)
     return text
 
 

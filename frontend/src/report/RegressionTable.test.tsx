@@ -59,10 +59,12 @@ describe("RegressionTable", () => {
     const packet = buildRegressionTablePacket([
       {
         model_id: "ols_1",
+        model_type: "ols",
         coefficients: { x: { estimate: 1, p_value: 0.5 } },
       },
       {
         model_id: "ols_2",
+        model_type: "ols",
         coefficients: { z: { estimate: 2, p_value: 0.5 } },
       },
     ]);

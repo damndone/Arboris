@@ -67,6 +67,7 @@ import {
   type ServerOwnedSchemaProperty,
 } from "./ServerOwnedModelOptions";
 import type { Capabilities } from "../../capabilities/types";
+import type { Schema } from "../../apiTypes";
 
 type BusyState =
   | "resume"
@@ -130,14 +131,9 @@ function firstNumber(value: unknown): number | null {
   return null;
 }
 
-type GenesisServerControl = {
-  key: string;
-  kind: string;
-  label?: string;
-  required?: boolean;
-  value?: unknown;
-  options?: unknown[];
-  role?: string;
+/** A server control whose embedded `schema` (declared as JSON Schema) is read
+ *  as the object form the Genesis editor renders. */
+type GenesisServerControl = Omit<Schema<"EditableControlSpec">, "schema"> & {
   schema?: {
     type: "object";
     required?: string[];
@@ -151,9 +147,8 @@ function serverControls(node: PipelineDraftNode | null): GenesisServerControl[] 
     return [];
   }
   return node.editable_schema.filter(
-    (item): item is GenesisServerControl =>
-      Boolean(item && typeof item === "object" && "key" in item && typeof item.key === "string"),
-  );
+    (item) => Boolean(item && typeof item === "object" && typeof item.key === "string"),
+  ) as GenesisServerControl[];
 }
 
 function capabilityEntry(capabilities: Capabilities | null | undefined, modelType: string) {

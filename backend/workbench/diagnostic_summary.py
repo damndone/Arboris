@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from .formula_terms import categorical_level
+
 
 def build_diagnostic_summary(
     issue_dicts: list[dict[str, Any]],
@@ -302,15 +304,8 @@ def _has_proxy_correlation(term: str, proxy_vars: set[str], issues: list[dict]) 
 
 
 def _term_base_name(term: str) -> str:
-    if "[T." in term and term.startswith("C("):
-        end = term.find(")[T.")
-        if end > 2:
-            inner = term[2:end]
-            if inner.startswith("Q('") and inner.endswith("')"):
-                return inner[3:-2]
-            if inner.startswith('Q("') and inner.endswith('")'):
-                return inner[3:-2]
-    return term
+    level = categorical_level(term)
+    return term if level is None else level[0]
 
 
 def _n_levels(var: str, coefficients: Mapping) -> int:

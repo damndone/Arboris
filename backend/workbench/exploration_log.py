@@ -7,6 +7,8 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
+from .jsonl_store import append_jsonl_atomic, read_jsonl
+
 class ExplorationLogValidationError(ValueError):
     """Raised when a workflow log event is not bounded or well-formed."""
 
@@ -102,18 +104,10 @@ class ExplorationLog:
             raise ExplorationLogValidationError("row_counts must be an object")
         if normalized["error"] is not None and not isinstance(normalized["error"], str):
             raise ExplorationLogValidationError("error must be a string or null")
-        # Import lazily: importing ``workbench.agent`` initializes the
-        # orchestrator, which imports the workflow module that owns this log.
-        # Keeping the storage dependency lazy makes this module independently
-        # readable for report/export tooling and unit tests.
-        from .agent.storage import append_jsonl_atomic
-
         append_jsonl_atomic(self.path, normalized)
         return normalized
 
     def read_events(self) -> list[dict[str, Any]]:
-        from .agent.storage import read_jsonl
-
         return read_jsonl(self.path)
 
     @staticmethod

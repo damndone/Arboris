@@ -64,7 +64,7 @@ def _result(project, outcome, model_id: str) -> dict:
 # --------------------------------------------------------------------------
 
 def test_anova_is_a_declared_model_family():
-    from workbench.agent.workflow_contracts import MODEL_FAMILY_CONTRACTS
+    from workbench.contracts.model.family import MODEL_FAMILY_CONTRACTS
 
     assert "anova" in MODEL_FAMILY_CONTRACTS, (
         "ANOVA is still only a one-way test, not a model family"

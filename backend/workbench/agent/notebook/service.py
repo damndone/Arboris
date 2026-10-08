@@ -84,7 +84,8 @@ from ...services.notebook_source_materialization import (
     materialize_notebook_upload_source,
     read_notebook_upload_frame,
 )
-from ..operations import OperationRegistry, OperationValidationError
+from ..operations import OperationRegistry
+from ...contracts.common.errors import OperationValidationError
 from ..trace import TraceWriter
 
 

@@ -36,7 +36,7 @@ from workbench.lineage.upload_store import store_upload_bytes
 def test_model_family_contracts_declare_existing_ols_panel_and_did_semantics() -> None:
     """The workflow core declares, rather than infers, each admitted family."""
 
-    from workbench.agent.workflow_contracts import MODEL_FAMILY_CONTRACTS
+    from workbench.contracts.model.family import MODEL_FAMILY_CONTRACTS
 
     assert set(MODEL_FAMILY_CONTRACTS) == {
         "anova",
@@ -164,7 +164,8 @@ def test_model_family_contracts_declare_existing_ols_panel_and_did_semantics() -
 
 
 def test_did_model_family_requires_its_declared_timing_field_without_ols_fallback() -> None:
-    from workbench.agent.workflow_contracts import OperationValidationError, validate_model_genesis_spec
+    from workbench.agent.workflow_contracts import validate_model_genesis_spec
+    from workbench.contracts.common.errors import OperationValidationError
 
     with pytest.raises(OperationValidationError, match="cs_did requires entity_col, time_col, and cohort_col"):
         validate_model_genesis_spec(
@@ -180,7 +181,8 @@ def test_did_model_family_requires_its_declared_timing_field_without_ols_fallbac
 def test_model_family_rejects_fields_owned_by_a_different_family() -> None:
     """A typed parameter must never be accepted and then silently ignored."""
 
-    from workbench.agent.workflow_contracts import OperationValidationError, validate_model_genesis_spec
+    from workbench.agent.workflow_contracts import validate_model_genesis_spec
+    from workbench.contracts.common.errors import OperationValidationError
 
     with pytest.raises(
         OperationValidationError,
@@ -203,7 +205,8 @@ def test_count_model_families_refuse_non_count_outcomes_before_execution(
 ) -> None:
     """Count-family semantics are a contract preflight, not a fit-time guess."""
 
-    from workbench.agent.workflow_contracts import MODEL_FAMILY_CONTRACTS, OperationValidationError
+    from workbench.contracts.model.family import MODEL_FAMILY_CONTRACTS
+    from workbench.contracts.common.errors import OperationValidationError
 
     validator = MODEL_FAMILY_CONTRACTS[model_family].validate_branch_frame
     assert validator is not None
@@ -738,7 +741,7 @@ def test_iv_workflow_refuses_an_instrument_absent_from_the_pinned_source(tmp_pat
     )
     project, source_run_id, artifact_id = _source_project(tmp_path, frame)
 
-    from workbench.agent.workflow_contracts import OperationValidationError
+    from workbench.contracts.common.errors import OperationValidationError
 
     with pytest.raises(OperationValidationError, match=r"missing column\(s\): instrument"):
         _compile(

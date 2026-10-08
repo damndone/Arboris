@@ -291,8 +291,8 @@ function adaptHeadSetNodeWithRunProvenance(
     schemaId: raw.schema_id,
     editableSchema: raw.editable_schema,
     editableSchemaSource: raw.editable_schema_source,
-    editableSchemaVersion: raw.editable_schema_version,
     rerunFrom: raw.rerun_from,
+    rerunFromConflicts: raw.rerun_from_conflicts,
     runRerunFrom,
   };
 }

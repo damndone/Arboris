@@ -41,9 +41,9 @@ from .operations import (
     OperationRecordStore,
     OperationRecordTransitionError,
     OperationRegistry,
-    OperationValidationError,
     UnknownOperationError,
 )
+from ..contracts.common.errors import OperationValidationError
 from .proposals import (
     ProposalConfirmation,
     ProposalConfirmationError,

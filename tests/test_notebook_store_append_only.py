@@ -114,7 +114,7 @@ def _server_comparison_decision() -> ComparisonDecisionRecord:
 
 
 def _append_jsonl_child(path: str, started: object, finished: object) -> None:
-    from workbench.agent.storage import append_jsonl_atomic
+    from workbench.jsonl_store import append_jsonl_atomic
 
     started.set()  # type: ignore[attr-defined]
     append_jsonl_atomic(Path(path), {"worker": "child"})

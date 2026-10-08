@@ -43,7 +43,7 @@ function shortRunId(id: string): string {
   return tail.slice(0, 8);
 }
 
-function statusClass(status: string): string {
+function statusClass(status: string | null): string {
   switch (status) {
     case "completed":
     case "ok":

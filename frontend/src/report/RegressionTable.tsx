@@ -19,7 +19,7 @@ export type RegressionTablePacket = {
   models: Array<{
     id: string;
     label: string;
-    nobs?: number;
+    nobs?: number | null;
     r_squared?: number | null;
   }>;
   rows: Array<{

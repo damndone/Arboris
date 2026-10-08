@@ -23,6 +23,7 @@ import {
   getPipelineDraft,
   listPipelineDrafts,
 } from "../api";
+import { draftSummaryFixture } from "../apiFixtures";
 
 const asMock = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
 
@@ -50,9 +51,7 @@ const registryOf = (...entries: DraftEntry[]): DraftRegistry =>
   new Map(entries.map((e) => [e.draftId, e]));
 
 const summary = (over: Partial<PipelineDraftSummary>): PipelineDraftSummary => ({
-  draft_id: "s1",
-  status: "draft",
-  draft_hash: "sh",
+  ...draftSummaryFixture({ draft_id: "s1", draft_hash: "sh" }),
   ...over,
 });
 

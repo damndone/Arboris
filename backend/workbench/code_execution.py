@@ -50,6 +50,7 @@ import pandas as pd
 
 from .artifacts import read_json, sha256_file, write_json
 from .data_operations import (
+    PreviewStatus,
     ALLOWED_OUTPUT_FORMATS,
     DataCastOutputFormat,
     _ensure_node_index_entry,
@@ -166,7 +167,7 @@ class CodeExecutePreview:
     stdout: str
     fingerprint: str
     downstream_invalidation: tuple[str, ...] = field(default_factory=tuple)
-    status: str = "ready"
+    status: PreviewStatus = "ready"
     error: str | None = None
 
     def to_dict(self) -> dict[str, Any]:

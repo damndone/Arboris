@@ -8,6 +8,7 @@ import type {
   HeadSetNode,
   Stage,
 } from "./graphViewTypes";
+import { getCompareWithSourceGate } from "./rerunProvenance";
 
 export type OwnerResolution =
   | "active_head_contains_node"
@@ -71,6 +72,8 @@ export interface NodeOperationContextV1 {
   context_kind: "executed_lineage_node";
   context_fingerprint: string;
   rerun_from?: RerunFromProvenance;
+  /** The runs sharing this node record different sources: none is used. */
+  rerun_from_conflicts?: RerunFromProvenance[];
   run_rerun_from?: RerunFromProvenance;
   resolver_trace?: string[];
   selection: {
@@ -261,10 +264,13 @@ export function resolveNodeOperationContext(
   const candidateRunIds = candidate_run_refs.map((r) => r.run_id);
   const sharedByRunIds = [...node.runs];
   const activeHeadPathContainsNode = Boolean(activeRef);
+  // Node-level provenance is persisted with the produced node and survives the
+  // node being shared by several runs; when those runs record different
+  // sources the backend sends every record and no single source.
   const nodeRerunFrom = node.rerunFrom;
-  // A deduped forest node can be shared by several runs.  In that case the
-  // node-level adapter intentionally has no single provenance value; the
-  // active owner head is the authoritative run-scoped provenance instead.
+  const nodeRerunFromConflicts = node.rerunFromConflicts;
+  // Run-level provenance: where the owner run's rerun request came from
+  // (audit, and the restricted fallback for runs indexed before v1.8.12).
   const runRerunFrom = ownerHead?.runRerunFrom ?? node.runRerunFrom;
   const resolverTrace = [
     `selected forest node: ${input.selected_forest_node_key}`,
@@ -278,76 +284,80 @@ export function resolveNodeOperationContext(
     `context_fingerprint_inputs: ${contextFingerprintInputs}`,
     `context_fingerprint: ${context_fingerprint}`,
     `rerun_from: ${JSON.stringify(nodeRerunFrom ?? null)}`,
+    ...(nodeRerunFromConflicts ? [`rerun_from_conflicts: ${JSON.stringify(nodeRerunFromConflicts)}`] : []),
     `run_rerun_from: ${JSON.stringify(runRerunFrom ?? null)}`,
   ];
 
-  return {
-    ok: true,
-    context: {
-      context_version: "node-operation-context/v1",
-      context_kind: "executed_lineage_node",
-      context_fingerprint,
-      rerun_from: nodeRerunFrom,
-      run_rerun_from: runRerunFrom,
-      resolver_trace: resolverTrace,
-      selection: {
-        forest_node_key: node.nodeKey,
-        node_hash: node.nodeHash,
-        display_label: node.title,
-        kind: node.kind,
-        stage: node.stage,
-      },
-      ownership: {
-        active_head_run_id: input.active_head_run_id,
-        candidate_run_refs,
-        candidate_run_ids: candidateRunIds,
-        shared_by_run_ids: sharedByRunIds,
-        owner_run_id: owner.run_id,
-        owner_resolution,
-        rerun_of: ownerHead?.rerunOf ?? null,
-        parent_run_id: ownerHead?.rerunOf ?? null,
-      },
-      operation_target: {
-        owner_run_id: owner.run_id,
-        op_node_id: owner.op_node_id,
-        node_hash: owner.node_hash,
-        node_state: node.status === "failed" ? "failed" : "materialized",
-        editable_schema_source: node.editableSchemaSource,
-      },
-      lineage_context: {
-        path_run_id: owner.run_id,
-        upstream_path: buildUpstreamPath(input.forest, node.nodeKey, owner.run_id),
-        downstream_hint: buildDownstreamHint(input.forest, node.nodeKey),
-        active_head_path_contains_node: activeHeadPathContainsNode,
-      },
-      node_payload: {
-        decisions: node.decisions,
-        artifacts: (node.artifacts ?? []).map((a) => ({
-          ...a,
-          ai_visibility: "metadata_only" as const,
-        })),
-        editable_schema: node.editableSchema ?? null,
-        // v1.6.11 B-2 — real parameter values live in editable_schema[].value
-        // (backend value-backfill from run_inputs.form). Deriving params here
-        // gives Ask AI packets and node comparisons actual values instead of {}.
-        params: paramsFromSchema(node.editableSchema),
-        metrics: node.stats,
-      },
-      capabilities: resolveCapabilities(node, candidate_run_refs.length),
-      comparison_readiness: {
-        can_compare: candidate_run_refs.length > 1,
-        candidate_run_ids: candidateRunIds,
-        active_head_run_id: input.active_head_run_id,
-        owner_run_id: owner.run_id,
-        parent_run_id: ownerHead?.rerunOf ?? null,
-        shared_by_run_ids: sharedByRunIds,
-      },
-      context_diagnostics: {
-        warnings: [],
-        resolution_notes: [`owner_resolution=${owner_resolution}`],
-      },
+  const context: NodeOperationContextV1 = {
+    context_version: "node-operation-context/v1",
+    context_kind: "executed_lineage_node",
+    context_fingerprint,
+    rerun_from: nodeRerunFrom,
+    ...(nodeRerunFromConflicts ? { rerun_from_conflicts: nodeRerunFromConflicts } : {}),
+    run_rerun_from: runRerunFrom,
+    resolver_trace: resolverTrace,
+    selection: {
+      forest_node_key: node.nodeKey,
+      node_hash: node.nodeHash,
+      display_label: node.title,
+      kind: node.kind,
+      stage: node.stage,
+    },
+    ownership: {
+      active_head_run_id: input.active_head_run_id,
+      candidate_run_refs,
+      candidate_run_ids: candidateRunIds,
+      shared_by_run_ids: sharedByRunIds,
+      owner_run_id: owner.run_id,
+      owner_resolution,
+      rerun_of: ownerHead?.rerunOf ?? null,
+      parent_run_id: ownerHead?.rerunOf ?? null,
+    },
+    operation_target: {
+      owner_run_id: owner.run_id,
+      op_node_id: owner.op_node_id,
+      node_hash: owner.node_hash,
+      node_state: node.status === "failed" ? "failed" : "materialized",
+      editable_schema_source: node.editableSchemaSource,
+    },
+    lineage_context: {
+      path_run_id: owner.run_id,
+      upstream_path: buildUpstreamPath(input.forest, node.nodeKey, owner.run_id),
+      downstream_hint: buildDownstreamHint(input.forest, node.nodeKey),
+      active_head_path_contains_node: activeHeadPathContainsNode,
+    },
+    node_payload: {
+      decisions: node.decisions,
+      artifacts: (node.artifacts ?? []).map((a) => ({
+        ...a,
+        ai_visibility: "metadata_only" as const,
+      })),
+      editable_schema: node.editableSchema ?? null,
+      // v1.6.11 B-2 — real parameter values live in editable_schema[].value
+      // (backend value-backfill from run_inputs.form). Deriving params here
+      // gives Ask AI packets and node comparisons actual values instead of {}.
+      params: paramsFromSchema(node.editableSchema),
+      metrics: node.stats,
+    },
+    capabilities: resolveCapabilities(node, candidate_run_refs.length),
+    comparison_readiness: {
+      can_compare: candidate_run_refs.length > 1,
+      candidate_run_ids: candidateRunIds,
+      active_head_run_id: input.active_head_run_id,
+      owner_run_id: owner.run_id,
+      parent_run_id: ownerHead?.rerunOf ?? null,
+      shared_by_run_ids: sharedByRunIds,
+    },
+    context_diagnostics: {
+      warnings: [],
+      resolution_notes: [`owner_resolution=${owner_resolution}`],
     },
   };
+  const gate = getCompareWithSourceGate(context);
+  resolverTrace.push(
+    `compare_with_source: ${gate.ok ? gate.source_kind : `blocked (${gate.reason})`}`,
+  );
+  return { ok: true, context };
 }
 
 export function explainResolveNodeOperationContext(

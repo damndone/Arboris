@@ -14,7 +14,8 @@ from __future__ import annotations
 
 import pytest
 
-from workbench.agent.operations import OperationRegistry, OperationValidationError
+from workbench.agent.operations import OperationRegistry
+from workbench.contracts.common.errors import OperationValidationError
 
 
 def _rerun_scaffold() -> tuple[dict, dict]:
@@ -121,7 +122,7 @@ def test_the_executor_can_carry_every_field_the_proposal_may_declare():
     be dropped on the way to the run -- reported as success, returning a result
     with no design in it.
     """
-    from workbench.agent.workflow_contracts import MODEL_FAMILY_CONTRACTS
+    from workbench.contracts.model.family import MODEL_FAMILY_CONTRACTS
     from workbench.engine.capabilities import build_capabilities
     from workbench.survey.fields import DESIGN_FIELDS
 

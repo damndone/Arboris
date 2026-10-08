@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { adaptHeadSet } from "./graphAdapter";
 import type { HeadSetResponse } from "./graphViewTypes";
+import { forestEdgeFixture, forestHeadFixture, forestNodeFixture } from "../../apiFixtures";
+import type { HeadSetNodeRaw } from "./graphViewTypes";
 
 // A two-head family sharing the cleaning prefix `C` (same node_hash), forking into
 // two sibling model nodes M1/M2, each with its own report. The backend already dedups
@@ -10,14 +12,14 @@ function fixture(): HeadSetResponse {
     schema_version: 4,
     legacy: false,
     nodes: {
-      "raw-key": { id: "stage:raw", kind: "dataset_stage", display_label: "Raw",
+      "raw-key": forestNodeFixture({ id: "stage:raw", kind: "dataset_stage", display_label: "Raw",
         stage: "source", trust: "ok", node_hash: null, producing_stage: null,
-        cas_ref: null, runs: ["run_a", "run_b"] },
-      C: { id: "stage:cleaned", kind: "dataset_stage", display_label: "Cleaned",
+        cas_ref: null, runs: ["run_a", "run_b"] }),
+      C: forestNodeFixture({ id: "stage:cleaned", kind: "dataset_stage", display_label: "Cleaned",
         stage: "clean", trust: "ok", node_hash: "C", producing_stage: "cleaning",
         cas_ref: { node_hash: "C", artifact: "processed/cleaned_dataset.parquet" },
-        runs: ["run_a", "run_b"] },
-      M1: { id: "model:ols_1", kind: "model", display_label: "OLS", stage: "model",
+        runs: ["run_a", "run_b"] }),
+      M1: forestNodeFixture({ id: "model:ols_1", kind: "model", display_label: "OLS", stage: "model",
         trust: "ok", node_hash: "M1", producing_stage: "estimation", cas_ref: null,
         runs: ["run_a"], editable: true, op_type: "ols", schema_id: "ols@v1",
         editable_schema_source: "run_inputs",
@@ -25,27 +27,27 @@ function fixture(): HeadSetResponse {
           { key: "model_type", kind: "select", label: "Model", role: "model" },
           { key: "covariance", kind: "select", label: "Covariance", required: false,
             options: ["robust", "clustered", "unadjusted"], value: "robust" },
-        ] },
-      M2: { id: "model:ols_1", kind: "model", display_label: "OLS", stage: "model",
+        ] }),
+      M2: forestNodeFixture({ id: "model:ols_1", kind: "model", display_label: "OLS", stage: "model",
         trust: "ok", node_hash: "M2", producing_stage: "estimation", cas_ref: null,
         runs: ["run_b"], editable: true, op_type: "ols", schema_id: "ols@v1",
         editable_schema_source: "run_inputs",
         editable_schema: [
           { key: "covariance", kind: "select", label: "Covariance",
             options: ["robust", "clustered", "unadjusted"], value: "unadjusted" },
-        ] },
+        ] }),
     },
     edges: [
-      { source: "raw-key", target: "C" },
-      { source: "C", target: "M1" },
-      { source: "C", target: "M2" },
+      forestEdgeFixture({ source: "raw-key", target: "C" }),
+      forestEdgeFixture({ source: "C", target: "M1" }),
+      forestEdgeFixture({ source: "C", target: "M2" }),
     ],
     heads: [
-      { run_id: "run_a", head_node_hash: "M1", from_node: null, rerun_of: null,
-        rerun_reason: null, status: "completed", created_at: "2026-06-23T00:00:00Z" },
-      { run_id: "run_b", head_node_hash: "M2", from_node: "model:ols_1",
+      forestHeadFixture({ run_id: "run_a", head_node_hash: "M1", from_node: null, rerun_of: null,
+        rerun_reason: null, status: "completed", created_at: "2026-06-23T00:00:00Z" }),
+      forestHeadFixture({ run_id: "run_b", head_node_hash: "M2", from_node: "model:ols_1",
         rerun_of: "run_a", rerun_reason: "manual_override", status: "completed",
-        created_at: "2026-06-23T01:00:00Z" },
+        created_at: "2026-06-23T01:00:00Z" }),
     ],
   };
 }
@@ -86,6 +88,29 @@ describe("adaptHeadSet", () => {
 
     expect(vm.familyCount).toBe(2);
     expect(vm.familyRunCount).toBe(3);
+  });
+
+  it("carries a node's own rerun_from and its conflicting records", () => {
+    const backend = fixture();
+    const provenance = {
+      owner_run_id: "run_a",
+      op_node_id: "model:ols_1",
+      node_hash: "M1",
+      context_fingerprint: "nocv1:source",
+      rerun_request_id: "req_node",
+    };
+    backend.nodes.M2 = { ...backend.nodes.M2, rerun_from: provenance };
+    backend.nodes.M1 = {
+      ...backend.nodes.M1,
+      rerun_from_conflicts: [provenance, { ...provenance, rerun_request_id: "req_other" }],
+    };
+
+    const vm = adaptHeadSet(backend);
+
+    expect(vm.nodes.find((n) => n.nodeHash === "M2")!.rerunFrom).toEqual(provenance);
+    const ambiguous = vm.nodes.find((n) => n.nodeHash === "M1")!;
+    expect(ambiguous.rerunFrom).toBeUndefined();
+    expect(ambiguous.rerunFromConflicts).toHaveLength(2);
   });
 
   it("carries head-level rerun_from without attaching it to an unrelated source node", () => {
@@ -146,7 +171,7 @@ describe("adaptHeadSet", () => {
 
   it("attaches run-level fallback to the produced op node when the run head is a report", () => {
     const backend = fixture();
-    backend.nodes.R2 = {
+    backend.nodes.R2 = forestNodeFixture({
       id: "report:html",
       kind: "report",
       display_label: "Report",
@@ -156,7 +181,7 @@ describe("adaptHeadSet", () => {
       producing_stage: "report",
       cas_ref: null,
       runs: ["run_b"],
-    };
+    });
     backend.heads = backend.heads.map((head) =>
       head.run_id === "run_b"
         ? {
@@ -188,7 +213,7 @@ describe("adaptHeadSet", () => {
 
   it("keeps a report node as Report when it has a downstream node", () => {
     const backend = fixture();
-    backend.nodes.R1 = {
+    backend.nodes.R1 = forestNodeFixture({
       id: "report:intermediate",
       kind: "report",
       display_label: "Report",
@@ -198,7 +223,8 @@ describe("adaptHeadSet", () => {
       producing_stage: "report",
       cas_ref: null,
       runs: ["run_a"],
-    };
+    });
+    // A kind and stage the backend does not send: the adapter must tolerate them.
     backend.nodes.D1 = {
       id: "decision:review",
       kind: "decision",
@@ -209,8 +235,8 @@ describe("adaptHeadSet", () => {
       producing_stage: "review",
       cas_ref: null,
       runs: ["run_a"],
-    };
-    backend.edges.push({ source: "M1", target: "R1" }, { source: "R1", target: "D1" });
+    } as unknown as HeadSetNodeRaw;
+    backend.edges.push(forestEdgeFixture({ source: "M1", target: "R1" }), forestEdgeFixture({ source: "R1", target: "D1" }));
 
     const vm = adaptHeadSet(backend);
 

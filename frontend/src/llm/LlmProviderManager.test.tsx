@@ -15,6 +15,7 @@ import {
   listDomainMemoryLibrary,
 } from "../notebook/domainMemoryApi";
 import type { LlmProvider, LlmProvidersResponse } from "./llmTypes";
+import { llmModelFixture } from "../apiFixtures";
 
 vi.mock("./llmApi", () => ({
   activateLlmProvider: vi.fn(),
@@ -47,24 +48,24 @@ const providers: LlmProvider[] = [
     model: "deepseek-chat",
     timeout_s: 60,
     models: [
-      {
+      llmModelFixture({
         display_name: "DeepSeek Chat",
         request_model: "deepseek-chat",
         context_window_tokens: 128000,
         supports_1m: false,
-      },
-      {
+      }),
+      llmModelFixture({
         display_name: "DeepSeek V4 Flash",
         request_model: "deepseek-v4-flash",
         context_window_tokens: null,
         supports_1m: false,
-      },
-      {
+      }),
+      llmModelFixture({
         display_name: "DeepSeek V4 Pro",
         request_model: "deepseek-v4-pro",
         context_window_tokens: null,
         supports_1m: false,
-      },
+      }),
     ],
     key_present: true,
   },
@@ -97,8 +98,8 @@ describe("LlmProviderManager", () => {
     vi.mocked(refreshLlmProviderModels).mockResolvedValue({
       ...providers[0],
       models: [
-        { display_name: "DeepSeek V4 Flash", request_model: "deepseek-v4-flash", context_window_tokens: null, supports_1m: false },
-        { display_name: "DeepSeek V4 Pro", request_model: "deepseek-v4-pro", context_window_tokens: null, supports_1m: false },
+        llmModelFixture({ display_name: "DeepSeek V4 Flash", request_model: "deepseek-v4-flash", context_window_tokens: null, supports_1m: false }),
+        llmModelFixture({ display_name: "DeepSeek V4 Pro", request_model: "deepseek-v4-pro", context_window_tokens: null, supports_1m: false }),
       ],
     });
     vi.mocked(updateLlmProvider).mockResolvedValue({

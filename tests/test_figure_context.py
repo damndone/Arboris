@@ -155,6 +155,22 @@ def test_figure_ai_context_route_and_404(tmp_path: Path) -> None:
         assert missing.json()["error"]["code"] == "FIGURE_CONTEXT_NOT_FOUND"
 
 
+def test_figure_ai_context_route_without_a_numeric_source(tmp_path: Path) -> None:
+    """A figure whose source artifact is absent is described with source null."""
+    project, run_id = _run_with_figures(tmp_path)
+    index_path = project / "runs" / run_id / "artifacts_index.json"
+    index = read_json(index_path)
+    index["artifacts"] = [record for record in index["artifacts"] if record["artifact_id"] != "ols_1"]
+    write_json(index_path, index)
+    with TestClient(app) as client:
+        response = client.get(
+            "/figures/ai-context",
+            params={"project_root": str(project), "run_id": run_id, "artifact_id": "coef_plot"},
+        )
+    assert response.status_code == 200
+    assert response.json()["source"] is None
+
+
 def test_llm_chat_accepts_figure_mode(tmp_path: Path) -> None:
     # unconfigured LLM → 503, but the figure MODE must be accepted (not 422).
     with TestClient(app) as client:

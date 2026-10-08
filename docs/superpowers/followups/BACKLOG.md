@@ -43,19 +43,15 @@
 
 | ID | 级别 | 内容 | 现状 / 建议 | 来源 |
 |---|---|---|---|---|
-| V1812-LOCAL-API-SECURITY | P0 | 本地后端无 Host / Origin 校验、无访问令牌：DNS rebinding 可同源读写数据、改服务商配置、驱动代码执行；`/runs` 等表单上传接口可被任意网页跨站提交（已实测外来 Host/Origin 均 200；密钥未明文返回） | Host 白名单（127.0.0.1 / localhost）+ 改状态请求校验 Origin + 启动时会话令牌（前端统一带头）+ 回归与浏览器验收 | 发版后自检 |
-| V1812-PREPUSH-GUARD | P0 | 含许可证值的 v1.8.11 历史与私有 ref 可能被推送（`archive/local-only/*` 命名挡不住） | 2026-10-07 已装主仓库 `.git/hooks/pre-push` 并验证；钩子源文件、安装脚本与测试随 v1.8.12 第 3 步入库 | 发版后自检 |
 | V1812-SESSION-TOKEN | P1 | 本地 API 会话令牌（纵深防御） | 用户决定 v1.8.12 不做；后端改为非回环监听、打包发布或多用户时与 V1812-LINUX 同批做 | v1.8.12 objective 评审 |
-| V1812-LOCAL-EVIDENCE-RETENTION | P1 | `local/` 无限增长：LMM 准入测试每次复制整个运行目录，脚本导出测试每次写原始日志 | 定保留策略（例如每类保留最近 N 次），与 pytest 保留设置同口径 | 磁盘写满复盘 |
-| V1812-REPO-EVIDENCE-POLICY | P1 | 仓库一个版本从 32 MB 涨到 84 MB（脚本导出 fixture 3581 个、审查证据约 1800 个文件） | 大体量证据移出 git（`local/` 或 LFS），仓库只留清单与哈希；评估证据与回归测试分目录 | 发版后自检 |
-| V1812-OPENAPI-TYPES | P1 | 前端类型手写（`api.ts` 60 个、`notebook/contracts.ts` 50 个），与后端同步靠人 | 由 FastAPI OpenAPI 生成 TypeScript 类型 + 漂移测试；v1.9.0 新界面直接使用 | v1.6.2 外部评价 #6 |
-| V1812-CLI-FROM-CATALOG | P1 | CLI 缺 `model_options`、加权、后估计、导出与数据操作；参数手写 | 从能力目录生成参数，补子命令 | v1.6.2 外部评价 #3 |
-| V1812-AGENT-GOD-FILES | P1 | 大文件转移到 Agent 层：`context_tools.py` 5445、`workflow_contracts.py` 4165、`notebook/service.py` 4129 行 | 按工具类别拆 `context_tools`；模型族合同与工作流合同分离 | v1.6.2 外部评价 #1 |
-| V1812-CONTRACT-LAYERING | P2 | `ModelFamilyContract` 定义在 `agent/`，被 engine、orchestrator、admission 反向依赖 | 挪到 `contracts/model/` | 发版后自检 |
-| V1812-FAMILY-LITERAL-DOWN | P2 | 共享代码中的族名分支被棘轮锁在 165 处，自 v1.8.10 未下降；`runner.py` 15 个 `run_*` 与估计阶段 14 个 `_fit_*` 与声明式模型包并存 | 每版定下降目标，逐步迁入模型包 | v1.6.2 外部评价 #2 |
+| V1812-GRAPH-CONTROL-KINDS | P1 | 图谱操作面板对 column / integer / number / object / json 控件只读（有序/多项 logit、Cox、LMM、分位数回归、ARMA-GARCH、ETS 的这些参数需回运行表单改） | **用户 2026-10-08 确定随 v1.9.0 界面重做**补就地编辑；种类已由生成的 `ControlKind` 约束 | v1.8.12 第 4 步 GAP |
+| V1812-TYPES-FOLLOWUPS | P3 | ARMA-GARCH 变换 id 在 4 处重复；数据操作 `diff_ref` 各操作结构未声明；`notebook/contracts.ts` 解析后类型未与生成类型做编译期一致性断言 | 逐项收敛到单一来源 | v1.8.12 第 4 步 REVIEW |
+| V1813-CLI-DATA-OPS | P2 | CLI 还没有数据操作子命令（subset、recode、merge、reshape 等） | v1.8.13：仿照 `postestimation` 从数据操作合同生成子命令，经同一数据操作服务执行 | v1.8.12 第 5 步 |
+| V1812-NB1-R-EXPORT | P3 | NB1（常数离散）原生脚本导出只有 Stata / Python，R 保持 Workbench 结果侧车 | 需要 R 的参照级 NB1 实现，并先对 Stata `nbreg, dispersion(constant)` 验证；否则维持现状 | v1.8.12 第 5 步 |
+| V1812-AGENT-GOD-FILES | P1 | 大文件转移到 Agent 层：`context_tools.py` 5445、`workflow_contracts.py` 4165、`notebook/service.py` 4129 行 | `context_tools` 按工具类别拆分转 v1.8.13 必做；模型族合同已在第 6 步分离（`workflow_contracts.py` 4165 → 3207 行） | v1.6.2 外部评价 #1 |
+| V1812-FAMILY-LITERAL-DOWN | P2 | v1.8.12 第 7 步已从 165 降到 119（合同表声明移入 `contracts/model/` 26 处；Notebook 产物词表改由合同推导，真正去重 20 处）。剩余 119 处中 45 处是草稿节点 id（`model_1`、`table_1` 等），正则误计；真正的族名分支 74 处；`runner.py` 15 个 `run_*` 与估计阶段 14 个 `_fit_*` 仍与声明式模型包并存 | v1.8.13：先修正则（排除节点 id），按 74 重定基线，再每版定下降目标、逐步迁入模型包（`evaluations/2026-10-08-v1.8.12-family-literal-down.md`） | v1.6.2 外部评价 #2 |
 | V1812-LINUX | P1 | 仅 macOS 验证；LMM 依赖 macOS 原生隔离 | 明确目标平台；Linux 隔离方案与 CI | 已知门槛 |
-| V1811-LMM-REMAINING | P2 | LMM 的 ML 似然比检验与边际效应无对照；结果卡片只显示组 × 时间交互项；分类项名暴露公式原文 | 补对照后开放；卡片随 v1.9.0；项名映射为可读名 | v1.8.11 |
-| V1811-PUBLIC-TERM-QUOTE | P2 | 列名含单引号时 `_public_term` 返回转义名，与原列名不一致（各族共有） | 修正反转义并补测试 | 自审 |
+| V1811-LMM-REMAINING | P2 | LMM 的 ML 似然比检验与边际效应无对照；结果卡片只显示组 × 时间交互项；分类项名暴露公式原文 | 补对照后开放；卡片随 v1.9.0；项名映射为可读名（v1.8.13，用户 2026-10-08 确定） | v1.8.11 |
 | V1811-SUITE-DURATION | P2 | 后端测试 18:39 / 预算 20:09，余量小；`honest_did` 纯计算约 95 s | gate 一律记录耗时；需要时优化 LP 求解 | 发版 gate |
 | V1811-FRONTEND-CSS | P2 | 6 个全局 CSS 共 5471 行、139 处写死颜色（深色模式欠账根源）、931 处内联样式 | 随 v1.9.0：主题变量 + 组件级样式 | v1.6.2 外部评价 #4 |
 
@@ -311,6 +307,7 @@ DetailHeader 渲染 `{runId} · {nodeKey}`（森林下 nodeKey 是 64-hex hash�
 
 > 保留一版可查阅，下次收尾整份冻结进 `archive/` 时一并带走。
 
+- **v1.8.12 已完成并删除的项**（2026-10-07）：V1812-LOCAL-API-SECURITY（第 1 步，`c1ff9638`；Host 白名单 + 所有方法校验 Origin + 改状态拒 cross-site，GET 只读由枚举测试守住；会话令牌按用户决定未做，见 V1812-SESSION-TOKEN；证据 `evaluations/2026-10-07-v1.8.12-local-api-security.md`）；V1812-LOCAL-EVIDENCE-RETENTION（第 2 步：测试证据统一写 `local/test-evidence/<类别>/<运行>`，每类留最近 3 份，失败或 `WORKBENCH_KEEP_EVIDENCE=1` 的永不自动删；LMM 准入只在失败或显式要求时复制运行目录；`tests/evidence_retention.py`）。V1812-REPO-EVIDENCE-POLICY 与 V1812-PREPUSH-GUARD（第 3 步：证据存放规范写入 `docs/superpowers/README.md` 第 8 条；`scripts/repo_evidence_budget.py` 每版对比上一发布 tag：净增 ≤ 5 MiB、新增文件 ≤ 1000、单文件 ≤ 512 KiB、冻结评估目录不得新增；pre-push 护栏源文件 `scripts/git_hooks/pre-push` + 安装脚本 + 真实推送回归测试；`tests/eval_v1811/` 5 个既有失败已逐一核实为审查脚本过期，原位保留）V1812-OPENAPI-TYPES（第 4 步：133 个接口全部声明响应，128 个 JSON 中 127 个以真实响应严格校验；前端 API 函数返回手写服务端结构 66 → 0，由编译器级不变量测试守住；顺带修复 Frequencies 预览 422 等 10 处合同与实现不一致；证据 `evaluations/2026-10-08-v1.8.12-openapi-types.md`）。V1812-NODE-RERUN-FROM（2026-10-08：补齐 v1.6.3 规格的节点级重跑来源，冲突时失败关闭；顺带把 `run_inputs.rerun_from` 混用的三种形状分开，数据集桥接改为 `dataset_source`，修复重跑子运行脚本导出 422；`014c307d`、`d0a4abf3`，证据 `evaluations/2026-10-08-v1.8.12-rerun-provenance.md`）。V1812-NOTEBOOK-AUTHORIZE（2026-10-08 用户同意删除：客户端提交执行授权的 HTTP 入口不该存在，授权只由 `confirm-and-execute` 在服务端签发；服务方法保留，路由测试锁定入口不存在）。生成类型文件放行（用户 2026-10-08 批准，上限 1 MiB；放行清单失效条目会被报出）。V1812-CLI-FROM-CATALOG（第 5 步：`run` 由 `POST /runs` 字段表生成并经同一 `_submit_run` 提交，`postestimation <op>` 由步骤合同生成并经工作流引擎执行，另有 `export-script` / `export-targets` / `models`；顺带补 NB1 的 Stata / Python 原生导出；命令行 NB1 → Wald → 原生 Stata 包经 Stata 冷启动实跑通过；证据 `evaluations/2026-10-08-v1.8.12-cli-from-catalog.md`）。V1812-CONTRACT-LAYERING（第 6 步：族合同表与结果形状注册表移到 `contracts/model/`，`OperationValidationError` 移到 `contracts/common/errors.py`，JSONL 工具移到 `workbench/jsonl_store.py`；分层守卫 `tests/test_layering_guard.py` 静态扫描 13 个下层包与模块含函数内导入；顺带修复子进程测试导入的是共享虚拟环境指向的旧 worktree 代码；证据 `evaluations/2026-10-08-v1.8.12-contract-layering.md`）。V1812-FAMILY-LITERAL-DOWN 本版目标（第 7 步：165 → 119，余项见 §0.4 同名条目）。V1811-PUBLIC-TERM-QUOTE（第 8 步：`workbench/formula_terms.py` 统一项名引号与反转义，前后端 8 处手写解析改用它；修复 ANOVA 含引号列名拟合失败与外发脱敏漏认双引号形式（运行流水线会规范列名，属潜在缺陷）；证据 `evaluations/2026-10-08-v1.8.12-term-quote.md`）。
 - **v1.8.11 已完成并删除的项**（2026-10-07）：V1810-FAMILY-ORACLES、V1810-PANEL-DID-KERNEL、V1810-NEGBIN、V1810-LMM-ORACLE（另改 GLS 口径并开放 wald/lincom/nlcom）、V1810-AGENT-FIT-THEN-TEST、V1810-PROVIDER-MODEL-NAMES；§2-V1.8.2-JOINT-ARMA-GARCH-MLE（联合 MLE 对 Stata `arch`，VIX 复现；ω 与原 Stata 的差为 Stata 停止精度，见发布说明）。
 - **v1.8.10 已完成并删除的 §0.2 项**（2026-10-04）：V189-RESULT-ENVELOPE、V189-MODEL-ACCEPTANCE-KIT、V189-BY-GROUP、V189-HAC、V189-DATA-TAB-AGENT-SCOPE、V189-P7-TESTS-PORT、V189-MI-POOLING-E2E；V189-POSTEST-REGISTRY 已对 4 族完成，余下族保留在表中。
 - **v1.6.9 前置清债**：见 §1 表末「已清」块。

@@ -63,6 +63,8 @@ function rawNode(dps: DecisionPoint[]): LineageNode {
     payload_ref: null,
     decision_points: dps,
     annotations: [],
+    stage: "model",
+    node_hash: null,
   };
 }
 

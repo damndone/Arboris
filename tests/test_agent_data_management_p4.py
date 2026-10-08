@@ -10,7 +10,8 @@ import pytest
 
 from tests.test_data_column_cast import _source_project
 from workbench.agent.context_tools import NodeOperationContextProvider
-from workbench.agent.operations import OperationRegistry, OperationValidationError
+from workbench.agent.operations import OperationRegistry
+from workbench.contracts.common.errors import OperationValidationError
 from workbench.agent.tools import ToolContext, ToolVisibleError
 from workbench.agent.workflow import WorkflowExecutor, compile_workflow
 from workbench.agent import workflow_contracts

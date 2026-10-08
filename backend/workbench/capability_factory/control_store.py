@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
-from ..agent.storage import read_jsonl
+from ..jsonl_store import read_jsonl
 from .control import (
     ControlAppendRequest,
     ControlCursorExpectation,

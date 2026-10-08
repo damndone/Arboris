@@ -1,10 +1,12 @@
+import type { Schema } from "../apiTypes";
 import type { ArmaGarchTransformPreflight, FilePreview } from "../api";
 
 export type TimeSemantics =
   | "regular_calendar"
   | "business_or_trading_observations"
   | "observation_order";
-export type TransformId = "level" | "log_level" | "diff_1" | "log_return_pct";
+/** The pack's transform vocabulary, from the backend (generated). */
+export type TransformId = Schema<"TransformRecommendation">["transform_id"];
 export type SelectionMode = "auto" | "manual";
 export type VarianceModel = "constant_variance" | "arch" | "garch";
 export type MissingValuePolicy = "block" | "drop_missing_confirmed";

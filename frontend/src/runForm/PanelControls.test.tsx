@@ -2,12 +2,12 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import { PanelControls } from "./PanelControls";
 import type { Capabilities } from "../capabilities/types";
+import { capabilitiesFixture } from "../apiFixtures";
 
-const caps: Capabilities = {
-  schema_version: 2, model_types: [], imputation_methods: [],
+const caps: Capabilities = capabilitiesFixture({
   covariance_options: [{ key: "robust", label: "Robust (default)" },
                        { key: "clustered", label: "Clustered" }],
-};
+});
 
 describe("PanelControls", () => {
   it("offers column choices and reports entity selection", () => {
@@ -33,7 +33,7 @@ describe("PanelControls", () => {
   });
 
   it("omits covariance control when manifest has none", () => {
-    const noCov: Capabilities = { schema_version: 2, model_types: [], imputation_methods: [] };
+    const noCov: Capabilities = capabilitiesFixture();
     render(<PanelControls capabilities={noCov} columns={["firm"]} entity="" time="" covariance=""
       onEntity={vi.fn()} onTime={vi.fn()} onCovariance={vi.fn()} />);
     expect(screen.queryByText(/covariance/i)).toBeNull();

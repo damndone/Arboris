@@ -7,7 +7,13 @@ type Props = {
 };
 
 const FALLBACK_MODELS: ModelTypeEntry[] = [
-  { key: "auto", label: "Auto (infer from y)", group: "auto" },
+  // Same entry the backend publishes first (engine/capabilities.py).
+  {
+    key: "auto",
+    label: "Auto (infer from y)",
+    group: "auto",
+    description: "Pick the best model automatically based on y type.",
+  },
 ];
 
 const GROUP_ORDER = ["Linear", "Binary", "Count", "Panel", "GLM"] as const;

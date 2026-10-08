@@ -13,7 +13,9 @@ from ..analysis_ledger import record_ui_action
 from ..api_errors import WorkbenchAPIError
 from ..data_operations import DataColumnCastValidationError
 from ..statistical_exploration import (
+    ExplorationOperation,
     ExplorationSpec,
+    FilterOperator,
     FilterSpec,
     StatisticalExplorationValidationError,
     exploration_fingerprint,
@@ -21,16 +23,18 @@ from ..statistical_exploration import (
     persist_exploration,
     resolve_statistical_source,
 )
+from .responses.statistical_exploration import ExplorationConfirmed, ExplorationOlsContext, ExplorationPreview
+from .typed_routes import TypedAPIRoute
 
 
-router = APIRouter()
+router = APIRouter(route_class=TypedAPIRoute)
 
 
 class StatisticalFilterRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     column: str = Field(min_length=1, max_length=200)
-    operator: Literal["eq", "neq", "lt", "lte", "gt", "gte", "in", "not_in"]
+    operator: FilterOperator
     value: Any
 
 
@@ -40,14 +44,7 @@ class StatisticalExplorationRequest(BaseModel):
     source_run_id: str = Field(min_length=1, max_length=200)
     source_node_id: str = Field(min_length=1, max_length=300)
     source_artifact_id: str = Field(min_length=1, max_length=200)
-    operation: Literal[
-        "summarize",
-        "summarize_detail",
-        "misstable",
-        "corr",
-        "derive_boolean",
-        "scatter",
-    ]
+    operation: ExplorationOperation
     selected_columns: list[str] = Field(default_factory=list, max_length=200)
     filters: list[StatisticalFilterRequest] = Field(default_factory=list, max_length=200)
     options: dict[str, Any] = Field(default_factory=dict)
@@ -142,7 +139,7 @@ def _evaluate(
 def preview_statistical_exploration(
     project_root: str,
     body: StatisticalExplorationRequest,
-) -> dict[str, Any]:
+) -> ExplorationPreview:
     root = _root(project_root)
     spec = _spec(body)
     context, frame, result, fingerprint = _evaluate(root, body, spec)
@@ -162,7 +159,7 @@ def preview_statistical_exploration(
 def confirm_statistical_exploration(
     project_root: str,
     body: StatisticalExplorationConfirmRequest,
-) -> dict[str, Any]:
+) -> ExplorationConfirmed:
     root = _root(project_root)
     spec = _spec(body)
     context, frame, result, fingerprint = _evaluate(root, body, spec, confirm=True)
@@ -210,7 +207,7 @@ def confirm_statistical_exploration(
 def create_statistical_ols_context(
     project_root: str,
     body: StatisticalOlsContextRequest,
-) -> dict[str, Any]:
+) -> ExplorationOlsContext:
     """Create a reviewable OLS Draft from a confirmed exploration context.
 
     This endpoint materializes only the filtered, complete-case input needed

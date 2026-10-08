@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pandas as pd
+import pytest
 from fastapi.testclient import TestClient
 
 from workbench.artifacts import sha256_file, write_json
@@ -98,6 +99,71 @@ def test_statistical_exploration_preview_resolves_raw_stage_without_payload_ref(
 
     assert response.status_code == 200, response.text
     assert response.json()["preview"]["result"]["filtered_row_count"] == 2
+
+
+def test_every_exploration_operation_is_accepted_over_http(tmp_path: Path) -> None:
+    """The HTTP request accepts every operation the exploration engine runs
+    (the Frequencies option sends tabulate)."""
+    from typing import get_args
+
+    from workbench.http.statistical_exploration_routes import StatisticalExplorationRequest
+    from workbench.statistical_exploration import ExplorationSpec
+
+    accepted = set(get_args(StatisticalExplorationRequest.model_fields["operation"].annotation))
+    assert accepted == set(ExplorationSpec.OPERATIONS)
+
+    project, run_id, artifact_id = _raw_stage_project(
+        tmp_path,
+        pd.DataFrame({"sex": ["f", "m", "f"], "wage": [10.0, 12.0, 11.0]}),
+    )
+    response = TestClient(app).post(
+        "/statistical-explorations/preview",
+        params={"project_root": str(project)},
+        json={
+            "source_run_id": run_id,
+            "source_node_id": "stage:raw",
+            "source_artifact_id": artifact_id,
+            "operation": "tabulate",
+            "selected_columns": ["sex"],
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["preview"]["result"]["operation"] == "tabulate"
+
+
+@pytest.mark.parametrize(
+    ("operation", "options", "expected_key"),
+    [
+        ("summarize_detail", {}, "variables"),
+        ("misstable", {}, "variables"),
+        ("corr", {}, "pairs"),
+        ("summarize", {"group_by": "sex"}, "groups"),
+    ],
+)
+def test_exploration_previews_satisfy_the_response_contract(
+    tmp_path: Path, operation: str, options: dict, expected_key: str
+) -> None:
+    project, run_id, artifact_id = _raw_stage_project(
+        tmp_path,
+        pd.DataFrame(
+            {"sex": ["f", "m", "f", "m"], "wage": [10.0, 12.0, None, 13.0], "hours": [30.0, 40.0, 35.0, 42.0]}
+        ),
+    )
+    columns = ["wage"] if options.get("group_by") else ["wage", "hours"]
+    response = TestClient(app).post(
+        "/statistical-explorations/preview",
+        params={"project_root": str(project)},
+        json={
+            "source_run_id": run_id,
+            "source_node_id": "stage:raw",
+            "source_artifact_id": artifact_id,
+            "operation": operation,
+            "selected_columns": columns,
+            "options": options,
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert expected_key in response.json()["preview"]["result"]
 
 
 def test_grouped_statistical_exploration_confirm_exports_nested_rows_as_json(

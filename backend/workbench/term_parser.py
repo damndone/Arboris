@@ -11,8 +11,9 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from .formula_terms import categorical_level, unquote_column
 
-_C_QUOTED_INNER = re.compile(r"""^Q\(['\"](.+?)['\"]\)$""")
+
 _T_LEVEL = re.compile(r"\[T\.(.+?)\]$")
 _NP_TRANSFORM = re.compile(r"^np\.(\w+)\((.+)\)$")
 _TRANSFORM_DISPLAY = {"log": "log", "sqrt": "sqrt", "exp": "exp"}
@@ -83,12 +84,13 @@ def parse_term(raw: str, *, reference_level: str | None = None) -> ParsedTerm:
 
 
 def _parse_categorical(raw: str, reference_level: str | None) -> ParsedTerm:
-    end_of_inner = raw.find(")[T.")
-    if end_of_inner != -1:
-        inner = raw[2:end_of_inner]
-        source = _unwrap_q(inner)
+    categorical = categorical_level(raw)
+    if categorical is None and ")[T." in raw:
+        # Not a plain column (e.g. `C(np.log(x))[T.a]`): keep the inner text.
         level_match = _T_LEVEL.search(raw)
-        level = level_match.group(1) if level_match else ""
+        categorical = (_unwrap_q(raw[2:raw.find(")[T.")]), level_match.group(1) if level_match else "")
+    if categorical is not None:
+        source, level = categorical
         display = f"{source} = {level}" if level else source
         return ParsedTerm(
             raw=raw,
@@ -116,8 +118,8 @@ def _parse_categorical(raw: str, reference_level: str | None) -> ParsedTerm:
 
 
 def _unwrap_q(inner: str) -> str:
-    m = _C_QUOTED_INNER.match(inner)
-    return m.group(1) if m else inner
+    column = unquote_column(inner)
+    return inner if column is None else column
 
 
 def _leading_identifier(expr: str) -> str:

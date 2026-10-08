@@ -16,7 +16,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tests.test_data_column_cast import _source_project
-from workbench.agent.operations import OperationValidationError
+from workbench.contracts.common.errors import OperationValidationError
 from workbench.agent.workflow import compile_workflow
 from workbench.agent.workflow_contracts import WORKFLOW_STEP_SPEC_CONTRACTS, workflow_step_vocabulary
 from workbench.agent.workflow_runtime import build_workflow_step_executor

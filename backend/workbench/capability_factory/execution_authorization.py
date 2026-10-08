@@ -19,7 +19,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Any, Callable, Iterator, Mapping
 
-from ..agent.storage import read_jsonl
+from ..jsonl_store import read_jsonl
 from ..custom_capability.canonical import domain_digest
 
 

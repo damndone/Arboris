@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentPanel } from "./AgentPanel";
 import { AgentSurfaceProvider } from "./AgentSurfaceContext";
 import type { AgentMessage, AgentProposal } from "./agentTypes";
+import { agentMessageFixture, agentProposalFixture } from "../../apiFixtures";
 
 const mocks = vi.hoisted(() => ({
   createAgentSession: vi.fn(),
@@ -87,7 +88,7 @@ const config = {
   supports_1m: false,
 };
 
-const pendingProposal: AgentProposal = {
+const pendingProposal: AgentProposal = agentProposalFixture({
   record_type: "revision" as const,
   proposal_id: "proposal-1",
   operation_id: "model.rerun",
@@ -105,7 +106,7 @@ const pendingProposal: AgentProposal = {
   created_at: "2026-07-14T00:00:00Z",
   fingerprint: "fingerprint-1",
   status: "pending",
-};
+});
 
 function session(
   sessionId: string,
@@ -170,8 +171,8 @@ describe("AgentSurfaceProvider", () => {
     mocks.abortAgentTurn.mockResolvedValue({ status: "cancelling", session_id: "agent_chain_new" });
     mocks.sendAgentTurn.mockResolvedValue({
       session: session("agent_chain_new", [
-        { entry_id: "u1", role: "user", content: "检查这个图" },
-        { entry_id: "a1", role: "assistant", content: "已检查 active head。", stop_reason: "stop" },
+        agentMessageFixture({ entry_id: "u1", role: "user", content: "检查这个图" }),
+        agentMessageFixture({ entry_id: "a1", role: "assistant", content: "已检查 active head。", stop_reason: "stop" }),
       ]),
       assistant: { entry_id: "a1", role: "assistant", content: "已检查 active head。" },
       status: "idle",
@@ -319,15 +320,15 @@ describe("AgentSurfaceProvider", () => {
     await act(async () => {
       resolveTurn({
         session: session("agent_chain_new", [
-          { entry_id: "u1", role: "user", content: "解释当前模型" },
-          {
+          agentMessageFixture({ entry_id: "u1", role: "user", content: "解释当前模型" }),
+          agentMessageFixture({
             entry_id: "a1",
             role: "assistant",
             content: "当前模型已核对。",
             stop_reason: "stop",
-          },
+          }),
         ]),
-        assistant: { entry_id: "a1", role: "assistant", content: "当前模型已核对。" },
+        assistant: agentMessageFixture({ entry_id: "a1", role: "assistant", content: "当前模型已核对。" }),
         status: "idle",
       });
     });
@@ -536,7 +537,7 @@ describe("AgentSurfaceProvider", () => {
       "agent_chain_saved",
     );
     mocks.getAgentSession.mockResolvedValue(session("agent_chain_saved", [
-      { entry_id: "a1", role: "assistant", content: "可回放的回答。", stop_reason: "stop" },
+      agentMessageFixture({ entry_id: "a1", role: "assistant", content: "可回放的回答。", stop_reason: "stop" }),
     ]));
 
     mount();

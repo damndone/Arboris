@@ -37,13 +37,15 @@ from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, get_args
 from urllib.parse import urlparse
+
+from .formula_terms import QUOTED_COLUMN, literal_value
 
 POLICY_VERSION = 1
 
 # Ordered from least to most revealing about individual records.
-CONTENT_CLASSES = (
+ContentClass = Literal[
     "workbench_state",  # operations, lineage, contracts, proposals -- no dataset values
     "schema",  # column names and types
     "metadata",  # variable/value labels, missing codes, measurement levels
@@ -51,9 +53,11 @@ CONTENT_CLASSES = (
     "model_result",  # coefficients, standard errors, fit statistics
     "rows",  # row-level records
     "unclassified",  # not declared: handled as the most restrictive class
-)
+]
+CONTENT_CLASSES: tuple[ContentClass, ...] = get_args(ContentClass)
 
-SENSITIVITY_LEVELS = ("public", "internal", "sensitive", "restricted")
+SensitivityLevel = Literal["public", "internal", "sensitive", "restricted"]
+SENSITIVITY_LEVELS: tuple[SensitivityLevel, ...] = get_args(SensitivityLevel)
 
 REMOTE_DEFAULT_ALLOW = frozenset({"workbench_state", "schema", "metadata", "aggregate", "model_result"})
 LOCAL_DEFAULT_ALLOW = frozenset(CONTENT_CLASSES)
@@ -390,7 +394,17 @@ class _Redactor:
             return text
 
         def replace(match: re.Match[str]) -> str:
-            column = match.group("q") or match.group("bare")
+            literal = match.group("literal")
+            if literal is not None:
+                try:
+                    column = literal_value(literal)
+                except ValueError:
+                    # A term naming no decodable column cannot be shown to be
+                    # unprotected: withhold its level, audited as written.
+                    self.redacted.add(literal)
+                    return match.group("head") + "[withheld]"
+            else:
+                column = match.group("bare")
             if column in self.protected:
                 self.redacted.add(column)
                 return match.group("head") + "[withheld]"
@@ -426,8 +440,10 @@ class _Redactor:
         return result
 
 
+# A categorical level, quoted (`C(Q('name'))[T.Alice]`, in either quote style,
+# with any escapes) or bare (`name[T.Alice]`).
 _TERM_RE = re.compile(
-    r"(?P<head>C\(Q\('(?P<q>[^']+)'\)[^\[]*\)|(?P<bare>[A-Za-z_一-鿿][\w一-鿿]*))\[T\.[^\]]*\]"
+    rf"(?P<head>C\({QUOTED_COLUMN}[^\[]*\)|(?P<bare>[A-Za-z_一-鿿][\w一-鿿]*))\[T\.[^\]]*\]"
 )
 
 
@@ -602,7 +618,15 @@ def _audit(
         # Decisions for tool and redacted messages; plain conversation turns are counted only.
         "decisions": [item.to_dict() for item in decisions if item.role == "tool" or item.decision != "sent"],
     }
-    path = audit_path(project)
+    _append_audit_line(audit_path(project), record)
+
+
+def append_user_audit_record(record: Mapping[str, Any]) -> None:
+    """Append a non-provider record (e.g. a refused local request) to the user-level log."""
+    _append_audit_line(audit_path(None), record)
+
+
+def _append_audit_line(path: Path, record: Mapping[str, Any]) -> None:
     line = json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n"
     with _AUDIT_LOCK:
         path.parent.mkdir(parents=True, exist_ok=True)

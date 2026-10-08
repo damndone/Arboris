@@ -5,11 +5,11 @@ import numpy as np
 import pandas as pd
 import pytest
 from workbench.econometrics import runner
-from workbench.script_export.plan import LANGUAGES, ScriptPlan, ScriptStep
+from workbench.script_export.plan import LANGUAGES, ScriptExportRefusal, ScriptPlan, ScriptStep
 from test_script_export_render import renderer
 from test_script_export_data_oracles import execute, fresh_directory, source
 
-CASES = ('ols_unadjusted','ols_robust','ols_clustered','ols_hac','ols_frequency','ols_analysis','logit','probit','poisson','glm_binomial','glm_poisson','negative_binomial')
+CASES = ('ols_unadjusted','ols_robust','ols_clustered','ols_hac','ols_frequency','ols_analysis','logit','probit','poisson','glm_binomial','glm_poisson','negative_binomial','negative_binomial_nb1')
 
 
 def frame():
@@ -39,6 +39,9 @@ def oracle(case,d):
     elif case.startswith('glm_'):
         family=case.removeprefix('glm_');params.update(model_type='glm',y='binary' if family=='binomial' else 'count',model_options={'family':family})
         result,fitted=runner.run_glm(d,params['y'],['x','z'],'model',family)
+    elif case=='negative_binomial_nb1':
+        params.update(model_type='negative_binomial',y='nb',model_options={'dispersion':'constant'})
+        result,fitted=runner.run_negative_binomial(d,'nb',['x','z'],'model',dispersion='constant')
     else:
         params.update(model_type=case,y={'logit':'binary','probit':'binary','poisson':'count','negative_binomial':'nb'}[case])
         result,fitted=getattr(runner,'run_'+case)(d,params['y'],['x','z'],'model')
@@ -60,6 +63,11 @@ def test_native_model_engine_oracle(case,language):
     s=source(directory,d,'data.csv','source')
     step=ScriptStep('model','model','model.'+params['model_type'],params,('source',),expected=expected)
     plan=ScriptPlan('model-oracle',case,(s,),(step,),'1.8.11','1'*64)
+    if case=='negative_binomial_nb1' and language=='r':
+        # R has no reference NB1 estimator; the step stays a Workbench result.
+        with pytest.raises(ScriptExportRefusal) as caught:renderer()(plan,language,require_native=True)
+        assert caught.value.code=='NOT_FULLY_NATIVE' and caught.value.steps==('model',)
+        return
     export=renderer()(plan,language,require_native=True)
     code,output=execute(export,directory,plan)
     assert code==0,output

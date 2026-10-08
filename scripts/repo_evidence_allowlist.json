@@ -1,0 +1,8 @@
+{
+  "files": {
+    "frontend/src/generated/api-schema.ts": {
+      "max_bytes": 1048576,
+      "reason": "Generated frontend API types (scripts/generate_api_types.py), not evidence. Grows with the number of declared operations; tests/test_api_types_drift.py keeps it identical to the backend. Approved by the user 2026-10-08 with a 1 MiB cap."
+    }
+  }
+}

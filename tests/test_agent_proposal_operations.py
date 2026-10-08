@@ -1013,11 +1013,14 @@ def test_model_rerun_executor_adapts_proposal_changes_and_provenance(
     )
     request = captured[0]
     assert request.op_overrides == {"covariance": "HC3", "x": ["x1"]}
+    # Full node provenance: the Agent's operation record is the rerun request,
+    # validated against the node-operation context it carries.
     assert request.rerun_from == {
         "owner_run_id": "run-1",
         "op_node_id": "model-ols",
         "node_hash": "node-hash-1",
-        "forest_node_key": "node-hash-1",
+        "context_fingerprint": "ctx-1",
+        "rerun_request_id": "oprec-1",
     }
     assert request.workbench_context == {
         "operation_id": "model.rerun",

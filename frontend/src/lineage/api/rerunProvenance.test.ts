@@ -150,6 +150,21 @@ describe("getCompareWithSourceGate", () => {
     expect(result).toEqual({ ok: false, reason: "provenance_mismatch" });
   });
 
+  it("fails closed when the runs sharing a node record different sources", () => {
+    const result = getCompareWithSourceGate(
+      context({
+        rerun_from_conflicts: [
+          sourceProvenance,
+          { ...sourceProvenance, rerun_request_id: "req_2", context_fingerprint: "nocv1:other" },
+        ],
+        // A run-level record must not stand in for an ambiguous node-level one.
+        run_rerun_from: sourceProvenance,
+      }),
+    );
+
+    expect(result).toEqual({ ok: false, reason: "provenance_ambiguous" });
+  });
+
   it("allows run-level fallback for the authoritative active head of a shared node", () => {
     const result = getCompareWithSourceGate(
       context({

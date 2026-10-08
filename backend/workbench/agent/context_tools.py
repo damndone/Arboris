@@ -31,7 +31,7 @@ from ..graph_model import NodeKind
 from .context_compiler import resolve_registered_artifact
 from .operations import OperationRecord, OperationRecordStore, OperationRegistry
 from .recipes.registry import build_option_vocabulary, validate_model_options_patch
-from .storage import read_jsonl
+from ..jsonl_store import read_jsonl
 from .tools import ToolContext, ToolDefinition, ToolVisibleError
 from .bounds import (
     _bounded_label,

@@ -6,12 +6,12 @@ import pytest
 from workbench.econometrics import runner
 from workbench.contracts.model.inference_kernel import build_inference_kernel
 from workbench.postestimation.registry import run_operation
-from workbench.script_export.plan import LANGUAGES, ScriptPlan, ScriptStep
+from workbench.script_export.plan import LANGUAGES, ScriptExportRefusal, ScriptPlan, ScriptStep
 from test_script_export_model_oracles import frame,oracle
 from test_script_export_data_oracles import fresh_directory,source,execute
 from test_script_export_render import renderer
 
-FAMILIES=('ols_unadjusted','ols_robust','ols_clustered','ols_hac','logit','probit','poisson','negative_binomial')
+FAMILIES=('ols_unadjusted','ols_robust','ols_clustered','ols_hac','logit','probit','poisson','negative_binomial','negative_binomial_nb1')
 OPERATIONS=('wald','lincom','nlcom','lr','margins')
 
 
@@ -20,6 +20,9 @@ def fit_kernel(case,d,x):
         cov=case.removeprefix('ols_');sink=[]
         result,plain=runner.run_ols(d,'y',x,False,'model',covariance=cov,cluster_col='group' if cov=='clustered' else None,hac_lags=2 if cov=='hac' else None,hac_time_order='time' if cov=='hac' else None,fitted_sink=sink.append)
         fit=sink[0];model='ols';link='identity';estimator={'unadjusted':'nonrobust','robust':'HC1','clustered':'cluster','hac':'HAC'}[cov]
+    elif case=='negative_binomial_nb1':
+        result,fit=runner.run_negative_binomial(d,'nb',x,'model',dispersion='constant')
+        model='negative_binomial';link='log';estimator='nonrobust'
     else:
         result,fit=getattr(runner,'run_'+case)(d,{'logit':'binary','probit':'binary','poisson':'count','negative_binomial':'nb'}[case],x,'model')
         model=case;link={'logit':'logit','probit':'probit','poisson':'log','negative_binomial':'log'}[case];estimator='nonrobust'
@@ -43,7 +46,7 @@ def expected_from(result):
     return expected
 
 
-CASES=[(f,o) for f in FAMILIES for o in OPERATIONS if (o!='lr' or f in {'ols_unadjusted','logit','probit','poisson'}) and (f!='negative_binomial' or o in {'wald','lincom'})]
+CASES=[(f,o) for f in FAMILIES for o in OPERATIONS if (o!='lr' or f in {'ols_unadjusted','logit','probit','poisson'}) and (not f.startswith('negative_binomial') or o in {'wald','lincom'})]
 
 @pytest.mark.parametrize('language',LANGUAGES)
 @pytest.mark.parametrize('case',CASES,ids=[f'{f}-{o}' for f,o in CASES])
@@ -60,6 +63,11 @@ def test_postestimation_native_kernel_oracle(case,language):
     result=run_operation(operation,kernels,spec,context)
     steps.append(ScriptStep('test','postestimation','postestimation.'+operation,{**spec,'models':models},tuple(models),expected=expected_from(result)))
     plan=ScriptPlan('postestimation',family,(source(directory,d,'data.csv','source'),),tuple(steps),'1.8.11','6'*64)
+    if family=='negative_binomial_nb1' and language=='r':
+        # R has no reference NB1 estimator: the model and the test on it stay Workbench results.
+        with pytest.raises(ScriptExportRefusal) as caught:renderer()(plan,language,require_native=True)
+        assert caught.value.code=='NOT_FULLY_NATIVE' and 'model' in caught.value.steps
+        return
     exported=renderer()(plan,language,require_native=True)
     code,output=execute(exported,directory,plan)
     assert code==0,output

@@ -392,7 +392,7 @@ export function StatisticalExplorationSection({ node }: { node: GraphViewNode })
                   <button
                     type="button"
                     data-testid="statistical-exploration-preview"
-                    disabled={!request || request.selected_columns.length === 0 || status === "previewing" || status === "confirming"}
+                    disabled={!request || (request.selected_columns ?? []).length === 0 || status === "previewing" || status === "confirming"}
                     onClick={() => void handlePreview()}
                   >
                     {status === "previewing" ? "Previewing…" : "Preview"}

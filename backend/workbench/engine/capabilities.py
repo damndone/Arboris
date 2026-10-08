@@ -463,7 +463,7 @@ def build_capabilities(*, bootstrap_packs: bool = True) -> dict:
 
     # An editor must not offer a requested covariance that the model ignores.
     # Use the same family declaration as workflow validation and run inputs.
-    from ..agent.workflow_contracts import MODEL_FAMILY_CONTRACTS
+    from ..contracts.model.family import MODEL_FAMILY_CONTRACTS
 
     for entry in model_types:
         contract = MODEL_FAMILY_CONTRACTS.get(entry["key"])
@@ -528,7 +528,7 @@ def _attach_weight_params(model_types: list[dict]) -> None:
     no Agent could set one at all. The family contract already declares which
     kinds it takes; this makes that declaration visible instead of restating it.
     """
-    from ..agent.workflow_contracts import MODEL_FAMILY_CONTRACTS
+    from ..contracts.model.family import MODEL_FAMILY_CONTRACTS
 
     for entry in model_types:
         contract = MODEL_FAMILY_CONTRACTS.get(entry["key"])
@@ -580,7 +580,7 @@ def _survey_design_capability() -> dict:
     which variance channel a given estimator can use instead of carrying a
     hard-coded list that silently rots as families are added.
     """
-    from ..agent.workflow_contracts import MODEL_FAMILY_CONTRACTS
+    from ..contracts.model.family import MODEL_FAMILY_CONTRACTS
     from ..survey.design import DF_CONVENTIONS, LONELY_PSU_POLICIES, REPLICATE_TYPES
     from ..survey.estimator import VARIANCE_METHOD_REQUIREMENTS
     from ..survey.fields import DESIGN_FIELDS

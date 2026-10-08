@@ -12,6 +12,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, Iterable
 from uuid import uuid4
 
+from ..lineage.rerun_provenance import run_rerun_from_from_context
 from ..services.rerun_service import (
     RerunReconciliationRequest,
     RerunService,
@@ -1392,12 +1393,21 @@ class WorkbenchOrchestrator:
                     rerun_reason="agent_confirmed",
                     # metadata.edit may declare columns outside the model.
                     metadata_edit=request.operation_id == "metadata.edit",
-                    rerun_from={
-                        "owner_run_id": request.source_run_id,
-                        "op_node_id": request.source_node_ref,
-                        "node_hash": request.node_hash,
-                        "forest_node_key": request.forest_node_key,
-                    },
+                    # Node provenance (RunRerunFrom): this operation record is
+                    # the rerun request, validated against the node-operation
+                    # context it carries. Without such a context there is no
+                    # fingerprint to revalidate the source by, so none is claimed.
+                    rerun_from=(
+                        run_rerun_from_from_context(
+                            request_id=request.operation_record_id,
+                            owner_run_id=request.source_run_id,
+                            op_node_id=request.source_node_ref,
+                            node_hash=request.node_hash,
+                            context_fingerprint=request.context_fingerprint,
+                        )
+                        if request.context_version == "node-operation-context/v1"
+                        else None
+                    ),
                     workbench_context=workbench_context,
                 )
             )

@@ -16,6 +16,7 @@ from workbench.contracts.model.linear_mixed_effects import (
     LmmDiagnostic,
     build_lmm_result_identity,
 )
+from workbench.formula_terms import quote_column
 
 from .diagnostics import classify_lmm_diagnostics
 from .figures import build_lmm_trajectory_context
@@ -29,9 +30,9 @@ LMM_OPTIMIZER = "lbfgs"
 
 def _interaction_term(prepared: PreparedLmmInput) -> str:
     return (
-        f"C(Q({prepared.input.group!r}), "
+        f"C({quote_column(prepared.input.group)}, "
         f"Treatment(reference={prepared.reference_group_value!r}))[T."
-        f"{prepared.comparison_group}]:Q({prepared.input.time!r})"
+        f"{prepared.comparison_group}]:{quote_column(prepared.input.time)}"
     )
 
 
@@ -138,7 +139,7 @@ def _common_result_fields(
         "exclusion_counts": dict(prepared.exclusion_counts),
         "fixed_effects_formula": prepared.formula,
         "random_effects_specification": (
-            "1 + " + f"Q({prepared.input.time!r})"
+            "1 + " + f"{quote_column(prepared.input.time)}"
             if prepared.input.random_slope
             else "1"
         ),

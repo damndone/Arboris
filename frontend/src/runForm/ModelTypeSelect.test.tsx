@@ -2,18 +2,17 @@ import { expect, test, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { ModelTypeSelect } from "./ModelTypeSelect";
 import type { Capabilities } from "../capabilities/types";
+import { capabilitiesFixture } from "../apiFixtures";
 
-const capabilities: Capabilities = {
-  schema_version: 1,
+const capabilities: Capabilities = capabilitiesFixture({
   model_types: [
-    { key: "auto", label: "Auto (infer from y)", group: "auto" },
-    { key: "ols", label: "OLS (linear)", group: "Linear" },
-    { key: "logit", label: "Logit", group: "Binary" },
-    { key: "poisson", label: "Poisson", group: "Count" },
-    { key: "panel_ols", label: "Panel OLS", group: "Panel" },
+    { key: "auto", label: "Auto (infer from y)", group: "auto", description: "" },
+    { key: "ols", label: "OLS (linear)", group: "Linear", description: "" },
+    { key: "logit", label: "Logit", group: "Binary", description: "" },
+    { key: "poisson", label: "Poisson", group: "Count", description: "" },
+    { key: "panel_ols", label: "Panel OLS", group: "Panel", description: "" },
   ],
-  imputation_methods: [],
-};
+});
 
 test("renders model types from capabilities grouped by group", () => {
   render(<ModelTypeSelect value="auto" onChange={() => {}} capabilities={capabilities} />);

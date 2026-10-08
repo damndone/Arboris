@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from workbench.agent.context_tools import _bounded_inference
-from workbench.agent.workflow_contracts import MODEL_FAMILY_CONTRACTS
+from workbench.contracts.model.family import MODEL_FAMILY_CONTRACTS
 from workbench.services.draft_materialization import normalize_ols_genesis_model_params
 
 

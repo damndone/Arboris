@@ -2,10 +2,11 @@ import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { AgentCapabilityPopover } from "./AgentCapabilityPopover";
+import { agentCapabilitiesFixture, operationCapabilityFixture } from "../../apiFixtures";
 
-const catalog = {
+const catalog = agentCapabilitiesFixture({
   capabilities: [
-    {
+    operationCapabilityFixture({
       operation_id: "graph.fork",
       operation_version: "v1",
       effect_level: "mutation",
@@ -16,13 +17,13 @@ const catalog = {
       ui_description: "Create a new Chain branch from the current verified node.",
       example_prompts: ["Create a new branch from the current node."],
       natural_language_enabled: true,
-    },
+    }),
   ],
   boundary: {
     advisory: [{ id: "analysis.explain", label: "Compare results and explain diagnostics", description: "Read-only explanation." }],
     unsupported: [{ id: "data.cleaning", label: "Modify data-cleaning rules", description: "No typed operation is available." }],
   },
-};
+});
 
 describe("AgentCapabilityPopover", () => {
   it("renders registry-backed executable, advisory, and unsupported boundaries", () => {

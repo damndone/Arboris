@@ -412,7 +412,7 @@ export function AgentSurfaceProvider({
         setSessionId(session.session_id);
         setMessages(session.messages);
         setProposals(session.proposals ?? []);
-        setSessionStatus(session.status);
+        setSessionStatus(session.status ?? "idle");
         await refreshNavigation(session.session_id, sessionScope);
         if (linkedOperationId) {
           try {
@@ -497,6 +497,7 @@ export function AgentSurfaceProvider({
           request_model: llmConfig.model,
           context_window_tokens: llmConfig.context_window_tokens,
           supports_1m: llmConfig.supports_1m,
+          supports_vision: llmConfig.supports_vision,
         }]
       : [];
   }, [activeProvider, llmConfig?.model]);
@@ -550,7 +551,10 @@ export function AgentSurfaceProvider({
       entry_id: `local-user-${optimisticMessageCounterRef.current}`,
       role: "user",
       content: question,
+      name: null,
       stop_reason: null,
+      error: null,
+      navigation: [],
     };
     // The transcript is the conversation surface, so a sent turn must be
     // visible before the provider round-trip completes. The durable response
@@ -604,7 +608,7 @@ export function AgentSurfaceProvider({
       if (activeScopeRef.current !== requestScope) return;
       setMessages(result.session.messages);
       setProposals(result.session.proposals ?? []);
-      setSessionStatus(result.status);
+      setSessionStatus(result.status ?? "idle");
       await refreshNavigation(activeSessionId, requestScope);
       try {
         await replayEvents(activeSessionId, eventCursor, requestScope);

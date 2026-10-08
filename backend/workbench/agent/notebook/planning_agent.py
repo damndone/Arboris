@@ -41,14 +41,16 @@ from .workflow_artifacts import (
 )
 from ..workflow_contracts import (
     GENESIS_RUN_LEVEL_FIELDS,
-    MODEL_FAMILY_SPEC_FIELDS,
     NOTEBOOK_GENESIS_MODEL_PARAMS,
-    OperationValidationError as WorkflowOperationValidationError,
-    family_context_columns,
-    model_family_contract,
     validate_model_genesis_spec,
     workflow_step_vocabulary,
 )
+from ...contracts.model.family import (
+    MODEL_FAMILY_SPEC_FIELDS,
+    family_context_columns,
+    model_family_contract,
+)
+from ...contracts.common.errors import OperationValidationError as WorkflowOperationValidationError
 from ..recipe_contracts import RecipeValidationError, recipe_contract_for_model_type
 
 

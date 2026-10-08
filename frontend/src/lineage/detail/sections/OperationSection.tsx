@@ -107,10 +107,7 @@ function EditableOperation({
           values,
         ),
         sourceContextFingerprint: context.context_fingerprint,
-        editableSchemaVersion:
-          "editableSchemaVersion" in node && typeof node.editableSchemaVersion === "string"
-            ? node.editableSchemaVersion
-            : context.operation_target.editable_schema_source ?? "run_inputs",
+        editableSchemaVersion: context.operation_target.editable_schema_source ?? "run_inputs",
         target: {
           owner_run_id: context.operation_target.owner_run_id,
           op_node_id: context.operation_target.op_node_id,
@@ -298,7 +295,6 @@ function ReadOnlyControlRow({ control }: { control: EditableControl }) {
         }}
       >
         {value}
-        {control.unit ? ` ${control.unit}` : ""}
       </span>
     </div>
   );

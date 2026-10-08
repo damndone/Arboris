@@ -6,6 +6,7 @@ import {
   completeNotebookOptionExecution,
   createNotebook,
   ensureNotebookProjection,
+  listNotebookOptions,
   materializeNotebookOption,
   proposeNotebookOptions,
   recordNotebookDecision,
@@ -33,6 +34,20 @@ describe("notebookApi", () => {
       title: "Analysis",
       created_by: "user",
     });
+  });
+
+  it("loads options with POST because the server records the compiled context", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ context: {}, options: [], trace_id: "trace_1" }), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await listNotebookOptions("/tmp/project", "nb/1");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/notebooks/nb%2F1/options?project_root=%2Ftmp%2Fproject",
+      expect.objectContaining({ method: "POST" }),
+    );
   });
 
   it("uses typed lifecycle endpoints and leaves response validation to the adapter", async () => {

@@ -81,7 +81,7 @@ def test_glm_postestimation_pairs_are_backed_by_existing_r_cases():
 
 def test_count_options_are_declared_for_agent_and_capabilities():
     from workbench.agent.recipes.registry import build_option_vocabulary
-    from workbench.agent.workflow_contracts import MODEL_FAMILY_CONTRACTS
+    from workbench.contracts.model.family import MODEL_FAMILY_CONTRACTS
     from workbench.engine.capabilities import build_capabilities
     for family, fields in [("negative_binomial", {"dispersion", "alpha"}),
                            ("glm:negative_binomial", {"alpha"})]:
@@ -96,7 +96,7 @@ def test_count_options_are_declared_for_agent_and_capabilities():
 
 def test_agent_fixed_dispersion_accepts_native_fractional_response_support():
     import pandas as pd
-    from workbench.agent.workflow_contracts import MODEL_FAMILY_CONTRACTS
+    from workbench.contracts.model.family import MODEL_FAMILY_CONTRACTS
     frame=pd.DataFrame({"y":[0.,.5,2.]})
     branch={"outcome":"y","model_options":{"alpha":.7}}
     for family in ["negative_binomial","glm:negative_binomial"]:

@@ -18,6 +18,7 @@ import type {
   MemorySettingsConfirmation,
 } from "../notebook/domainMemoryContracts";
 import { DomainMemoryReviewQueue } from "../notebook/DomainMemoryReviewQueue";
+import type { RequestOf } from "../apiTypes";
 
 type PendingChange = {
   confirmation: MemorySettingsConfirmation;
@@ -169,7 +170,7 @@ export function MemorySettingsPanel({ projectRoot }: { projectRoot: string }) {
   }, [refresh]);
 
   async function beginSetting(
-    action: string,
+    action: RequestOf<"/domain-memory/settings/confirmations", "post">["action"],
     expectedRevision: number,
     summary: string,
     commit: (confirmation: MemorySettingsConfirmation) => Promise<DomainMemorySettings>,

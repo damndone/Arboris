@@ -1,17 +1,37 @@
 from __future__ import annotations
 
+import enum
+import inspect
 import json
 import os
 import socket
 import time
+from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import Annotated, Any
 from urllib.parse import quote
 
 import typer
+import typer.main
+from typer.core import TyperGroup
 
 from .projects import create_project
 
-app = typer.Typer(help="Local econometrics workbench.")
+
+class _WorkbenchGroup(TyperGroup):
+    """Typer's group plus the generated commands, each built on first use."""
+
+    def list_commands(self, ctx: Any) -> list[str]:
+        return sorted(set(super().list_commands(ctx)) | set(_GENERATED_COMMANDS))
+
+    def get_command(self, ctx: Any, cmd_name: str) -> Any:
+        factory = _GENERATED_COMMANDS.get(cmd_name)
+        if factory is not None:
+            return factory()
+        return super().get_command(ctx, cmd_name)
+
+
+app = typer.Typer(help="Local econometrics workbench.", cls=_WorkbenchGroup)
 
 # Default FE dev-server origin. Override with WORKBENCH_UI_ORIGIN when
 # running on a non-standard host/port (e.g. CI proxy, remote tunnel).
@@ -116,182 +136,265 @@ def create(parent: Path, name: str) -> None:
     typer.echo(str(project.root))
 
 
-@app.command()
-def run(
-    project_root: Path,
-    data_file: Path,
-    y: str,
-    x: list[str] = typer.Option(
-        ...,
-        "--x",
-        help="Regressor column. Repeat for multiple columns.",
-    ),
-    mode: str = typer.Option("auto", "--mode"),
-    model_type: str = typer.Option("auto", "--model-type"),
-    imputation: str = typer.Option("", "--imputation"),
-    entity_col: str = typer.Option(
-        "", "--entity-col", help="Panel entity (unit id) column."
-    ),
-    time_col: str = typer.Option(
-        "", "--time-col", help="Panel time-period column."
-    ),
-    covariance: str = typer.Option(
-        "", "--covariance",
-        help="Covariance estimator: robust | clustered | unadjusted. Default: robust.",
-    ),
-    iv_endog: list[str] = typer.Option(
-        [], "--iv-endog", help="Endogenous regressor. Repeat for multiple."
-    ),
-    iv_instruments: list[str] = typer.Option(
-        [], "--iv-instruments", help="Instrument column. Repeat for multiple."
-    ),
-    did_mode: str = typer.Option(
-        "", "--did-mode",
-        help="DID design: cohort | two_by_two | status. Default: cohort.",
-    ),
-    did_cohort_col: str = typer.Option(
-        "", "--did-cohort-col",
-        help="Cohort (first-treatment period) column; required for mode 'cohort'.",
-    ),
-    did_treat_col: str = typer.Option(
-        "", "--did-treat-col",
-        help="Treated-group dummy column; required for mode 'two_by_two'.",
-    ),
-    did_post_col: str = typer.Option(
-        "", "--did-post-col",
-        help="Post-period dummy column; required for mode 'two_by_two'.",
-    ),
-    did_status_col: str = typer.Option(
-        "", "--did-status-col",
-        help="Per-period treatment-status column; required for mode 'status'.",
-    ),
-    did_treatment_path: str = typer.Option(
-        "", "--did-treatment-path",
-        help="Treatment-path column for dCDH (non-absorbing/switching treatment).",
-    ),
-    cs_control_group: str = typer.Option(
-        "", "--cs-control-group",
-        help="Callaway-Sant'Anna control group: never | not_yet. Default: never.",
-    ),
-    cs_est_method: str = typer.Option(
-        "", "--cs-est-method",
-        help="Callaway-Sant'Anna estimation method: dr | reg | ipw. Default: dr.",
-    ),
-    cs_base_period: str = typer.Option(
-        "", "--cs-base-period",
-        help="Callaway-Sant'Anna base period: varying | universal. Default: varying.",
-    ),
-    cs_cluster_var: str = typer.Option(
-        "", "--cs-cluster-var",
-        help="Cluster column for Callaway-Sant'Anna inference.",
-    ),
-    cs_anticipation: int = typer.Option(
-        0, "--cs-anticipation",
-        help="Anticipation periods for Callaway-Sant'Anna. Default: 0.",
-    ),
-    honest_did: bool = typer.Option(
-        False, "--honest-did",
-        help="Run Rambachan-Roth honest-DID sensitivity analysis (slow, opt-in).",
-    ),
-    prediction_model_type: str = typer.Option(
-        "", "--prediction-model-type",
-        help="Prediction model: prediction_lasso | prediction_ridge | prediction_random_forest.",
-    ),
-    prediction_cv_folds: int = typer.Option(
-        0, "--prediction-cv-folds",
-        help="Cross-validation folds for the prediction model. 0 = engine default.",
-    ),
-    prediction_sampling_method: str = typer.Option(
-        "", "--prediction-sampling-method",
-        help="Class-imbalance resampling: smote | oversample | undersample.",
-    ),
-    # v1.8.7 block 1.  Added alongside the HTTP surface so the CLI does not
-    # repeat the D3 debt of silently lacking parameters the API accepts.
-    survey_strata_col: str = typer.Option(
-        "", "--survey-strata-col", help="Complex survey design: stratum column.",
-    ),
-    survey_psu_col: str = typer.Option(
-        "", "--survey-psu-col", help="Complex survey design: primary sampling unit column.",
-    ),
-    survey_fpc_col: str = typer.Option(
-        "", "--survey-fpc-col", help="Complex survey design: finite population correction column.",
-    ),
-    survey_replicate_weights: list[str] = typer.Option(
-        [], "--survey-replicate-weight",
-        help="Replicate weight column. Repeat for multiple columns.",
-    ),
-    survey_replicate_type: str = typer.Option(
-        "", "--survey-replicate-type",
-        help="Replicate variance method: brr | jackknife | bootstrap | provided.",
-    ),
-    survey_lonely_psu: str = typer.Option(
-        "", "--survey-lonely-psu",
-        help="Single-PSU stratum policy: fail | remove | adjust | average | certainty.",
-    ),
-    survey_weight_frame: str = typer.Option(
-        "", "--survey-weight-frame",
-        help="Panel weight semantics: cross_sectional | longitudinal.",
-    ),
-    survey_subpop: str = typer.Option(
-        "", "--survey-subpop",
-        help="Subpopulation expression evaluated on the full design.",
-    ),
-    survey_df: str = typer.Option(
-        "", "--survey-df",
-        help="Coefficient test df under a survey design: design (default, #PSU - #strata) | design_minus_p (R survey).",
-    ),
-) -> None:
-    from .orchestrator import parse_imputation_request, run_workflow
+# ---------------------------------------------------------------------------
+# Generated commands (V1812-CLI-FROM-CATALOG).
+#
+# `run` takes the POST /runs fields (run_request.RUN_REQUEST_FIELDS),
+# `postestimation <op>` the post-estimation step contracts, and `export-script`
+# the script-export languages; each executes through the same service as the
+# API or the Agent (cli_commands). Built on first use, so start-up imports
+# neither the statistics libraries nor the web stack.
+# ---------------------------------------------------------------------------
 
-    result = run_workflow(
-        project_root,
-        [data_file],
-        mode=mode,
-        y=y,
-        x=x,
-        model_type=model_type,
-        imputation=parse_imputation_request(imputation),
-        entity_col=entity_col,
-        time_col=time_col,
-        covariance=covariance,
-        # Orchestrator gates the IV path on a plain falsy check
-        # (`iv_endog or []`), so an empty list is equivalent to None —
-        # default invocations never enter the IV path. Mirror the API
-        # layer, which passes lists straight through.
-        iv_endog=list(iv_endog),
-        iv_instruments=list(iv_instruments),
-        did_mode=did_mode,
-        did_cohort_col=did_cohort_col,
-        did_treat_col=did_treat_col,
-        did_post_col=did_post_col,
-        did_status_col=did_status_col,
-        did_treatment_path=did_treatment_path,
-        cs_control_group=cs_control_group,
-        cs_est_method=cs_est_method,
-        cs_base_period=cs_base_period,
-        cs_cluster_var=cs_cluster_var,
-        cs_anticipation=cs_anticipation,
-        honest_did=honest_did,
-        prediction_model_type=prediction_model_type,
-        prediction_cv_folds=prediction_cv_folds,
-        prediction_sampling_method=prediction_sampling_method,
-        survey_strata_col=survey_strata_col,
-        survey_psu_col=survey_psu_col,
-        survey_fpc_col=survey_fpc_col,
-        survey_replicate_weights=list(survey_replicate_weights),
-        survey_replicate_type=survey_replicate_type,
-        survey_lonely_psu=survey_lonely_psu,
-        survey_weight_frame=survey_weight_frame,
-        survey_subpop=survey_subpop,
-        survey_df=survey_df,
+
+def _fail(exc: Exception) -> None:
+    from .cli_commands import CommandError
+
+    if isinstance(exc, CommandError):
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(code=exc.code)
+    raise exc
+
+
+def _json_value(raw: str | None, option: str) -> Any:
+    """A JSON document given inline or as @path."""
+    if raw is None:
+        return None
+    text = raw
+    if raw.startswith("@"):
+        try:
+            text = Path(raw[1:]).expanduser().read_text(encoding="utf-8")
+        except OSError as exc:
+            raise typer.BadParameter(f"cannot read {raw[1:]}: {exc}", param_hint=option) from exc
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise typer.BadParameter(f"not valid JSON: {exc}", param_hint=option) from exc
+
+
+def _option_name(name: str) -> str:
+    return "--" + name.replace("_", "-")
+
+
+def _param(name: str, annotation: Any, info: Any, default: Any = inspect.Parameter.empty) -> inspect.Parameter:
+    return inspect.Parameter(
+        name, inspect.Parameter.KEYWORD_ONLY, annotation=Annotated[annotation, info], default=default,
     )
-    run_id = result["run_id"]
-    # stdout: machine-readable run_id only — preserves the long-standing
-    # `RUN_ID=$(workbench run ...)` shell contract.
-    typer.echo(run_id)
-    # stderr: human-facing copyable URL — visible in terminals, doesn't
-    # pollute scripts capturing stdout.
-    typer.echo(f"Lineage: {_lineage_url(project_root, run_id)}", err=True)
+
+
+def _command(name: str, help_text: str, parameters: list[inspect.Parameter], callback: Callable[..., None]) -> Any:
+    """A Typer command whose parameters are given as a generated signature."""
+    callback.__signature__ = inspect.Signature(parameters)  # type: ignore[attr-defined]
+    single = typer.Typer()
+    single.command(name, help=help_text)(callback)
+    return typer.main.get_command(single)
+
+
+def _run_command() -> Any:
+    from .run_request import RUN_REQUEST_FIELDS, encode_many
+
+    parameters = [
+        _param("project_root", Path, typer.Argument(help="Workbench project directory.")),
+        _param("data_file", Path, typer.Argument(help="Data file (csv, xlsx, sav, dta, ...).")),
+        _param("y", str, typer.Argument(help="Outcome column.")),
+    ]
+    for field in RUN_REQUEST_FIELDS:
+        if field.name == "y":
+            continue
+        decls = (_option_name(field.name), *field.cli_aliases)
+        if field.many:
+            parameters.append(_param(field.name, list[str] | None, typer.Option(*decls, help=field.help), None))
+        elif isinstance(field.default, bool):
+            parameters.append(_param(field.name, bool, typer.Option(*decls, help=field.help), field.default))
+        elif isinstance(field.default, int):
+            parameters.append(_param(field.name, int, typer.Option(*decls, help=field.help), field.default))
+        elif field.encoding == "json":
+            parameters.append(_param(
+                field.name, str | None, typer.Option(*decls, help=field.help + " Inline JSON or @file."), None,
+            ))
+        else:
+            parameters.append(_param(
+                field.name, str | None, typer.Option(*decls, help=field.help, show_default=bool(field.default)),
+                field.default,
+            ))
+
+    def callback(project_root: Path, data_file: Path, y: str, **options: Any) -> None:
+        values: dict[str, Any] = {"y": y}
+        for field in RUN_REQUEST_FIELDS:
+            if field.name == "y":
+                continue
+            value = options[field.name]
+            if field.many:
+                values[field.name] = encode_many(field, list(value or ()))
+            elif field.encoding == "json":
+                document = _json_value(value, _option_name(field.name))
+                values[field.name] = field.default if document is None else json.dumps(document)
+            elif value is not None:
+                values[field.name] = value
+        from .cli_commands import submit_run
+
+        def progress(event: dict) -> None:
+            if event.get("step") and str(event.get("event", "")).startswith("step_"):
+                typer.echo(f"{event['event']:<14} {event['step']:<18} {event.get('message', '')}", err=True)
+
+        try:
+            run_id, status = submit_run(project_root, data_file, values, on_event=progress)
+        except Exception as exc:  # noqa: BLE001 - refusals are reported, anything else re-raised
+            _fail(exc)
+            return
+        # stdout: machine-readable run_id only — the long-standing
+        # `RUN_ID=$(workbench run ...)` shell contract.
+        typer.echo(run_id)
+        typer.echo(f"Lineage: {_lineage_url(project_root, run_id)}", err=True)
+        if status != "completed":
+            typer.echo(f"run {run_id} {status}", err=True)
+            raise typer.Exit(code=1)
+
+    return _command(
+        "run", "Fit a model: the fields of POST /runs, submitted through the same service.", parameters, callback,
+    )
+
+
+_JSON_FIELD_TYPES = frozenset({"list", "object"})
+
+
+def _postestimation_group() -> Any:
+    from .contracts.model.postestimation_steps import STEP_SHAPES
+
+    group = typer.Typer(name="postestimation")
+
+    @group.callback()
+    def _postestimation() -> None:
+        """Post-estimation on a completed model (one subcommand per registered operation)."""
+
+    for operation, (summary, fields, required, types) in STEP_SHAPES.items():
+        parameters = [
+            _param("project_root", Path, typer.Argument(help="Workbench project directory.")),
+            _param("run_id", str, typer.Argument(help="The run holding the model.")),
+        ]
+        for name, help_text in fields.items():
+            kind = types.get(name, "string")
+            extra = " JSON (inline or @file)." if kind in _JSON_FIELD_TYPES else ""
+            info = typer.Option(_option_name(name), help=help_text + extra)
+            annotation = float if kind == "number" else str
+            if name in required:
+                parameters.append(_param(name, annotation, info))
+            else:
+                parameters.append(_param(name, annotation | None, info, None))
+
+        def callback(project_root: Path, run_id: str, _operation: str = operation,
+                     _types: Mapping[str, str] = types, **options: Any) -> None:
+            spec: dict[str, Any] = {}
+            for name, value in options.items():
+                if value is None:
+                    continue
+                spec[name] = _json_value(value, _option_name(name)) if _types.get(name) in _JSON_FIELD_TYPES else value
+            from .cli_commands import run_postestimation
+
+            try:
+                result = run_postestimation(project_root, run_id, _operation, spec)
+            except Exception as exc:  # noqa: BLE001
+                _fail(exc)
+                return
+            typer.echo(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+
+        # A fresh function per operation; Typer reads the generated signature.
+        callback.__signature__ = inspect.Signature(parameters)  # type: ignore[attr-defined]
+        group.command(operation, help=summary)(callback)
+    return typer.main.get_command(group)
+
+
+def _export_script_command() -> Any:
+    from .script_export.plan import LANGUAGES
+
+    language_choice = enum.Enum("Language", {language: language for language in LANGUAGES}, type=str)
+
+    def callback(project_root: Path, run_id: str, target: str, language: Any,
+                 require_native: bool, output: Path | None) -> None:
+        from .cli_commands import export_script
+
+        try:
+            result = export_script(project_root, run_id, target, str(language.value),
+                                   require_native=require_native, output=output)
+        except Exception as exc:  # noqa: BLE001
+            _fail(exc)
+            return
+        typer.echo(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+
+    return _command(
+        "export-script",
+        "Export a reproducible script bundle, as the Export menu does.",
+        [
+            _param("project_root", Path, typer.Argument(help="Workbench project directory.")),
+            _param("run_id", str, typer.Argument()),
+            _param("target", str, typer.Option(
+                "--target", help="What to reproduce: model:<id> or artifact:<id> (see export-targets).",
+            )),
+            _param("language", language_choice, typer.Option("--language"), language_choice("stata")),
+            _param("require_native", bool, typer.Option(
+                "--require-native", help="Refuse unless the script runs natively in the language (no Python fallback).",
+            ), False),
+            _param("output", Path | None, typer.Option(
+                "--output", help="Also write the bundle here (a file path or a directory).",
+            ), None),
+        ],
+        callback,
+    )
+
+
+def _export_targets_command() -> Any:
+    def callback(project_root: Path, run_id: str, model: str) -> None:
+        from .cli_commands import export_targets
+
+        try:
+            result = export_targets(project_root, run_id, model)
+        except Exception as exc:  # noqa: BLE001
+            _fail(exc)
+            return
+        typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+
+    return _command(
+        "export-targets",
+        "List what a run's model can be exported with (the model, and its post-estimation results).",
+        [
+            _param("project_root", Path, typer.Argument(help="Workbench project directory.")),
+            _param("run_id", str, typer.Argument()),
+            _param("model", str, typer.Option("--model", help="Model node, e.g. model:negative_binomial_1.")),
+        ],
+        callback,
+    )
+
+
+def _models_command() -> Any:
+    def callback(model_type: str | None) -> None:
+        from .cli_commands import catalog
+
+        try:
+            result = catalog(model_type)
+        except Exception as exc:  # noqa: BLE001
+            _fail(exc)
+            return
+        if model_type is None:
+            for entry in result["model_types"]:
+                typer.echo(f"{entry['key']:<26} {entry.get('group', ''):<12} {entry.get('label', '')}")
+            return
+        typer.echo(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+
+    return _command(
+        "models",
+        "List the capability catalog; with MODEL_TYPE, its parameters and model_options fields.",
+        [_param("model_type", str | None, typer.Argument(), None)],
+        callback,
+    )
+
+
+_GENERATED_COMMANDS: dict[str, Callable[[], Any]] = {
+    "run": _run_command,
+    "postestimation": _postestimation_group,
+    "export-script": _export_script_command,
+    "export-targets": _export_targets_command,
+    "models": _models_command,
+}
 
 
 run_family_app = typer.Typer(help="Run-family identity maintenance.")

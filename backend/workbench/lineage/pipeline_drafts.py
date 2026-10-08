@@ -1349,7 +1349,8 @@ def _genesis_model_requires_predictors(model_type: Any) -> bool:
     recipe_contract = recipe_contract_for_model_type(model_type)
     if recipe_contract is not None:
         return recipe_contract.requires_nonempty_predictors
-    from ..agent.workflow_contracts import OperationValidationError, model_family_contract
+    from ..contracts.model.family import model_family_contract
+    from ..contracts.common.errors import OperationValidationError
 
     try:
         return model_family_contract(model_type).requires_nonempty_predictors

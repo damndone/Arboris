@@ -30,8 +30,10 @@ from ..services.run_service import (
     reject_invalid_rerun_declarations,
 )
 from ._deps import _TERMINAL_RUN_STATUSES, _backfill_schema_values
+from .responses.datasets import RerunSubmitted
+from .typed_routes import TypedAPIRoute
 
-router = APIRouter()
+router = APIRouter(route_class=TypedAPIRoute)
 
 
 class RerunRequest(BaseModel):
@@ -55,7 +57,7 @@ class RerunRequest(BaseModel):
 
 
 @router.post("/runs/{run_id}/rerun")
-def rerun_endpoint(run_id: str, project_root: str, body: RerunRequest) -> dict[str, Any]:
+def rerun_endpoint(run_id: str, project_root: str, body: RerunRequest) -> RerunSubmitted:
     response = _submit_rerun(run_id, project_root, body)
     rerun_from = response.get("rerun_from") or {}
     record_ui_action(

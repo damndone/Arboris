@@ -182,6 +182,33 @@ def test_none_sidecars_preserve_basic_program_except_native_reader_corrections(l
             assert count==1
         text,count=re.subn(r'^data\[\[.*?\]\] <- wb_csv_precision\(.*\)\n','',text,flags=re.M)
         assert count==1
+    if language=='python':
+        # Reviewed v1.8.12 correction (V1811-PUBLIC-TERM-QUOTE): wb_public decodes the Q() literal.
+        corrected='''import ast
+import statsmodels.formula.api as smf
+from scipy import stats
+
+def wb_public(name):
+    # Q(<string literal>) names a column; the literal may use either quote and escapes.
+    if name.startswith("Q(") and name.endswith(")"):
+        try:
+            column = ast.literal_eval(name[2:-1])
+        except (ValueError, SyntaxError):
+            return name
+        if isinstance(column, str):
+            return column
+    return name
+'''
+        original='''import statsmodels.formula.api as smf
+from scipy import stats
+
+def wb_public(name):
+    if name.startswith("Q('") and name.endswith("')"):
+        return name[3:-2]
+    return name
+'''
+        assert text.count(corrected)==1
+        text=text.replace(corrected,original)
     assert text==baseline.read_text()
     assert exported==renderer()(plan,language)
 

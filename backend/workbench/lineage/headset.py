@@ -27,6 +27,7 @@ from ..artifacts import read_json
 from ..graph_store import GraphStore, graph_to_json
 from .family import Family
 from .node_index import NODE_INDEX_FILENAME
+from .rerun_provenance import run_rerun_from, settle_node_rerun_from
 
 HEADSET_SCHEMA_VERSION = 4
 
@@ -209,6 +210,8 @@ def build_headset(
     edge_seen: set[tuple[str, str]] = set()
     heads: list[dict] = []
     produced_markers: list[tuple[str, str, str]] = []
+    # Node-level rerun_from records per forest key, from every run sharing it.
+    node_provenance: dict[str, list[dict]] = {}
 
     members = [family.self_id, *family.ancestors, *family.descendants, *family.siblings]
     seen_members: set[str] = set()
@@ -235,7 +238,9 @@ def build_headset(
 
         # id -> dedup key for this run's nodes
         keymap = {nid: forest_node_key(nid, node_index) for nid in graph.get("nodes", {})}
-        rerun_from = inputs.get("rerun_from")
+        # Only well-formed provenance is served (older runs also used the key
+        # for dataset bridges and context-less Agent reruns).
+        rerun_from = run_rerun_from(inputs)
         from_node = inputs.get("from_node")
         if (
             isinstance(rerun_from, dict)
@@ -250,6 +255,8 @@ def build_headset(
         for nid, node in graph.get("nodes", {}).items():
             key = keymap[nid]
             entry = node_index.get(nid) or {}
+            if isinstance(entry.get("rerun_from"), dict):
+                node_provenance.setdefault(key, []).append(entry["rerun_from"])
             if key not in nodes:
                 view = dict(node)
                 # Remap parent_stage_id to the parent's dedup KEY so the FE (whose node
@@ -318,6 +325,10 @@ def build_headset(
             "status": manifest.get("status"),
             "created_at": manifest.get("started_at") or manifest.get("created_at"),
         })
+
+    for key, candidates in node_provenance.items():
+        if key in nodes:
+            settle_node_rerun_from(nodes[key], candidates)
 
     for run_id, produced_key, request_id in produced_markers:
         node = nodes.get(produced_key)

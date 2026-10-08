@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Literal, get_args
 import re
 
 from ..custom_capability.canonical import domain_digest
@@ -29,14 +29,17 @@ MEMORY_KINDS = frozenset(
         "project_domain_fact",
     }
 )
-APPLY_MODES = frozenset({"inform_only", "suggest_default"})
+ApplyMode = Literal["inform_only", "suggest_default"]
+APPLY_MODES = frozenset(get_args(ApplyMode))
 EFFECT_KINDS = frozenset(
     {"candidate_retrieval_hint", "inspection_plan_hint", "assumption_check_hint", "known_caveat", "reporting_preference"}
 )
 PREDICATE_OPERATORS = frozenset({"equals", "not_equals", "one_of", "exists"})
 EVIDENCE_STATUSES = frozenset({"observed_once", "observed_repeatedly", "independently_reviewed"})
-CANDIDATE_STATES = frozenset({"proposed", "needs_review", "approved", "rejected", "expired"})
-VALIDITY_STATES = frozenset({"active", "stale", "archived"})
+CandidateState = Literal["proposed", "needs_review", "approved", "rejected", "expired"]
+CANDIDATE_STATES = frozenset(get_args(CandidateState))
+ValidityState = Literal["active", "stale", "archived"]
+VALIDITY_STATES = frozenset(get_args(ValidityState))
 
 _HEX = frozenset("0123456789abcdef")
 _MAX_ID = 256
@@ -263,7 +266,7 @@ class DomainMemoryContentRevision:
     supersedes_revision: int | None
     conflicts_with: tuple[str, ...]
     created_by: str
-    apply_mode: str = "inform_only"
+    apply_mode: ApplyMode = "inform_only"
     vocabulary_version: str | None = None
     verifier: MemoryVerifier | None = None
     last_validated_at: str | None = None
@@ -404,10 +407,10 @@ class MemoryCandidate:
     recommended_target_refs: tuple[str, ...]
     source_summary_refs: tuple[SourceSummaryRef, ...]
     created_from_manifest_ref: str
-    status: str
+    status: CandidateState
     created_at: str
     expires_at: str | None = None
-    apply_mode: str = "inform_only"
+    apply_mode: ApplyMode = "inform_only"
     vocabulary_version: str | None = None
     verifier: MemoryVerifier | None = None
     last_validated_at: str | None = None
@@ -537,7 +540,7 @@ class DomainMemoryValidityRecord:
     content_revision: int
     validity_revision: int
     control_sequence: int
-    state: str
+    state: ValidityState
     effective_at: str
     reason: str
     authority: str

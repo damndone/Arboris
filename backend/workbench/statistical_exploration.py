@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 import re
-from typing import Any, ClassVar, Mapping
+from typing import Any, ClassVar, Literal, Mapping, get_args
 
 import pandas as pd
 
@@ -54,15 +54,19 @@ def _canonical_value(value: Any) -> Any:
     )
 
 
+ExplorationOperation = Literal[
+    "summarize", "summarize_detail", "misstable", "tabulate", "corr", "derive_boolean", "scatter"
+]
+FilterOperator = Literal["eq", "neq", "lt", "lte", "gt", "gte", "in", "not_in"]
+
+
 @dataclass(frozen=True)
 class FilterSpec:
     column: str
     operator: str
     value: Any
 
-    OPERATORS: ClassVar[frozenset[str]] = frozenset(
-        {"eq", "neq", "lt", "lte", "gt", "gte", "in", "not_in"}
-    )
+    OPERATORS: ClassVar[frozenset[str]] = frozenset(get_args(FilterOperator))
 
     def __post_init__(self) -> None:
         if not isinstance(self.column, str) or not self.column.strip():
@@ -94,17 +98,7 @@ class ExplorationSpec:
     options: Mapping[str, Any] = field(default_factory=dict)
     derived_definitions: tuple[Mapping[str, Any], ...] = ()
 
-    OPERATIONS: ClassVar[frozenset[str]] = frozenset(
-        {
-            "summarize",
-            "summarize_detail",
-            "misstable",
-            "tabulate",
-            "corr",
-            "derive_boolean",
-            "scatter",
-        }
-    )
+    OPERATIONS: ClassVar[frozenset[str]] = frozenset(get_args(ExplorationOperation))
 
     def __post_init__(self) -> None:
         if self.operation not in self.OPERATIONS:

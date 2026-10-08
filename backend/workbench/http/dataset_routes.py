@@ -18,8 +18,10 @@ from ..services.rerun_service import (
     RerunSubmissionRequest,
     editable_rerun_nodes,
 )
+from .responses.datasets import DatasetNodes, DatasetPage, DatasetVariables, MetadataRerunSubmitted
+from .typed_routes import TypedAPIRoute
 
-router = APIRouter()
+router = APIRouter(route_class=TypedAPIRoute)
 
 _METADATA_FIELDS = frozenset(
     {"variable_labels", "value_labels", "measurement_level", "user_missing_values"}
@@ -36,7 +38,7 @@ def _unavailable(exc: Exception, run_id: str, node_id: str | None = None) -> Wor
 
 
 @router.get("/runs/{run_id}/datasets")
-def list_datasets_endpoint(run_id: str, project_root: str) -> dict[str, Any]:
+def list_datasets_endpoint(run_id: str, project_root: str) -> DatasetNodes:
     try:
         return {"run_id": run_id, "datasets": list_dataset_nodes(project_root, run_id)}
     except (FileNotFoundError, ValueError) as exc:
@@ -52,7 +54,7 @@ def dataset_rows_endpoint(
     limit: int = 100,
     sort_by: str | None = None,
     descending: bool = False,
-) -> dict[str, Any]:
+) -> DatasetPage:
     try:
         return dataset_page(
             project_root, run_id, node_id,
@@ -63,7 +65,7 @@ def dataset_rows_endpoint(
 
 
 @router.get("/runs/{run_id}/datasets/variables")
-def dataset_variables_endpoint(run_id: str, project_root: str, node_id: str) -> dict[str, Any]:
+def dataset_variables_endpoint(run_id: str, project_root: str, node_id: str) -> DatasetVariables:
     try:
         return dataset_variables(project_root, run_id, node_id)
     except (DataColumnCastValidationError, FileNotFoundError, ValueError) as exc:
@@ -79,7 +81,7 @@ class MetadataEditRequest(BaseModel):
 @router.post("/runs/{run_id}/metadata")
 def edit_metadata_endpoint(
     run_id: str, project_root: str, request: MetadataEditRequest
-) -> dict[str, Any]:
+) -> MetadataRerunSubmitted:
     """Record a variable-metadata edit as a new run in the lineage.
 
     Only the named fields and columns change; everything else declared is kept

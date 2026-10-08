@@ -39,7 +39,7 @@ def _jsonl() -> tuple[Any, Any]:
     `legacy_family_anchor`), and a top-level import would close that cycle.
     """
 
-    from ..agent.storage import append_jsonl_atomic, read_jsonl
+    from ..jsonl_store import append_jsonl_atomic, read_jsonl
 
     return append_jsonl_atomic, read_jsonl
 

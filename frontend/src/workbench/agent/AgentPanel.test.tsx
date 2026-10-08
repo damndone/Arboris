@@ -7,12 +7,13 @@ import {
   type AgentSurfaceContextValue,
 } from "./AgentSurfaceContext";
 import type { AgentHierarchyNode, AgentNavigationRef } from "./agentTypes";
+import { agentMessageFixture, agentProposalFixture, llmModelFixture } from "../../apiFixtures";
 
 function value(overrides: Partial<AgentSurfaceContextValue> = {}): AgentSurfaceContextValue {
   return {
     messages: [
-      { entry_id: "u1", role: "user", content: "检查 active head", stop_reason: null },
-      { entry_id: "a1", role: "assistant", content: "发现一个待确认的风险。", stop_reason: "stop" },
+      agentMessageFixture({ entry_id: "u1", role: "user", content: "检查 active head", stop_reason: null }),
+      agentMessageFixture({ entry_id: "a1", role: "assistant", content: "发现一个待确认的风险。", stop_reason: "stop" }),
     ],
     prompt: "",
     setPrompt: vi.fn(),
@@ -25,7 +26,7 @@ function value(overrides: Partial<AgentSurfaceContextValue> = {}): AgentSurfaceC
     contextWindowTokens: 32_000,
     contextPercent: 6.4,
     model: "deepseek-v4-flash",
-    modelOptions: [{ display_name: "DeepSeek V4 Flash", request_model: "deepseek-v4-flash", context_window_tokens: 32_000, supports_1m: false }],
+    modelOptions: [llmModelFixture({ display_name: "DeepSeek V4 Flash", request_model: "deepseek-v4-flash", context_window_tokens: 32_000, supports_1m: false })],
     setModel: vi.fn(),
     sessionStatus: "idle",
     activeOperation: null,
@@ -166,8 +167,8 @@ describe("AgentPanel", () => {
       <AgentSurfaceContext.Provider value={value({
         sessionStatus: "failed",
         messages: [
-          { entry_id: "u1", role: "user", content: "Prepare a workflow", stop_reason: null },
-          { entry_id: "a1", role: "assistant", content: "", stop_reason: "error", error: "LLMUpstreamError" },
+          agentMessageFixture({ entry_id: "u1", role: "user", content: "Prepare a workflow", stop_reason: null }),
+          agentMessageFixture({ entry_id: "a1", role: "assistant", content: "", stop_reason: "error", error: "LLMUpstreamError" }),
         ],
       })}>
         <AgentPanel runId="run-a" projectRoot="/proj" />
@@ -188,10 +189,10 @@ describe("AgentPanel", () => {
       <AgentSurfaceContext.Provider value={value({
         sessionStatus: "completed",
         messages: [
-          { entry_id: "u1", role: "user", content: "Is the gap significant?", stop_reason: null },
-          { entry_id: "a1", role: "assistant", content: "", stop_reason: "error", error: "LLMUpstreamError:upstream_503" },
-          { entry_id: "u2", role: "user", content: "Try again", stop_reason: null },
-          { entry_id: "a2", role: "assistant", content: "Yes, t = 8.03, p < 0.001.", stop_reason: "stop" },
+          agentMessageFixture({ entry_id: "u1", role: "user", content: "Is the gap significant?", stop_reason: null }),
+          agentMessageFixture({ entry_id: "a1", role: "assistant", content: "", stop_reason: "error", error: "LLMUpstreamError:upstream_503" }),
+          agentMessageFixture({ entry_id: "u2", role: "user", content: "Try again", stop_reason: null }),
+          agentMessageFixture({ entry_id: "a2", role: "assistant", content: "Yes, t = 8.03, p < 0.001.", stop_reason: "stop" }),
         ],
       })}>
         <AgentPanel runId="run-a" projectRoot="/proj" />
@@ -206,8 +207,8 @@ describe("AgentPanel", () => {
       <AgentSurfaceContext.Provider value={value({
         sessionStatus: "failed",
         messages: [
-          { entry_id: "u1", role: "user", content: "Is the gap significant?", stop_reason: null },
-          { entry_id: "a1", role: "assistant", content: "", stop_reason: "error", error: "LLMUpstreamError:upstream_503" },
+          agentMessageFixture({ entry_id: "u1", role: "user", content: "Is the gap significant?", stop_reason: null }),
+          agentMessageFixture({ entry_id: "a1", role: "assistant", content: "", stop_reason: "error", error: "LLMUpstreamError:upstream_503" }),
         ],
       })}>
         <AgentPanel runId="run-a" projectRoot="/proj" />
@@ -224,8 +225,8 @@ describe("AgentPanel", () => {
       <AgentSurfaceContext.Provider value={value({
         sessionStatus: "failed",
         messages: [
-          { entry_id: "u1", role: "user", content: "Inspect the model", stop_reason: null },
-          { entry_id: "a1", role: "assistant", content: "", stop_reason: "error", error: "tool_runtime_error" },
+          agentMessageFixture({ entry_id: "u1", role: "user", content: "Inspect the model", stop_reason: null }),
+          agentMessageFixture({ entry_id: "a1", role: "assistant", content: "", stop_reason: "error", error: "tool_runtime_error" }),
         ],
       })}>
         <AgentPanel runId="run-a" projectRoot="/proj" />
@@ -242,10 +243,10 @@ describe("AgentPanel", () => {
       <AgentSurfaceContext.Provider value={value({
         sessionStatus: "blocked",
         messages: [
-          { entry_id: "u1", role: "user", content: "Prepare a workflow", stop_reason: null },
-          { entry_id: "a1", role: "assistant", content: "", stop_reason: "error", error: "max_steps_exceeded" },
+          agentMessageFixture({ entry_id: "u1", role: "user", content: "Prepare a workflow", stop_reason: null }),
+          agentMessageFixture({ entry_id: "a1", role: "assistant", content: "", stop_reason: "error", error: "max_steps_exceeded" }),
         ],
-        proposals: [{
+        proposals: [agentProposalFixture({
           record_type: "revision",
           proposal_id: "proposal-1",
           operation_id: "operation.multi_step",
@@ -263,7 +264,7 @@ describe("AgentPanel", () => {
           created_at: "2026-07-30T00:00:00Z",
           fingerprint: "sha256:test",
           status: "pending",
-        }],
+        })],
       })}>
         <AgentPanel runId="run-a" projectRoot="/proj" />
       </AgentSurfaceContext.Provider>,
@@ -320,7 +321,7 @@ describe("AgentPanel", () => {
   it("follows newly appended output only while the transcript is at its bottom", () => {
     const initial = value({
       isSubmitting: true,
-      messages: [{ entry_id: "u1", role: "user", content: "检查结果", stop_reason: null }],
+      messages: [agentMessageFixture({ entry_id: "u1", role: "user", content: "检查结果", stop_reason: null })],
     });
     const { rerender } = render(
       <AgentSurfaceContext.Provider value={initial}>
@@ -341,7 +342,7 @@ describe("AgentPanel", () => {
         isSubmitting: true,
         messages: [
           ...initial.messages,
-          { entry_id: "a1", role: "assistant", content: "这是最新输出。", stop_reason: "stop" },
+          agentMessageFixture({ entry_id: "a1", role: "assistant", content: "这是最新输出。", stop_reason: "stop" }),
         ],
       })}>
         <AgentPanel runId="run-a" projectRoot="/proj" />
@@ -357,7 +358,7 @@ describe("AgentPanel", () => {
         isSubmitting: true,
         messages: [
           ...initial.messages,
-          { entry_id: "a1", role: "assistant", content: "这是最新输出。\n\n补充说明。", stop_reason: "stop" },
+          agentMessageFixture({ entry_id: "a1", role: "assistant", content: "这是最新输出。\n\n补充说明。", stop_reason: "stop" }),
         ],
       })}>
         <AgentPanel runId="run-a" projectRoot="/proj" />
@@ -369,26 +370,26 @@ describe("AgentPanel", () => {
   it("groups a tool-assisted turn into a collapsible reasoning trace", () => {
     const withReasoning = value({
       messages: [
-        { entry_id: "u1", role: "user", content: "检查模型结果", stop_reason: null },
-        {
+        agentMessageFixture({ entry_id: "u1", role: "user", content: "检查模型结果", stop_reason: null }),
+        agentMessageFixture({
           entry_id: "a1",
           role: "assistant",
           content: "我会先核对模型和诊断证据。",
           stop_reason: "tool_calls",
-        },
-        {
+        }),
+        agentMessageFixture({
           entry_id: "t1",
           role: "tool",
           name: "inspect_model_result",
           content: JSON.stringify({ ok: true, output: { result_id: "result-1" } }),
           stop_reason: null,
-        },
-        {
+        }),
+        agentMessageFixture({
           entry_id: "a2",
           role: "assistant",
           content: "模型结果已核对：系数为正。",
           stop_reason: "stop",
-        },
+        }),
       ],
     });
 
@@ -409,15 +410,15 @@ describe("AgentPanel", () => {
   it("files a draft withdrawn by the numeric check under reasoning and says why", () => {
     const withDraft = value({
       messages: [
-        { entry_id: "u1", role: "user", content: "男女工资有差别吗", stop_reason: null },
-        {
+        agentMessageFixture({ entry_id: "u1", role: "user", content: "男女工资有差别吗", stop_reason: null }),
+        agentMessageFixture({
           entry_id: "a1",
           role: "assistant",
           content: "p 值为 0.099。",
           stop_reason: "revised",
-          numeric_check: { unverified: [{ text: "0.099", closest: ["0.098491234"] }] },
-        },
-        { entry_id: "a2", role: "assistant", content: "p 值为 0.098。", stop_reason: "stop" },
+          numeric_check: { unverified: [{ text: "0.099", closest: ["0.098491234"], kind: "number" }] },
+        }),
+        agentMessageFixture({ entry_id: "a2", role: "assistant", content: "p 值为 0.098。", stop_reason: "stop" }),
       ],
     });
 
@@ -467,7 +468,7 @@ describe("AgentPanel", () => {
     const forkFromMessage = vi.fn().mockResolvedValue(true);
     const openNavigation = vi.fn();
     const withMessageLink = value({ forkFromMessage, openNavigation });
-    withMessageLink.messages = [{
+    withMessageLink.messages = [agentMessageFixture({
       entry_id: "u1",
       role: "user",
       content: "从这个节点继续探索",
@@ -485,7 +486,7 @@ describe("AgentPanel", () => {
           forest_node_key: "run-a::model:ols_1",
         },
       }],
-    }];
+    })];
 
     render(
       <AgentSurfaceContext.Provider value={withMessageLink}>
@@ -503,8 +504,8 @@ describe("AgentPanel", () => {
   it("projects tool messages as typed status lines, not raw JSON dumps", () => {
     const withTool = value();
     withTool.messages = [
-      { entry_id: "u1", role: "user", content: "检查节点", stop_reason: null },
-      {
+      agentMessageFixture({ entry_id: "u1", role: "user", content: "检查节点", stop_reason: null }),
+      agentMessageFixture({
         entry_id: "t1",
         role: "tool",
         name: "inspect_node_context",
@@ -514,8 +515,8 @@ describe("AgentPanel", () => {
           output: { context_version: "node-operation-context/v1", owner_run_id: "run-a" },
         }),
         stop_reason: null,
-      },
-      {
+      }),
+      agentMessageFixture({
         entry_id: "t2",
         role: "tool",
         name: "propose_operation",
@@ -525,8 +526,8 @@ describe("AgentPanel", () => {
           output: { requires_confirmation: true, proposal: { proposal_id: "p-1" } },
         }),
         stop_reason: null,
-      },
-      {
+      }),
+      agentMessageFixture({
         entry_id: "t3",
         role: "tool",
         name: "inspect_diagnostics",
@@ -536,7 +537,7 @@ describe("AgentPanel", () => {
           error: "tool_runtime_error",
         }),
         stop_reason: null,
-      },
+      }),
     ];
     render(
       <AgentSurfaceContext.Provider value={withTool}>
@@ -565,7 +566,7 @@ describe("AgentPanel", () => {
 
   it("renders a pending proposal as an explicit confirmation card", () => {
     const withProposal = value();
-    withProposal.proposals = [{
+    withProposal.proposals = [agentProposalFixture({
       record_type: "revision",
       proposal_id: "proposal-1",
       operation_id: "model.rerun",
@@ -583,7 +584,7 @@ describe("AgentPanel", () => {
       created_at: "2026-07-14T00:00:00Z",
       fingerprint: "fingerprint-1",
       status: "pending",
-    }];
+    })];
     render(
       <AgentSurfaceContext.Provider value={withProposal}>
         <AgentPanel runId="run-a" projectRoot="/proj" />
@@ -597,7 +598,7 @@ describe("AgentPanel", () => {
 
   it("renders object-valued model options literally instead of mistaking them for a diff", () => {
     const withProposal = value();
-    withProposal.proposals = [{
+    withProposal.proposals = [agentProposalFixture({
       record_type: "revision",
       proposal_id: "proposal-model-options",
       operation_id: "model.rerun",
@@ -621,7 +622,7 @@ describe("AgentPanel", () => {
       created_at: "2026-07-18T00:00:00Z",
       fingerprint: "fp-model-options",
       status: "pending",
-    }];
+    })];
 
     render(
       <AgentSurfaceContext.Provider value={withProposal}>
@@ -638,7 +639,7 @@ describe("AgentPanel", () => {
 
   it("renders an NL data-cast proposal as readable intent, not raw JSON", () => {
     const withProposal = value();
-    withProposal.proposals = [{
+    withProposal.proposals = [agentProposalFixture({
       record_type: "revision",
       proposal_id: "proposal-cast",
       operation_id: "data.columns.cast",
@@ -662,7 +663,7 @@ describe("AgentPanel", () => {
       created_at: "2026-07-16T00:00:00Z",
       fingerprint: "fp-cast",
       status: "pending",
-    }];
+    })];
     render(
       <AgentSurfaceContext.Provider value={withProposal}>
         <AgentPanel runId="run-a" projectRoot="/proj" />
@@ -728,7 +729,7 @@ describe("AgentPanel", () => {
     const duplicateChainId = "chain-message";
     const withMessageLinks = value({
       navigationLinks: [],
-      messages: [{
+      messages: [agentMessageFixture({
         entry_id: "message-chain-links",
         role: "assistant",
         content: "已定位到链路。",
@@ -751,7 +752,7 @@ describe("AgentPanel", () => {
             href: { view: "agent", chain_id: duplicateChainId },
           },
         ],
-      }],
+      })],
     });
 
     render(
@@ -770,7 +771,7 @@ describe("AgentPanel", () => {
     const openNavigation = vi.fn();
     const withMessageLink = value({ openNavigation });
     withMessageLink.navigationLinks = [];
-    withMessageLink.messages = [{
+    withMessageLink.messages = [agentMessageFixture({
       entry_id: "a1",
       role: "assistant",
       content: "已核对源模型。",
@@ -787,7 +788,7 @@ describe("AgentPanel", () => {
           forest_node_key: "run-source::model:ols_1",
         },
       }],
-    }];
+    })];
 
     render(
       <AgentSurfaceContext.Provider value={withMessageLink}>
@@ -808,7 +809,7 @@ describe("AgentPanel", () => {
     const declineProposal = vi.fn().mockResolvedValue(true);
     const reviseProposal = vi.fn().mockResolvedValue(true);
     const withProposal = value({ declineProposal, reviseProposal });
-    withProposal.proposals = [{
+    withProposal.proposals = [agentProposalFixture({
       record_type: "revision",
       proposal_id: "proposal-1",
       operation_id: "model.rerun",
@@ -826,7 +827,7 @@ describe("AgentPanel", () => {
       created_at: "2026-07-14T00:00:00Z",
       fingerprint: "fingerprint-1",
       status: "pending",
-    }];
+    })];
     render(
       <AgentSurfaceContext.Provider value={withProposal}>
         <AgentPanel runId="run-a" projectRoot="/proj" />
@@ -881,7 +882,7 @@ describe("AgentPanel", () => {
   it("renders assistant Markdown as readable terminal blocks", () => {
     const withMarkdown = value();
     withMarkdown.messages = [
-      { entry_id: "a-md", role: "assistant", content: "## Findings\n\n**Stable** result", stop_reason: "stop" },
+      agentMessageFixture({ entry_id: "a-md", role: "assistant", content: "## Findings\n\n**Stable** result", stop_reason: "stop" }),
     ];
     render(
       <AgentSurfaceContext.Provider value={withMarkdown}>

@@ -190,7 +190,8 @@ function transcriptTurns(messages: AgentMessage[]): TranscriptTurn[] {
 }
 
 function withdrawnNumbers(message: AgentMessage): string {
-  const unverified = message.numeric_check?.unverified ?? [];
+  const check = message.numeric_check;
+  const unverified = check && "unverified" in check ? check.unverified : [];
   const numbers = unverified.map((item) => item.text).filter(Boolean);
   return numbers.length > 0 ? numbers.join(", ") : "some numbers";
 }

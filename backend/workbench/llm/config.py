@@ -6,6 +6,7 @@ lets a running server pick up key changes without restart.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 from urllib.parse import urlparse
 
 from .provider_store import (
@@ -26,6 +27,15 @@ DEFAULT_TIMEOUT_S = 60.0
 SOURCE_EXPLICIT_CONFIG_MISSING = "explicit_config_missing"
 SOURCE_EXPLICIT_CONFIG_INVALID = "explicit_config_invalid"
 SOURCE_EXPLICIT_CONFIG_UNCONFIGURED = "explicit_config_unconfigured"
+
+ConfigSource = Literal[
+    "local",
+    "environment",
+    "none",
+    "explicit_config_missing",
+    "explicit_config_invalid",
+    "explicit_config_unconfigured",
+]
 
 
 def validate_provider_url(value: str | None, field_name: str) -> str | None:
@@ -62,7 +72,7 @@ class LLMConfig:
     timeout_s: float = DEFAULT_TIMEOUT_S
     provider_id: str = ""
     provider_name: str = ""
-    source: str = "none"
+    source: ConfigSource = "none"
     context_window_tokens: int | None = None
     supports_1m: bool = False
     supports_vision: bool = False
@@ -153,7 +163,7 @@ def load_llm_config() -> LLMConfig:
     return LLMConfig(base_url="", api_key="", model="", source="none")
 
 
-def _config_from_provider(provider: ProviderRecord, *, source: str) -> LLMConfig:
+def _config_from_provider(provider: ProviderRecord, *, source: ConfigSource) -> LLMConfig:
     try:
         validate_provider_url(provider.base_url, "base_url")
     except ValueError:

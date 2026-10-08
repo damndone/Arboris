@@ -1,3 +1,5 @@
+import type { Schema } from "../apiTypes";
+
 export interface DomainMemoryPreferences {
   cross_project_domain_memory_use: boolean;
   cross_project_domain_memory_iteration: boolean;
@@ -35,6 +37,8 @@ export interface DomainMemoryHint {
   memory_source?: { memory_id: string; revision: number };
 }
 
+/** A retrieval projection as a notebook context carries it (any contract
+ * version; GET /domain-memory/retrieve returns v3, Schema<"MemoryRetrieval">). */
 export interface DomainMemoryRetrievalProjection {
   contract_version?:
     | "domain-memory-context-input/v1"
@@ -51,53 +55,9 @@ export interface DomainMemoryRetrievalProjection {
   memory_authority?: "non_authoritative";
 }
 
-export interface DomainMemoryCandidate {
-  candidate_id: string;
-  revision: number;
-  status: "proposed" | "needs_review" | "approved" | "rejected" | "expired";
-  memory_kind: string;
-  compact_lesson: string;
-  source_summary_refs: string[];
-}
-
-export interface DomainMemoryCandidateQueue {
-  candidates: DomainMemoryCandidate[];
-  memory_authority: "server_owned";
-}
-
-export interface DomainMemorySettings {
-  global: { revision: number; library_enabled: boolean };
-  project: {
-    revision: number;
-    library_enabled: boolean;
-    inherit_global: boolean;
-    candidate_generation_enabled: boolean;
-  };
-  memory_authority: "server_owned";
-}
-
-export interface MemorySettingsConfirmation {
-  receipt: string;
-  action: string;
-  scope_ref: string;
-  expected_revision?: number;
-  target_count: number;
-  expires_at: string;
-}
-
-export interface DomainMemoryLibraryEntry {
-  memory_id: string;
-  revision: number;
-  state: "active" | "stale" | "archived";
-  validity_revision: number;
-  memory_kind: string;
-  domain_tags: string[];
-  compact_lesson: string;
-  apply_mode: "inform_only" | "suggest_default";
-}
-
-export interface DomainMemoryLibrary {
-  library: "global" | "project";
-  entries: DomainMemoryLibraryEntry[];
-  memory_authority: "server_owned";
-}
+export type DomainMemoryCandidate = Schema<"PendingCandidate">;
+export type DomainMemoryCandidateQueue = Schema<"PendingCandidates">;
+export type DomainMemorySettings = Schema<"MemorySettings">;
+export type MemorySettingsConfirmation = Schema<"ConfirmationReceipt">;
+export type DomainMemoryLibraryEntry = Schema<"LibraryEntry">;
+export type DomainMemoryLibrary = Schema<"MemoryLibrary">;
