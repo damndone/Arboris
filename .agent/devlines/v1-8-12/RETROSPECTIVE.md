@@ -6,11 +6,11 @@
 
 ## Final status
 
-STARTED
+COMPLETED
 
 ## Metrics
 
-- Failure frequency: 18/37 (48.6%; 48.6 per 100 events)
+- Failure frequency: 18/38 (47.4%; 47.4 per 100 events)
 - Repeat rate: 1/18 (5.6%)
 - Recurrence rate: 1/17 (5.9%)
 - MTTR: median=0 ms (sample=14; unresolved=4)
@@ -176,3 +176,4 @@ STARTED
 - #35: `353a6153-3fbd-4031-8d4a-ab885490ac0f` | 2026-10-08T17:21:03.355Z | REVIEW/pre_release_self_review | incident=`d8b727a5-910e-4624-ad21-43902ed9db47` | lesson_key=`fail-closed-branch-through-real-send` | event_sha256=`27aa1213cfff69bcb5df28b0ee4c5783ca5023693fffae622190a9c96ad0855d`
 - #36: `7a60c1bb-9b11-45de-b0d1-062b014ac3ef` | 2026-10-08T17:21:03.355Z | GATE/host_full_gate_pre_release | incident=`551932dc-f00a-4a30-94b1-0f7fdbaf22b6` | lesson_key=`gate-the-exact-release-commit` | event_sha256=`7b869bf00fcd55689769be60b86a30166acbbacf4912031349d5be9757b19492`
 - #37: `b1cf97fb-93b8-43a2-825e-e23ade7ed623` | 2026-10-08T18:28:24.043Z | STATE_CHANGE/released | incident=`ca7d87db-962d-484b-9861-b7e21420b50e` | lesson_key=`check-shared-install-before-archiving` | event_sha256=`760fcda39ddede55ed369a2a73690a3034d5fdb495612ab37c5174609e9880e4`
+- #38: `0c9f994a-8ead-4a61-9721-f686d3255daa` | 2026-10-08T18:28:57.874Z | STATE_CHANGE/version_closed | incident=`c2716158-5e75-40d9-8269-c2cf164c3759` | lesson_key=`close-line-with-state-transition` | event_sha256=`23785ac2eef5419fe45b6857ccd38a9ddc00e8532050a084fe4809f6d37d5ff3`
