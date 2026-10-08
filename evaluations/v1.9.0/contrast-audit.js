@@ -1,4 +1,10 @@
+// Contrast audit for the browser: paste into the page console (or javascript_tool).
+// Finishes running CSS transitions first (a hidden browser pane freezes them at
+// their start value), skips hidden and disabled elements, and reports every
+// visible text whose colour against its composited background is below 4.5:1
+// (3:1 for large text).
 (() => {
+  document.getAnimations().forEach((a) => { try { if (a.effect?.getTiming().iterations !== Infinity) a.finish(); } catch {} });
   const toLin = (c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
   function oklchToRgb(L, C, H) {
     const h = (H * Math.PI) / 180, a = C * Math.cos(h), b = C * Math.sin(h);
@@ -34,7 +40,7 @@
     const el = t.parentElement; if (!el || seen.has(el)) continue; seen.add(el);
     const r = el.getBoundingClientRect(); const cs = getComputedStyle(el);
     if (r.width === 0 || r.height === 0 || cs.visibility === 'hidden' || +cs.opacity === 0) continue;
-    if (el.closest('[disabled],[aria-disabled="true"]')) continue;
+    if (el.closest('[disabled],[aria-disabled="true"],[hidden]')) continue;
     const fg = parse(cs.color); if (!fg) { out.push({ text: t.textContent.trim().slice(0, 40), err: cs.color }); continue; }
     const bg = background(el); const fgRgb = blend(fg, bg);
     const a = lum(fgRgb), b = lum(bg); const ratio = (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);

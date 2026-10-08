@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { AppearanceSettings } from "../workspace/AppearanceSettings";
 import { LlmProviderEditor } from "./LlmProviderEditor";
 import { MemorySettingsPanel } from "../workbench/MemorySettingsPanel";
 import {
@@ -64,7 +65,7 @@ export function LlmProviderManager({ onBack, projectRoot }: LlmProviderManagerPr
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [probeStates, setProbeStates] = useState<Record<string, ProbeState>>({});
-  const [settingsSection, setSettingsSection] = useState<"providers" | "memory">("providers");
+  const [settingsSection, setSettingsSection] = useState<"providers" | "memory" | "appearance">("providers");
 
   async function refreshProviders() {
     setLoading(true);
@@ -211,9 +212,10 @@ export function LlmProviderManager({ onBack, projectRoot }: LlmProviderManagerPr
       <nav aria-label="Settings sections" style={{ display: "flex", gap: 8, margin: "0 0 20px" }}>
         <button type="button" aria-pressed={settingsSection === "providers"} onClick={() => setSettingsSection("providers")} style={settingsSectionButtonStyle(settingsSection === "providers")}>LLM providers</button>
         {projectRoot ? <button type="button" aria-pressed={settingsSection === "memory"} onClick={() => setSettingsSection("memory")} style={settingsSectionButtonStyle(settingsSection === "memory")}>Memory</button> : null}
+        <button type="button" aria-pressed={settingsSection === "appearance"} onClick={() => setSettingsSection("appearance")} style={settingsSectionButtonStyle(settingsSection === "appearance")}>Appearance</button>
       </nav>
 
-      {settingsSection === "memory" && projectRoot ? <MemorySettingsPanel projectRoot={projectRoot} /> : <>
+      {settingsSection === "memory" && projectRoot ? <MemorySettingsPanel projectRoot={projectRoot} /> : settingsSection === "appearance" ? <AppearanceSettings /> : <>
 
       {error && <div role="alert" data-testid="llm-provider-manager-error" style={{ color: "var(--status-fails-fg)", marginBottom: 14 }}>{error}</div>}
       {status && <div aria-live="polite" data-testid="llm-provider-manager-status" style={{ color: "var(--green)", marginBottom: 14 }}>{status}</div>}

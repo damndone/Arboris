@@ -1,0 +1,352 @@
+/* frontend/src/workspace/workspace.css — the v1.9.0 workspace shell.
+ * Reads tokens only (theme/tokens.css). The map and Agent column widths are
+ * registered custom properties so the grid animates on the spring curve and a
+ * switch can be reversed mid-flight. */
+
+@property --ws-map {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 280px;
+}
+
+@property --ws-agent {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 380px;
+}
+
+.ws-shell {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--ws-map) minmax(0, 1fr) var(--ws-agent);
+  grid-template-rows: 48px minmax(0, 1fr) auto;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg-canvas);
+  color: var(--label);
+  font-family: var(--font-sans);
+  font-size: var(--text-ui);
+  line-height: var(--leading-ui);
+  transition:
+    --ws-map var(--duration-spring) var(--ease-spring),
+    --ws-agent var(--duration-spring) var(--ease-spring);
+}
+
+.ws-shell--dragging {
+  transition: none;
+  cursor: col-resize;
+  user-select: none;
+}
+
+.ws-topbar {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  min-width: 0;
+  z-index: 3;
+  background: var(--material-bar);
+  -webkit-backdrop-filter: var(--material-blur);
+  backdrop-filter: var(--material-blur);
+  border-bottom: var(--hairline) solid var(--separator);
+}
+
+.ws-map {
+  grid-column: 1;
+  grid-row: 2;
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.ws-divider {
+  grid-column: 2;
+  grid-row: 2;
+  justify-self: start;
+  z-index: 2;
+  width: 9px;
+  margin-left: -5px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.ws-divider::after {
+  content: "";
+  display: block;
+  width: 2px;
+  height: 100%;
+  margin-left: 3px;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  transition: background var(--duration-fade) var(--ease-standard);
+}
+
+.ws-divider:hover::after,
+.ws-divider:focus-visible::after,
+.ws-shell--dragging .ws-divider::after {
+  background: var(--tint);
+}
+
+.ws-divider:focus-visible {
+  outline: none;
+}
+
+.ws-stage {
+  grid-column: 2;
+  grid-row: 2;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  padding: var(--space-2) var(--space-2) var(--space-2) 0;
+}
+
+.ws-shell[data-layout="lineage"] .ws-stage {
+  padding: 0;
+}
+
+.ws-stage__surface {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-card);
+  border: var(--hairline) solid var(--separator);
+  border-radius: var(--radius-lg);
+  container-type: inline-size;
+  container-name: stage;
+}
+
+.ws-shell[data-layout="lineage"] .ws-stage__surface {
+  border-width: 0 0 0 var(--hairline);
+  border-radius: 0;
+}
+
+.ws-agent {
+  grid-column: 3;
+  grid-row: 2 / 4;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-card);
+  border-left: var(--hairline) solid var(--separator);
+}
+
+.ws-agent__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.ws-agent__body[hidden] {
+  display: none;
+}
+
+.ws-agent__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 44px;
+  flex: 0 0 auto;
+  padding: 0 var(--space-2) 0 var(--space-5);
+  border-bottom: var(--hairline) solid var(--separator-faint);
+}
+
+.ws-agent__title {
+  flex: 1;
+  margin: 0;
+  font-size: var(--text-ui);
+  font-weight: 600;
+}
+
+.ws-agent__content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.ws-agent__rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding-top: var(--space-2);
+  background: var(--bg-card-2);
+  height: 100%;
+}
+
+.ws-bottom {
+  grid-column: 1 / 3;
+  grid-row: 3;
+  min-width: 0;
+}
+
+/* Shared chrome controls */
+
+.ws-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--control-height);
+  height: var(--control-height);
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--label-secondary);
+  font-weight: 400;
+  cursor: pointer;
+}
+
+.ws-icon-button:hover {
+  background: var(--bg-elev);
+  color: var(--label);
+}
+
+.ws-icon-button:focus-visible,
+.ws-button:focus-visible,
+.ws-segmented__item:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.ws-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: var(--control-height);
+  min-height: 0;
+  padding: 0 10px;
+  border: var(--hairline) solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--label);
+  font-size: var(--text-ui);
+  font-weight: 400;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.ws-button:hover {
+  background: var(--bg-elev);
+}
+
+.ws-button--primary {
+  border-color: var(--tint-fill);
+  background: var(--tint-fill);
+  color: var(--on-tint);
+  font-weight: 500;
+}
+
+.ws-button--primary:hover {
+  background: var(--tint-fill-pressed);
+}
+
+.ws-segmented {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--radius-md);
+  background: var(--bg-pressed);
+}
+
+.ws-segmented__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  min-height: 0;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--label-secondary);
+  font-size: var(--text-ui);
+  font-weight: 400;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--duration-fade) var(--ease-standard);
+}
+
+.ws-segmented__item[aria-selected="true"],
+.ws-segmented__item[aria-pressed="true"] {
+  background: var(--bg-card);
+  color: var(--label);
+  font-weight: 500;
+  box-shadow: var(--shadow-1);
+}
+
+.ws-segmented--small .ws-segmented__item {
+  padding: 0 10px;
+  font-size: var(--text-small);
+}
+
+.ws-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Stage host (Analysis view) */
+
+.ws-stage-host {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.ws-stage-host__tabs {
+  flex: 0 0 auto;
+  border-bottom: var(--hairline) solid var(--separator-faint);
+  background: var(--bg-card-2);
+}
+
+.ws-stage-host__tabs:empty {
+  display: none;
+}
+
+.ws-stage-host__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+
+.ws-stage-host__empty {
+  margin: auto;
+  max-width: 28rem;
+  padding: var(--space-8);
+  text-align: center;
+  color: var(--label-secondary);
+}
+
+.ws-stage-host__empty-title {
+  margin: 0 0 var(--space-1);
+  font-size: var(--text-section);
+  font-weight: 600;
+  color: var(--label);
+}
+
+/* The classic detail tabs carry a negative top margin for the old right
+ * panel; in the stage they sit in their own strip. */
+.ws-stage-host__tabs .detail-tabs {
+  margin: 0;
+}
+
+.ws-stage-host__tabs .detail-tabs__strip {
+  min-height: 42px;
+  padding: 0 var(--space-2);
+}

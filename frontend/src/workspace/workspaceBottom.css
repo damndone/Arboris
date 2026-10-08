@@ -1,0 +1,149 @@
+/* frontend/src/workspace/workspaceBottom.css — v1.9.0 bottom panel and Runs. */
+
+.ws-bottom-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-top: var(--hairline) solid var(--separator);
+  background: var(--bg-canvas);
+}
+
+.ws-bottom-panel__resizer {
+  position: absolute;
+  inset: -4px 0 auto 0;
+  height: 8px;
+  cursor: row-resize;
+  touch-action: none;
+  z-index: 1;
+}
+
+.ws-bottom-panel__resizer:focus-visible {
+  outline: 2px solid var(--focus-ring);
+}
+
+.ws-bottom-panel__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 40px;
+  flex: 0 0 auto;
+  padding: 0 var(--space-2) 0 var(--space-3);
+}
+
+.ws-bottom-panel__tabs {
+  display: flex;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.ws-bottom-panel__tab {
+  height: 26px;
+  min-height: 0;
+  padding: 0 9px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--label-secondary);
+  font-size: var(--text-small);
+  font-weight: 400;
+  cursor: pointer;
+}
+
+.ws-bottom-panel__tab:hover {
+  background: var(--bg-elev);
+}
+
+.ws-bottom-panel__tab[aria-selected="true"] {
+  background: var(--bg-pressed);
+  color: var(--label);
+  font-weight: 600;
+}
+
+.ws-bottom-panel__tab:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.ws-bottom-panel__body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border-top: var(--hairline) solid var(--separator-faint);
+}
+
+.ws-runs {
+  padding: var(--space-2) var(--space-3) var(--space-3);
+}
+
+.ws-runs__note {
+  margin: 0;
+  padding: var(--space-3);
+  color: var(--label-secondary);
+}
+
+.ws-runs__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.ws-runs__table th {
+  padding: 6px 8px;
+  text-align: left;
+  font-size: var(--text-small);
+  font-weight: 500;
+  color: var(--label-tertiary);
+}
+
+.ws-runs__table td {
+  padding: 6px 8px;
+  border-top: var(--hairline) solid var(--separator-faint);
+  color: var(--label);
+}
+
+.ws-runs__table tr[aria-current="true"] td {
+  background: var(--tint-bg);
+}
+
+.ws-runs__id {
+  font-family: var(--font-mono);
+  font-size: var(--text-small);
+}
+
+.ws-runs__contents {
+  color: var(--label-secondary);
+}
+
+.ws-runs__action {
+  text-align: right;
+}
+
+.ws-runs__open {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--tint);
+  font-size: var(--text-small);
+  font-weight: 400;
+  cursor: pointer;
+}
+
+.ws-runs__open:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.ws-runs__current {
+  font-size: var(--text-small);
+  color: var(--tint-label);
+}
+
+.ws-runs__all {
+  display: inline-block;
+  margin-top: var(--space-2);
+  font-size: var(--text-small);
+  color: var(--tint);
+}

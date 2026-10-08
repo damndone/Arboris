@@ -68,6 +68,7 @@ const RUNTIME_VARS = [
   "--report-preview-left", "--report-preview-top",
   "--report-review-left", "--report-review-top",
   "--role-color", "--node-color", "--agent-ring-progress",
+  "--ws-map", "--ws-agent",
   "--role-", "--stage-",
 ];
 

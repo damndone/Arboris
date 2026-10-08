@@ -58,6 +58,9 @@ import { WorkbenchHomeView } from "./views/WorkbenchHomeView";
 import { ContextMenu } from "./ContextMenu";
 import { useGlobalShortcuts } from "./useGlobalShortcuts";
 import { BottomPanel } from "./BottomPanel";
+import { RunHistoryToggle } from "./RunHistoryToggle";
+import { WorkbenchWorkspace } from "../workspace/WorkbenchWorkspace";
+import { useWorkspaceMode } from "../workspace/workspaceMode";
 import { SearchPalette } from "./SearchPalette";
 import { CommandPalette } from "./CommandPalette";
 import { ProjectRootProvider } from "./ProjectRootContext";
@@ -1331,6 +1334,7 @@ function WorkbenchShell({
 }) {
   const { model, selectedKey, select } = useLineage();
   const { state, dispatch } = useWorkbench();
+  const workspaceMode = useWorkspaceMode();
   const navigate = useNavigate();
   const [navigationParams, setNavigationParams] = useSearchParams();
   const [rawJsonOpen, setRawJsonOpen] = useState(false);
@@ -1939,6 +1943,44 @@ function WorkbenchShell({
       )
     : null;
 
+  const overlays = (
+    <>
+      {state.view !== "home" && <ContextMenu />}
+      {state.view !== "home" && <SearchPalette />}
+      {state.view !== "home" && <CommandPalette projectRoot={projectRoot} />}
+      {state.view !== "home" && <RawJsonModal open={rawJsonOpen} onClose={() => setRawJsonOpen(false)} node={selectedNode} />}
+      {reportReviewFloating}
+      {nodePanelFloating}
+    </>
+  );
+  const stageTabs = (
+    <DetailDrawerTabs
+      tabs={dockedTabs}
+      nodes={model.nodes}
+      activeTabId={dockedActiveTabId}
+      onActive={dispatch.selectByTabSwitch}
+      onClose={dispatch.closeTab}
+      lastEvictedTabId={state.lastEvictedTabId}
+    />
+  );
+
+  if (workspaceMode === "new" && state.view !== "home") {
+    return (
+      <AgentNavigationContext.Provider value={openAgentNavigation}>
+        <WorkbenchWorkspace
+          runId={runId}
+          projectRoot={projectRoot}
+          stageTabs={stageTabs}
+          stagePanel={reportReviewTabActive && reportReviewLayout === "docked" ? reportReviewPanel : nodePanelTabActive ? nodePanelContent : null}
+          reportFocusRequest={reportFocusRequest}
+          newAnalysis={onOpenGenesisWizard ? { label: hasGenesisDraft ? "Resume new analysis" : "New analysis", open: onOpenGenesisWizard } : undefined}
+          onOpenSettings={onOpenSettings}
+          overlays={overlays}
+        />
+      </AgentNavigationContext.Provider>
+    );
+  }
+
   return (
     <div
       data-testid="workbench-route"
@@ -1955,32 +1997,7 @@ function WorkbenchShell({
         projectRoot={projectRoot}
         leadingActions={
           state.view !== "home" ? (
-            <button
-              type="button"
-              data-testid="run-history-toggle"
-              aria-label={runHistoryOpen ? "Hide run history" : "Show run history"}
-              title={runHistoryOpen ? "Hide runs" : "Show runs"}
-              onClick={() => onRunHistoryOpenChange(!runHistoryOpen)}
-              style={{
-                alignItems: "center",
-                display: "inline-flex",
-                height: 28,
-                justifyContent: "center",
-                padding: 4,
-                width: 28,
-                border: 0,
-                borderRadius: 6,
-                background: "transparent",
-                color: "var(--label-secondary)",
-                cursor: "pointer",
-                fontSize: 12,
-              }}
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <rect x="3" y="4" width="18" height="16" rx="2.5" stroke="currentColor" strokeWidth="1.6" />
-                <line x1="9" y1="4" x2="9" y2="20" stroke="currentColor" strokeWidth="1.6" />
-              </svg>
-            </button>
+            <RunHistoryToggle open={runHistoryOpen} onToggle={() => onRunHistoryOpenChange(!runHistoryOpen)} />
           ) : null
         }
         extraActions={
@@ -2068,34 +2085,14 @@ function WorkbenchShell({
                     : nodePanelTabActive && nodePanelLayout === "docked"
                       ? (collapsed) => setNodePanelUi((current) => ({ ...current, collapsed }))
                       : undefined}
-                  tabs={
-                    <DetailDrawerTabs
-                      tabs={dockedTabs}
-                      nodes={model.nodes}
-                      activeTabId={dockedActiveTabId}
-                      onActive={dispatch.selectByTabSwitch}
-                      onClose={dispatch.closeTab}
-                      lastEvictedTabId={state.lastEvictedTabId}
-                    />
-                  }
+                  tabs={stageTabs}
                   nodePanel={nodePanelLayout === "docked" ? nodePanelContent : null}
                   reportPanel={reportReviewLayout === "docked" ? reportReviewPanel : null}
                 />
               )}
         </div>
       </AgentNavigationContext.Provider>
-      {state.view !== "home" && <ContextMenu />}
-      {state.view !== "home" && <SearchPalette />}
-      {state.view !== "home" && <CommandPalette projectRoot={projectRoot} />}
-      {state.view !== "home" && (
-        <RawJsonModal
-          open={rawJsonOpen}
-          onClose={() => setRawJsonOpen(false)}
-          node={selectedNode}
-        />
-      )}
-      {reportReviewFloating}
-      {nodePanelFloating}
+      {overlays}
     </div>
   );
 }

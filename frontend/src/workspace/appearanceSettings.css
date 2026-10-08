@@ -1,0 +1,52 @@
+/* frontend/src/workspace/appearanceSettings.css — Settings › Appearance. */
+
+.appearance-settings {
+  display: grid;
+  gap: var(--space-6);
+  max-width: 36rem;
+}
+
+.appearance-settings__group {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.appearance-settings__group legend {
+  margin-bottom: var(--space-2);
+  padding: 0;
+  font-size: var(--text-section);
+  font-weight: 600;
+  color: var(--label);
+}
+
+.appearance-settings__option {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: var(--hairline) solid var(--separator);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  color: var(--label);
+  cursor: pointer;
+}
+
+.appearance-settings__option:has(input:checked) {
+  border-color: var(--tint);
+  background: var(--tint-bg);
+}
+
+.appearance-settings__option input {
+  margin: 2px 0 0;
+  accent-color: var(--tint-fill);
+}
+
+.appearance-settings__hint {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--text-small);
+  color: var(--label-secondary);
+}

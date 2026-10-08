@@ -16,6 +16,7 @@ import { DraftGraphRoute } from "./pipelineDrafts/DraftGraphRoute";
 import { LauncherRoute } from "./launcher/LauncherRoute";
 import { WorkbenchHome } from "./workbench/WorkbenchRouteContainer";
 import { rootToSlug, slugToRoot } from "./workbench/projectSlug";
+import { useWorkspaceMode } from "./workspace/workspaceMode";
 import "./theme/tokens.css";
 import "./styles.css";
 
@@ -156,6 +157,7 @@ function AppShell() {
   const [searchParams] = useSearchParams();
   const location = useLocation();
   const navigate = useNavigate();
+  const workspaceMode = useWorkspaceMode();
 
   const [projectRoot, setProjectRootState] = useState<string>(() => {
     const fromUrl = searchParams.get("project_root");
@@ -251,10 +253,14 @@ function AppShell() {
   // Workbench canvas. The outer Home/Workbench selection changes navigation
   // state, not the layout contract of the project route.
   const isLineageDarkScope = isProjectGraphRoute;
+  // v1.9.0: the new workspace brings its own top bar (home, settings) and its
+  // own main landmark (the stage), so the outer navigation row steps aside.
+  const workspaceActive = workspaceMode === "new" && isWorkbenchActive;
+  const Root = workspaceActive ? "div" : "main";
 
   return (
-    <main
-      className={`workbench-shell${isLineageDarkScope ? " workbench-shell--lineage" : ""}`}
+    <Root
+      className={`workbench-shell${isLineageDarkScope ? " workbench-shell--lineage" : ""}${workspaceActive ? " workbench-shell--workspace" : ""}`}
     >
       {errorMessage && (
         <section className="panel panel-error" role="alert">
@@ -263,6 +269,7 @@ function AppShell() {
         </section>
       )}
 
+      {!workspaceActive && (
       <div className="workbench-navigation-row">
         <nav className="tabs" role="tablist" aria-label="workbench views">
           <button
@@ -313,11 +320,12 @@ function AppShell() {
           <ThemeToggle />
         </div>
       </div>
+      )}
 
       <div className="workbench-outlet">
         <Outlet context={context} />
       </div>
-    </main>
+    </Root>
   );
 }
 

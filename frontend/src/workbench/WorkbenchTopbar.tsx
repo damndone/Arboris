@@ -14,13 +14,8 @@ import { useNavigate } from "react-router-dom";
 import {
   useWorkbench,
 } from "./WorkbenchStateProvider";
-import { useLineage } from "../lineage/LineageContext";
 import type { ViewMode } from "./state/urlSchema";
-import {
-  actionsForSurface,
-  type ActionContext,
-} from "./registry/actionRegistry";
-import { pickRerunTargetKey } from "./rerunTarget";
+import { useTopbarActions } from "./useTopbarActions";
 import { rootToSlug } from "./projectSlug";
 import { CreateProjectModal } from "../launcher/CreateProjectModal";
 import { listRecents, touchRecent } from "../launcher/recents";
@@ -233,36 +228,7 @@ export function WorkbenchTopbar({
   onViewChange?: () => void;
 }) {
   const { state, dispatch } = useWorkbench();
-  const { model } = useLineage();
-
-  // Topbar action slot (plan §15). Driven by actionRegistry filtered by
-  // surface="topbar". These actions are analysis-level, so the context node
-  // is the primary MODEL node (its drawer hosts the editable rerun panel) —
-  // not whatever happens to be selected. v1.6.6 ③: this makes "Rerun" a
-  // meaningful "re-run this analysis" shortcut that opens the model's rerun
-  // panel from any view, instead of no-op'ing on the current selection.
-  const targetKey = pickRerunTargetKey(model, state.selectedKey);
-  const ctxNode =
-    model.nodes.find((n) => n.nodeKey === targetKey) ?? model.nodes[0];
-  const actionCtx: ActionContext | null = ctxNode
-    ? {
-        node: ctxNode,
-        model,
-        selectedKey: state.selectedKey,
-        focusKey: state.focusKey,
-        pinned: state.pinned,
-        dispatch: {
-          openDetail: dispatch.selectByCanvasClick,
-          pinTab: dispatch.selectByCanvasClick,
-          pinUpstream: dispatch.pinFocus,
-          // F1: focus-only (see ContextMenu) — don't move selection.
-          focusUpstream: dispatch.setFocusOnly,
-        },
-      }
-    : null;
-  const topbarActions = actionCtx
-    ? actionsForSurface("topbar", actionCtx)
-    : [];
+  const { actionCtx, actions: topbarActions } = useTopbarActions();
 
   return (
     <div
