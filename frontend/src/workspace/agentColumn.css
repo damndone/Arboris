@@ -1,0 +1,128 @@
+/* frontend/src/workspace/agentColumn.css — the Agent column in the workspace.
+ * The Agent panel is shared with the classic bottom panel; here it reads as a
+ * conversation, not a terminal: sans type, the user's turns as bubbles, tool
+ * steps as quiet status lines, the composer as a card at the foot. */
+
+.ws-agent__content .wb-agent-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  font-family: var(--font-sans);
+}
+
+/* Focus: what the Agent is about, as a chip under the column title. */
+.ws-agent__content .wb-agent-panel > header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 36px;
+  padding: var(--space-2) var(--space-5) 0;
+  font-family: var(--font-sans);
+  font-size: var(--text-small);
+  color: var(--label-secondary);
+}
+
+.ws-agent__content .wb-agent-panel > header * {
+  font-family: var(--font-sans);
+}
+
+.ws-agent__content .wb-agent-panel > header > strong,
+.ws-agent__content .wb-agent-panel > header > span:last-child:not(:first-of-type) {
+  display: none;
+}
+
+.ws-agent__content .wb-agent-panel > header > span:first-of-type {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  min-height: 24px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--tint-bg);
+  color: var(--tint-label);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ws-agent__content .wb-agent-terminal {
+  padding: var(--space-4) var(--space-5) var(--space-2);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
+  line-height: 1.55;
+  color: var(--label);
+}
+
+.ws-agent__content .wb-agent-terminal-marker,
+.ws-agent__content .wb-agent-terminal-input-marker {
+  display: none;
+}
+
+.ws-agent__content .wb-agent-terminal-line {
+  display: flex;
+  margin: 0 0 var(--space-3);
+  padding: 0;
+}
+
+.ws-agent__content .wb-agent-terminal-line[data-role="user"] {
+  justify-content: flex-end;
+}
+
+.ws-agent__content .wb-agent-terminal-line[data-role="user"] .wb-agent-terminal-content {
+  max-width: 85%;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-xl);
+  background: var(--bg-elev);
+}
+
+.ws-agent__content .wb-agent-terminal-line[data-role="tool"] {
+  font-family: var(--font-sans) !important;
+  font-size: var(--text-small) !important;
+  color: var(--label-tertiary);
+}
+
+.ws-agent__content .wb-agent-terminal-empty {
+  margin: auto 0;
+  padding: var(--space-8) var(--space-2);
+  text-align: center;
+  font-family: var(--font-sans);
+  color: var(--label-secondary);
+}
+
+.ws-agent__content .wb-agent-terminal-empty > div:first-child {
+  margin-bottom: var(--space-1);
+  font-size: var(--text-section);
+  font-weight: 600;
+  color: var(--label);
+}
+
+.ws-agent__content .wb-agent-terminal:has(.wb-agent-terminal-empty) {
+  display: flex;
+  flex-direction: column;
+}
+
+.ws-agent__content .wb-agent-composer {
+  margin: var(--space-2) var(--space-3) var(--space-3);
+  border: var(--hairline) solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-2);
+}
+
+.ws-agent__content .wb-agent-composer textarea {
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
+}
+
+.ws-agent__content .wb-agent-execution-trace,
+.ws-agent__content .wb-agent-live-response {
+  font-family: var(--font-sans);
+  border-radius: var(--radius-md);
+}

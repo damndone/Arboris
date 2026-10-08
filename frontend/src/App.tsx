@@ -255,7 +255,7 @@ function AppShell() {
   const isLineageDarkScope = isProjectGraphRoute;
   // v1.9.0: the new workspace brings its own top bar (home, settings) and its
   // own main landmark (the stage), so the outer navigation row steps aside.
-  const workspaceActive = workspaceMode === "new" && isProjectGraphRoute;
+  const workspaceActive = workspaceMode === "new" && (isProjectGraphRoute || isLauncherActive);
   const Root = workspaceActive ? "div" : "main";
 
   return (

@@ -12,6 +12,13 @@ import { AiActivityPanel } from "../workbench/panels/AiActivityPanel";
 import { GraphView } from "../workbench/views/GraphView";
 import { GraphAutoFitContext } from "../lineage/graph/AutoFitOnResize";
 import { useLineage } from "../lineage/LineageContext";
+import { DetailSlotsContext, type DetailSlots } from "../lineage/detail/detailSlots";
+import type { HeadSetNode } from "../lineage/api/graphViewTypes";
+import { useForest } from "../workbench/ForestContext";
+import { ownerRunOf } from "../workbench/agent/focus";
+import { ModelResultView } from "./result/ModelResultView";
+import { StageIndex } from "./result/StageIndex";
+import { modelIdOf } from "./result/resultModel";
 import { WorkbenchMain } from "../workbench/WorkbenchMain";
 import { useWorkbench } from "../workbench/WorkbenchStateProvider";
 import { useTopbarActions } from "../workbench/useTopbarActions";
@@ -36,6 +43,10 @@ export interface WorkbenchWorkspaceProps {
   /** Floating panels, dialogs and palettes that sit above any layout. */
   overlays: ReactNode;
 }
+
+// Ask AI is the Agent column in the workspace; the analysis-loop status is an
+// internal record (design spec §8.7). Both stay in the classic shell.
+const STAGE_HIDDEN_SECTIONS: ReadonlySet<string> = new Set(["askAi", "analysisLoop"]);
 
 function TopbarActions() {
   const { actionCtx, actions } = useTopbarActions();
@@ -74,7 +85,23 @@ export function WorkbenchWorkspace({
 }: WorkbenchWorkspaceProps) {
   const { state, dispatch } = useWorkbench();
   const { model } = useLineage();
+  const forest = useForest();
   const navigate = useNavigate();
+  const detailSlots: DetailSlots = {
+    hiddenSections: STAGE_HIDDEN_SECTIONS,
+    lead: (node) => {
+      if (!modelIdOf(node)) return <StageIndex key={node.id} />;
+      const owner = forest && "runs" in node
+        ? ownerRunOf(node as HeadSetNode, forest.forest, forest.activeRunId) ?? runId
+        : runId;
+      return (
+        <>
+          <StageIndex key={node.id} />
+          <ModelResultView key={`${owner}:${node.id}`} projectRoot={projectRoot} runId={owner} node={node} />
+        </>
+      );
+    },
+  };
   // The details fold away to give the map the whole width; choosing another
   // step brings them back.
   const [stageFolded, setStageFolded] = useState(false);
@@ -146,7 +173,15 @@ export function WorkbenchWorkspace({
         topbar={(controls) => topbarFor(controls)}
         stageOpen={stageOpen}
         map={map}
-        stage={analysis ? <StageHost tabs={stageTabs} panel={stagePanel} onFold={() => setStageFolded(true)} /> : main}
+        stage={
+          analysis ? (
+            <DetailSlotsContext.Provider value={detailSlots}>
+              <StageHost tabs={stageTabs} panel={stagePanel} onFold={() => setStageFolded(true)} />
+            </DetailSlotsContext.Provider>
+          ) : (
+            main
+          )
+        }
         agent={<AgentPanel runId={runId} projectRoot={projectRoot} />}
         bottom={<WorkspaceBottomPanel projectRoot={projectRoot} tabs={bottomTabs} />}
       />

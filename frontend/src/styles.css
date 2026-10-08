@@ -1469,8 +1469,3 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
     grid-template-columns: 1fr;
   }
 }
-
-/* v1.9.0 workspace: the shell is full-bleed and owns its own chrome. */
-.workbench-shell--workspace {
-  padding: 0;
-}

@@ -494,3 +494,125 @@
 .ws-stage-host__tabs .detail-tabs__close {
   border-left: 0;
 }
+
+.ws-stage-host__tabs .detail-tabs__tab {
+  max-width: 200px;
+}
+
+/* Node details inside the stage: the stage is the card, so the drawer takes
+ * its surface and a reading measure. (Its own inline styles fill a classic
+ * side panel; these win only inside the stage.) */
+.ws-stage-host .detail-drawer {
+  background: var(--bg-card) !important;
+  padding: var(--space-5) var(--space-8) var(--space-10) !important;
+}
+
+.ws-shell[data-layout="lineage"] .ws-stage-host .detail-drawer {
+  padding: var(--space-4) var(--space-5) var(--space-8) !important;
+}
+
+/* Project list (launcher) in the workspace. */
+.ws-topbar__brand--static {
+  cursor: default;
+}
+
+.ws-topbar__brand--static:hover {
+  background: transparent;
+}
+
+.ws-launcher {
+  width: min(64rem, 100%);
+  margin: 0 auto;
+  padding: var(--space-10) var(--space-6);
+  overflow: auto;
+}
+
+.ws-launcher__head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+}
+
+.ws-launcher__title {
+  margin: 0;
+  font-size: var(--text-title);
+  font-weight: 600;
+  letter-spacing: var(--tracking-tight);
+}
+
+.ws-launcher__lead {
+  margin: var(--space-1) 0 0;
+  color: var(--label-secondary);
+}
+
+.ws-launcher [data-testid="recent-projects-panel"] > li.panel {
+  padding: var(--space-4);
+  border: var(--hairline) solid var(--separator);
+  border-radius: var(--radius-lg);
+  background: var(--bg-card);
+  box-shadow: none;
+}
+
+.ws-launcher [data-testid="recent-projects-panel"] > li.panel > button:first-child {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-weight: 400;
+}
+
+.ws-launcher [data-testid="recent-projects-panel"] > li.panel > button:first-child strong {
+  display: block;
+  font-size: var(--text-section);
+  font-weight: 600;
+  color: var(--label);
+}
+
+.ws-launcher [data-testid="recent-projects-panel"] .mono {
+  margin-top: var(--space-1);
+  font-size: var(--text-caption);
+  color: var(--label-tertiary);
+  overflow-wrap: anywhere;
+}
+
+.ws-launcher [data-testid="recent-projects-panel"] .muted {
+  margin-top: var(--space-2);
+  font-size: var(--text-small);
+  color: var(--label-secondary);
+}
+
+.ws-launcher [data-testid^="recent-remove-"] {
+  min-height: 0;
+  height: 26px;
+  padding: 0 var(--space-2);
+  font-size: var(--text-small);
+  color: var(--label-secondary);
+}
+
+/* The outer shell steps aside for the workspace on every page it owns. */
+.workbench-shell.workbench-shell--workspace {
+  padding: 0;
+  width: 100%;
+  max-width: none;
+  height: 100vh;
+  height: 100dvh;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.workbench-shell.workbench-shell--workspace > .workbench-outlet {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.workbench-shell.workbench-shell--workspace > .workbench-outlet > * {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}

@@ -24,6 +24,7 @@ import {
 } from "./layoutModel";
 import { AgentRailIcon, FoldRightIcon } from "./icons";
 import "./workspace.css";
+import "./agentColumn.css";
 
 export interface LayoutControls {
   /** The layout the user chose for this project. */

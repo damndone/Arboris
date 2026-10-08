@@ -15,7 +15,8 @@
 //
 // Spec §8.2.
 
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from "react";
+import { useCallback, useContext, useEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from "react";
+import { DetailSlotsContext } from "./detailSlots";
 import { DetailHeader, DETAIL_HEADER_TITLE_ID } from "../header/DetailHeader";
 import { useLineage } from "../LineageContext";
 import type { GraphViewNode } from "../api/graphViewTypes";
@@ -89,13 +90,14 @@ export function DetailDrawer({
     return model.nodes.find((n) => n.id === selectedKey) ?? null;
   }, [nodeProp, model.nodes, selectedKey]);
 
+  const slots = useContext(DetailSlotsContext);
   // Pre-sort once so registry insertion order doesn't matter at runtime.
   const visibleSections = useMemo(() => {
     if (resolved === null) return [];
     return sectionRegistry
-      .filter((s) => s.shouldRender(resolved))
+      .filter((s) => s.shouldRender(resolved) && !slots.hiddenSections?.has(s.id))
       .sort((a, b) => a.order - b.order);
-  }, [resolved]);
+  }, [resolved, slots.hiddenSections]);
 
   const widthStorageKey = `workbench:detailDrawerWidth:${projectRoot ?? "default"}`;
   const [drawerWidth, setDrawerWidth] = useState(() => readDrawerWidth(widthStorageKey));
@@ -198,6 +200,7 @@ export function DetailDrawer({
           windowControls={windowControls}
           windowDragHandle={windowDragHandle}
         />
+        {!collapsed && slots.lead?.(resolved)}
         {!collapsed && visibleSections.map((s) => (
           <s.Component key={s.id} node={resolved} />
         ))}

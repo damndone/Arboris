@@ -1,0 +1,363 @@
+/* frontend/src/workspace/result/modelResult.css — the stage's result view. */
+
+.ws-result {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  margin: var(--space-2) 0 var(--space-8);
+  font-variant-numeric: tabular-nums;
+}
+
+.ws-result__note {
+  margin: var(--space-4) 0;
+  color: var(--label-secondary);
+}
+
+.ws-result__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.ws-result__chips:empty {
+  display: none;
+}
+
+.ws-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 10px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-elev);
+  color: var(--label-secondary);
+  font-size: var(--text-small);
+  font-weight: 600;
+}
+
+.ws-chip[data-status="holds"] {
+  background: var(--status-holds-bg);
+  color: var(--status-holds-fg);
+}
+
+.ws-chip[data-status="caution"] {
+  background: var(--status-caution-bg);
+  color: var(--status-caution-fg);
+}
+
+.ws-chip[data-status="fails"] {
+  background: var(--status-fails-bg);
+  color: var(--status-fails-fg);
+}
+
+.ws-result__lead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-6);
+}
+
+.ws-result__number p {
+  margin: 0;
+}
+
+.ws-result__caption {
+  font-size: var(--text-ui);
+  color: var(--label-secondary);
+}
+
+.ws-result__key {
+  font-size: var(--text-key);
+  line-height: 1.15;
+  font-weight: 600;
+  letter-spacing: var(--tracking-key);
+  color: var(--label);
+}
+
+.ws-result__interval {
+  font-size: var(--text-body);
+  color: var(--label-secondary);
+}
+
+.ws-result__provenance {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border: var(--hairline) solid var(--separator);
+  border-radius: var(--radius-md);
+  background: var(--bg-card-2);
+  font-size: var(--text-small);
+  color: var(--label-secondary);
+}
+
+.ws-result__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.ws-result__heading {
+  margin: 0;
+  font-size: var(--text-section);
+  font-weight: 600;
+  color: var(--label);
+}
+
+.ws-result__table-scroll {
+  overflow-x: auto;
+}
+
+.ws-result__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-ui);
+}
+
+.ws-result__table th,
+.ws-result__table td {
+  padding: 7px 10px;
+  border-top: var(--hairline) solid var(--separator-faint);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.ws-result__table thead th {
+  border-top: 0;
+  font-size: var(--text-small);
+  font-weight: 500;
+  color: var(--label-tertiary);
+}
+
+.ws-result__table th[scope="row"],
+.ws-result__table thead th:first-child {
+  text-align: left;
+  font-weight: 500;
+  color: var(--label);
+}
+
+.ws-result__table tr[aria-current="true"] th,
+.ws-result__table tr[aria-current="true"] td {
+  background: var(--tint-bg);
+}
+
+.ws-result__stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr));
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.ws-result__stats div {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--bg-card-2);
+}
+
+.ws-result__stats dt {
+  font-size: var(--text-small);
+  color: var(--label-tertiary);
+}
+
+.ws-result__stats dd {
+  margin: 2px 0 0;
+  font-size: var(--text-section);
+  font-weight: 600;
+  color: var(--label);
+}
+
+.ws-result__reasons {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.ws-result__reasons li {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--status-caution-bg);
+  color: var(--status-caution-fg);
+}
+
+.ws-result__reasons li[data-status="fails"] {
+  background: var(--status-fails-bg);
+  color: var(--status-fails-fg);
+}
+
+.ws-result__muted {
+  margin: 0;
+  color: var(--label-secondary);
+}
+
+/* Interval plot */
+
+.ws-interval {
+  margin: 0;
+}
+
+.ws-interval__zero {
+  stroke: var(--chart-grid);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.ws-interval__bar {
+  stroke: var(--chart-axis);
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+
+.ws-interval__dot {
+  fill: var(--chart-axis);
+  stroke: var(--bg-card);
+  stroke-width: 2;
+}
+
+.ws-interval__row--key .ws-interval__bar {
+  stroke: var(--chart-1);
+}
+
+.ws-interval__row--key .ws-interval__dot {
+  fill: var(--chart-1);
+}
+
+.ws-interval__label {
+  font-size: 12px;
+  fill: var(--label-secondary);
+}
+
+.ws-interval__row--key .ws-interval__label {
+  fill: var(--label);
+  font-weight: 600;
+}
+
+.ws-interval__tick {
+  font-size: 11px;
+  fill: var(--label-tertiary);
+}
+
+.ws-chip--button {
+  min-height: 24px;
+  border: 0;
+  cursor: pointer;
+}
+
+.ws-chip--button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.ws-result__stats dt {
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+/* Page index: sticky under the stage tabs while the details scroll. */
+.ws-stage-index {
+  position: sticky;
+  top: calc(-1 * var(--space-5));
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px var(--space-1);
+  margin: var(--space-2) calc(-1 * var(--space-2)) var(--space-1);
+  padding: var(--space-2);
+  background: var(--material-popover);
+  -webkit-backdrop-filter: var(--material-blur);
+  backdrop-filter: var(--material-blur);
+  border-bottom: var(--hairline) solid var(--separator-faint);
+}
+
+.ws-stage-index:empty {
+  display: none;
+}
+
+.ws-stage-index__item {
+  min-height: 0;
+  height: 26px;
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--label-secondary);
+  font-size: var(--text-small);
+  font-weight: 500;
+}
+
+.ws-stage-index__item:hover {
+  background: var(--bg-elev);
+  color: var(--label);
+}
+
+/* The classic details inside the stage speak the workspace's type. */
+.ws-stage-host .dp-kind .id,
+.ws-stage-host .dp-kind > span:last-child:not(:first-child) {
+  display: none;
+}
+
+.ws-stage-host .dp-kind {
+  font-size: var(--text-small);
+  letter-spacing: normal;
+  text-transform: capitalize;
+  color: var(--label-tertiary);
+}
+
+.ws-stage-host .dp-title {
+  font-family: var(--font-sans);
+  font-size: var(--text-title);
+  font-weight: 600;
+  letter-spacing: var(--tracking-tight);
+}
+
+.ws-stage-host .dp-sub {
+  font-size: var(--text-ui);
+  color: var(--label-secondary);
+}
+
+/* The result's "Needs your choice" chip says what the review banner said. */
+.ws-stage-host .detail-drawer:has(.ws-result) .dp-trust.review-required {
+  display: none;
+}
+
+.ws-stage-host .ln-section-label {
+  margin-top: var(--space-2);
+  font-size: var(--text-section);
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--label);
+}
+
+.ws-stage-host .detail-drawer > section {
+  scroll-margin-top: 56px;
+  padding-top: var(--space-4);
+  border-top: var(--hairline) solid var(--separator-faint);
+}
+
+.ws-result__section,
+.ws-result {
+  scroll-margin-top: 56px;
+}
+
+/* The inspector (lineage first) is narrow: same content, secondary columns folded. */
+@container stage (max-width: 460px) {
+  .ws-result__table [data-col="se"] {
+    display: none;
+  }
+
+  .ws-result__table th,
+  .ws-result__table td {
+    padding: 6px 6px;
+  }
+
+  .ws-result__key {
+    font-size: 2.25rem;
+  }
+
+  .ws-interval svg {
+    max-width: 100%;
+    height: auto;
+  }
+}
