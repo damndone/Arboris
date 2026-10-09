@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 import hashlib
 import json
 import math
+import os
+import stat
 from pathlib import Path
 import re
 from tempfile import TemporaryDirectory
@@ -23,13 +25,13 @@ from ..agent.workflow_runtime import collect_post_estimation_results, count_post
 from ..api_errors import WorkbenchAPIError
 from ..artifacts import read_json, register_artifact, sha256_file, write_json
 from ..graph_store import GraphStore, graph_to_json
-from ..lineage.headset import _model_stats, forest_node_key
+from ..lineage.headset import forest_node_key
 from ..predictive_research.schema import default_v1_prediction_registry
 from ..report_contract import validate_report_packet, validate_report_response
 from ..report_export import export_report
 from ..report_view_model import build_regression_table
 from ..repository.run_repository import _read_artifacts_index
-from .results_service import read_model_results
+from .lmm_result_adapter import read_lmm_public_results
 
 REPORT_ID = re.compile(r"^mrpt_[A-Za-z0-9_-]{3,100}$")
 SAFE_FIGURE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -69,6 +71,141 @@ def _inside(run_root: Path, relative: str) -> Path:
     return path
 
 
+def _source_bytes(run_root: Path, relative: str) -> bytes:
+    """Read one regular file without following links in any relative component."""
+    parts = Path(relative).parts
+    if not parts or Path(relative).is_absolute() or any(part in {".", ".."} for part in parts):
+        raise _error("MANUAL_REPORT_SOURCE_INVALID", "Evidence path is not run-relative.")
+    descriptors = []
+    try:
+        current = os.open(run_root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        descriptors.append(current)
+        for part in parts[:-1]:
+            current = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=current)
+            descriptors.append(current)
+        fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW, dir_fd=current)
+        descriptors.append(fd)
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise _error("MANUAL_REPORT_SOURCE_INVALID", "Evidence must be a regular file.")
+        with os.fdopen(os.dup(fd), "rb") as stream:
+            return stream.read()
+    except OSError as exc:
+        raise _error("MANUAL_REPORT_SOURCE_INVALID", "Evidence file is missing or contains a symlink.") from exc
+    finally:
+        for fd in reversed(descriptors):
+            os.close(fd)
+
+
+def _json_object(data: bytes) -> dict:
+    try:
+        payload = json.loads(data)
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise _error("MANUAL_REPORT_SOURCE_INVALID", "Evidence is not valid JSON.") from exc
+    if not isinstance(payload, dict):
+        raise _error("MANUAL_REPORT_SOURCE_INVALID", "Evidence must be a JSON object.")
+    return payload
+
+
+def _source_records(run_root: Path) -> list[dict]:
+    if not os.path.lexists(run_root / "artifacts_index.json"):
+        return []
+    records = _json_object(_source_bytes(run_root, "artifacts_index.json")).get("artifacts", [])
+    if not isinstance(records, list) or any(not isinstance(record, dict) for record in records):
+        raise _error("MANUAL_REPORT_SOURCE_INVALID", "Evidence registration is invalid.")
+    return records
+
+
+def _registered_snapshot(run_root: Path, records: list[dict], relative: str) -> tuple[dict, bytes, dict] | None:
+    matches = [record for record in records if record.get("path") == relative]
+    if not matches:
+        return None
+    record = matches[0]
+    identity = record.get("artifact_id")
+    if len(matches) != 1 or not isinstance(identity, str) or not identity or sum(
+        item.get("artifact_id") == identity for item in records
+    ) != 1:
+        raise _error("MANUAL_REPORT_SOURCE_INVALID", "Evidence registration must have a unique identity and path.")
+    data = _source_bytes(run_root, relative)
+    if hashlib.sha256(data).hexdigest() != record.get("sha256"):
+        raise _error("MANUAL_REPORT_SOURCE_CHANGED", "Registered evidence no longer matches its recorded hash.", 409)
+    payload = _json_object(data)
+    if "run_id" in payload and payload["run_id"] != run_root.name:
+        raise _error("MANUAL_REPORT_SOURCE_INVALID", "Evidence belongs to a different run.")
+    return record, data, payload
+
+
+def _registered_models(run_root: Path, records: list[dict]) -> list[dict]:
+    models = []
+    for record in sorted(records, key=lambda item: str(item.get("path", ""))):
+        relative = record.get("path")
+        if not isinstance(relative, str) or not relative.startswith("model_results/"):
+            continue
+        if record.get("artifact_type") != "model_result":
+            continue
+        snapshot = _registered_snapshot(run_root, records, relative)
+        _, _, payload = snapshot
+        identity = record["artifact_id"]
+        if relative != f"model_results/{identity}.json" or payload.get("model_id") != identity:
+            raise _error("MANUAL_REPORT_SOURCE_INVALID", "Model identity does not match its registered artifact.")
+        if isinstance(payload.get("coefficients"), dict):
+            models.append(payload)
+    # Versioned LMM packets retain their existing descriptor-pinned identity,
+    # execution binding, payload-contract and hash validation.
+    if os.path.lexists(run_root / "artifacts_index.json"):
+        models.extend(read_lmm_public_results(run_root))
+    return models
+
+
+def _registered_metrics(run_root: Path, records: list[dict]) -> dict:
+    snapshot = _registered_snapshot(run_root, records, "diagnostic_summary.json")
+    if snapshot is None:
+        return {}
+    record, _, summary = snapshot
+    if record.get("artifact_id") != "diagnostic_summary" or record.get("artifact_type") != "metadata" or summary.get("run_id") != run_root.name:
+        raise _error("MANUAL_REPORT_SOURCE_INVALID", "Diagnostic summary identity is invalid.")
+    stats = {}
+    nobs = (summary.get("model_identity") or {}).get("n_observations")
+    if isinstance(nobs, (int, float)) and nobs:
+        stats["n_observations"] = nobs
+    metrics = (summary.get("model_quality") or {}).get("metrics")
+    if isinstance(metrics, dict):
+        stats.update({key: value for key, value in metrics.items() if isinstance(value, (int, float))})
+    return stats
+
+
+def _registered_family_evidence(run_root: Path, records: list[dict], models: list[dict]) -> dict | None:
+    if not models:
+        return None
+    from ..contracts.model.result_envelope_registry import declaration_for
+
+    declaration = declaration_for(models[0].get("kernel_family") or models[0].get("model_type"))
+    if declaration is None:
+        return None
+    relatives = set(declaration.sidecars.values())
+    if declaration.evidence_document:
+        relatives.add(declaration.evidence_document)
+    if not relatives:
+        return bounded_model_family_evidence(run_root, models)
+    # Project the exact verified bytes through the existing family bounds. The
+    # legacy projector may reread documents, so give it only pinned snapshots;
+    # never allow that second read to admit an unregistered file or race.
+    with TemporaryDirectory(prefix="workbench-report-evidence-") as directory:
+        pinned = Path(directory) / run_root.name
+        pinned.mkdir()
+        selected = []
+        for relative in sorted(relatives):
+            snapshot = _registered_snapshot(run_root, records, relative)
+            if snapshot is None:
+                continue
+            record, data, _ = snapshot
+            target = pinned / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+            selected.append(record)
+        write_json(pinned / "artifacts_index.json", {"artifacts": selected})
+        return bounded_model_family_evidence(pinned, models)
+
+
 def _figures(run_root: Path) -> list[dict]:
     figures = []
     seen = set()
@@ -90,6 +227,10 @@ def _figures(run_root: Path) -> list[dict]:
 
 
 def build_manual_report_draft(run_root: Path) -> dict:
+    records = _source_records(run_root)
+    models = _registered_models(run_root, records)
+    model_ids = {model["model_id"] for model in models}
+    metrics = _registered_metrics(run_root, records)
     facts: list[dict] = []
     limits = [
         "Evidence uses persisted public graph, coefficient, declared family and registered test projections; it is not a new statistical analysis.",
@@ -143,7 +284,7 @@ def build_manual_report_draft(run_root: Path) -> dict:
             emit(public_params(decision.get("selected")), f"decision/{decision['decision_id']}/selected", node=key, ref="graph.json")
             params = (decision.get("reason") or {}).get("chosen_params", {})
             emit(public_params(params), f"decision/{decision['decision_id']}/params", node=key, ref="graph.json")
-        stats = _model_stats(run_root.parent, run_root.name, node_id) or {}
+        stats = metrics if node_id.removeprefix("model:") in model_ids and node_id.startswith("model:") else {}
         # Coefficients are projected separately below, including stored CIs.
         emit({k: v for k, v in stats.items() if k not in {"coefficients", "diagnostic_artifacts"}},
              "metric", node=key, ref="diagnostic_summary.json")
@@ -151,7 +292,6 @@ def build_manual_report_draft(run_root: Path) -> dict:
         emit(public_params(edge.get("params", {})), f"param/{edge_id}",
              node=forest_node_key(edge["target_id"], index), ref="graph.json")
 
-    models = read_model_results(run_root)
     table = build_regression_table([(str(model.get("model_id") or i), model) for i, model in enumerate(models)])
     for i, model in enumerate(models):
         identity = str(model.get("model_id") or i)
@@ -170,7 +310,7 @@ def build_manual_report_draft(run_root: Path) -> dict:
             if cell is not None:
                 emit({k: v for k, v in cell.items() if k in COEFFICIENT_FIELDS},
                      f"coefficient/{row['term']}", node=f"model:{model_id}", ref=f"model_results:{model_id}")
-    family = bounded_model_family_evidence(run_root, models)
+    family = _registered_family_evidence(run_root, records, models)
     if family:
         emit(family, "family", node="run", ref="family_evidence")
     else:

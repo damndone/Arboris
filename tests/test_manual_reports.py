@@ -39,6 +39,7 @@ def report_case(tmp_path, monkeypatch):
     # Unknown/raw fields must not leak into the fact projection.
     result["raw_rows"] = [{"patient_secret": "NEVER_PROJECT_THIS"}]
     write_json(run.root / "model_results/ols_1.json", result)
+    register_artifact(run.root, "ols_1", run.root / "model_results/ols_1.json", "model_result", "econometrics", [])
     app = FastAPI()
     register_error_handlers(app)
     if importlib.util.find_spec("workbench.http.manual_report_routes"):
@@ -118,6 +119,8 @@ def test_stale_source_and_changed_figure_fail_closed(report_case):
     write_json(run.root / "model_results/ols_1.json", result)
     response = post(report_case, request_for(snapshot))
     assert response.status_code == 409
+    from workbench.engine.stages.report import _refresh_artifact_checksum
+    _refresh_artifact_checksum(run.root, "ols_1", run.root / "model_results/ols_1.json")
     snapshot = draft(report_case)
     (run.root / "figures/coef.png").write_bytes(b"changed")
     assert post(report_case, request_for(snapshot)).status_code == 409
@@ -203,6 +206,8 @@ def test_fact_identities_do_not_alias_terms_with_path_separators(report_case):
     result["coefficients"]["x"]["inference"] = {"std_error": .2}
     result["coefficients"]["x/inference"] = {"estimate": 3, "std_error": .4}
     write_json(run.root / "model_results/ols_1.json", result)
+    from workbench.engine.stages.report import _refresh_artifact_checksum
+    _refresh_artifact_checksum(run.root, "ols_1", run.root / "model_results/ols_1.json")
     snapshot = draft(report_case)
     identities = [fact["id"] for fact in snapshot["facts"]]
     assert len(identities) == len(set(identities))
@@ -225,3 +230,110 @@ def test_post_estimation_facts_keep_the_owning_run_and_reject_corruption(report_
     client = report_case[0]
     response = client.get(f"/runs/{run.run_id}/manual-reports/draft", params={"project_root": str(project.root)})
     assert response.status_code == 422
+
+
+def _draft_response(case):
+    client, project, run, _ = case
+    return client.get(f"/runs/{run.run_id}/manual-reports/draft", params={"project_root": str(project.root)})
+
+
+@pytest.mark.parametrize("link", [False, True])
+def test_unregistered_foreign_model_is_never_a_report_fact(report_case, link):
+    import copy
+    _, project, run, result = report_case
+    other = create_run(project.root, mode="auto")
+    foreign = copy.deepcopy(result)
+    foreign["model_id"] = "foreign_model"
+    foreign["coefficients"]["x"]["estimate"] = 654321
+    path = other.root / "model_results/foreign_model.json"
+    write_json(path, foreign)
+    register_artifact(other.root, "foreign_model", path, "model_result", "econometrics", [])
+    target = run.root / "model_results/foreign_model.json"
+    if link:
+        target.symlink_to(path)
+    else:
+        target.write_bytes(path.read_bytes())
+    snapshot = draft(report_case)
+    assert "foreign_model" not in str(snapshot)
+    assert not any(fact["value"] == 654321 for fact in snapshot["facts"])
+    assert any(fact["value"] == 1.25 for fact in snapshot["facts"])
+
+
+@pytest.mark.parametrize("corruption", ["hash", "identity", "run_identity", "symlink"])
+def test_registered_model_requires_hash_and_current_run_identity(report_case, corruption):
+    _, project, run, result = report_case
+    path = run.root / "model_results/ols_1.json"
+    if corruption == "hash":
+        result["coefficients"]["x"]["estimate"] = 1234
+        write_json(path, result)
+    elif corruption in {"identity", "run_identity"}:
+        result["model_id" if corruption == "identity" else "run_id"] = "foreign"
+        write_json(path, result)
+        from workbench.artifacts import sha256_file
+        import json
+        index = json.loads((run.root / "artifacts_index.json").read_text())
+        next(record for record in index["artifacts"] if record["artifact_id"] == "ols_1")["sha256"] = sha256_file(path)
+        write_json(run.root / "artifacts_index.json", index)
+    else:
+        other = create_run(project.root, mode="auto")
+        foreign = other.root / "model_results/ols_1.json"
+        foreign.write_bytes(path.read_bytes())
+        path.unlink()
+        path.symlink_to(foreign)
+    response = _draft_response(report_case)
+    assert response.status_code == (409 if corruption == "hash" else 422), response.text
+
+
+@pytest.mark.parametrize("corruption", ["unregistered", "hash", "run_identity", "symlink"])
+def test_report_diagnostics_require_registration_integrity_and_run_identity(report_case, corruption):
+    _, project, run, _ = report_case
+    path = run.root / "diagnostic_summary.json"
+    packet = {"run_id": run.run_id, "model_identity": {"n_observations": 24},
+              "model_quality": {"metrics": {"r_squared": .73}}}
+    if corruption == "run_identity":
+        packet["run_id"] = "foreign"
+    write_json(path, packet)
+    if corruption != "unregistered":
+        register_artifact(run.root, "diagnostic_summary", path, "metadata", "diagnostics", [])
+    if corruption == "hash":
+        packet["model_quality"]["metrics"]["r_squared"] = .999
+        write_json(path, packet)
+    if corruption == "symlink":
+        other = create_run(project.root, mode="auto")
+        foreign = other.root / "diagnostic_summary.json"
+        foreign.write_bytes(path.read_bytes())
+        path.unlink()
+        path.symlink_to(foreign)
+    response = _draft_response(report_case)
+    if corruption == "unregistered":
+        assert response.status_code == 200, response.text
+        assert not any(fact["field"].startswith("metric/") for fact in response.json()["facts"])
+    else:
+        assert response.status_code == (409 if corruption == "hash" else 422), response.text
+
+
+def test_registered_diagnostic_metrics_and_family_sidecars_keep_their_values(report_case):
+    _, _, run, result = report_case
+    summary = run.root / "diagnostic_summary.json"
+    write_json(summary, {"run_id": run.run_id, "model_identity": {"n_observations": 24},
+                         "model_quality": {"metrics": {"r_squared": .73}}})
+    register_artifact(run.root, "diagnostic_summary", summary, "metadata", "diagnostics", [])
+    snapshot = draft(report_case)
+    assert any(fact["field"] == "metric/r_squared" and fact["value"] == .73 for fact in snapshot["facts"])
+    # Use the actual ordinal sidecar declaration and writer's artifact identity.
+    result["model_type"] = "ordinal_logit"
+    result["model_id"] = "ordinal_logit_1"
+    primary = run.root / "model_results/ordinal_logit_1.json"
+    write_json(primary, result)
+    from workbench.artifact_index import artifact_index_transaction
+    with artifact_index_transaction(run.root) as index:
+        index["artifacts"] = [record for record in index["artifacts"] if record["artifact_id"] != "ols_1"]
+    register_artifact(run.root, "ordinal_logit_1", primary, "model_result", "econometrics", [])
+    sidecar = run.root / "model_results/diagnostics_ordinal_logit_1.json"
+    write_json(sidecar, {"contract": "workbench.ordinal_logit.diagnostics.v1", "model_type": "ordinal_logit",
+                         "parallel_lines": {"status": "checked", "slope_ranges": {"x": 765432}}})
+    assert 765432 not in [fact["value"] for fact in draft(report_case)["facts"]]
+    register_artifact(run.root, "diagnostics_ordinal_logit_1", sidecar, "model_diagnostic", "model_families", ["cleaned_dataset"])
+    assert 765432 in [fact["value"] for fact in draft(report_case)["facts"]]
+    sidecar.write_text("{}")
+    assert _draft_response(report_case).status_code == 409

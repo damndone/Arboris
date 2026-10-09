@@ -103,6 +103,45 @@ def read_frame_bounded(
     return frame.iloc[:max_rows].copy(), truncated
 
 
+def _read_verified_dataset_parquet(
+    path: Path, run_root: Path, config: WorkbenchConfig,
+) -> pd.DataFrame:
+    """Read only a server-bound, byte-identical selected dataset artifact.
+
+    Parquet remains outside the public upload reader. Internal model dispatch
+    may reuse a registered dataset without a lossy CSV conversion, but the
+    persisted lineage and upload must identify these exact bytes.
+    """
+    from pyarrow.parquet import ParquetFile
+    from .artifacts import sha256_file
+    from .lineage.run_inputs import read_run_inputs
+    from .statistical_exploration import resolve_statistical_source
+
+    inputs = read_run_inputs(run_root)
+    binding = inputs.get("dataset_source")
+    if not isinstance(binding, dict):
+        raise ValueError("parquet input requires a verified dataset source")
+    digest = sha256_file(path)
+    if digest != (inputs.get("upload") or {}).get("sha256"):
+        raise ValueError("parquet input does not match the pinned run upload")
+    # Inspect metadata before the source resolver reads any rows.
+    if ParquetFile(path).metadata.num_rows > config.max_rows:
+        raise ValueError(f"row count exceeds limit: {path.name}")
+    source, frame = resolve_statistical_source(
+        run_root.parent.parent,
+        source_run_id=str(binding.get("source_run_id", "")),
+        source_node_id=str(binding.get("op_node_id", "")),
+        source_artifact_id=str(binding.get("source_artifact_id", "")),
+    )
+    if digest != source["source_sha256"] or (
+        binding.get("source_sha256") is not None and binding["source_sha256"] != digest
+    ):
+        raise ValueError("parquet input does not match its registered dataset source")
+    if len(frame) > config.max_rows:
+        raise ValueError(f"row count exceeds limit: {path.name}")
+    return frame
+
+
 def ingest_files(
     paths: list[Path],
     run_root: Path,
@@ -120,7 +159,12 @@ def ingest_files(
         size_gb = path.stat().st_size / (1024**3)
         if size_gb > config.max_single_file_gb:
             raise ValueError(f"file exceeds size limit: {path.name}")
-        frame = _read_frame(path, config, sheet_name, transpose)
+        if path.suffix.lower() == ".parquet":
+            if transpose or sheet_name:
+                raise ValueError("verified dataset parquet cannot apply upload table transforms")
+            frame = _read_verified_dataset_parquet(path, run_root, config)
+        else:
+            frame = _read_frame(path, config, sheet_name, transpose)
         target = run_root / "raw_snapshot" / path.name
         resolved_target = target.resolve()
         raw_snapshot_root = (run_root / "raw_snapshot").resolve()
