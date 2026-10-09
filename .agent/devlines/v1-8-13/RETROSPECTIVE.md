@@ -6,18 +6,18 @@
 
 ## Final status
 
-IN_PROGRESS
+CONTEXT_RESCOPED
 
 ## Metrics
 
-- Failure frequency: 3/14 (21.4%; 21.4 per 100 events)
+- Failure frequency: 3/22 (13.6%; 13.6 per 100 events)
 - Repeat rate: 0/3 (0.0%)
 - Recurrence rate: 0/3 (0.0%)
 - MTTR: median=434540 ms (sample=1; unresolved=2)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: 0/2 (0.0%)
+- Gate waste rate: 0/3 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0)
 
@@ -59,6 +59,7 @@ IN_PROGRESS
 - Assert actual fitted sample size and immutable source bytes across data-operation to model execution, not only successful status.
 - Distinguish composable service execution from every mixed-plan shape and from frontend acceptance; never claim measured warm-start timing as cold first-use timing.
 - Exercise persisted dataset formats and require registered evidence at manual reporting boundaries.
+- Public presentation names are not executable formula structure; keep verified design metadata separate from labels.
 - Recompute owner results against frozen native references and preserve actual failures; admission is separate from evidence-test success.
 
 ## Event index
@@ -77,3 +78,11 @@ IN_PROGRESS
 - #12: `197932d7-3c5c-4ebf-9ab4-72f2e3826e32` | 2026-10-09T06:55:40.902Z | GAP/remaining_acceptance_boundaries | incident=`81e6f1dd-2e99-4867-b634-52fd23df7b29` | lesson_key=`offline-backend-acceptance-boundaries` | event_sha256=`a3072886eec506d661392aede85bbce4798ea4c61c9f6207feb321f1036b1966`
 - #13: `a0aa2857-0529-40a9-8dc8-2e79a9b44f6c` | 2026-10-09T07:14:24.483Z | GATE/final_full_gate_failed | incident=`eb11d415-6bbc-409a-9022-28359c06ce68` | lesson_key=`notebook-dataset-source-family-ownership` | event_sha256=`0b592bb884569d80b1aa50d7b7ea239d78268c93701f939d31ede3480676a443`
 - #14: `c68720db-f41e-4d1e-87f5-c82b6ece698e` | 2026-10-09T07:17:06.570Z | STATE_CHANGE/full_gate_findings_corrected | incident=`eb11d415-6bbc-409a-9022-28359c06ce68` | lesson_key=`notebook-dataset-source-family-ownership` | event_sha256=`074d8e89719f9b114b0d1b41561e87b2dac12a5df4130332d93f34488c48e780`
+- #15: `57c7c794-7350-4b87-849b-ffd052d34606` | 2026-10-09T12:59:33.903Z | STATE_CHANGE/authorized_backend_closure | incident=`514f220b-a6b0-48b8-8f0a-5de385be77e9` | lesson_key=`manual-contract-consumer-adoption` | event_sha256=`c756c1e35e5ee1d9aac7520e706e93af1efeb182c6f7e30a1491d4f586eceda6`
+- #16: `db3cb8b8-4476-43cd-9cf6-e1ea216d22c7` | 2026-10-09T13:03:38.765Z | STATE_CHANGE/context_rescope_required | incident=`7c9e1b84-acd8-49b9-94ec-3ae01a8d64a2` | lesson_key=`context-pack-rescope` | event_sha256=`78ab0a7e0c5ed5add5e0b6522d87bf9fb88f3a4086b3d0cac79147ace1fbbc59`
+- #17: `1face047-79d9-4036-8bcf-e3c1b8d45e9f` | 2026-10-09T13:03:38.773Z | STATE_CHANGE/context_rescoped | incident=`2a63ff2a-c8ca-4928-81e0-8f263b522ce6` | lesson_key=`context-pack-rescope` | event_sha256=`f07edb6f358d3d9b227900b7c5aed15ddb32261e212bcb2c93dd9f545f0a7cf5`
+- #18: `d18dbb28-bfcb-4b0a-9618-521f05ef89fd` | 2026-10-09T13:14:07.809Z | REVIEW/closure_diff_review_resolved | incident=`9a37bbd5-9d84-4940-afcc-aa783161a75c` | lesson_key=`verified-design-not-public-label` | event_sha256=`5a2657eec8294b7e043f5dd5a6c996afdd47a471463a8d272dcd3e5237a3ab93`
+- #19: `6c6c354c-0175-43e4-832e-81d61c154d08` | 2026-10-09T13:32:14.012Z | STATE_CHANGE/context_rescope_required | incident=`939a47ad-845b-4aca-ab6c-46a499aa10bb` | lesson_key=`context-pack-rescope` | event_sha256=`c810a027856f08a7d8c103de78fdec526ee18e456c69702d5e654ca56991d111`
+- #20: `5e88fd8c-ced9-46a8-8c99-38d4bcbfbce8` | 2026-10-09T13:32:14.026Z | STATE_CHANGE/context_rescoped | incident=`fe943901-86b6-4fe9-a0ac-5ec34198fe38` | lesson_key=`context-pack-rescope` | event_sha256=`d3f1bf6aa29164b045d26f1f8d0210c476bd4438ee023e1b060469bfa00ede50`
+- #21: `8b8bd493-2acd-4f58-bcc6-e0ad751efce7` | 2026-10-09T13:33:21.449Z | GATE/final_closure_gate_documentation_corrected | incident=`7dad30d9-a6a6-48b0-a2a9-8578f6fe657d` | lesson_key=`registry-admission-generated-reference` | event_sha256=`93300e726a2e693433343bb9256f859af3bcbb5824c51505234d062581c71464`
+- #22: `a5298097-7741-4594-8d18-5355860565c6` | 2026-10-09T13:34:05.023Z | STATE_CHANGE/backend_contract_ready_for_frontend_adoption | incident=`514f220b-a6b0-48b8-8f0a-5de385be77e9` | lesson_key=`manual-contract-consumer-adoption` | event_sha256=`9f3a1913f9b3962d5eb23a0a378d765a25d9609f84eb4212e0b721cf3ea989f2`
