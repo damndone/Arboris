@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 # One-command antifragility gate. Run from a version worktree root.
+# Bootstrap uses stdlib Python; pytest resolution below remains independent.
+exec python3 "$(dirname "$0")/gate_lock.py" "$@"
+exit 3
+# WORKBENCH_GATE_BODY
 set -uo pipefail
 
 fail=0
@@ -51,21 +55,8 @@ banner() {
 # the suite was killed mid-run -- which surfaced as a truncated log and a bare
 # exit 1, i.e. it looked like a test failure rather than memory exhaustion.
 # Refuse to start instead of stacking, and say exactly what to stop.
-GATE_LOCK="${TMPDIR:-/tmp}/workbench-gate-$(cd "$(dirname "$0")/.." && basename "$PWD").lock"
-
 preflight_exclusive() {
   local conflict=0
-
-  if [ -e "$GATE_LOCK" ]; then
-    local holder
-    holder="$(cat "$GATE_LOCK" 2>/dev/null || echo unknown)"
-    if [ "$holder" != "unknown" ] && kill -0 "$holder" 2>/dev/null; then
-      echo "REFUSING: another gate is already running (pid $holder)." >&2
-      echo "  Wait for it, or: kill $holder && rm -f $GATE_LOCK" >&2
-      exit 3
-    fi
-    rm -f "$GATE_LOCK"
-  fi
 
   # Match how a real vitest run actually appears in the process table --
   # `node (vitest)` and `node (vitest N)` for its workers -- rather than any
@@ -91,8 +82,6 @@ preflight_exclusive() {
 
   [ "$conflict" -eq 0 ] || exit 3
 
-  echo $$ > "$GATE_LOCK"
-  trap 'rm -f "$GATE_LOCK"' EXIT INT TERM
 }
 
 # A worktree must borrow the main checkout's frontend/node_modules, never
@@ -248,7 +237,7 @@ run_gate_syntax() {
 }
 
 run_gate_script_tests() {
-  run_pytest tests/test_gate_script.py -q
+  run_pytest tests/test_gate_script.py tests/test_gate_lock.py -q
 }
 
 run_domain_memory_preflight() {
@@ -333,7 +322,7 @@ run_quick() {
       frontend/*)
         has_frontend=1
         ;;
-      scripts/gate.sh|tests/test_gate_script.py)
+      scripts/gate.sh|scripts/gate_lock.py|tests/test_gate_script.py|tests/test_gate_lock.py)
         has_gate_script=1
         ;;
       backend/workbench/development_control/*|tests/test_devline_control_*.py|scripts/devline_control.py|AGENTS.md|.agent/development-control/*)
