@@ -6,24 +6,24 @@
 
 ## Final status
 
-STARTED
+IN_PROGRESS
 
 ## Metrics
 
-- Failure frequency: N/A (sample=0)
-- Repeat rate: N/A (sample=0)
-- Recurrence rate: N/A (sample=0)
-- MTTR: N/A (sample=0; unresolved=0)
+- Failure frequency: 3/14 (21.4%; 21.4 per 100 events)
+- Repeat rate: 0/3 (0.0%)
+- Recurrence rate: 0/3 (0.0%)
+- MTTR: median=434540 ms (sample=1; unresolved=2)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: N/A (sample=0)
+- Gate waste rate: 0/2 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0)
 
 ## All failures
 
-- None recorded.
+- #8 2026-10-09T06:28:54.430Z `genesis_selected_dataset_ignored`; cause_status: `known`; cause: The original-upload shortcut compared the selected frame with itself instead of proving raw-upload identity.; resolution: `open`; lesson: Assert actual fitted sample size and immutable source bytes across data-operation to model execution, not only successful status.
 
 ## All errors
 
@@ -31,7 +31,8 @@ STARTED
 
 ## All gaps
 
-- None recorded.
+- #10 2026-10-09T06:36:40.724Z `lmm_postestimation_native_evaluation`; cause_status: `known`; cause: Native R/Stata comparison exposes omitted interaction contribution in time margins; current LR provenance cannot establish admissible comparisons.; resolution: `accepted`; lesson: Recompute owner results against frozen native references and preserve actual failures; admission is separate from evidence-test success.
+- #12 2026-10-09T06:55:40.902Z `remaining_acceptance_boundaries`; cause_status: `known`; cause: Existing mixed-plan source validation contradicts non-frame Wald semantics; original frontend lacks the new manual operation UI and cold first-use data help loads the existing numerical registry.; resolution: `open`; lesson: Distinguish composable service execution from every mixed-plan shape and from frontend acceptance; never claim measured warm-start timing as cold first-use timing.
 
 ## All waste
 
@@ -39,7 +40,9 @@ STARTED
 
 ## Root causes and solutions
 
-- None recorded.
+- `lmm-postestimation-native-evidence`: occurrences=1; cause_status: `known`; root cause: Native R/Stata comparison exposes omitted interaction contribution in time margins; current LR provenance cannot establish admissible comparisons.; solution: `accepted`
+- `offline-backend-acceptance-boundaries`: occurrences=1; cause_status: `known`; root cause: Existing mixed-plan source validation contradicts non-frame Wald semantics; original frontend lacks the new manual operation UI and cold first-use data help loads the existing numerical registry.; solution: `open`
+- `selected-dataset-model-source-authority`: occurrences=1; cause_status: `known`; root cause: The original-upload shortcut compared the selected frame with itself instead of proving raw-upload identity.; solution: `open`
 
 ## Added tests
 
@@ -47,12 +50,30 @@ STARTED
 
 ## New rules
 
-- No rule candidate recorded.
+- `lmm-postestimation-native-evidence`: line experience occurrence(s)=1
+- `offline-backend-acceptance-boundaries`: line experience occurrence(s)=1
+- `selected-dataset-model-source-authority`: line experience occurrence(s)=1
 
 ## Future guidance
 
-- No guidance recorded.
+- Assert actual fitted sample size and immutable source bytes across data-operation to model execution, not only successful status.
+- Distinguish composable service execution from every mixed-plan shape and from frontend acceptance; never claim measured warm-start timing as cold first-use timing.
+- Exercise persisted dataset formats and require registered evidence at manual reporting boundaries.
+- Recompute owner results against frozen native references and preserve actual failures; admission is separate from evidence-test success.
 
 ## Event index
 
 - #1: `f9856754-5aeb-452b-b8ee-b71b7f70f51b` | 2026-10-09T05:54:01.350Z | STATE_CHANGE/line_started | incident=`dc78d445-e0af-4a39-9dae-0481deb09477` | lesson_key=`frozen-context-before-start` | event_sha256=`fcb1e2f037957ab6fb1f5f778d7a1e8fd95ea071223e569b7f89e56d730ca264`
+- #2: `16c4ded9-f988-4b2f-bd7c-776a8083abfd` | 2026-10-09T05:55:23.074Z | STATE_CHANGE/approved_kickoff | incident=`cd899113-9c21-46fd-b85f-e97ec7438617` | lesson_key=`release-baseline-and-manual-capability-contract` | event_sha256=`d13056a0ac759b6bf154aff5e09f414cbf6734c2b0a1628d1b50e0550bc02a31`
+- #3: `ed937ac2-5e17-4235-a443-a87285bda99e` | 2026-10-09T05:58:47.194Z | GATE/global_lock_focused | incident=`79903d67-7b67-4ff7-83dd-11dffae0e6ff` | lesson_key=`machine-gate-lock-stable-inode` | event_sha256=`9323fde74e0bfb2cad5250ba364fc6c4db952172cb35d5575fc7738bba019a53`
+- #4: `12eb3fc4-9498-4c27-a84e-b16e646afb2f` | 2026-10-09T06:06:40.622Z | STATE_CHANGE/context_tools_split | incident=`cc3c7017-8da0-4547-a374-04a4c7c2ce28` | lesson_key=`context-tool-responsibility-split` | event_sha256=`68fad43d5b214f10cc365df0cb2c6914ba7deaba20af89c9d312929493a28fbb`
+- #5: `c6be40b9-d444-4748-bd87-38265b4cd9a3` | 2026-10-09T06:13:23.162Z | STATE_CHANGE/family_measurement_corrected | incident=`c9344821-ca90-49aa-ace5-0c0e609ecd26` | lesson_key=`family-ratchet-measurement-separation` | event_sha256=`0122ce0b2456f2099304586f2da48861beb21a2bb49829a98068d8ce2ec6799e`
+- #6: `5df4abb5-ab94-4186-9925-705b431181b6` | 2026-10-09T06:23:47.875Z | STATE_CHANGE/manual_contract_delivered | incident=`1056dd3e-02cb-49fa-a2d4-26b9fe5b8508` | lesson_key=`manual-and-agent-shared-execution` | event_sha256=`14a8d7f9bbebab5c927e26bc1cfd86c2a4295ffd788eca552e035523fc8f683e`
+- #7: `632c1611-bb7e-4daa-9fa3-fa6ac4c64ff7` | 2026-10-09T06:28:54.430Z | STATE_CHANGE/family_policy_and_fit_ownership | incident=`b309e0c6-e9ea-4268-8bb4-8c78563f53eb` | lesson_key=`family-owned-policies-and-fit-adapters` | event_sha256=`943dda5fbc18f012dcefd773071a47333e9cf9bed376b7d3fc7e83bd1f225920`
+- #8: `b0ce0896-86c1-4067-ba25-be35d7b86800` | 2026-10-09T06:28:54.430Z | FAILURE/genesis_selected_dataset_ignored | incident=`8aa9cda2-4fd2-42ad-a224-7f9f6c0f1df9` | lesson_key=`selected-dataset-model-source-authority` | event_sha256=`2aa4e5b9bb7ca06995718e82dc0cbc35194784a0aa9a0ab6765c6d569db0a803`
+- #9: `876a32ce-3ff2-47b9-8c84-58b6a191eb46` | 2026-10-09T06:36:08.970Z | STATE_CHANGE/genesis_selected_dataset_fixed | incident=`8aa9cda2-4fd2-42ad-a224-7f9f6c0f1df9` | lesson_key=`selected-dataset-model-source-authority` | event_sha256=`f4839daddf7c6d93bc7627f66e08ff3913d7ae96d1668ca1965eb07d1bc26187`
+- #10: `6b9f3217-4f6c-4d77-a880-4f9dfb4545f1` | 2026-10-09T06:36:40.724Z | GAP/lmm_postestimation_native_evaluation | incident=`c0e10ff3-f0be-45dd-8486-5de61f1aa2bf` | lesson_key=`lmm-postestimation-native-evidence` | event_sha256=`a42e357875a035fc4a9894fdca22dd645a30b267123fa8603172708c9805485d`
+- #11: `c2003749-2c38-4516-8a91-e0adcabce5b1` | 2026-10-09T06:51:11.416Z | REVIEW/independent_version_review_resolved | incident=`1ad9bdcf-372b-4ae9-8921-17f6ecba7693` | lesson_key=`manual-boundary-independent-review` | event_sha256=`9885e60147288571a8ecc6d663e91185ddb364bb63197235e2193745e39b360c`
+- #12: `197932d7-3c5c-4ebf-9ab4-72f2e3826e32` | 2026-10-09T06:55:40.902Z | GAP/remaining_acceptance_boundaries | incident=`81e6f1dd-2e99-4867-b634-52fd23df7b29` | lesson_key=`offline-backend-acceptance-boundaries` | event_sha256=`a3072886eec506d661392aede85bbce4798ea4c61c9f6207feb321f1036b1966`
+- #13: `a0aa2857-0529-40a9-8dc8-2e79a9b44f6c` | 2026-10-09T07:14:24.483Z | GATE/final_full_gate_failed | incident=`eb11d415-6bbc-409a-9022-28359c06ce68` | lesson_key=`notebook-dataset-source-family-ownership` | event_sha256=`0b592bb884569d80b1aa50d7b7ea239d78268c93701f939d31ede3480676a443`
+- #14: `c68720db-f41e-4d1e-87f5-c82b6ece698e` | 2026-10-09T07:17:06.570Z | STATE_CHANGE/full_gate_findings_corrected | incident=`eb11d415-6bbc-409a-9022-28359c06ce68` | lesson_key=`notebook-dataset-source-family-ownership` | event_sha256=`074d8e89719f9b114b0d1b41561e87b2dac12a5df4130332d93f34488c48e780`
