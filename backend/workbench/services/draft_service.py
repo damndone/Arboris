@@ -363,8 +363,9 @@ def execute_genesis_draft(
                 upload_filename=filename,
                 started_at=datetime.now(timezone.utc).isoformat(),
                 rerun_reason="workflow_dataset_model" if dataset_source else "initial",
-                rerun_of=dataset_source["source_run_id"] if dataset_source else None,
-                from_node=dataset_source["op_node_id"] if dataset_source else None,
+                # Dataset provenance is independent of analysis-family
+                # ancestry. Genesis creates a model in its explicitly pinned
+                # family; selecting another run's data is not a rerun of it.
                 dataset_source=validated_source if dataset_source else None,
                 run_family_id=_draft_run_family_id(draft),
                 before_dispatch=_record_snapshot_before_dispatch,
