@@ -6,9 +6,9 @@ from functools import lru_cache
 from importlib import import_module
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from fastapi.openapi.utils import get_openapi
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, model_validator
 
 from ..services.operation_catalog import operation_catalog
 from .responses.operations import ManualOperationResponse, OperationCatalog
@@ -123,11 +123,21 @@ def _dedicated_operations() -> tuple[dict[str, Any], ...]:
 def get_operations(
     project_root: str | None = None, source_run_id: str | None = None,
     source_node_id: str | None = None, source_artifact_id: str | None = None,
+    target: str | None = None,
 ) -> OperationCatalog:
+    """Discover operations; target is the JSON target used by POST /operations/run."""
+    requested = None
+    if target is not None:
+        if any(value is not None for value in (source_run_id, source_node_id, source_artifact_id)):
+            raise HTTPException(422, "Use target or source_* fields, not both")
+        try:
+            requested = TypeAdapter(Annotated[DatasetNodeTarget | ModelNodeTarget | UploadTarget, Field(discriminator="kind")]).validate_json(target).model_dump()
+        except ValidationError as exc:
+            raise HTTPException(422, "target must be a valid operation target JSON object") from exc
     return operation_catalog(
         project_root=project_root, source_run_id=source_run_id,
         source_node_id=source_node_id, source_artifact_id=source_artifact_id,
-        dedicated_operations=_dedicated_operations(),
+        dedicated_operations=_dedicated_operations(), target=requested,
     )
 
 

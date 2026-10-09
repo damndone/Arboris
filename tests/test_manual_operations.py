@@ -156,6 +156,22 @@ def test_model_target_uses_the_completed_kernel_and_owned_dataset(client, tmp_pa
     from tests.test_postestimation_workflow_steps import _run
 
     root, run_id = _run(tmp_path, "model", model_type="logit", y="yb", x=["x1", "x2", "x3"])
+    target = {"kind": "model_node", "run_id": run_id, "node_id": "model:logit_1"}
+    catalog = client.get("/operations", params={"project_root": str(root), "target": json.dumps(target)})
+    assert catalog.status_code == 200, catalog.text
+    entries = {item["id"]: item for item in catalog.json()["operations"]}
+    assert entries["postestimation.wald"]["availability"]["status"] == "needs_parameters"
+    invalid = client.get("/operations", params={"project_root": str(root), "target": json.dumps({**target, "node_id": "model:logit_9"})})
+    entries = {item["id"]: item for item in invalid.json()["operations"]}
+    assert entries["postestimation.wald"]["availability"]["status"] == "unavailable"
+    composed = _post(client, root, {"mode": "preview", "request_id": "model-target-composed", "target": target,
+        "steps": [{"step_id": "new", "operation_id": "model.genesis", "spec": {
+            "model_family": "ols", "branches": [{"branch_id": "base", "outcome": "y", "predictors": ["x1"]}]}},
+            {"step_id": "test", "operation_id": "postestimation.lincom", "spec": {
+                "model_ref": "step:new:base", "terms": {"x1": 1}}}]})
+    assert composed.status_code == 200, composed.text
+    assert "model_run_id" not in composed.json()["steps"][1]["spec"]
+
     response = _post(client, root, {"mode": "execute", "request_id": "wald", "target": {
         "kind": "model_node", "run_id": run_id, "node_id": "model:logit_1"}, "steps": [{
             "step_id": "wald", "operation_id": "postestimation.wald", "spec": {

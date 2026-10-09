@@ -53,10 +53,54 @@ def _target_availability(
             "message": "Source ownership is verified; supply parameters for operation-specific validation and confirmation."}
 
 
+def _selected_target(project_root: str | None, target: Mapping[str, Any]):
+    """Validate the same target as execution without materializing uploads."""
+    if not project_root:
+        return {"status": "needs_target", "reason_code": "PROJECT_REQUIRED",
+                "message": "Select a project for this target."}, None
+    from .manual_operations import _resolve_target
+    from ..agent.postestimation_steps import _load_kernel, model_id_from_ref
+    from ..cli_commands import CommandError
+
+    try:
+        _resolve_target(Path(project_root).expanduser().resolve(), target)
+        kernel = None
+        if target["kind"] == "model_node":
+            kernel = _load_kernel(Path(project_root).expanduser().resolve() / "runs" / target["run_id"],
+                                  model_id_from_ref(target["node_id"]))
+    except (OSError, ValueError, KeyError, CommandError, RuntimeError) as exc:
+        return {"status": "unavailable", "reason_code": "TARGET_INVALID", "message": str(exc)}, None
+    return {"status": "needs_parameters", "reason_code": "SPEC_VALIDATION_REQUIRED",
+            "message": "Target ownership is verified; preview validates parameters and execution conditions."}, kernel
+
+
+def _model_availability(operation_id: str, contract: Any, state: dict, kernel: Any) -> dict:
+    if not contract.model_reference_fields or state["status"] == "unavailable":
+        return dict(state)
+    if kernel is None:
+        return {"status": "needs_parameters", "reason_code": "MODEL_REFERENCE_REQUIRED",
+                "message": "Select a completed model, or bind model_ref to a producing step in this workflow."}
+    from ..agent.postestimation_steps import OPERATION_PREFIX
+    from ..postestimation.core import PostestimationRefusal, _require_interface
+    from ..postestimation.registry import OPERATIONS, require_validated
+
+    operation = operation_id.removeprefix(OPERATION_PREFIX)
+    declaration = OPERATIONS.get(operation)
+    if declaration is not None:
+        try:
+            for interface in declaration.requires:
+                _require_interface(kernel, interface, operation)
+            require_validated(str(kernel["model_type"]), operation)
+        except PostestimationRefusal as exc:
+            return {"status": "unavailable", "reason_code": exc.code, "message": exc.message}
+    return dict(state)
+
+
 def operation_catalog(
     *, project_root: str | None = None, source_run_id: str | None = None,
     source_node_id: str | None = None, source_artifact_id: str | None = None,
     dedicated_operations: Sequence[Mapping[str, Any]] = (),
+    target: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Publish every registered identity, including composition-only steps."""
     registry = OperationRegistry()
@@ -65,6 +109,9 @@ def operation_catalog(
         for operation_id in set((*item.proposed_by, *item.composable_as)):
             capabilities.setdefault(operation_id, []).append(item.capability_id)
     target_state = _target_availability(project_root, source_run_id, source_node_id, source_artifact_id)
+    kernel = None
+    if target is not None:
+        target_state, kernel = _selected_target(project_root, target)
     dedicated = {item["id"]: item for item in dedicated_operations}
     entries = {}
     for operation_id in registry.operation_ids():
@@ -72,7 +119,8 @@ def operation_catalog(
         contract = WORKFLOW_STEP_SPEC_CONTRACTS.get(operation_id)
         schema = contract.to_schema() if contract is not None else deepcopy(definition.editable_schema)
         execution: dict[str, Any] = {"kind": "workflow", "method": "POST", "path": "/operations/run"}
-        availability = dict(target_state)
+        availability = (_model_availability(operation_id, contract, target_state, kernel)
+                        if contract is not None and target_state["status"] != "needs_target" else dict(target_state))
         if operation_id in dedicated:
             binding = dedicated[operation_id]
             execution = deepcopy(binding["execution"])

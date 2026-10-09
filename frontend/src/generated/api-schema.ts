@@ -1454,7 +1454,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Operations */
+        /**
+         * Get Operations
+         * @description Discover operations; target is the JSON target used by POST /operations/run.
+         */
         get: operations["get_operations_operations_get"];
         put?: never;
         post?: never;
@@ -12708,6 +12711,7 @@ export interface operations {
                 source_artifact_id?: string | null;
                 source_node_id?: string | null;
                 source_run_id?: string | null;
+                target?: string | null;
             };
             header?: never;
             path?: never;

@@ -1,6 +1,9 @@
 """Manual discovery stays in sync with the executable declarations."""
 
 from dataclasses import replace
+import json
+
+import pytest
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -82,3 +85,34 @@ def test_unresolvable_target_is_reported_without_any_writes(tmp_path):
     assert entries["data.aggregate"]["availability"]["status"] == "unavailable"
     assert entries["data.aggregate"]["availability"]["reason_code"] == "TARGET_INVALID"
     assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize("target", ["not-json", "{}", '{"kind":"unknown"}',
+    '{"kind":"model_node","run_id":"r","node_id":"m","extra":true}'])
+def test_malformed_target_is_rejected(target):
+    assert _client().get("/operations", params={"target": target}).status_code == 422
+
+
+def test_upload_target_discovery_does_not_materialize_a_run(tmp_path, monkeypatch):
+    from workbench.projects import create_project
+    from workbench.lineage.upload_store import store_upload_bytes
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Discovery must not load a provider")
+
+    monkeypatch.setattr("workbench.llm.config.load_llm_config", forbidden)
+    root = create_project(tmp_path, "catalog").root
+    sha = store_upload_bytes(root, b"x,y\n1,2\n3,4\n", filename="data.csv")
+    target = {"kind": "upload", "upload_sha256": sha, "filename": "data.csv"}
+    params = {"project_root": str(root), "target": json.dumps(target)}
+    response = _client().get("/operations", params=params)
+    assert response.status_code == 200, response.text
+    entries = {item["id"]: item for item in response.json()["operations"]}
+    assert entries["data.recode"]["availability"]["status"] == "needs_parameters"
+    assert entries["postestimation.wald"]["availability"]["reason_code"] == "MODEL_REFERENCE_REQUIRED"
+    assert not list((root / "runs").iterdir())
+    assert _client().get("/operations", params={**params, "source_run_id": "r"}).status_code == 422
+    target["upload_sha256"] = "f" * 64
+    invalid = _client().get("/operations", params={**params, "target": json.dumps(target)})
+    entries = {item["id"]: item for item in invalid.json()["operations"]}
+    assert entries["data.recode"]["availability"]["reason_code"] == "TARGET_INVALID"

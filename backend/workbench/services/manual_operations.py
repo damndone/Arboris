@@ -73,8 +73,9 @@ def _compile(root: Path, request: Mapping[str, Any], token: str):
         for step in steps:
             if str(step.get("operation_id", "")).startswith("postestimation."):
                 spec = step.setdefault("spec", {})
-                spec.setdefault("model_ref", request["target"]["node_id"])
-                spec.setdefault("model_run_id", request["target"]["run_id"])
+                if "model_ref" not in spec:
+                    spec["model_ref"] = request["target"]["node_id"]
+                    spec.setdefault("model_run_id", request["target"]["run_id"])
     preconditions = {
         "context_version": "manual-operation-source/v1",
         "context_fingerprint": sha256_canonical({"target": target, "source_sha256": source_sha}),
