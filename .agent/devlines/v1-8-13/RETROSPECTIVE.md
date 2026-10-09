@@ -10,10 +10,10 @@ CONTEXT_RESCOPED
 
 ## Metrics
 
-- Failure frequency: 3/22 (13.6%; 13.6 per 100 events)
-- Repeat rate: 0/3 (0.0%)
-- Recurrence rate: 0/3 (0.0%)
-- MTTR: median=434540 ms (sample=1; unresolved=2)
+- Failure frequency: 5/26 (19.2%; 19.2 per 100 events)
+- Repeat rate: 0/5 (0.0%)
+- Recurrence rate: 0/5 (0.0%)
+- MTTR: median=434540 ms (sample=1; unresolved=4)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
@@ -27,12 +27,13 @@ CONTEXT_RESCOPED
 
 ## All errors
 
-- None recorded.
+- #24 2026-10-09T15:54:07.223Z `workspace_acceptance_mode_misidentified`; cause_status: `known`; cause: Acceptance launched the correct frontend commit but missed the workspace=new switch; default classic shell was mistaken for new workspace.; resolution: `mitigated`; lesson: Verify active UI mode as well as frontend commit before browser acceptance.
 
 ## All gaps
 
 - #10 2026-10-09T06:36:40.724Z `lmm_postestimation_native_evaluation`; cause_status: `known`; cause: Native R/Stata comparison exposes omitted interaction contribution in time margins; current LR provenance cannot establish admissible comparisons.; resolution: `accepted`; lesson: Recompute owner results against frozen native references and preserve actual failures; admission is separate from evidence-test success.
 - #12 2026-10-09T06:55:40.902Z `remaining_acceptance_boundaries`; cause_status: `known`; cause: Existing mixed-plan source validation contradicts non-frame Wald semantics; original frontend lacks the new manual operation UI and cold first-use data help loads the existing numerical registry.; resolution: `open`; lesson: Distinguish composable service execution from every mixed-plan shape and from frontend acceptance; never claim measured warm-start timing as cold first-use timing.
+- #23 2026-10-09T15:42:09.021Z `v190_live_manual_consumer_missing`; cause_status: `known`; cause: Live v1.9.0 frontend at 98801242 does not consume the additive manual catalog, execution and report contract.; resolution: `open`; lesson: Verify real browser consumers separately from backend HTTP readiness and frontend test counts.
 
 ## All waste
 
@@ -41,8 +42,10 @@ CONTEXT_RESCOPED
 ## Root causes and solutions
 
 - `lmm-postestimation-native-evidence`: occurrences=1; cause_status: `known`; root cause: Native R/Stata comparison exposes omitted interaction contribution in time margins; current LR provenance cannot establish admissible comparisons.; solution: `accepted`
+- `manual-contract-consumer-adoption`: occurrences=1; cause_status: `known`; root cause: Live v1.9.0 frontend at 98801242 does not consume the additive manual catalog, execution and report contract.; solution: `open`
 - `offline-backend-acceptance-boundaries`: occurrences=1; cause_status: `known`; root cause: Existing mixed-plan source validation contradicts non-frame Wald semantics; original frontend lacks the new manual operation UI and cold first-use data help loads the existing numerical registry.; solution: `open`
 - `selected-dataset-model-source-authority`: occurrences=1; cause_status: `known`; root cause: The original-upload shortcut compared the selected frame with itself instead of proving raw-upload identity.; solution: `open`
+- `verify-active-workspace-mode`: occurrences=1; cause_status: `known`; root cause: Acceptance launched the correct frontend commit but missed the workspace=new switch; default classic shell was mistaken for new workspace.; solution: `mitigated`
 
 ## Added tests
 
@@ -51,8 +54,10 @@ CONTEXT_RESCOPED
 ## New rules
 
 - `lmm-postestimation-native-evidence`: line experience occurrence(s)=1
+- `manual-contract-consumer-adoption`: line experience occurrence(s)=1
 - `offline-backend-acceptance-boundaries`: line experience occurrence(s)=1
 - `selected-dataset-model-source-authority`: line experience occurrence(s)=1
+- `verify-active-workspace-mode`: line experience occurrence(s)=1
 
 ## Future guidance
 
@@ -61,6 +66,8 @@ CONTEXT_RESCOPED
 - Exercise persisted dataset formats and require registered evidence at manual reporting boundaries.
 - Public presentation names are not executable formula structure; keep verified design metadata separate from labels.
 - Recompute owner results against frozen native references and preserve actual failures; admission is separate from evidence-test success.
+- Verify active UI mode as well as frontend commit before browser acceptance.
+- Verify real browser consumers separately from backend HTTP readiness and frontend test counts.
 
 ## Event index
 
@@ -86,3 +93,7 @@ CONTEXT_RESCOPED
 - #20: `5e88fd8c-ced9-46a8-8c99-38d4bcbfbce8` | 2026-10-09T13:32:14.026Z | STATE_CHANGE/context_rescoped | incident=`fe943901-86b6-4fe9-a0ac-5ec34198fe38` | lesson_key=`context-pack-rescope` | event_sha256=`d3f1bf6aa29164b045d26f1f8d0210c476bd4438ee023e1b060469bfa00ede50`
 - #21: `8b8bd493-2acd-4f58-bcc6-e0ad751efce7` | 2026-10-09T13:33:21.449Z | GATE/final_closure_gate_documentation_corrected | incident=`7dad30d9-a6a6-48b0-a2a9-8578f6fe657d` | lesson_key=`registry-admission-generated-reference` | event_sha256=`93300e726a2e693433343bb9256f859af3bcbb5824c51505234d062581c71464`
 - #22: `a5298097-7741-4594-8d18-5355860565c6` | 2026-10-09T13:34:05.023Z | STATE_CHANGE/backend_contract_ready_for_frontend_adoption | incident=`514f220b-a6b0-48b8-8f0a-5de385be77e9` | lesson_key=`manual-contract-consumer-adoption` | event_sha256=`9f3a1913f9b3962d5eb23a0a378d765a25d9609f84eb4212e0b721cf3ea989f2`
+- #23: `f55e58cf-7e14-48ee-826f-8aa1a672501e` | 2026-10-09T15:42:09.021Z | GAP/v190_live_manual_consumer_missing | incident=`4dd4826f-87ea-4c8d-aa16-e6ad8337539d` | lesson_key=`manual-contract-consumer-adoption` | event_sha256=`4c438657aeeec3bd70fc71e754896fc6022d36a701f4783a58b92b06405e0fe6`
+- #24: `6a014373-08e1-4635-a6ea-ae860bb92d4f` | 2026-10-09T15:54:07.223Z | ERROR/workspace_acceptance_mode_misidentified | incident=`3375ec15-c696-4195-a064-e9ffc20ff6d3` | lesson_key=`verify-active-workspace-mode` | event_sha256=`fbdb9ac8cfc0fe9c33104caf5e925187e84ce5d8e75be6291ed8db5bbc590e2b`
+- #25: `5943f36d-1ffd-4199-a047-b18a6181d054` | 2026-10-09T16:08:04.742Z | STATE_CHANGE/new_workspace_partial_acceptance | incident=`082209cc-4132-4476-ae65-973051a158b9` | lesson_key=`verify-active-workspace-mode` | event_sha256=`01322611685e733f3a8f99a8ef9eb7ec8fb987931507893733257fbb8f0d21a7`
+- #26: `641ebf76-b71c-46c4-8a1e-a0443ef7a699` | 2026-10-09T16:25:44.642Z | STATE_CHANGE/manual_interface_browser_acceptance | incident=`1d0de90f-3785-4c55-8955-27d3747d7d27` | lesson_key=`manual-interface-consumer-browser-evidence` | event_sha256=`b51f213213d9b36884e70e53e290630dc0037bf82156d709e872541c57f20dba`
