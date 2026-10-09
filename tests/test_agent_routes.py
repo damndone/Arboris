@@ -153,7 +153,7 @@ def test_chain_session_canonicalizes_client_head_against_durable_chain(
     packet["node_summary"] = {"params": {"covariance": "robust", "x": ["x1"]}}
     # The persisted kernel reader has its own owner validation; this test
     # exercises the HTTP projection of its result into initial Agent context.
-    monkeypatch.setattr("workbench.agent.context_tools._executed_covariance", lambda root, model_id: "nonrobust")
+    monkeypatch.setattr("workbench.agent.context_tools_support.node_tools._executed_covariance", lambda root, model_id: "nonrobust")
     packet.update(
         {
             "context_fingerprint": "client-preview-fingerprint",

@@ -33,7 +33,8 @@ FAMILY_LITERAL = re.compile(
 )
 
 BASELINE = {
-    "agent/context_tools.py": 3,
+    "agent/context_tools_support/model_tools.py": 2,
+    "agent/context_tools_support/summaries.py": 1,
     "agent/notebook/materialization.py": 7,
     "agent/notebook/service.py": 2,
     "agent/notebook/vocabulary.py": 1,

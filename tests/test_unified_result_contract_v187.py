@@ -179,7 +179,7 @@ def test_agent_evidence_projection_has_no_per_family_branches():
     Blocks 2 and 3 removed it from the design layer and from `result_shape`;
     leaving it in the consumer just relocates the cost of adding a family.
     """
-    source = (REPO / "backend/workbench/agent/context_tools.py").read_text()
+    source = "\n".join(p.read_text() for p in (REPO / "backend/workbench/agent/context_tools_support").glob("*.py"))
     offenders = re.findall(
         r'model_type\s*==\s*"(ordinal_logit|multinomial_logit|survival_cox'
         r'|quantile_regression|time_series\.ets)"',
