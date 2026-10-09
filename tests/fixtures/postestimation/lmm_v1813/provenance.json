@@ -1,0 +1,38 @@
+{
+  "stata_binary": "/Applications/Stata/StataMP.app/Contents/MacOS/stata-mp",
+  "stata_language_version": "18 (do-file compatibility setting, not binary version)",
+  "R_environment_source": "native_r.json:environment",
+  "source_sha256": {
+    "tests/fixtures/admission/linear_mixed_effects/data.csv": "f971e489477c8c912580aa09b2f0327334f0e12a2f9d5313a5e95f9ccf333828",
+    "tests/fixtures/postestimation/lmm_v1811/random_slope.csv": "8daaa586b83bf865b08f59e5af9fa2a29dc2d0b6069069cd98e10f9fedea91d3"
+  },
+  "reference_definitions": {
+    "sample": "Complete cases of y,arm,time,x,g, retained identically in each pair",
+    "full_fixed": "y ~ arm * time + x",
+    "restricted_fixed": "y ~ arm * time",
+    "fit_method": "ML",
+    "random_intercept": "(1|g)",
+    "random_slope": "(1+time|g), unstructured intercept/slope covariance",
+    "LR": "2*(full logLik - restricted logLik), chi-square df=1; numerical quantity only",
+    "margins": "Fixed-only population response; x beta_x; time beta_time + sample share(arm=b)*beta_arm:time",
+    "margins_SE": "Delta method using the full fixed-effect GLS covariance",
+    "R_prediction_check": "Central difference h=1e-4 of predict(...,re.form=NA)",
+    "Stata_prediction": "margins,dydx(x/time) predict(xb)"
+  },
+  "genuine_native_outputs": [
+    "native_r.json (written directly by R/jsonlite)",
+    "native_stata.csv (written directly by Stata file write)"
+  ],
+  "sensitive_logs": "License-bearing Stata batch log kept only in temporary staging; only product/version header extracted",
+  "Stata_environment": {
+    "app_bundle_version": "18.0.120",
+    "bundle_identifier": "com.stata.stata18",
+    "macOS": "15.1",
+    "architecture": "arm64",
+    "source": "installed executable app Info.plist; batch output provides numerical results"
+  },
+  "scripts_sha256": {
+    "generate_reference.do": "17bb15428f6708201e73702ca56260e61c16192e0623dd24ea14ad198c5cd2fc",
+    "generate_reference.R": "db099e36c07f91ddf0f7633f47e5c261f541888f0ddcee9a249065c5c1d432d8"
+  }
+}

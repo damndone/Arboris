@@ -1,0 +1,35 @@
+{
+  "tolerance_changes": false,
+  "production_changes": false,
+  "native_R_exit_code": 0,
+  "native_Stata_exit_code": 0,
+  "initial_owner_evaluator": {
+    "exit_code": 1,
+    "error": "TypeError: unsupported operand type(s) for -: 'float' and 'list'",
+    "cause": "R delta-method standard error retained a 1x1 matrix in JSON",
+    "repair": "Scalar serialization via as.numeric; no numerical formula or tolerance change"
+  },
+  "final_owner_evaluator": {
+    "exit_code": 1,
+    "random_intercept": "FAIL: interaction-aware time derivative and standard error mismatch",
+    "random_slope": "FAIL: interaction-aware time derivative and standard error mismatch",
+    "direct_lr": "NOT_MODEL_BASED_VARIANCE"
+  },
+  "focused_evidence_tests": {
+    "result": "4 passed",
+    "elapsed_seconds": 0.83,
+    "meaning": "Native agreement, numerical subset, preserved semantic failure, and closed admission; not LR/margins release validation"
+  },
+  "NB1_R_inventory": {
+    "glmmTMB": "not installed in active R namespaces/library paths",
+    "lme4": "2.0.1",
+    "MASS": "7.3.65",
+    "marginaleffects": "1.0.0",
+    "NB1_native_reestimation": "NOT RUN; no package installation or oracle modification"
+  },
+  "live_evidence_guard": {
+    "result": "4 passed",
+    "elapsed_seconds": 1.43,
+    "meaning": "Recompute current owner estimates during pytest; preserved time derivative and SE FAIL, admission remains closed."
+  }
+}

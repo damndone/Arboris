@@ -1,0 +1,62 @@
+{
+  "environment": {
+    "R": "R version 4.6.0 (2026-04-24)",
+    "packages": {
+      "lme4": "2.0.1",
+      "jsonlite": "2.0.0",
+      "glmmTMB": null,
+      "marginaleffects": "1.0.0",
+      "MASS": "7.3.65"
+    }
+  },
+  "random_intercept": {
+    "nobs": 360,
+    "same_sample": true,
+    "random_structure": "(1|g)",
+    "converged": true,
+    "singular": false,
+    "loglik_full": -391.748547516444,
+    "loglik_restricted": -479.389781625151,
+    "statistic": 175.282468217414,
+    "df": 1,
+    "p_value": 5.19425372334948e-40,
+    "arm_b_share": 0.5,
+    "margins": {
+      "x": {
+        "estimate": 0.549463552874332,
+        "std_error": 0.0359980200289947,
+        "prediction_derivative": 0.549463552874365
+      },
+      "time": {
+        "estimate": 0.39156183136528,
+        "std_error": 0.0185443508096192,
+        "prediction_derivative": 0.391561831365401
+      }
+    }
+  },
+  "random_slope": {
+    "nobs": 360,
+    "same_sample": true,
+    "random_structure": "(1+time|g)",
+    "converged": true,
+    "singular": false,
+    "loglik_full": -460.317486109072,
+    "loglik_restricted": -535.157761470837,
+    "statistic": 149.68055072353,
+    "df": 1,
+    "p_value": 2.03603022903639e-34,
+    "arm_b_share": 0.5,
+    "margins": {
+      "x": {
+        "estimate": 0.49961031775185,
+        "std_error": 0.0352550219442452,
+        "prediction_derivative": 0.499610317751925
+      },
+      "time": {
+        "estimate": 0.401388515255411,
+        "std_error": 0.0424604455729236,
+        "prediction_derivative": 0.401388515255523
+      }
+    }
+  }
+}
