@@ -10,16 +10,16 @@ STARTED
 
 ## Metrics
 
-- Failure frequency: N/A (sample=0)
-- Repeat rate: N/A (sample=0)
-- Recurrence rate: N/A (sample=0)
-- MTTR: N/A (sample=0; unresolved=0)
+- Failure frequency: 4/12 (33.3%; 33.3 per 100 events)
+- Repeat rate: 0/4 (0.0%)
+- Recurrence rate: 0/4 (0.0%)
+- MTTR: median=0 ms (sample=2; unresolved=2)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
 - Gate waste rate: N/A (sample=0)
 - Same-state retry rate: N/A (sample=0)
-- Token waste: N/A (sample=0)
+- Token waste: N/A (sample=0; coverage=0/1)
 
 ## All failures
 
@@ -27,19 +27,25 @@ STARTED
 
 ## All errors
 
-- None recorded.
+- #9 2026-10-08T22:18:48.255Z `backdrop_filter_contains_fixed_overlay`; cause_status: `known`; cause: The new top bar uses backdrop-filter; that makes it the containing block for position:fixed descendants, so the create-project dialog opened from the project menu was laid out inside the 48 px bar and clipped.; resolution: `resolved`; lesson: Overlays that must cover the window render through a portal; filters, transforms and backdrop-filters on an ancestor capture fixed positioning.
+- #10 2026-10-08T22:18:48.255Z `search_button_dead_on_home`; cause_status: `known`; cause: The search button dispatched a synthetic Cmd+K, and project home did not mount the search palette at all, so the button did nothing there.; resolution: `resolved`; lesson: Wire a control to an explicit event or API, and test it on every page it appears on.
 
 ## All gaps
 
-- None recorded.
+- #2 2026-10-08T20:11:56.377Z `manual_parity_gap_operations_agent_only`; cause_status: `known`; cause: The Agent workflow declares 109 step operations, but the UI can call only model runs (POST /runs), a few data operations and statistical exploration. There is no HTTP route that executes a workflow step without the Agent; the CLI calls WorkflowExecutor directly. Reports can only be created through the AI report route.; resolution: `open`; lesson: An Agent capability with no direct route is a feature the user cannot reach without a model; give every operation one declared execution path and let both the UI and the Agent call it.
+- #6 2026-10-08T21:13:07.916Z `dev_mode_open_time_cold_compile`; cause_status: `known`; cause: First open-time measurement put the new shell at 1.60x the classic one; it included Vite compiling the new modules on first request. Warm runs measured 1.00x and 0.93x.; resolution: `open`; lesson: Compare page timings only after a warm-up run, and settle budgets on production builds.
 
 ## All waste
 
-- None recorded.
+- #5 2026-10-08T21:13:07.916Z `hidden_pane_froze_transitions_in_audit`; cause_status: `known`; cause: The contrast audit ran while the browser pane was hidden; CSS transitions do not advance there, so a theme switch left segmented controls at their light background and the audit reported 1.12 for selected items in dark.; resolution: `resolved`; lesson: Before measuring computed colours or sizes in a possibly hidden page, finish running transitions or the readings are their start values.
 
 ## Root causes and solutions
 
-- None recorded.
+- `every-agent-operation-has-a-direct-route`: occurrences=1; cause_status: `known`; root cause: The Agent workflow declares 109 step operations, but the UI can call only model runs (POST /runs), a few data operations and statistical exploration. There is no HTTP route that executes a workflow step without the Agent; the CLI calls WorkflowExecutor directly. Reports can only be created through the AI report route.; solution: `open`
+- `explicit-open-events`: occurrences=1; cause_status: `known`; root cause: The search button dispatched a synthetic Cmd+K, and project home did not mount the search palette at all, so the button did nothing there.; solution: `resolved`
+- `finish-transitions-before-measuring`: occurrences=1; cause_status: `known`; root cause: The contrast audit ran while the browser pane was hidden; CSS transitions do not advance there, so a theme switch left segmented controls at their light background and the audit reported 1.12 for selected items in dark.; solution: `resolved`
+- `portal-window-overlays`: occurrences=1; cause_status: `known`; root cause: The new top bar uses backdrop-filter; that makes it the containing block for position:fixed descendants, so the create-project dialog opened from the project menu was laid out inside the 48 px bar and clipped.; solution: `resolved`
+- `warm-up-before-timing-dev-builds`: occurrences=1; cause_status: `known`; root cause: First open-time measurement put the new shell at 1.60x the classic one; it included Vite compiling the new modules on first request. Warm runs measured 1.00x and 0.93x.; solution: `open`
 
 ## Added tests
 
@@ -47,12 +53,33 @@ STARTED
 
 ## New rules
 
-- No rule candidate recorded.
+- `every-agent-operation-has-a-direct-route`: line experience occurrence(s)=1
+- `explicit-open-events`: line experience occurrence(s)=1
+- `finish-transitions-before-measuring`: line experience occurrence(s)=1
+- `portal-window-overlays`: line experience occurrence(s)=1
+- `warm-up-before-timing-dev-builds`: line experience occurrence(s)=1
 
 ## Future guidance
 
-- No guidance recorded.
+- An Agent capability with no direct route is a feature the user cannot reach without a model; give every operation one declared execution path and let both the UI and the Agent call it.
+- Before measuring computed colours or sizes in a possibly hidden page, finish running transitions or the readings are their start values.
+- Compare page timings only after a warm-up run, and settle budgets on production builds.
+- Keep the controls users rely on when moving them; removing one is a regression even if it moved to Settings.
+- Overlays that must cover the window render through a portal; filters, transforms and backdrop-filters on an ancestor capture fixed positioning.
+- Placing old pieces into new regions is not a redesign; each region needs content designed for its size (a tree for a 280px map, a result view for the stage) before the user sees it.
+- Wire a control to an explicit event or API, and test it on every page it appears on.
 
 ## Event index
 
 - #1: `d87e83e6-d582-40ad-a329-ff4d41757fd5` | 2026-10-08T20:11:19.145Z | STATE_CHANGE/line_started | incident=`b052cd2e-cfd3-421c-a295-7c96c29e1c42` | lesson_key=`frozen-context-before-start` | event_sha256=`318331c28864039e4e749d4eb994c413727e47fbfa30a017b2318d2c3f238a93`
+- #2: `f80a4d91-59df-4a5c-8ca3-f3ac42c21f68` | 2026-10-08T20:11:56.377Z | GAP/manual_parity_gap_operations_agent_only | incident=`b858b8f4-5fd9-4752-aa68-2fbe49dd6c30` | lesson_key=`every-agent-operation-has-a-direct-route` | event_sha256=`a38e4b7317baad775c4c5f6fbc0fdcb019b33316868af5eba4d46aa67ec57aca`
+- #3: `a84c4996-50e1-4d65-bd82-27768b53a40d` | 2026-10-08T20:55:26.325Z | STATE_CHANGE/step1_design_tokens_complete | incident=`c17cc3df-8b06-4607-ba9a-e6c9d18a426b` | lesson_key=`no-colour-fallbacks-in-var` | event_sha256=`b5bf94448c5a4ff051d6411e3d8d27665c4b09371e951df663b5ddf9b9178e84`
+- #4: `5e65a037-df5b-45b9-b056-409d4fc73c06` | 2026-10-08T21:13:07.916Z | STATE_CHANGE/step2_workspace_shell_complete | incident=`d06572e7-8449-4d04-b392-8a532362f4b1` | lesson_key=`new-shell-takes-slots-not-state` | event_sha256=`8342e4d50d2c8d7ee4d17da5dd70b5f3eaa842e1cfd8997384c10985c2443319`
+- #5: `2382088f-9dad-4ab8-a07e-2cd4e02836f4` | 2026-10-08T21:13:07.916Z | WASTE/hidden_pane_froze_transitions_in_audit | incident=`d794d408-1225-4159-aa0a-93ef5af3222e` | lesson_key=`finish-transitions-before-measuring` | event_sha256=`93a03770f7e956756ee30fce5ecb825584b1c862ac79a0373c51a14b422dce58`
+- #6: `d82e917f-32c0-4e54-a2e1-ecaeb8e9ea9e` | 2026-10-08T21:13:07.916Z | GAP/dev_mode_open_time_cold_compile | incident=`24afa0d9-eac2-4f99-8c10-666eaa2077a8` | lesson_key=`warm-up-before-timing-dev-builds` | event_sha256=`bdcbf84065cd11cea2f7f4743b44ec54da8afce98dcc402ec039f8f627e45cdb`
+- #7: `96fa3667-3a2e-43b0-ab58-898908a7c24f` | 2026-10-08T22:03:18.253Z | REVIEW/user_review_1_shell_far_from_acceptable | incident=`03a1a847-0b88-4ef3-9f3c-c77d838a9ee4` | lesson_key=`design-content-for-the-region` | event_sha256=`416b7dfa7c7755ca9b4b449b9c266debefaadf46ece0e0549dd36b9c1faa28ae`
+- #8: `eeacb98e-390e-4a80-99f1-2cb0549bf865` | 2026-10-08T22:18:48.255Z | REVIEW/user_review_2_topbar_search_modal_composer | incident=`d6cba83e-7715-4b6f-8a1e-15ff55dec3d7` | lesson_key=`keep-relied-on-controls` | event_sha256=`48ef3d572db0f6079d54b7ea2c0b0d26ec1aba990d473849d3a94a2e4bf911a3`
+- #9: `1531f3d6-a71f-45d6-9b2b-fc703b995a56` | 2026-10-08T22:18:48.255Z | ERROR/backdrop_filter_contains_fixed_overlay | incident=`890dba62-7c5e-4db8-881e-75b1e7bb7399` | lesson_key=`portal-window-overlays` | event_sha256=`7938fb19e2322b17d0d9ef7aa61c603346fbd0404aed21171197bc64b00c4e04`
+- #10: `1b847666-9138-454b-a665-f511e271c8e6` | 2026-10-08T22:18:48.255Z | ERROR/search_button_dead_on_home | incident=`1403e274-858c-4386-8267-e5feaee93d82` | lesson_key=`explicit-open-events` | event_sha256=`b7a58da0d990571c4a75c8d8ff4ba56ababb1f0e903274b2eacdf667e5121c29`
+- #11: `fba7a491-a25a-422c-8a2d-ec6af6b2f67e` | 2026-10-09T16:10:46.428Z | STATE_CHANGE/adopt_v1813_manual_contract | incident=`88d059ac-e012-49be-93dd-e8e49e99e083` | lesson_key=`manual-contract-consumer-adoption` | event_sha256=`55aa79daf91ef49c8072de2f18f0645b199b171f4d4597aebe67bb1ea91fba06`
+- #12: `c207b3c0-8d6f-431d-a5ac-0aedb27a6b32` | 2026-10-09T16:25:44.642Z | STATE_CHANGE/manual_interface_browser_acceptance | incident=`26060998-fbda-42a7-9896-39405c13fb43` | lesson_key=`manual-interface-consumer-browser-evidence` | event_sha256=`63e623b73e5aec5d98c1879ae1e4d701568e98919d9d06c4700c200c82d722ef`

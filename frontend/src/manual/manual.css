@@ -1,0 +1,16 @@
+.manual-panel { padding: 20px; color: var(--label); background: var(--bg-card); min-width: 0; overflow: auto; height: 100%; box-sizing: border-box; }
+.manual-panel header, .manual-actions { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:16px; }
+.manual-panel h2 { margin:0; flex:1; }
+.manual-field { display:grid; gap:5px; margin:10px 0; }
+.manual-field small, .manual-panel small { color:var(--label-secondary); }
+.manual-panel input:not([type=checkbox]), .manual-panel select, .manual-panel textarea { box-sizing:border-box; width:100%; color:var(--label); background:var(--bg-card-2); border:1px solid var(--separator); padding:8px; border-radius:6px; }
+.manual-panel textarea { min-height:90px; font-family:inherit; }
+.manual-panel fieldset, .manual-panel article { border:1px solid var(--separator); border-radius:8px; padding:12px; margin:12px 0; min-width:0; }
+.manual-panel button { padding:6px 10px; }
+.manual-panel pre { white-space:pre-wrap; overflow-wrap:anywhere; }
+.manual-panel [role=alert] { color:var(--label); border-left:3px solid var(--label-secondary); padding:10px; }
+.manual-catalog { display:flex; gap:8px; flex-wrap:wrap; max-height:240px; overflow:auto; padding:8px 0; }
+.manual-catalog button { text-align:left; }
+.manual-facts { max-height:300px; overflow:auto; }
+.manual-facts label { display:block; padding:6px; }
+.manual-panel a { color:var(--tint); margin-right:12px; }

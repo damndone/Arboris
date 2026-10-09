@@ -29,6 +29,7 @@ import { MapTree } from "./MapTree";
 import { StageHost } from "./StageHost";
 import { WorkspaceBottomPanel, type BottomTab } from "./WorkspaceBottomPanel";
 import { WorkspaceShell, type MapPresentation } from "./WorkspaceShell";
+import { OperationsPanel } from "../manual/OperationsPanel";
 import { WorkspaceTopbar } from "./WorkspaceTopbar";
 
 export interface WorkbenchWorkspaceProps {
@@ -86,6 +87,13 @@ export function WorkbenchWorkspace({
 }: WorkbenchWorkspaceProps) {
   const { state, dispatch } = useWorkbench();
   const { model } = useLineage();
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analysisSearch, setAnalysisSearch] = useState("");
+  useEffect(() => {
+    const open = (event: Event) => {setAnalysisSearch(String((event as CustomEvent).detail ?? ""));setAnalyzing(true);};
+    window.addEventListener("workbench:analyze", open);
+    return () => window.removeEventListener("workbench:analyze", open);
+  }, []);
   const forest = useForest();
   const navigate = useNavigate();
   const detailSlots: DetailSlots = {
@@ -119,14 +127,24 @@ export function WorkbenchWorkspace({
       projectRoot={projectRoot}
       view={state.view}
       controls={controls}
-      actions={<TopbarActions />}
+      actions={<><button type="button" className="ws-button" onClick={() => {setAnalysisSearch("");setAnalyzing(true);}}>Analyze</button><TopbarActions /></>}
       newAnalysisLabel={newAnalysis?.label}
-      onView={dispatch.setView}
-      onHome={() => dispatch.setView("home")}
+      onView={view => {setAnalyzing(false);dispatch.setView(view);}}
+      onHome={() => {setAnalyzing(false);dispatch.setView("home");}}
       onOpenSettings={onOpenSettings}
       onNewAnalysis={newAnalysis?.open}
     />
   );
+  const operationPanel = <OperationsPanel key={`${projectRoot}:${runId}`} projectRoot={projectRoot} runId={runId} initialSearch={analysisSearch}
+    models={(forest?.forest.nodes ?? []).filter(n => n.kind === "model").flatMap(n => n.runs.map(owner => ({runId: owner, nodeId: n.opNodeId, label: n.title})))}
+    onClose={() => setAnalyzing(false)} onRefresh={() => forest?.refetch?.()}
+    onOpenRun={owner => {forest?.setActiveRunId(owner);setAnalyzing(false);dispatch.setView("table");}}
+    onDedicated={id => {
+      setAnalyzing(false);
+      if (["data.import", "model.draft"].includes(id)) newAnalysis?.open();
+      else if (id === "operation.multi_step") setAnalyzing(true);
+      else dispatch.setView(id.startsWith("data.") || id === "code.execute" ? "data" : id === "model.custom" ? "notebook" : id === "table.export" ? "table" : "graph");
+    }}/>;
   const main = (
     <WorkbenchMain
       projectRoot={projectRoot}
@@ -140,7 +158,7 @@ export function WorkbenchWorkspace({
     return (
       <div className="ws-page" data-testid="workspace-home">
         <header className="ws-topbar" role="banner">{topbarFor()}</header>
-        <main className="ws-page__body" aria-label="Project home">{main}</main>
+        <main className="ws-page__body" aria-label="Project home">{analyzing ? operationPanel : main}</main>
         {overlays}
       </div>
     );
@@ -148,7 +166,7 @@ export function WorkbenchWorkspace({
 
   const analysis = state.view === "graph";
   const hasOpenItem = stagePanel !== null;
-  const stageOpen = analysis ? hasOpenItem && !stageFolded : true;
+  const stageOpen = analyzing ? true : analysis ? hasOpenItem && !stageFolded : true;
   const bottomTabs: BottomTab[] = [
     { id: "runs", label: "Runs", render: () => <RunsTable projectRoot={projectRoot} /> },
     { id: "logs", label: "Logs", render: () => <LogsPanel runId={runId} projectRoot={projectRoot} /> },
@@ -181,7 +199,7 @@ export function WorkbenchWorkspace({
         stageOpen={stageOpen}
         map={map}
         stage={
-          analysis ? (
+          analyzing ? operationPanel : analysis ? (
             <DetailSlotsContext.Provider value={detailSlots}>
               <StageHost tabs={stageTabs} panel={stagePanel} onFold={() => setStageFolded(true)} />
             </DetailSlotsContext.Provider>
