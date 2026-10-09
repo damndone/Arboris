@@ -97,3 +97,25 @@ def test_run_detail_serves_term_labels_from_declared_labels(tmp_path) -> None:
         "地区: 南方",
         "地区: 西部",
     ]
+
+
+@pytest.mark.parametrize("column", ["arm", "arm:label", "o'brien", 'say "hi"', "back\\slash"])
+def test_lmm_treatment_interactions_preserve_quoted_columns(column):
+    from workbench.formula_terms import quote_column
+
+    left = f"C({quote_column(column)}, Treatment(reference='a'))[T.b:later]"
+    right = quote_column("time:visit")
+    term = f"{left}:{right}"
+    assert term_display_label(term) == f"{column}: b:later × time:visit"
+    assert term_display_label(f"{left}:C(Q('site'))[T.south]") == f"{column}: b:later × site: south"
+
+
+def test_lmm_labels_do_not_merge_terms_or_change_report_evidence():
+    terms = ["C(Q('arm'), Treatment(reference='a'))[T.b]", "C(Q('cohort'), Treatment(reference='a'))[T.b]"]
+    coefficients = {term: {"estimate": i + .25, "source_id": f"kernel.params.{term}"} for i, term in enumerate(terms)}
+    table = build_regression_table([( "m", {"coefficients": coefficients})], variable_labels={"arm": "Group", "cohort": "Group"})
+    assert [row["label"] for row in table["rows"]] == ["Group: b", "Group: b"]
+    assert [row["term"] for row in table["rows"]] == terms
+    for row in table["rows"]:
+        for key, value in coefficients[row["term"]].items():
+            assert row["models"]["m"][key] == value
