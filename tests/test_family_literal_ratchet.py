@@ -42,7 +42,7 @@ BASELINE = {
     "agent/planner_evaluation.py": 2,
     "agent/recipe_contracts.py": 2,
     "agent/recipes/lmm_public_result_view.py": 2,
-    "agent/workflow_capability_adapters.py": 3,
+    "agent/workflow_capability_adapters.py": 2,
     "agent/workflow_runtime.py": 3,
     "analysis_loop/resolver.py": 1,
     "diagnostic_preview/guidance.py": 1,

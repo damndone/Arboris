@@ -217,3 +217,17 @@ def test_validation_plan_must_be_explicitly_submitted_before_freeze() -> None:
 
     with pytest.raises(error_type, match="missing ARMA-GARCH input field: validation"):
         contract_type.from_dict(payload)
+
+
+def test_transform_choices_share_the_contract_declaration():
+    from typing import get_args, get_type_hints
+    from workbench.contracts.model.arma_garch import ArmaGarchAnalysisContract, TRANSFORM_IDS
+    from workbench.engine.packs.arma_garch import transforms
+    from workbench.agent.workflow_capability_adapters import workflow_capability_request_schema
+
+    assert get_args(get_type_hints(ArmaGarchAnalysisContract)["transform"]) == TRANSFORM_IDS
+    assert transforms.TRANSFORM_IDS is TRANSFORM_IDS
+    schema = workflow_capability_request_schema("arma_garch")
+    assert schema["properties"]["options"]["properties"]["transform"]["enum"] == list(TRANSFORM_IDS)
+    for transform in TRANSFORM_IDS:
+        assert ArmaGarchAnalysisContract.from_dict({**_minimal_payload(), "transform": transform}).transform == transform
