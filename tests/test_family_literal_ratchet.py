@@ -48,20 +48,16 @@ BASELINE = {
     "diagnostic_preview/guidance.py": 1,
     "engine/recommended_actions.py": 5,
     "engine/stages/diagnostics.py": 5,
-    "engine/stages/report.py": 2,
     "engine/stages/ytype.py": 1,
     "figure_context.py": 1,
     "lineage/role_inputs_from_ctx.py": 2,
     "model_options.py": 1,
-    "narrative/claims.py": 2,
-    "orchestrator/__init__.py": 8,
-    "orchestrator/_reliability_checks.py": 4,
-    "orchestrator/_report_build.py": 4,
+    "orchestrator/__init__.py": 3,
     "prediction.py": 5,
     "repository/run_repository.py": 3,
     "services/draft_materialization.py": 2,
     "services/lmm_result_adapter.py": 1,
-    "services/run_service.py": 6
+    "services/run_service.py": 3
 }
 
 

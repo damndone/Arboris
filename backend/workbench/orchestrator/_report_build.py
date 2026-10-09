@@ -54,23 +54,12 @@ def _family_summary(
     exposure_col: str | None,
     fallback_n: int,
 ) -> str | None:
-    n = int(result.get("nobs", fallback_n))
-    if model_type in ("ols", "ols_robust", "ols_hac"):
-        if robust_se_dp is not None and robust_se_dp.reason is not None:
-            se_type = robust_se_dp.reason.chosen_params.get("variant", robust_se_dp.selected)
-        elif robust_se_dp is not None:
-            se_type = robust_se_dp.selected
-        else:
-            se_type = "HC1"
-        return f"OLS ({se_type}, n={n})"
-    if model_type == "logit":
-        return f"Logit (n={n})"
-    if model_type == "poisson_rate":
-        exp = result.get("exposure_col") or exposure_col
-        return f"Poisson rate (exposure={exp}, n={n})" if exp else f"Poisson (n={n})"
-    if model_type == "poisson":
-        return f"Poisson (n={n})"
-    return None
+    from ..contracts.model.presentation import model_summary
+
+    return model_summary(
+        model_type, result, robust_se_dp=robust_se_dp,
+        exposure_col=exposure_col, fallback_n=fallback_n,
+    )
 
 
 def _write_model_result(

@@ -19,6 +19,7 @@ import numpy as np
 import pandas as pd
 
 from ..common.errors import OperationValidationError
+from .execution_profile import ols_request_covariance, panel_request_covariance
 from .result_shapes import (
     ResultShapeError,
     get_result_shape,
@@ -73,6 +74,10 @@ class ModelFamilyContract:
     #: -- the shared adapter does the rest, and neither the engine nor the
     #: adapter ever asks which family it is holding.
     survey_glm_family: str | None = None
+    #: Request metadata and covariance resolution, shared by direct and UI runs.
+    request_contract_version: str | None = None
+    source_eligible_covariances: tuple[str, ...] = ()
+    request_covariance: Callable[[str, Mapping[str, Any]], str] | None = None
     supported_split_kinds: tuple[str, ...] = ()
     requires_branch_figures: bool = False
     context_spec_fields: tuple[str, ...] = ()
@@ -553,6 +558,9 @@ MODEL_FAMILY_CONTRACTS: dict[str, ModelFamilyContract] = {
     ),
     "ols": ModelFamilyContract(
         family="ols",
+        request_contract_version="ols_result_contract_v1",
+        source_eligible_covariances=("unadjusted",),
+        request_covariance=ols_request_covariance,
         survey_glm_family="gaussian",
         required_spec_fields=(),
         required_spec_field_mode="all",
@@ -678,6 +686,7 @@ MODEL_FAMILY_CONTRACTS: dict[str, ModelFamilyContract] = {
     ),
     "panel_ols": ModelFamilyContract(
         family="panel_ols",
+        request_covariance=panel_request_covariance,
         required_spec_fields=("entity_col", "time_col"),
         required_spec_field_mode="any",
         forbidden_spec_fields=(),
@@ -715,6 +724,7 @@ MODEL_FAMILY_CONTRACTS: dict[str, ModelFamilyContract] = {
     ),
     "did": ModelFamilyContract(
         family="did",
+        request_covariance=panel_request_covariance,
         required_spec_fields=("entity_col", "time_col"),
         required_spec_field_mode="all",
         forbidden_spec_fields=(),
