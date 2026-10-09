@@ -78,7 +78,7 @@ describe("WorkspaceShell", () => {
     expect(shell()).toHaveAttribute("data-layout", "lineage");
   });
 
-  test("⌘. folds the Agent into a rail without losing its state", () => {
+  test("⌘. folds the Agent into a floating bubble without losing its state", () => {
     renderShell();
     fireEvent.click(screen.getByTestId("agent-state"));
     fireEvent.keyDown(window, { key: ".", metaKey: true });
@@ -87,6 +87,53 @@ describe("WorkspaceShell", () => {
     fireEvent.click(screen.getByRole("button", { name: "Show the Agent" }));
     expect(shell()).toHaveAttribute("data-agent", "open");
     expect(screen.getByTestId("agent-state")).toHaveTextContent("1");
+  });
+
+
+  test("bubble and floating modes release the grid column and keep conversation state", () => {
+    renderShell();
+    fireEvent.click(screen.getByTestId("agent-state"));
+    fireEvent.click(screen.getByRole("button", { name: "Fold the Agent" }));
+    expect(shell().style.getPropertyValue("--ws-agent")).toBe("0px");
+    fireEvent.click(screen.getByRole("button", { name: "Show the Agent" }));
+    expect(screen.getByRole("complementary", { name: "Agent" })).toHaveAttribute("data-mode", "floating");
+    expect(shell().style.getPropertyValue("--ws-agent")).toBe("0px");
+    fireEvent.click(screen.getByRole("button", { name: "Collapse conversation history" }));
+    expect(screen.getByRole("complementary", { name: "Agent" })).toHaveAttribute("data-compact", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Fully expand the Agent" }));
+    expect(shell().style.getPropertyValue("--ws-agent")).toBe("380px");
+    expect(screen.getByTestId("agent-state")).toHaveTextContent("1");
+    expect(screen.getByRole("complementary", { name: "Agent" })).toHaveAttribute("data-compact", "false");
+  });
+  test("width is adjustable in both docked and floating modes", () => {
+    renderShell();
+    fireEvent.keyDown(screen.getByRole("separator", { name: "Agent width" }), { key: "ArrowLeft" });
+    expect(shell().style.getPropertyValue("--ws-agent")).toBe("400px");
+    fireEvent.click(screen.getByRole("button", { name: "Float the Agent" }));
+    fireEvent.keyDown(screen.getByRole("separator", { name: "Agent width" }), { key: "ArrowRight" });
+    expect(screen.getByRole("separator", { name: "Agent width" })).toHaveAttribute("aria-valuenow", "380");
+    for (let i = 0; i < 40; i++) fireEvent.keyDown(screen.getByRole("separator", { name: "Agent width" }), { key: "ArrowRight" });
+    expect(screen.getByRole("separator", { name: "Agent width" })).toHaveAttribute("aria-valuenow", "280");
+  });
+  test("docked resizing reserves space for the map and results", () => {
+    const previous = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 900 });
+    try {
+      renderShell();
+      for (let i = 0; i < 30; i++) fireEvent.keyDown(screen.getByRole("separator", { name: "Agent width" }), { key: "ArrowLeft" });
+      expect(shell().style.getPropertyValue("--ws-agent")).toBe("420px");
+      expect(screen.getByRole("separator", { name: "Agent width" })).toHaveAttribute("aria-valuemax", "420");
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: previous });
+    }
+  });
+  test("bubble moves with the keyboard without opening and stays in bounds", () => {
+    localStorage.setItem("workbench:agent-open", "false");
+    renderShell();
+    const bubble = screen.getByRole("button", { name: "Show the Agent" });
+    for (let i = 0; i < 80; i++) fireEvent.keyDown(bubble, { key: "ArrowLeft" });
+    expect(screen.getByRole("complementary", { name: "Agent" }).style.left).toBe("12px");
+    expect(shell()).toHaveAttribute("data-agent", "folded");
   });
 
   test("wide views borrow the wide stage in lineage first and give it back", () => {

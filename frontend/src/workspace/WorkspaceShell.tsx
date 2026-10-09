@@ -10,7 +10,6 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProp
 import type { ViewMode } from "../workbench/state/urlSchema";
 import {
   WIDE_VIEWS,
-  agentWidth,
   columnSpec,
   effectiveLayout,
   mapPresentation,
@@ -22,7 +21,7 @@ import {
   writeLayout,
   type Layout,
 } from "./layoutModel";
-import { AgentRailIcon, FoldRightIcon } from "./icons";
+import { AgentWindow, type AgentMode } from "./AgentWindow";
 import "./workspace.css";
 import "./agentColumn.css";
 
@@ -93,7 +92,10 @@ export function WorkspaceShell({ projectRoot, view, topbar, stageOpen, map, stag
   const shellRef = useRef<HTMLDivElement>(null);
   const shellWidth = useShellWidth(shellRef);
   const [layout, setLayoutState] = useState<Layout>(() => readLayout(projectRoot));
-  const [agentOpen, setAgentOpen] = useState(readAgentOpen);
+  const [agentMode, setAgentMode] = useState<AgentMode>(() => readAgentOpen() ? "docked" : "bubble");
+  const [agentSize, setAgentSize] = useState(380);
+  const agentOpen = agentMode !== "bubble";
+  const setMode = useCallback((mode: AgentMode) => { setAgentMode(mode); writeAgentOpen(mode !== "bubble"); }, []);
   // The Analysis map column shows by default; Data, Tables, Report and Plans
   // are wide documents, so their map column starts folded.
   const [analysisMapHidden, setAnalysisMapHidden] = useState(false);
@@ -110,9 +112,10 @@ export function WorkspaceShell({ projectRoot, view, topbar, stageOpen, map, stag
   }, [projectRoot]);
   const toggleLayout = useCallback(() => setLayout(layout === "results" ? "lineage" : "results"), [layout, setLayout]);
   const toggleAgent = useCallback(() => {
-    setAgentOpen((open) => {
-      writeAgentOpen(!open);
-      return !open;
+    setAgentMode((mode) => {
+      const next = mode === "bubble" ? "floating" : "bubble";
+      writeAgentOpen(next !== "bubble");
+      return next;
     });
   }, []);
 
@@ -131,12 +134,14 @@ export function WorkspaceShell({ projectRoot, view, topbar, stageOpen, map, stag
     return () => window.removeEventListener("keydown", onKey);
   }, [toggleAgent, toggleLayout]);
 
-  const spec = columnSpec(windowWidth());
   const effective = effectiveLayout(layout, view);
   const wideView = WIDE_VIEWS.has(view);
   const mapHidden = wideView ? wideMapHidden : analysisMapHidden;
+  const baseSpec = columnSpec(shellWidth);
+  const dockMax = Math.max(180, Math.min(720, shellWidth - (mapHidden ? 0 : baseSpec.map) - (stageOpen ? 240 : 0)));
+  const spec = { ...baseSpec, agent: Math.min(agentSize, dockMax), rail: 0 };
   const toggleMap = () => (wideView ? setWideMapHidden(!wideMapHidden) : setAnalysisMapHidden(!analysisMapHidden));
-  const regions = { layout: effective, stageOpen, mapHidden, agentOpen };
+  const regions = { layout: effective, stageOpen, mapHidden, agentOpen: agentMode === "docked" };
   const lineageWidth = mapWidthFor({ ...regions, layout: "lineage", stageOpen: true }, shellWidth, spec);
   const targetMap = mapWidthFor(regions, shellWidth, spec);
   const presentation = mapPresentation(regions);
@@ -165,7 +170,7 @@ export function WorkspaceShell({ projectRoot, view, topbar, stageOpen, map, stag
 
   const style = {
     "--ws-map": `${dragWidth ?? targetMap}px`,
-    "--ws-agent": `${agentWidth(spec, agentOpen)}px`,
+    "--ws-agent": `${agentMode === "docked" ? spec.agent : 0}px`,
   } as CSSProperties;
 
   return (
@@ -210,24 +215,7 @@ export function WorkspaceShell({ projectRoot, view, topbar, stageOpen, map, stag
       <main className="ws-stage" aria-label="Stage" hidden={!stageOpen}>
         <div className="ws-stage__surface">{stage}</div>
       </main>
-      <aside className="ws-agent" aria-label="Agent">
-        {!agentOpen && (
-          <div className="ws-agent__rail">
-            <button type="button" className="ws-icon-button" aria-label="Show the Agent" title="Show the Agent (⌘.)" onClick={toggleAgent}>
-              <AgentRailIcon />
-            </button>
-          </div>
-        )}
-        <div className="ws-agent__body" hidden={!agentOpen}>
-          <div className="ws-agent__header">
-            <h2 className="ws-agent__title">Agent</h2>
-            <button type="button" className="ws-icon-button" aria-label="Fold the Agent" title="Fold the Agent (⌘.)" onClick={toggleAgent}>
-              <FoldRightIcon />
-            </button>
-          </div>
-          <div className="ws-agent__content">{agent}</div>
-        </div>
-      </aside>
+      <AgentWindow mode={agentMode} setMode={setMode} width={agentMode === "docked" ? spec.agent : agentSize} maxWidth={agentMode === "docked" ? dockMax : 720} setWidth={setAgentSize} shellRef={shellRef}>{agent}</AgentWindow>
       <section className="ws-bottom" aria-label="Bottom panel">{bottom}</section>
     </div>
   );

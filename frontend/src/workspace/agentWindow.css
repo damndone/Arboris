@@ -1,0 +1,26 @@
+.ws-agent[data-mode="floating"], .ws-agent[data-mode="bubble"] {
+  position: absolute;
+  grid-area: auto;
+  z-index: 12;
+  border: var(--hairline) solid var(--border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-2);
+  overflow: visible;
+}
+.ws-agent[data-mode="bubble"] { border: 0; border-radius: 50%; background: transparent; }
+.ws-agent__bubble { width: 48px; height: 48px; min-height: 0; padding: 0; display: grid; place-items: center; border-radius: 50%; border: var(--hairline) solid var(--border); background: var(--bg-card); color: var(--tint); box-shadow: var(--shadow-2); cursor: grab; touch-action: none; }
+.ws-agent[data-mode="docked"] { position: relative; overflow: visible; }
+.ws-agent__body { overflow: hidden; border-radius: inherit; }
+.ws-agent__header .ws-agent__title { border: 0; background: transparent; color: var(--label); text-align: left; min-height: 36px; padding: 0; cursor: grab; touch-action: none; }
+.ws-agent__title span { margin-left: 8px; color: var(--label-secondary); }
+.ws-agent[data-moving="true"] { user-select: none; }
+.ws-agent__resize { position: absolute; left: -5px; top: 44px; bottom: 12px; width: 10px; cursor: col-resize; touch-action: none; border-radius: var(--radius-sm); }
+.ws-agent__resize:hover, .ws-agent__resize:focus-visible { background: var(--tint); }
+.ws-agent__bubble:focus-visible, .ws-agent__title:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+/* Only history folds away. Pending approvals, errors and operation status remain reachable. */
+.ws-agent[data-compact="true"] .wb-agent-terminal { display: none; }
+.ws-agent[data-compact="true"] .ws-agent__content { overflow-y: auto; }
+.ws-agent[data-compact="true"] .wb-agent-panel { height: auto; flex: 1; }
+/* Resizing follows the pointer directly; grid easing resumes on release. */
+.ws-shell:has(.ws-agent[data-moving="true"]) { transition: none; }
+.ws-agent[data-moving="true"] .ws-agent__title, .ws-agent[data-moving="true"] .ws-agent__bubble { cursor: grabbing; }
