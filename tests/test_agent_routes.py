@@ -686,8 +686,13 @@ def test_get_activity_projection_returns_durable_operation_and_diff(tmp_path: Pa
 
 
 def test_graph_fork_proposal_route_confirms_into_child_agent_without_child_run(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    def no_provider(*args, **kwargs):
+        raise AssertionError("Manual graph fork must not construct a provider")
+
+    monkeypatch.setattr("workbench.http.agent_routes.OpenAICompatibleModelAdapter", no_provider)
+    monkeypatch.setattr("workbench.http.agent_routes.load_llm_config", no_provider)
     project_root = tmp_path / "project"
     project_root.mkdir()
     _write_inspectable_run(project_root)

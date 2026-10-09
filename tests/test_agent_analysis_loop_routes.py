@@ -359,6 +359,10 @@ def test_analysis_loop_proposal_route_resolves_persisted_source_without_executio
     from test_agent_analysis_loop_resolver import _write_source
     from workbench.http import agent_routes
 
+    def no_provider(*args, **kwargs):
+        raise AssertionError("Manual analysis loop must not construct a provider")
+
+    monkeypatch.setattr(agent_routes, "OpenAICompatibleModelAdapter", no_provider)
     project_root = tmp_path / "project"
     project_root.mkdir()
     _write_source(project_root)
