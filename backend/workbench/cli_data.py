@@ -11,7 +11,8 @@ import typer.main
 
 
 def build_data_group(param: Callable, json_value: Callable, fail: Callable) -> Any:
-    from .agent.workflow_contracts import WORKFLOW_STEP_SPEC_CONTRACTS
+    from types import SimpleNamespace
+    from .contracts.model.genesis_schema import model_genesis_parameters
     from .data_operation_registry import data_operation_declarations
 
     group = typer.Typer(name="data")
@@ -70,7 +71,7 @@ def build_data_group(param: Callable, json_value: Callable, fail: Callable) -> A
         register(declaration.operation, declaration.workflow_operation_id, declaration)
     # The existing file-upload `run` command remains compatible. This entry
     # preserves an explicit transformed dataset's identity when fitting.
-    register("fit", "model.genesis", WORKFLOW_STEP_SPEC_CONTRACTS["model.genesis"])
+    register("fit", "model.genesis", SimpleNamespace(**model_genesis_parameters()))
 
     @group.command("confirm")
     def confirm(

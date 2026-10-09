@@ -152,7 +152,27 @@ run_stage() {
   local label="$1"
   shift
   banner "$label"
-  "$@" || fail=1
+  stage_number=$((stage_number + 1))
+  local started status log stderr_log stdout_pipe stderr_pipe stdout_tee stderr_tee
+  log="stage-${stage_number}.log"
+  stderr_log="stage-${stage_number}.stderr.log"
+  stdout_pipe="$GATE_ARTIFACT_DIR/stage-${stage_number}.stdout.pipe"
+  stderr_pipe="$GATE_ARTIFACT_DIR/stage-${stage_number}.stderr.pipe"
+  started="$(python3 "$METRICS_HELPER" clock)" || { fail=1; return; }
+  mkfifo "$stdout_pipe" "$stderr_pipe" || { fail=1; return; }
+  tee "$GATE_ARTIFACT_DIR/$log" < "$stdout_pipe" &
+  stdout_tee=$!
+  tee "$GATE_ARTIFACT_DIR/$stderr_log" < "$stderr_pipe" >&2 &
+  stderr_tee=$!
+  "$@" > "$stdout_pipe" 2> "$stderr_pipe"
+  status=$?
+  # Preserve both original streams and wait for durable log writes before
+  # recording completion; process substitution alone would not join tee.
+  wait "$stdout_tee" || status=1
+  wait "$stderr_tee" || status=1
+  rm -f "$stdout_pipe" "$stderr_pipe"
+  python3 "$METRICS_HELPER" stage "$GATE_ARTIFACT_DIR" "$label" "$started" "$status" "$log" || fail=1
+  [ "$status" -eq 0 ] || fail=1
 }
 
 resolve_pytest_python() {
@@ -204,7 +224,7 @@ resolve_pytest_python() {
 
 run_pytest() {
   resolve_pytest_python || return 1
-  "$PYTHON" -m pytest "$@"
+  "$PYTHON" -m pytest "$@" --durations=25 --junitxml="$GATE_ARTIFACT_DIR/stage-${stage_number}.junit.xml"
 }
 
 run_backend_full() {
@@ -220,7 +240,7 @@ run_golden() {
 }
 
 run_frontend_tests() {
-  ( cd frontend && npx vitest run )
+  ( cd frontend && npx vitest run --reporter=default --reporter=json --outputFile="$GATE_ARTIFACT_DIR/stage-${stage_number}.vitest.json" )
 }
 
 run_frontend_typecheck() {
@@ -237,7 +257,7 @@ run_gate_syntax() {
 }
 
 run_gate_script_tests() {
-  run_pytest tests/test_gate_script.py tests/test_gate_lock.py -q
+  run_pytest tests/test_gate_script.py tests/test_gate_lock.py tests/test_gate_metrics.py -q
 }
 
 run_domain_memory_preflight() {
@@ -322,7 +342,7 @@ run_quick() {
       frontend/*)
         has_frontend=1
         ;;
-      scripts/gate.sh|scripts/gate_lock.py|tests/test_gate_script.py|tests/test_gate_lock.py)
+      scripts/gate.sh|scripts/gate_lock.py|scripts/gate_metrics.py|tests/test_gate_script.py|tests/test_gate_lock.py|tests/test_gate_metrics.py)
         has_gate_script=1
         ;;
       backend/workbench/development_control/*|tests/test_devline_control_*.py|scripts/devline_control.py|AGENTS.md|.agent/development-control/*)
@@ -395,6 +415,17 @@ run_quick() {
   fi
 }
 
+METRICS_HELPER="$(dirname "$0")/gate_metrics.py"
+GATE_ARTIFACT_DIR="$(python3 "$METRICS_HELPER" init "$mode")" || exit 1
+stage_number=0
+finish_gate() {
+  local status=$?
+  trap - EXIT
+  python3 "$METRICS_HELPER" finish "$GATE_ARTIFACT_DIR" "$status" || status=1
+  printf '\nGate logs and timings: %s\n' "$GATE_ARTIFACT_DIR"
+  exit "$status"
+}
+trap finish_gate EXIT
 preflight_shared_deps
 preflight_exclusive
 run_domain_memory_preflight

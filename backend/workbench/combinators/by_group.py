@@ -24,10 +24,13 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
-import numpy as np
-import pandas as pd
+if TYPE_CHECKING:
+    import numpy as np
+    import pandas as pd
+
+
 
 MAX_GROUPS = 50
 MISSING_GROUP = "(missing)"
@@ -203,6 +206,7 @@ def group_member(group: Group, *, status: str, result_ref: str | None = None,
 
 def run_by_group(frame: pd.DataFrame, column: str, run_one: Any) -> list[dict[str, Any]]:
     """Run ``run_one(subset)`` on each group's rows; a failure is not estimable, with its reason."""
+    import numpy as np
     outcomes: list[dict[str, Any]] = []
     for group in plan_groups(frame, column):
         entry: dict[str, Any] = {"key": group.key, "index": group.index, "nobs": group.nobs}

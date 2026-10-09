@@ -134,20 +134,57 @@ def test_declared_data_examples_execute_with_registered_output(tmp_path, operati
     assert result["status"] == "completed" and result["steps"][0]["artifact_refs"]
 
 
-def test_startup_and_warm_declaration_help_budget():
-    probe = "import sys,time; t=time.perf_counter(); import workbench.cli; print(time.perf_counter()-t); print([m for m in ('pandas','numpy','scipy','fastapi') if m in sys.modules])"
-    result = subprocess.run([sys.executable, "-c", probe], cwd=REPO,
-                            env={**os.environ, "PYTHONPATH": str(REPO / "backend")}, capture_output=True, text=True, check=True)
-    elapsed, loaded = result.stdout.strip().splitlines()
-    assert float(elapsed) < .5 and loaded == "[]", result.stdout
-    # Match the existing cold CLI-import budget; measure command construction
-    # separately with the declaration registry already loaded.
-    from workbench.data_operation_registry import data_operation_declarations
-    data_operation_declarations()
+@pytest.mark.parametrize("arguments", [["data", "--help"], ["data", "subset", "--help"], ["data", "fit", "--help"]])
+def test_data_help_is_truly_cold_and_within_budget(arguments):
+    # Measure the complete public CLI invocation inside a fresh interpreter:
+    # no declaration imports, command construction, or statistical warmup.
+    probe = """
+import contextlib, io, json, sys, time
+start = time.perf_counter()
+from workbench.cli import app
+with contextlib.redirect_stdout(io.StringIO()) as output:
+    app(args=json.loads(sys.argv[1]), standalone_mode=False)
+print(json.dumps({"elapsed": time.perf_counter() - start, "output": output.getvalue(),
+                  "heavy": [m for m in ("pandas", "numpy", "scipy", "fastapi", "workbench.data_operations", "workbench.agent.workflow_contracts") if m in sys.modules]}))
+"""
+    started = time.perf_counter()
+    result = subprocess.run([sys.executable, "-c", probe, json.dumps(arguments)], cwd=REPO,
+        env={**os.environ, "PYTHONPATH": str(REPO / "backend"), **WIDE}, capture_output=True, text=True, check=True)
+    measured = json.loads(result.stdout)
+    measured["process_seconds"] = time.perf_counter() - started
+    print(json.dumps({"command": arguments, **{key: value for key, value in measured.items() if key != "output"}}))
+    assert not measured["heavy"], measured
+    assert measured["elapsed"] < .5 and measured["process_seconds"] < .5, measured
+    assert "Usage:" in measured["output"]
+
+
+def test_fit_cli_metadata_is_the_shared_genesis_declaration():
+    from workbench.contracts.model.genesis_schema import model_genesis_parameters
     from workbench.agent.workflow_contracts import WORKFLOW_STEP_SPEC_CONTRACTS
-    start = time.perf_counter()
-    assert invoke("data", "--help").exit_code == 0
-    assert time.perf_counter() - start < .5
+    declaration = WORKFLOW_STEP_SPEC_CONTRACTS["model.genesis"]
+    for key, value in model_genesis_parameters().items():
+        assert getattr(declaration, key) == value
+
+
+def test_cold_genesis_schema_help_reads_the_live_family_registry(monkeypatch):
+    from dataclasses import replace
+    from workbench.contracts.model.family import MODEL_FAMILY_CONTRACTS
+    monkeypatch.setitem(MODEL_FAMILY_CONTRACTS, "test_live_family", replace(
+        MODEL_FAMILY_CONTRACTS["ols"], family="test_live_family"))
+    assert "test_live_family" in invoke("data", "fit", "--help").stdout
+
+
+def test_survey_lazy_exports_and_shared_declarations_stay_compatible():
+    import importlib
+    import workbench.survey as survey
+    from workbench.survey import declarations, design, fields
+    for name in survey.__all__:
+        assert getattr(survey, name) is getattr(importlib.import_module(
+            "workbench.survey." + survey._EXPORT_MODULES[name]), name)
+        assert name in dir(survey)
+    for name in ("DF_CONVENTIONS", "LONELY_PSU_POLICIES", "REPLICATE_TYPES"):
+        assert getattr(design, name) is getattr(declarations, name)
+        assert getattr(fields, name) is getattr(declarations, name)
 
 
 def test_real_cli_data_fit_postestimate_export_preserves_lineage(tmp_path):

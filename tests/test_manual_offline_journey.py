@@ -23,16 +23,11 @@ def test_http_manual_recode_tests_iv_pca_and_report_without_provider(tmp_path, m
     monkeypatch.setattr("workbench.agent.model.OpenAICompatibleModelAdapter.__init__", forbidden)
     monkeypatch.setattr("workbench.llm.config.load_llm_config", forbidden)
     monkeypatch.setattr("workbench.llm.client.chat_completion", forbidden)
-    from workbench.http.operation_routes import router as operations
-    from workbench.http.manual_report_routes import router as reports
+    from workbench.app import app
     from workbench.agent.workflow_contracts import WORKFLOW_STEP_SPEC_CONTRACTS
     from workbench.services.results_service import read_model_results
 
-    app = FastAPI()
-    register_error_handlers(app)
-    app.include_router(operations)
-    app.include_router(reports)
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     root = create_project(tmp_path, "manual-offline").root
     # Reuse the well-conditioned pack fixture; no independent estimator or
     # tolerance policy is introduced by this surface-composition acceptance.
@@ -40,7 +35,9 @@ def test_http_manual_recode_tests_iv_pca_and_report_without_provider(tmp_path, m
     frame = pd.DataFrame({"y": y, "const": exog[:, 0], "x": exog[:, 1],
                           "endog": endog[:, 0], "z1": instruments[:, 0], "z2": instruments[:, 1]})
     upload = frame.to_csv(index=False).encode()
-    sha = store_upload_bytes(root, upload, filename="iv.csv")
+    uploaded = client.post("/uploads", data={"project_root": str(root)}, files={"file": ("iv.csv", upload, "text/csv")})
+    assert uploaded.status_code == 200, uploaded.text
+    sha = uploaded.json()["sha256"]
     source = {"from_step": "recode", "output": "produced_dataset"}
     steps = [
         {"step_id": "recode", "operation_id": "data.recode", "spec": {
@@ -60,9 +57,17 @@ def test_http_manual_recode_tests_iv_pca_and_report_without_provider(tmp_path, m
             "input_mode": "frame", "column_bindings": {"columns": ["x", "endog", "z1"]},
             "options": {"matrix": "correlation", "component_selection": "all", "include_scores": False,
                         "max_score_rows": 100}, "source": source}},
+        {"step_id": "wald", "operation_id": "postestimation.wald", "spec": {
+            "model_ref": "step:iv:iv", "constraints": [{"terms": {"endog": 1}, "value": 0}]}},
     ]
     assert all(step["operation_id"] in WORKFLOW_STEP_SPEC_CONTRACTS for step in steps)
     params = {"project_root": str(root)}
+    catalog = client.get("/operations", params={**params, "target": json.dumps({
+        "kind": "upload", "upload_sha256": sha, "filename": "iv.csv"})})
+    assert catalog.status_code == 200, catalog.text
+    entries = {item["id"]: item for item in catalog.json()["operations"]}
+    assert all(entries[step["operation_id"]]["execution"]["kind"] == "workflow" for step in steps)
+
     preview_response = client.post("/operations/run", params=params, json={
         "mode": "preview", "request_id": "offline-journey", "target": {
             "kind": "upload", "upload_sha256": sha, "filename": "iv.csv"}, "steps": steps})
@@ -111,17 +116,15 @@ def test_http_manual_recode_tests_iv_pca_and_report_without_provider(tmp_path, m
     [model] = read_model_results(model_root)
     assert model["nobs"] == 240
     assert "iv" in str(model.get("model_type") or model.get("model"))
-    # Post-estimation has a model target and consumes its inference kernel,
-    # while the preceding steps consume a dataset. Confirm that branch through
-    # a separate public request rather than inventing a frame source for Wald.
-    response = client.post("/operations/run", params=params, json={
-        "mode": "execute", "request_id": "offline-model-wald", "target": {
-            "kind": "model_node", "run_id": model_run, "node_id": f"model:{model['model_id']}"},
-        "steps": [{"step_id": "wald", "operation_id": "postestimation.wald", "spec": {
-            "constraints": [{"terms": {"endog": 1}, "value": 0}]}}]})
-    assert response.status_code == 200, response.text
-    assert response.json()["status"] == "completed", response.json()
-    by_step["wald"] = response.json()["steps"][0]
+    model_catalog = client.get("/operations", params={**params, "target": json.dumps({
+        "kind": "model_node", "run_id": model_run, "node_id": f"model:{model['model_id']}"})})
+    assert model_catalog.status_code == 200, model_catalog.text
+    model_entries = {item["id"]: item for item in model_catalog.json()["operations"]}
+    assert model_entries["postestimation.wald"]["availability"]["status"] == "needs_parameters"
+    assert model_entries["postestimation.lr"]["availability"]["reason_code"] == "INTERFACE_UNAVAILABLE"
+
+    # A model dependency follows the fitted model's evidence, not the data
+    # frame consumed by recode/IV. No second request or guessed model id.
     inputs = json.loads((model_root / "run_inputs.json").read_text())
     assert inputs["dataset_source"]["source_run_id"] == source_run
     assert inputs["dataset_source"]["op_node_id"] == source_node
@@ -149,7 +152,7 @@ def test_http_manual_recode_tests_iv_pca_and_report_without_provider(tmp_path, m
     draft = draft_response.json()
     assert client.get(f"/runs/{source_run}/manual-reports/draft", params=params).json() == draft
     selected = []
-    for step_id in ("ttest", "weak", "pca"):
+    for step_id in ("ttest", "wald", "weak", "pca"):
         ref, result = evidence[step_id]
         facts = [fact for fact in draft["facts"] if ref["artifact_id"] in fact["source"]["artifact_ids"]]
         assert facts, f"Missing {step_id} report evidence"
@@ -161,8 +164,8 @@ def test_http_manual_recode_tests_iv_pca_and_report_without_provider(tmp_path, m
     model_draft = client.get(f"/runs/{model_run}/manual-reports/draft", params=params)
     assert model_draft.status_code == 200, model_draft.text
     wald_ref, wald_result = evidence["wald"]
-    wald_facts = [fact for fact in model_draft.json()["facts"] if wald_ref["artifact_id"] in fact["source"]["artifact_ids"]]
-    assert wald_facts and all(fact["source"]["run_id"] == model_run for fact in wald_facts)
+    wald_facts = [fact for fact in draft["facts"] if wald_ref["artifact_id"] in fact["source"]["artifact_ids"]]
+    assert wald_facts and all(fact["source"]["run_id"] == source_run for fact in wald_facts)
     wald_numbers = dict(numeric_fields(wald_result))
     assert all(wald_numbers[fact["field"]] == fact["value"] for fact in wald_facts
                if isinstance(fact["value"], (int, float)) and not isinstance(fact["value"], bool))
@@ -186,10 +189,10 @@ def test_http_manual_recode_tests_iv_pca_and_report_without_provider(tmp_path, m
     assert exported.status_code == 200, exported.text
     assert "User interpretation" in exported.text and "Computed evidence" in exported.text
     assert any(str(fact["value"]) in exported.text for fact in selected if isinstance(fact["value"], float))
-    # A second immutable, run-bound report preserves fitted IV and Wald
+    # A second immutable, run-bound report preserves fitted IV coefficient
     # evidence; cross-run report aggregation is not silently invented here.
     model_snapshot = model_draft.json()
-    model_facts = [fact for fact in model_snapshot["facts"] if fact["field"].startswith("coefficient/")] + wald_facts
+    model_facts = [fact for fact in model_snapshot["facts"] if fact["field"].startswith("coefficient/")]
     model_save = {**save, "id": "mrpt_offline_model", "source_fingerprint": model_snapshot["source_fingerprint"],
                   "fact_ids": [fact["id"] for fact in model_facts]}
     model_saved = client.post(f"/runs/{model_run}/manual-reports", params=params, json=model_save)

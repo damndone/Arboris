@@ -1,0 +1,70 @@
+{
+  "environment": {
+    "R": "R version 4.6.0 (2026-04-24)",
+    "lme4": "2.0.1"
+  },
+  "random_intercept": {
+    "fit_method": "REML",
+    "random_structure": "(1|g)",
+    "converged": true,
+    "singular": false,
+    "margins": {
+      "average": {
+        "time": {
+          "estimate": 0.391560637698484,
+          "std_error": 0.0186369384502811,
+          "prediction_derivative": 0.391560637699008
+        },
+        "x": {
+          "estimate": 0.549433982698939,
+          "std_error": 0.0361901164842903,
+          "prediction_derivative": 0.549433982698932
+        }
+      },
+      "at_means": {
+        "time": {
+          "estimate": 0.391560637698484,
+          "std_error": 0.0186369384502811,
+          "prediction_derivative": 0.391560637699008
+        },
+        "x": {
+          "estimate": 0.549433982698939,
+          "std_error": 0.0361901164842903,
+          "prediction_derivative": 0.549433982698932
+        }
+      }
+    }
+  },
+  "random_slope": {
+    "fit_method": "REML",
+    "random_structure": "(1+time|g)",
+    "converged": true,
+    "singular": false,
+    "margins": {
+      "average": {
+        "time": {
+          "estimate": 0.401385392521431,
+          "std_error": 0.0432011216681698,
+          "prediction_derivative": 0.401385392521547
+        },
+        "x": {
+          "estimate": 0.499835603121591,
+          "std_error": 0.035371089934254,
+          "prediction_derivative": 0.499835603121545
+        }
+      },
+      "at_means": {
+        "time": {
+          "estimate": 0.401385392521431,
+          "std_error": 0.0432011216681698,
+          "prediction_derivative": 0.401385392521547
+        },
+        "x": {
+          "estimate": 0.499835603121591,
+          "std_error": 0.035371089934254,
+          "prediction_derivative": 0.499835603121545
+        }
+      }
+    }
+  }
+}

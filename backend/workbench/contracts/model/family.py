@@ -13,10 +13,12 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, TYPE_CHECKING
 
-import numpy as np
-import pandas as pd
+if TYPE_CHECKING:
+    import pandas as pd
+
+
 
 from ..common.errors import OperationValidationError
 from .execution_profile import ols_request_covariance, panel_request_covariance
@@ -37,7 +39,7 @@ DID_MODE_VALUES = ("cohort", "two_by_two", "status")
 
 ModelParameterBuilder = Callable[[Mapping[str, Any], Mapping[str, Any], list[str], str], dict[str, Any]]
 ModelFamilySpecValidator = Callable[[Mapping[str, Any]], None]
-ModelFamilyDataValidator = Callable[[pd.DataFrame, Mapping[str, Any]], None]
+ModelFamilyDataValidator = Callable[["pd.DataFrame", Mapping[str, Any]], None]
 
 @dataclass(frozen=True)
 class ModelFamilyContract:
@@ -311,6 +313,7 @@ def _validate_survival_model_options(options: Mapping[str, Any]) -> None:
         )
 
 def _validate_quantile_model_options(options: Mapping[str, Any]) -> None:
+    import numpy as np
     quantiles = options.get("quantiles", [0.25, 0.5, 0.75])
     if (
         not isinstance(quantiles, list)
@@ -375,6 +378,8 @@ def _validate_continuous_outcome(frame: pd.DataFrame, branch: Mapping[str, Any])
 def _require_outcome_values(
     frame: pd.DataFrame, branch: Mapping[str, Any], family: str
 ) -> pd.Series:
+    import numpy as np
+    import pandas as pd
     outcome = branch.get("outcome")
     if not isinstance(outcome, str) or outcome not in frame.columns:
         raise OperationValidationError(
@@ -403,6 +408,7 @@ def _validate_count_outcome(
     family: str,
 ) -> ModelFamilyDataValidator:
     def _validate(frame: pd.DataFrame, branch: Mapping[str, Any]) -> None:
+        import numpy as np
         values = _require_outcome_values(frame, branch, family)
         if (values < 0).any() or not np.isclose(values, np.round(values)).all():
             raise OperationValidationError(
@@ -412,6 +418,7 @@ def _validate_count_outcome(
     return _validate
 
 def _validate_nb_outcome(frame: pd.DataFrame, branch: Mapping[str, Any]) -> None:
+    import numpy as np
     values = _require_outcome_values(frame, branch, "negative_binomial")
     fixed = (branch.get("model_options") or {}).get("alpha") is not None
     if (values < 0).any() or (not fixed and not (values == np.floor(values)).all()):
