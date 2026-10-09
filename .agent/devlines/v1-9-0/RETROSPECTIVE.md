@@ -10,7 +10,7 @@ STARTED
 
 ## Metrics
 
-- Failure frequency: 4/12 (33.3%; 33.3 per 100 events)
+- Failure frequency: 4/13 (30.8%; 30.8 per 100 events)
 - Repeat rate: 0/4 (0.0%)
 - Recurrence rate: 0/4 (0.0%)
 - MTTR: median=0 ms (sample=2; unresolved=2)
@@ -83,3 +83,4 @@ STARTED
 - #10: `1b847666-9138-454b-a665-f511e271c8e6` | 2026-10-08T22:18:48.255Z | ERROR/search_button_dead_on_home | incident=`1403e274-858c-4386-8267-e5feaee93d82` | lesson_key=`explicit-open-events` | event_sha256=`b7a58da0d990571c4a75c8d8ff4ba56ababb1f0e903274b2eacdf667e5121c29`
 - #11: `fba7a491-a25a-422c-8a2d-ec6af6b2f67e` | 2026-10-09T16:10:46.428Z | STATE_CHANGE/adopt_v1813_manual_contract | incident=`88d059ac-e012-49be-93dd-e8e49e99e083` | lesson_key=`manual-contract-consumer-adoption` | event_sha256=`55aa79daf91ef49c8072de2f18f0645b199b171f4d4597aebe67bb1ea91fba06`
 - #12: `c207b3c0-8d6f-431d-a5ac-0aedb27a6b32` | 2026-10-09T16:25:44.642Z | STATE_CHANGE/manual_interface_browser_acceptance | incident=`26060998-fbda-42a7-9896-39405c13fb43` | lesson_key=`manual-interface-consumer-browser-evidence` | event_sha256=`63e623b73e5aec5d98c1879ae1e4d701568e98919d9d06c4700c200c82d722ef`
+- #13: `141e880f-873b-4a8e-ba36-d5345993cea9` | 2026-10-09T16:41:37.986Z | STATE_CHANGE/typed_manual_form_coverage | incident=`ce2bf847-9dfc-402f-890a-b4f1bb7aaf1a` | lesson_key=`typed-manual-form-coverage` | event_sha256=`b4dfbf22fa3087c67d45f5b4ec10c92b75c9dc5cc61742b98e313d1d775512de`

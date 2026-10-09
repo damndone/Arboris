@@ -4,6 +4,7 @@ import { readResponse } from "../api";
 import { catalog, execute, manualUrl, type Operation, type Target, type Outcome } from "./manualApi";
 import { SchemaField, initialValue, type JsonSchema } from "./SchemaFields";
 import "./manual.css";
+import { validateValue } from "./schemaModel";
 export type ModelChoice = {
     runId: string;
     nodeId: string;
@@ -31,6 +32,7 @@ export function OperationsPanel({ projectRoot, runId, models, initialSearch = ""
     onDedicated: (id: string) => void;
 }) {
     const [choices, setChoices] = useState<Choice[]>([]);
+    const [refreshRevision,setRefreshRevision]=useState(0);
     const [targetIndex, setTargetIndex] = useState("");
     const [operations, setOperations] = useState<Operation[]>([]);
     const [search, setSearch] = useState(initialSearch);
@@ -55,7 +57,7 @@ export function OperationsPanel({ projectRoot, runId, models, initialSearch = ""
         let current = true;
         (async () => {
             const datasets = runId ? await listDatasets(projectRoot, runId) : [];
-            const data = await Promise.all(datasets.map(async (d) => { const page = await fetchDatasetPage(projectRoot, runId, d.node_id, { offset: 0, limit: 1 }); return { label: `Data · ${d.label} · ${runId}`, target: { kind: "dataset_node", run_id: runId, node_id: d.node_id, artifact_id: page.artifact_id } as Target, columns: page.columns }; }));
+            const data = await Promise.all(datasets.map(async (d) => { const page = await fetchDatasetPage(projectRoot, runId, d.node_id, { offset: 0, limit: 1 }); return { label: `Data · ${d.label} · ${d.node_id} · ${runId}`, target: { kind: "dataset_node", run_id: runId, node_id: d.node_id, artifact_id: page.artifact_id } as Target, columns: page.columns }; }));
             const all = [...data, ...models.map(m => ({ label: `Model · ${m.label} · ${m.runId}`, target: { kind: "model_node", run_id: m.runId, node_id: m.nodeId } as Target, columns: [] }))];
             if (current) {
                 const index = all.findIndex(c => JSON.stringify(c.target) === selectedTarget.current);
@@ -68,7 +70,7 @@ export function OperationsPanel({ projectRoot, runId, models, initialSearch = ""
             }
         })().catch(e => current && setError(String(e)));
         return () => { current = false; };
-    }, [projectRoot, runId, modelKey]);
+    }, [projectRoot, runId, modelKey, refreshRevision]);
     useEffect(() => {
         let current = true;
         setCatalogBusy(true);
@@ -88,6 +90,21 @@ export function OperationsPanel({ projectRoot, runId, models, initialSearch = ""
     async function submit(confirm = false) {
         if (pending.current || !form.current?.reportValidity())
             return;
+        const issues = steps.flatMap((step,index) => {
+            const op=operations.find(o=>o.id===step.operation_id);
+            if(!op) return [`Step ${index+1}: operation declaration is unavailable.`];
+            const schema=op.spec_schema as JsonSchema;
+            const {source,...fields}=step.spec;
+            const earlier=steps.slice(0,index);
+            if(source && !earlier.some(s=>s.step_id===(source as {from_step?:string}).from_step)) return [`Step ${index+1}: the selected dataset producer no longer exists before this step.`];
+            if(typeof step.spec.model_ref==='string'&&step.spec.model_ref.startsWith('step:')) {
+                const [,producerId,branchId]=step.spec.model_ref.split(':');
+                const producer=earlier.find(s=>s.step_id===producerId);
+                if(!producer||!Array.isArray(producer.spec.branches)||!producer.spec.branches.some(b=>(b as {branch_id?:unknown})?.branch_id===branchId)) return [`Step ${index+1}: select a declared model branch from an earlier step.`];
+            }
+            return validateValue(schema, schema.properties?.source ? step.spec : fields, schema, `Step ${index+1}`);
+        });
+        if(issues.length){setError(issues.join("\n"));return;}
         if (!target && !confirm)
             return;
         pending.current = true;
@@ -97,8 +114,9 @@ export function OperationsPanel({ projectRoot, runId, models, initialSearch = ""
             const body = confirm && outcome ? { mode: "confirm" as const, request_id: outcome.request_id, preview_id: outcome.preview_id, fingerprint: outcome.fingerprint } : { mode: "preview" as const, request_id: requestId.current, target, steps };
             const result = await execute(projectRoot, body);
             setOutcome(result);
-            if (result.status === "completed" || result.status === "partial" || result.status === "failed")
-                onRefresh();
+            if (result.status === "completed" || result.status === "partial" || result.status === "failed") {
+                setRefreshRevision(value=>value+1);onRefresh();
+            }
         }
         catch (e) {
             setError(e instanceof Error ? e.message : String(e));
@@ -133,12 +151,14 @@ export function OperationsPanel({ projectRoot, runId, models, initialSearch = ""
             const op = operations.find(o => o.id === step.operation_id);
             return <article key={step.step_id}><header><h3>{i + 1}. {op?.name ?? step.operation_id}</h3><button type="button" onClick={() => { invalidate(); setSteps(old => old.filter((_, j) => j !== i)); }}>Remove step {i + 1}</button></header><p>{op?.summary}</p><small>Step reference: {step.step_id}</small>
         <SchemaField key={step.step_id} label={`Step ${i + 1}`} schema={(op?.spec_schema ?? { type: 'object' }) as JsonSchema} value={step.spec} onChange={v => changeStep(i, v as Record<string, unknown>)} columns={choice?.columns}/>
-        {i > 0 && <details><summary>Use an earlier result</summary><p>Dataset input uses a producer step. Model references use step:&lt;step id&gt;:&lt;branch id&gt;.</p><label className="manual-field">Dataset producer<select aria-label={`Step ${i + 1} dataset producer`} value={String((step.spec.source as {
+        {i > 0 && <details><summary>Use an earlier result</summary><p>Dataset input uses a producer step. Choose a model branch below when an earlier step produces it.</p><label className="manual-field">Dataset producer<select aria-label={`Step ${i + 1} dataset producer`} value={String((step.spec.source as {
                 from_step?: string;
             })?.from_step ?? '')} onChange={e => { const next = { ...step.spec }; if (e.target.value)
                 next.source = { from_step: e.target.value, output: 'produced_dataset' };
             else
-                delete next.source; changeStep(i, next); }}><option value="">Selected target</option>{steps.slice(0, i).map(s => <option key={s.step_id} value={s.step_id}>{s.step_id} · {s.operation_id}</option>)}</select></label></details>}
+                delete next.source; changeStep(i, next); }}><option value="">Selected target</option>{steps.slice(0, i).map(s => <option key={s.step_id} value={s.step_id}>{s.step_id} · {s.operation_id}</option>)}</select></label>
+          {(op?.spec_schema as JsonSchema)?.properties?.model_ref && <label className="manual-field">Model producer<select aria-label={`Step ${i+1} model producer`} value={String(step.spec.model_ref??'').startsWith('step:')?String(step.spec.model_ref):''} onChange={e=>{const next={...step.spec};if(e.target.value){next.model_ref=e.target.value;delete next.model_run_id;}else if(target?.kind==='model_node'){next.model_ref=target.node_id;next.model_run_id=target.run_id;}else{delete next.model_ref;delete next.model_run_id;}changeStep(i,next);}}><option value="">Selected model / explicit reference</option>{steps.slice(0,i).flatMap(producer=>Array.isArray(producer.spec.branches)?producer.spec.branches.flatMap((branch:unknown)=>{const id=(branch as {branch_id?:unknown})?.branch_id;return typeof id==='string'&&id?[<option key={`${producer.step_id}:${id}`} value={`step:${producer.step_id}:${id}`}>{producer.step_id} · {id}</option>]:[];}):[])}</select></label>}
+        </details>}
       </article>;
         })}
       <button type="submit" disabled={!steps.length || !target || catalogBusy || busy}>Preview analysis</button>
