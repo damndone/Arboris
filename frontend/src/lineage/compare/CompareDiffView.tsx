@@ -89,6 +89,9 @@ function DiffSection({
 }
 
 function DiffRow({ item }: { item: FieldDiff }) {
+  if ([item.old_value, item.new_value].some(value => value !== null && typeof value === "object")) {
+    return <li><details><summary>{item.label ?? item.field_id} · structured evidence changed</summary><p>Stored evidence values; numeric display rounding may differ from the full model result.</p><pre>{JSON.stringify({ before: item.old_value, after: item.new_value }, null, 2)}</pre></details></li>;
+  }
   return (
     <li style={{ fontSize: 12, padding: "2px 0", display: "flex", gap: 6 }}>
       <span style={{ minWidth: 110, color: "var(--label-secondary)" }}>

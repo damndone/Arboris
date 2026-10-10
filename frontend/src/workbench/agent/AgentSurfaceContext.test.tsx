@@ -24,7 +24,7 @@ const mocks = vi.hoisted(() => ({
   fetchLlmConfig: vi.fn(),
   updateLlmProvider: vi.fn(),
   lineageModel: { current: { nodes: [] } as Record<string, unknown> },
-  workbenchState: { selectedKey: null as string | null },
+  workbenchState: { selectedKey: null as string | null, agentFocus: null as null | { kind: "report" | "plan"; id: string; runId?: string } },
   forest: { current: null as unknown },
 }));
 
@@ -143,6 +143,7 @@ describe("AgentSurfaceProvider", () => {
     vi.clearAllMocks();
     mocks.lineageModel.current = { nodes: [] };
     mocks.workbenchState.selectedKey = null;
+    mocks.workbenchState.agentFocus = null;
     mocks.forest.current = null;
     mocks.fetchLlmProviders.mockResolvedValue({ active_provider_id: provider.id, providers: [provider] });
     mocks.fetchLlmConfig.mockResolvedValue(config);
@@ -190,6 +191,17 @@ describe("AgentSurfaceProvider", () => {
       proposal: { ...pendingProposal, revision: 2, status: "pending" },
       status: "pending",
     });
+  });
+
+  it.each(["report", "plan"] as const)("creates an authoritative %s focus without reusing graph sessions", async kind => {
+    sessionStorage.setItem("workbench:agent-session:/proj:run-a:project%3Arun-a%3Anone", "old_graph_session");
+    mocks.workbenchState.agentFocus = { kind, id: kind === "report" ? "run-a" : "notebook-a", runId: "run-a" };
+    render(<MemoryRouter initialEntries={["/?agent_session=old_graph_session"]}><AgentSurfaceProvider projectRoot="/proj" runId="run-a"><AgentPanel projectRoot="/proj" runId="run-a" /></AgentSurfaceProvider></MemoryRouter>);
+    await screen.findByRole("listbox", { name: "Agent model" });
+    fireEvent.change(screen.getByRole("textbox", { name: "Ask Agent" }), { target: { value: "Inspect current focus" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send to Agent" }));
+    await waitFor(() => expect(mocks.createAgentSession).toHaveBeenCalledWith("/proj", expect.objectContaining({ focus: expect.objectContaining({kind, id: kind === "report" ? "run-a" : "notebook-a", label: expect.stringMatching(kind === "report" ? /^Report/ : /^Plan/)}) })));
+    expect(mocks.getAgentSession).not.toHaveBeenCalledWith("/proj", "old_graph_session");
   });
 
   it("shares model selection and a submitted turn across the panel surface", async () => {
@@ -500,6 +512,7 @@ describe("AgentSurfaceProvider", () => {
     const head = (runId: string, hash: string) => ({ runId, headNodeHash: hash, fromNode: null, rerunOf: null,
                                                      rerunReason: null, status: "completed", createdAt: null });
     mocks.workbenchState.selectedKey = null;
+    mocks.workbenchState.agentFocus = null;
     mocks.lineageModel.current = { nodes: [olsModel, ivModel] };
     mocks.forest.current = {
       forest: { schemaVersion: 4, legacy: false, nodes: [olsModel, ivModel], edges: [],
@@ -770,8 +783,8 @@ describe("AgentSurfaceProvider", () => {
     mount();
 
     fireEvent.click(await screen.findByRole("button", { name: "Revise proposal proposal-1" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Proposal changes proposal-1" }), {
-      target: { value: '{"covariance":{"old":"nonrobust","new":"unadjusted"}}' },
+    fireEvent.change(screen.getByLabelText("Proposal changes proposal-1.covariance.new"), {
+      target: { value: "unadjusted" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save revision proposal-1" }));
     await waitFor(() => expect(mocks.reviseAgentProposal).toHaveBeenCalledWith(

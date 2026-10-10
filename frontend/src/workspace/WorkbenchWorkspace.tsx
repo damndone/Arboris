@@ -6,6 +6,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
+import { useCompareOptional } from "../lineage/compare/CompareContext";
 import { AgentPanel } from "../workbench/agent/AgentPanel";
 import { LogsPanel } from "../workbench/panels/LogsPanel";
 import { AiActivityPanel } from "../workbench/panels/AiActivityPanel";
@@ -86,6 +87,7 @@ export function WorkbenchWorkspace({
   overlays,
 }: WorkbenchWorkspaceProps) {
   const { state, dispatch } = useWorkbench();
+  const compare = useCompareOptional();
   const { model } = useLineage();
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisSearch, setAnalysisSearch] = useState("");
@@ -180,7 +182,7 @@ export function WorkbenchWorkspace({
         </GraphAutoFitContext.Provider>
       </div>
       {presentation === "tree" && (
-        <MapTree nodes={model.nodes} edges={model.edges} selectedKey={state.selectedKey} onSelect={dispatch.selectByCanvasClick} />
+        <MapTree nodes={model.nodes} edges={model.edges} selectedKey={state.selectedKey} onSelect={key => { if (!compare?.handleCanvasSelect(key)) dispatch.selectByCanvasClick(key); }} />
       )}
       {analysis && hasOpenItem && stageFolded && (
         <button type="button" className="ws-button ws-map__reopen" onClick={() => setStageFolded(false)}>

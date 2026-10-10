@@ -34,7 +34,15 @@ import { useWorkspaceMode } from "../workspace/workspaceMode";
 
 export function ReportView({ projectRoot, focusRequest = 0 }: { projectRoot?: string; focusRequest?: number }) {
   const mode = useWorkspaceMode();
+  const wb = useWorkbenchOptional();
+  const setAgentFocus = wb?.dispatch.setAgentFocus;
   const forest = useForest();
+  const focusRun = forest?.activeRunId;
+  useEffect(() => {
+    if (!setAgentFocus || !focusRun) return;
+    setAgentFocus({ kind: "report", id: focusRun, runId: focusRun });
+    return () => setAgentFocus(null);
+  }, [focusRun, setAgentFocus]);
   const [writer, setWriter] = useState<"manual" | "ai">("manual");
   return <>{mode === "new" && <div className="manual-actions" role="group" aria-label="Report writing mode">
     {mode === "new" && <><button type="button" aria-pressed={writer === "manual"} onClick={() => setWriter("manual")}>Manual report</button><button type="button" aria-pressed={writer === "ai"} onClick={() => setWriter("ai")}>AI-assisted report</button></>}

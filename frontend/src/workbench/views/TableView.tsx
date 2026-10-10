@@ -12,6 +12,7 @@
 // widening that coverage (violin/pairplot/…) is a backend concern (roadmap
 // §3.5 V).
 
+import { CrossRunTable } from "../../workspace/result/CrossRunTable";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   appendAiActivity,
@@ -961,6 +962,7 @@ export function TableView({ projectRoot: projectRootProp }: { projectRoot?: stri
           ))}
         </nav>
       )}
+      <CrossRunTable key={projectRoot} projectRoot={projectRoot} runIds={runIds}/>
       {activeRunId && (
         <RunResultsPanel
           runId={activeRunId}

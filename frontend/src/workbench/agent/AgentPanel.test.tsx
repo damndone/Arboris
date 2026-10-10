@@ -844,10 +844,11 @@ describe("AgentPanel", () => {
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Revise proposal proposal-1" }));
     });
-    const editor = screen.getByRole("textbox", { name: "Proposal changes proposal-1" });
+    expect(screen.getByRole("button", { name: "Confirm proposal proposal-1" })).toBeDisabled();
+    const editor = screen.getByLabelText("Proposal changes proposal-1.covariance.new");
     await act(async () => {
       fireEvent.change(editor, {
-        target: { value: '{"covariance":{"old":"nonrobust","new":"unadjusted"}}' },
+        target: { value: "unadjusted" },
       });
       fireEvent.click(screen.getByRole("button", { name: "Save revision proposal-1" }));
     });

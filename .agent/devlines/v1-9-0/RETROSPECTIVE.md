@@ -10,7 +10,7 @@ STARTED
 
 ## Metrics
 
-- Failure frequency: 4/15 (26.7%; 26.7 per 100 events)
+- Failure frequency: 4/16 (25.0%; 25.0 per 100 events)
 - Repeat rate: 0/4 (0.0%)
 - Recurrence rate: 0/4 (0.0%)
 - MTTR: median=0 ms (sample=2; unresolved=2)
@@ -86,3 +86,4 @@ STARTED
 - #13: `141e880f-873b-4a8e-ba36-d5345993cea9` | 2026-10-09T16:41:37.986Z | STATE_CHANGE/typed_manual_form_coverage | incident=`ce2bf847-9dfc-402f-890a-b4f1bb7aaf1a` | lesson_key=`typed-manual-form-coverage` | event_sha256=`b4dfbf22fa3087c67d45f5b4ec10c92b75c9dc5cc61742b98e313d1d775512de`
 - #14: `5df00257-bc5b-47f7-a133-b3a90d467835` | 2026-10-09T21:14:16.230Z | STATE_CHANGE/floating_agent_workspace | incident=`3b17853a-ec29-4c8c-a4d3-207a731e7acb` | lesson_key=`floating-agent-bounded-layout` | event_sha256=`4f36f19f8fa8ebe88bfff93d64abf1fdd96f46b8a458ae3475d3f99c5b4735de`
 - #15: `5c817b7d-9430-4c65-a6ae-6f43994732d4` | 2026-10-10T22:42:46.714Z | STATE_CHANGE/report_reading_provider_acceptance | incident=`e1872ed7-43ab-4af3-a38e-2ed813267b42` | lesson_key=`bounded-provider-acceptance` | event_sha256=`5172035baeee8c19805aaee20a51a0864c09027aa971a5c03defa1bf8a2c046e`
+- #16: `055dcfd4-8c81-4245-829a-9c59668fc6d5` | 2026-10-10T23:04:56.630Z | STATE_CHANGE/cross_focus_proposal_research_acceptance | incident=`7c58f9f7-e565-46f2-bdf7-213447b02de3` | lesson_key=`focus-and-research-scope` | event_sha256=`b0ee6f6b87829a54715db1128e07a5b067833d5e41d3fd2dde77f1cdf760b18a`

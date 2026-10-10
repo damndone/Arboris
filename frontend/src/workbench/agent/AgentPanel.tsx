@@ -6,6 +6,7 @@ import type { AgentMessage } from "./agentTypes";
 import { AgentRowsTable, shownRows } from "./AgentRowsTable";
 import { renderMarkdown } from "../../report/markdown";
 import "./agent.css";
+import { ProposalFields } from "./ProposalFields";
 
 function roleMarker(role: string): string {
   if (role === "user") return "❯";
@@ -262,8 +263,9 @@ export function AgentPanel({
   composer?: ReactNode;
 }) {
   const agent = useAgentSurface();
+  const [revisionIssues, setRevisionIssues] = useState<string[]>([]);
   const [editingProposalId, setEditingProposalId] = useState<string | null>(null);
-  const [revisionDraft, setRevisionDraft] = useState("");
+  const [revisionDraft, setRevisionDraft] = useState<Record<string, unknown>>({});
   const [revisionError, setRevisionError] = useState<string | null>(null);
   const transcriptRef = useRef<HTMLDivElement | null>(null);
   const shouldFollowTranscriptRef = useRef(true);
@@ -631,6 +633,7 @@ export function AgentPanel({
             ) : (
               <div className="wb-agent-proposal-change">{changeSummary(proposal.changes)}</div>
             )}
+            {proposal.revision > 1 && <p role="note">Parameters were revised. The Agent rationale below describes the original proposal; review the current parameter summary before confirming.</p>}
             {proposal.expected_effect.length > 0 && (
               <div className="wb-agent-proposal-detail">Expected: {proposal.expected_effect.join("; ")}</div>
             )}
@@ -644,7 +647,7 @@ export function AgentPanel({
                     type="button"
                     className="wb-agent-proposal-confirm"
                     aria-label={`Confirm proposal ${proposal.proposal_id}`}
-                    disabled={agent.confirmationBusyId !== null}
+                    disabled={agent.confirmationBusyId !== null || editingProposalId === proposal.proposal_id}
                     onClick={() => void agent.confirmProposal(proposal.proposal_id)}
                   >
                     {agent.confirmationBusyId === proposal.proposal_id
@@ -667,7 +670,7 @@ export function AgentPanel({
                     disabled={agent.confirmationBusyId !== null}
                     onClick={() => {
                       setEditingProposalId(proposal.proposal_id);
-                      setRevisionDraft(JSON.stringify(proposal.changes, null, 2));
+                      setRevisionDraft(proposal.changes);
                       setRevisionError(null);
                     }}
                   >
@@ -676,22 +679,18 @@ export function AgentPanel({
                 </div>
                 {editingProposalId === proposal.proposal_id && (
                   <div className="wb-agent-proposal-editor">
-                    <textarea
-                      aria-label={`Proposal changes ${proposal.proposal_id}`}
-                      value={revisionDraft}
-                      onChange={(event) => setRevisionDraft(event.target.value)}
-                      rows={4}
-                    />
+                    <ProposalFields projectRoot={projectRoot} label={`Proposal changes ${proposal.proposal_id}`} value={revisionDraft} onChange={setRevisionDraft} onIssues={setRevisionIssues} />
+                    {revisionIssues.length > 0 && <p role="status">{revisionIssues.join(" ")}</p>}
                     {revisionError && <div role="alert">{revisionError}</div>}
                     <div className="wb-agent-proposal-actions">
                       <button
                         type="button"
                         className="wb-agent-proposal-confirm"
                         aria-label={`Save revision ${proposal.proposal_id}`}
-                        disabled={agent.confirmationBusyId !== null}
+                        disabled={agent.confirmationBusyId !== null || revisionIssues.length > 0}
                         onClick={async () => {
                           try {
-                            const parsed: unknown = JSON.parse(revisionDraft);
+                            const parsed: unknown = revisionDraft;
                             if (
                               typeof parsed !== "object" ||
                               parsed === null ||

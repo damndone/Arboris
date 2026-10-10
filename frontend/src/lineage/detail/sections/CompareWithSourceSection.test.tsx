@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { CompareWithSourceSection } from "./CompareWithSourceSection";
 
@@ -48,6 +48,7 @@ describe("CompareWithSourceSection", () => {
 
     render(<CompareWithSourceSection />);
 
-    expect(screen.getByRole("button", { name: /compare with source/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /compare with source/i }));
+    expect(screen.getByRole("status")).toHaveTextContent("recorded source cannot be resolved");
   });
 });

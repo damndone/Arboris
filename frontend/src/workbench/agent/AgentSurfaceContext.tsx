@@ -319,10 +319,16 @@ export function AgentSurfaceProvider({
     && contextPacket.context_fingerprint
     ? contextPacket.context_fingerprint
     : `${runId}:${selectedKey ?? "none"}`;
-  const storageKey = isGlobalScope
+  const baseStorageKey = isGlobalScope
     ? `workbench:agent-session:${projectRoot}:main:${encodeURIComponent(contextFingerprint)}`
     : `workbench:agent-session:${projectRoot}:${scopeRunId}:${encodeURIComponent(contextFingerprint)}`;
-  const linkedSessionId = searchParams.get("agent_session") || null;
+  // Report and plan context can share a run fingerprint with a graph node.
+  // Keep legacy node history, but never reuse its authoritative focus for a page.
+  const storageKey = ["report", "plan", "dataset"].includes(resolvedFocus.focus.kind)
+    ? `${baseStorageKey}:focus:${resolvedFocus.focus.kind}:${encodeURIComponent(resolvedFocus.focus.id)}`
+    : baseStorageKey;
+  const linkedSessionId = ["report", "plan", "dataset"].includes(resolvedFocus.focus.kind)
+    ? null : searchParams.get("agent_session") || null;
   const linkedOperationId = searchParams.get("operation") || null;
   const linkedDiffFocused = searchParams.get("diff") === "1";
   const sessionScope = linkedSessionId
@@ -525,7 +531,7 @@ export function AgentSurfaceProvider({
   const contextPercent = contextWindowTokens
     ? Math.min(100, (contextUsedTokens / contextWindowTokens) * 100)
     : null;
-  const scopeLabel = isGlobalScope
+  const scopeLabel = isGlobalScope && resolvedFocus.focus.kind === "project"
     ? `Global Agent · ${forest?.forest.familyRunCount ?? 0} runs · ${forest?.forest.familyCount ?? 0} families`
     : resolvedFocus.label;
 
