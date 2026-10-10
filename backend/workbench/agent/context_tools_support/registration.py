@@ -1258,7 +1258,10 @@ class RegistrationMixin:
                 )
             )
 
+        from .notebook_state import notebook_state_tool
+
         return [
+            notebook_state_tool(self.project_root, session_id=session_id),
             self.show_dataset_rows_tool(session_id=session_id, scope_requirements=("project",)),
             self.calculate_tool(session_id=session_id, scope_requirements=("project",)),
             ToolDefinition(

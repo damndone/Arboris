@@ -10,10 +10,10 @@ CONTEXT_RESCOPED
 
 ## Metrics
 
-- Failure frequency: 5/26 (19.2%; 19.2 per 100 events)
-- Repeat rate: 0/5 (0.0%)
-- Recurrence rate: 0/5 (0.0%)
-- MTTR: median=434540 ms (sample=1; unresolved=4)
+- Failure frequency: 6/29 (20.7%; 20.7 per 100 events)
+- Repeat rate: 0/6 (0.0%)
+- Recurrence rate: 0/6 (0.0%)
+- MTTR: median=217270 ms (sample=2; unresolved=4)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
@@ -34,6 +34,7 @@ CONTEXT_RESCOPED
 - #10 2026-10-09T06:36:40.724Z `lmm_postestimation_native_evaluation`; cause_status: `known`; cause: Native R/Stata comparison exposes omitted interaction contribution in time margins; current LR provenance cannot establish admissible comparisons.; resolution: `accepted`; lesson: Recompute owner results against frozen native references and preserve actual failures; admission is separate from evidence-test success.
 - #12 2026-10-09T06:55:40.902Z `remaining_acceptance_boundaries`; cause_status: `known`; cause: Existing mixed-plan source validation contradicts non-frame Wald semantics; original frontend lacks the new manual operation UI and cold first-use data help loads the existing numerical registry.; resolution: `open`; lesson: Distinguish composable service execution from every mixed-plan shape and from frontend acceptance; never claim measured warm-start timing as cold first-use timing.
 - #23 2026-10-09T15:42:09.021Z `v190_live_manual_consumer_missing`; cause_status: `known`; cause: Live v1.9.0 frontend at 98801242 does not consume the additive manual catalog, execution and report contract.; resolution: `open`; lesson: Verify real browser consumers separately from backend HTTP readiness and frontend test counts.
+- #29 2026-10-10T23:04:56.923Z `notebook_state_reader`; cause_status: `known`; cause: Plans focus could only inspect committed workflow receipts. The new reader initially lacked outbound content classification and was correctly withheld.; resolution: `resolved`; lesson: Register outbound classification and test the route tool set before live provider validation. Empty workflow receipts do not establish an empty Notebook.
 
 ## All waste
 
@@ -43,6 +44,7 @@ CONTEXT_RESCOPED
 
 - `lmm-postestimation-native-evidence`: occurrences=1; cause_status: `known`; root cause: Native R/Stata comparison exposes omitted interaction contribution in time margins; current LR provenance cannot establish admissible comparisons.; solution: `accepted`
 - `manual-contract-consumer-adoption`: occurrences=1; cause_status: `known`; root cause: Live v1.9.0 frontend at 98801242 does not consume the additive manual catalog, execution and report contract.; solution: `open`
+- `notebook-state-egress-contract`: occurrences=1; cause_status: `known`; root cause: Plans focus could only inspect committed workflow receipts. The new reader initially lacked outbound content classification and was correctly withheld.; solution: `resolved`
 - `offline-backend-acceptance-boundaries`: occurrences=1; cause_status: `known`; root cause: Existing mixed-plan source validation contradicts non-frame Wald semantics; original frontend lacks the new manual operation UI and cold first-use data help loads the existing numerical registry.; solution: `open`
 - `selected-dataset-model-source-authority`: occurrences=1; cause_status: `known`; root cause: The original-upload shortcut compared the selected frame with itself instead of proving raw-upload identity.; solution: `open`
 - `verify-active-workspace-mode`: occurrences=1; cause_status: `known`; root cause: Acceptance launched the correct frontend commit but missed the workspace=new switch; default classic shell was mistaken for new workspace.; solution: `mitigated`
@@ -55,6 +57,7 @@ CONTEXT_RESCOPED
 
 - `lmm-postestimation-native-evidence`: line experience occurrence(s)=1
 - `manual-contract-consumer-adoption`: line experience occurrence(s)=1
+- `notebook-state-egress-contract`: line experience occurrence(s)=1
 - `offline-backend-acceptance-boundaries`: line experience occurrence(s)=1
 - `selected-dataset-model-source-authority`: line experience occurrence(s)=1
 - `verify-active-workspace-mode`: line experience occurrence(s)=1
@@ -66,6 +69,7 @@ CONTEXT_RESCOPED
 - Exercise persisted dataset formats and require registered evidence at manual reporting boundaries.
 - Public presentation names are not executable formula structure; keep verified design metadata separate from labels.
 - Recompute owner results against frozen native references and preserve actual failures; admission is separate from evidence-test success.
+- Register outbound classification and test the route tool set before live provider validation. Empty workflow receipts do not establish an empty Notebook.
 - Verify active UI mode as well as frontend commit before browser acceptance.
 - Verify real browser consumers separately from backend HTTP readiness and frontend test counts.
 
@@ -97,3 +101,6 @@ CONTEXT_RESCOPED
 - #24: `6a014373-08e1-4635-a6ea-ae860bb92d4f` | 2026-10-09T15:54:07.223Z | ERROR/workspace_acceptance_mode_misidentified | incident=`3375ec15-c696-4195-a064-e9ffc20ff6d3` | lesson_key=`verify-active-workspace-mode` | event_sha256=`fbdb9ac8cfc0fe9c33104caf5e925187e84ce5d8e75be6291ed8db5bbc590e2b`
 - #25: `5943f36d-1ffd-4199-a047-b18a6181d054` | 2026-10-09T16:08:04.742Z | STATE_CHANGE/new_workspace_partial_acceptance | incident=`082209cc-4132-4476-ae65-973051a158b9` | lesson_key=`verify-active-workspace-mode` | event_sha256=`01322611685e733f3a8f99a8ef9eb7ec8fb987931507893733257fbb8f0d21a7`
 - #26: `641ebf76-b71c-46c4-8a1e-a0443ef7a699` | 2026-10-09T16:25:44.642Z | STATE_CHANGE/manual_interface_browser_acceptance | incident=`1d0de90f-3785-4c55-8955-27d3747d7d27` | lesson_key=`manual-interface-consumer-browser-evidence` | event_sha256=`b51f213213d9b36884e70e53e290630dc0037bf82156d709e872541c57f20dba`
+- #27: `4010f235-e816-46d0-a791-41f587251b13` | 2026-10-10T23:02:19.862Z | STATE_CHANGE/context_rescope_required | incident=`67e44033-f2ad-4007-8cbc-56872fcbe453` | lesson_key=`context-pack-rescope` | event_sha256=`9c03ae40a14c05a66d137f37c4febfba2f38e0df46415d4bb91cc71815a5fed0`
+- #28: `b2c5786a-0751-408d-a14c-49e8ebf86c17` | 2026-10-10T23:02:19.882Z | STATE_CHANGE/context_rescoped | incident=`9b409f96-ff57-4d4c-83c9-dfa24128b7b9` | lesson_key=`context-pack-rescope` | event_sha256=`a29e3f6452fcccfae796ceaf25e67059a9a9c1e8f5c56f13c2e0eb3dd7097406`
+- #29: `ee488330-ecf2-49af-8cf8-db3f25611108` | 2026-10-10T23:04:56.923Z | GAP/notebook_state_reader | incident=`67280a19-23d3-4f38-afce-1539b436ad44` | lesson_key=`notebook-state-egress-contract` | event_sha256=`b474898af7613bf5bb174edc43da0d2e43772ef66bfab8d68b5d00b45a0d9e87`
