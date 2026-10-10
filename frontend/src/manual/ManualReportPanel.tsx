@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { reportDraft, reportHistory, saveReport, reportExportUrl, type Draft, type Report } from "./manualApi";
 import "./manual.css";
+import { ReportReadingView, factLabel, factValue } from "./ReportEvidence";
 export function ManualReportPanel({ projectRoot, runId }: {
     projectRoot: string;
     runId: string;
@@ -15,6 +16,7 @@ export function ManualReportPanel({ projectRoot, runId }: {
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState("");
     const [saved, setSaved] = useState(false);
+    const [reading, setReading] = useState(true);
     const saveId = useRef(`mrpt_${crypto.randomUUID()}`);
     const pending = useRef(false);
     const edit = () => { setSaved(false); saveId.current = `mrpt_${crypto.randomUUID()}`; };
@@ -55,11 +57,11 @@ export function ManualReportPanel({ projectRoot, runId }: {
         setBusy(false);
     } }}>New draft from current evidence</button></header><p>Write locally. Computed evidence stays read-only; each save creates a version.</p><small>Run {runId}</small>
     {error && <p role="alert">{error}</p>}{busy && <p role="status">Working…</p>}
-    <fieldset disabled={busy || !draft}><label className="manual-field">Report title<input aria-label="Report title" maxLength={300} value={title} onChange={e => { edit(); setTitle(e.target.value); }}/></label><label className="manual-field">Report text<textarea aria-label="Report text" maxLength={2000000} rows={10} value={text} onChange={e => { edit(); setText(e.target.value); }}/></label>
-    {current && <p>Saved evidence is fixed. Start a new draft to choose different evidence.</p>}<details><summary>Computed evidence ({facts.length} selected)</summary><div className="manual-facts">{evidence.map(f => <label key={f.id}><input type="checkbox" disabled={current !== null} checked={facts.includes(f.id)} onChange={e => { edit(); setFacts(old => e.target.checked ? [...old, f.id] : old.filter(id => id !== f.id)); }}/>{f.label}: {String(f.value)}<small> · {f.source.run_id} · {f.field}</small></label>)}</div></details>
+    <fieldset disabled={busy || !draft}><label className="manual-field">Report title<input aria-label="Report title" maxLength={300} value={title} onChange={e => { edit(); setTitle(e.target.value); }}/></label><div role="group" aria-label="Report display"><button type="button" aria-pressed={reading} onClick={() => setReading(true)}>Read</button><button type="button" aria-pressed={!reading} onClick={() => setReading(false)}>Edit source</button></div>{reading && <ReportReadingView text={text} facts={evidence}/>}<label className="manual-field" hidden={reading}>Report text<textarea aria-label="Report text" maxLength={2000000} rows={10} value={text} onChange={e => { edit(); setText(e.target.value); }}/></label>
+    {current && <p>Saved evidence is fixed. Start a new draft to choose different evidence.</p>}<details><summary>Computed evidence ({facts.length} selected)</summary><div className="manual-facts">{evidence.map(f => <label key={f.id}><input type="checkbox" disabled={current !== null} checked={facts.includes(f.id)} onChange={e => { edit(); setFacts(old => e.target.checked ? [...old, f.id] : old.filter(id => id !== f.id)); }}/>{factLabel(f)}: {factValue(f)}<small title={`Exact value: ${String(f.value)}`}> · {f.source.run_id} · {f.field}</small></label>)}</div></details>
     <details><summary>Figures ({figures.length} selected)</summary>{figureEvidence.map(f => <label key={f.artifact_id}><input type="checkbox" disabled={current !== null} checked={figures.includes(f.artifact_id)} onChange={e => { edit(); setFigures(old => e.target.checked ? [...old, f.artifact_id] : old.filter(id => id !== f.artifact_id)); }}/>{f.chart_type} · {f.artifact_id}</label>)}</details>
     {(current?.limitations ?? draft?.limitations ?? []).map((s, i) => <p key={i}>{s}</p>)}<button type="button" disabled={!title.trim() || !text.trim() || saved} onClick={() => void save()}>{current ? 'Save report revision' : 'Save manual report'}</button></fieldset>
-    {saved && current && <section aria-label="Saved manual report"><p role="status">Saved · version {current.revision_number} · author: user</p><h3>{current.title}</h3><pre>{current.text}</pre><p>Exports contain the saved version and its computed evidence.</p>{['html', 'docx', 'tex', 'pdf-print'].map(format => <a key={format} href={reportExportUrl(projectRoot, runId, current.id, format)} download>Export {format === 'pdf-print' ? 'print-ready HTML' : format.toUpperCase()}</a>)}</section>}
+    {saved && current && <section aria-label="Saved manual report"><p role="status">Saved · version {current.revision_number} · author: user</p><h3>{current.title}</h3><ReportReadingView text={current.text} facts={current.facts}/><p>Exports contain the saved version and its computed evidence.</p>{['html', 'docx', 'tex', 'pdf-print'].map(format => <a key={format} href={reportExportUrl(projectRoot, runId, current.id, format)} download>Export {format === 'pdf-print' ? 'print-ready HTML' : format.toUpperCase()}</a>)}</section>}
     <h3>Manual report history</h3>{history.length === 0 ? <p>No saved manual reports yet.</p> : history.map(r => <button type="button" key={r.id} disabled={busy} onClick={() => select(r)}>{r.title} · version {r.revision_number} · {r.created_at}</button>)}
   </section>;
 }
