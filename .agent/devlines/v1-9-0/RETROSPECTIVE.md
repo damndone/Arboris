@@ -10,14 +10,14 @@ CONTEXT_RESCOPED
 
 ## Metrics
 
-- Failure frequency: 4/24 (16.7%; 16.7 per 100 events)
+- Failure frequency: 4/27 (14.8%; 14.8 per 100 events)
 - Repeat rate: 0/4 (0.0%)
 - Recurrence rate: 0/4 (0.0%)
 - MTTR: median=0 ms (sample=2; unresolved=2)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: N/A (sample=0)
+- Gate waste rate: 0/1 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0; coverage=0/1)
 
@@ -95,3 +95,6 @@ CONTEXT_RESCOPED
 - #22: `c1bc2824-bda3-45a6-a2c8-eb135f47500d` | 2026-10-11T11:42:51.092Z | STATE_CHANGE/context_rescope_required | incident=`6f9297c4-4cd2-4f86-9553-4e0ec38f5c39` | lesson_key=`context-pack-rescope` | event_sha256=`39e5c84ecd86f9f00c3a59f69347dde91b4b692303631959cff2ee7f8eb40a08`
 - #23: `2cf648a1-2b43-46ed-9c45-fcc4672f77c6` | 2026-10-11T11:42:51.101Z | STATE_CHANGE/context_rescoped | incident=`3844e113-7dba-4842-b6db-9a869dab6d0e` | lesson_key=`context-pack-rescope` | event_sha256=`a0e7b494d5d1ae9eec3f15e57fe1fb16ea0b6b80bbfddb9d57925adc08a9b25b`
 - #24: `d279dada-765d-45a7-bc27-d3a2b1d9a057` | 2026-10-11T11:45:07.096Z | STATE_CHANGE/lmm_browser_integration_repairs | incident=`beef3ed2-d283-467c-af05-adb41f9eb845` | lesson_key=`manual-lmm-declaration-and-result-projection` | event_sha256=`b8fae74bf18e9c77487d9aeffe70fa4e15b0a8fb3101658bd76bb501d5c053a2`
+- #25: `b6622d22-98cd-46f4-b002-e63e60c071da` | 2026-10-11T12:07:19.208Z | STATE_CHANGE/context_rescope_required | incident=`41dc23b1-8c2f-4be3-b526-0293d6c15608` | lesson_key=`context-pack-rescope` | event_sha256=`4564c09245eee1b7720aafb21ef513804d99877f2fbedb770b3901c2241d7eb7`
+- #26: `04a48e75-9973-4d94-af07-c9866b60af0c` | 2026-10-11T12:07:19.219Z | STATE_CHANGE/context_rescoped | incident=`c93d4b30-5799-49f3-8c58-f92d38950f5a` | lesson_key=`context-pack-rescope` | event_sha256=`ce468a69bc5267284045bd502b1722bb27017e0f60ff9a3fb96460a81a20e802`
+- #27: `8333e261-e8b1-438a-b6d4-5973055a5eb8` | 2026-10-11T12:12:07.146Z | GATE/integrated_gate_targeted_corrections | incident=`3fd8ded7-7b68-4b28-8baf-a4c387495e2c` | lesson_key=`integrated-gate-declaration-projection` | event_sha256=`52e7c452194202849419db721e31fafbe21c940d2fb725e806d2d728f9c81a5e`

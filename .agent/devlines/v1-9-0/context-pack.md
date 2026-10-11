@@ -119,7 +119,7 @@ worktree `.worktrees/workbench-v1.9.0`（分支 `workbench-v1.9.0`），devline 
   Plans 视图在本版原样承载 Notebook，右侧 Agent 在 Plans 视图默认收起以免同屏两个输入框；旧外壳在本版仍可从设置切回，v1.9.1 下线。
 
 ## Boundary
-- Affected paths: `frontend/src`, `frontend/package.json`, `docs`, `evaluations`, `backend/workbench/report_view_model.py`, `backend/workbench/http/runs_routes.py`, `tests/test_report_export.py`, `backend/workbench/services/lmm_coefficients.py`, `backend/workbench/agent/context_tools_support/coefficients.py`, `tests/test_lmm_coefficient_view.py`, `backend/workbench/contracts/model/script_results.py`, `backend/workbench/script_export/builder.py`, `tests/test_script_export_intrinsic_covariance.py`
+- Affected paths: `frontend/src`, `frontend/package.json`, `docs`, `evaluations`, `backend/workbench/report_view_model.py`, `backend/workbench/http/runs_routes.py`, `tests/test_report_export.py`, `backend/workbench/services/lmm_coefficients.py`, `backend/workbench/services/results_service.py`, `backend/workbench/contracts/model/presentation.py`, `backend/workbench/agent/context_tools_support/coefficients.py`, `tests/test_lmm_coefficient_view.py`, `backend/workbench/contracts/model/script_results.py`, `backend/workbench/script_export/builder.py`, `tests/test_script_export_intrinsic_covariance.py`
 - Allowed paths: none
 - Protected paths: `backend`
 - Dependencies: `v1-8-13 contract commit: GET /operations, POST /operations/run, manual report save (specs/2026-10-08-v1.9.0-operation-interfaces.md)`

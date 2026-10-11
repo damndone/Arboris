@@ -27,6 +27,7 @@ Every tool the Agent can call, and the class of content its result contains. The
 | `inspect_design_advisories` | `aggregate` |
 | `inspect_diagnostics` | `model_result` |
 | `inspect_node_context` | `metadata` |
+| `inspect_notebook_state` | `workbench_state` |
 | `inspect_notebook_workflow_results` | `aggregate` |
 | `inspect_operation_artifact` | `aggregate` |
 | `inspect_operation_contract` | `workbench_state` |

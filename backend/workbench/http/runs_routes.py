@@ -59,7 +59,7 @@ from ..report_quality import validate_report_response_quality
 from ..report_view_model import build_regression_table, regression_table_export_rows
 from ..report_store import AiReportRecordRequest, list_ai_reports, save_ai_report
 from ..services.lmm_result_adapter import VersionedResultReadError
-from ..services.results_service import _model_results, _normalize_issue_stream
+from ..services.results_service import _model_results, _normalize_issue_stream, read_model_coefficient_view
 from ..predictive_research.consumer_projection import (
     read_prediction_evidence_from_run_root,
 )
@@ -461,12 +461,9 @@ def get_run_endpoint(run_id: str, project_root: str) -> RunDetail:
             merged_family_evidence.update(model_family_evidence)
             merged_family_evidence["diagnostics"] = model_family_evidence
         model_family_evidence = merged_family_evidence
-    if any(result.get("source_contract") == "linear_mixed_effects.result" for result in model_results):
-        from ..services.lmm_coefficients import _lmm_published_results
-
-        lmm_views = _lmm_published_results(run_root)
-        if lmm_views:
-            model_family_evidence = lmm_views[0]
+    coefficient_view = read_model_coefficient_view(run_root, model_results)
+    if coefficient_view is not None:
+        model_family_evidence = coefficient_view
     prediction_evidence = None
     if (run_root / "prediction_results").is_dir():
         try:

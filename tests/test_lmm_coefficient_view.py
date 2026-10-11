@@ -4,7 +4,7 @@ from workbench.services import lmm_coefficients
 
 
 def test_run_detail_keeps_packet_and_exposes_matching_coefficient_view(tmp_path, monkeypatch):
-    packet = {"model_id": "lmm_1", "source_contract": "linear_mixed_effects.result"}
+    packet = {"model_id": "lmm_1", "model_type": "linear_mixed_effects", "source_contract": "linear_mixed_effects.result"}
     view = {"model_id": "lmm_1", "coefficients": {"Q('time')": {"estimate": 0.4}}}
     monkeypatch.setattr(runs_routes, "_resolve_run_root", lambda *args: tmp_path)
     monkeypatch.setattr(runs_routes, "_read_manifest", lambda *args: {})
