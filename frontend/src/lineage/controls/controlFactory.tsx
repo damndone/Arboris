@@ -199,7 +199,7 @@ function makePlaceholder(kind: ControlKind) {
     return (
       <span data-testid={`control-${kind}`} data-control-kind={kind} aria-disabled="true">
         {control.label}
-        {control.value !== undefined ? `: ${String(control.value)}` : ""}
+        {control.value !== undefined ? `: ${typeof control.value === "object" ? JSON.stringify(control.value) : String(control.value)}` : ""}
       </span>
     );
   }

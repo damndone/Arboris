@@ -286,6 +286,10 @@ export function GenesisWizard({
   const serverModelOptionsControl = serverModelControls.find(
     (control) => control.key === "model_options" && control.kind === "object",
   );
+  const familyParams = capabilityEntry(capabilities, modelType)?.params;
+  // Auto selects a family at execution; concrete families own their controls.
+  const supportsCovariance = modelType === "auto" || familyParams === undefined ||
+    familyParams.some((param) => param.key === "covariance");
   const isRecipeModel =
     capabilityUsesObjectOnlyInput(capabilities, modelType) ||
     schemaUsesObjectOnlyInput(serverModelControls);
@@ -696,7 +700,7 @@ export function GenesisWizard({
     if (!isRecipeModel && imputationMethod) {
       params.imputation = JSON.stringify({ method: imputationMethod });
     }
-    if (!isRecipeModel && !isDID && !usesCsParams && !isDcdh && defaultCovariance) {
+    if (!isRecipeModel && !isDID && !usesCsParams && !isDcdh && supportsCovariance && defaultCovariance) {
       params.covariance = defaultCovariance;
     }
     if (!isRecipeModel && modelType === "panel_ols") {
@@ -1290,7 +1294,7 @@ export function GenesisWizard({
             onFinalHoldoutFraction={setPredictionFinalHoldoutFraction}
             onShuffle={setPredictionShuffle}
           />}
-          {modelType !== "time_series.arma_garch" &&
+          {supportsCovariance && modelType !== "time_series.arma_garch" &&
             modelType !== "panel_ols" &&
             modelType !== "iv_2sls" &&
             modelType !== "did" &&

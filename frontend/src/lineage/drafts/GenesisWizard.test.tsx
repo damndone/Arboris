@@ -13,7 +13,7 @@ vi.mock("../../capabilities/useCapabilities", () => ({
         { key: "auto", label: "Auto", group: "auto" },
         { key: "ols", label: "OLS", group: "Linear" },
         { key: "panel_ols", label: "Panel OLS", group: "Panel" },
-        { key: "linear_mixed_effects", label: "Linear Mixed Effects", group: "Panel" },
+        { key: "linear_mixed_effects", label: "Linear Mixed Effects", group: "Panel", params: [{ key: "x", kind: "columns" }, { key: "model_options", kind: "object" }] },
         { key: "iv_2sls", label: "IV / 2SLS", group: "IV" },
         { key: "dcdh", label: "DCDH DID", group: "DID" },
         {
@@ -550,6 +550,7 @@ describe("GenesisWizard", () => {
     fireEvent.change(screen.getByLabelText("model type"), {
       target: { value: "linear_mixed_effects" },
     });
+    expect(screen.queryByLabelText("covariance")).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("LMM subject"), { target: { value: "participant_id" } });
     fireEvent.change(screen.getByLabelText("LMM time"), { target: { value: "week" } });
     fireEvent.change(screen.getByLabelText("LMM group"), { target: { value: "arm" } });
@@ -562,7 +563,6 @@ describe("GenesisWizard", () => {
           model_type: "linear_mixed_effects",
           y: "score",
           x: ["baseline_score"],
-          covariance: "robust",
           model_options: {
             subject_id: "participant_id",
             time: "week",

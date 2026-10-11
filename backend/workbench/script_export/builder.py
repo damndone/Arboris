@@ -168,6 +168,25 @@ def _post_values(payload):
     return values
 
 
+def _export_covariance(executed, packet, form, kernel, layout):
+    covariance = executed.get("covariance") or packet.get('covariance') or form.get('covariance') or None
+    if covariance is None:
+        if kernel["covariance_estimator"] in {"nonrobust", "unadjusted"}:
+            covariance = "unadjusted"
+        elif layout.intrinsic_covariance and kernel["covariance_estimator"] == layout.intrinsic_covariance:
+            covariance = layout.intrinsic_covariance
+        elif kernel['covariance_estimator'] is not None:
+            refuse("Executed covariance cannot be proved from the owner record")
+    labels = {'unadjusted': {'nonrobust','unadjusted'}, 'robust': {'robust','HC1'},
+              'clustered': {'cluster','clustered'}, 'hac': {'HAC'}}
+    if layout.intrinsic_covariance:
+        labels[layout.intrinsic_covariance] = {layout.intrinsic_covariance}
+    if not isinstance(packet.get('survey_design'), dict) and covariance is not None:
+        if kernel['covariance_estimator'] not in labels.get(covariance, set()):
+            refuse("Executed covariance input disagrees with its actual inference kernel")
+    return covariance
+
+
 class _Builder:
     def __init__(self, project, run_id):
         self.project = Path(project).resolve()
@@ -500,17 +519,7 @@ class _Builder:
                     rel_tol=16*math.ulp(1.0),abs_tol=0.0):
                 refuse('Model standard error and inference kernel disagree')
         evidence = packet.get('covariance_evidence') or {}
-        covariance = executed.get("covariance") or packet.get('covariance') or form.get('covariance') or None
-        if covariance is None:
-            if kernel["covariance_estimator"] in {"nonrobust", "unadjusted"}:
-                covariance = "unadjusted"
-            elif kernel['covariance_estimator'] is not None:
-                refuse("Executed covariance cannot be proved from the owner record")
-        labels = {'unadjusted': {'nonrobust','unadjusted'}, 'robust': {'robust','HC1'},
-                  'clustered': {'cluster','clustered'}, 'hac': {'HAC'}}
-        if not isinstance(packet.get('survey_design'), dict) and covariance is not None:
-            if kernel['covariance_estimator'] not in labels.get(covariance, set()):
-                refuse("Executed covariance input disagrees with its actual inference kernel")
+        covariance = _export_covariance(executed, packet, form, kernel, layout)
         cluster = options.get('cluster') or executed.get('entity_col') or form.get('entity_col') or None
         if covariance == 'clustered' and evidence:
             if (evidence.get('cluster_variable') != cluster or evidence.get('cluster_count') != kernel['n_clusters']

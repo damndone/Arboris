@@ -10,7 +10,7 @@ CONTEXT_RESCOPED
 
 ## Metrics
 
-- Failure frequency: 4/19 (21.1%; 21.1 per 100 events)
+- Failure frequency: 4/24 (16.7%; 16.7 per 100 events)
 - Repeat rate: 0/4 (0.0%)
 - Recurrence rate: 0/4 (0.0%)
 - MTTR: median=0 ms (sample=2; unresolved=2)
@@ -90,3 +90,8 @@ CONTEXT_RESCOPED
 - #17: `c5689655-77b8-4241-ac84-8dc835964ecf` | 2026-10-11T00:26:01.525Z | STATE_CHANGE/context_rescope_required | incident=`70758ec1-a006-4058-b9d5-f8e5ea0fb0e1` | lesson_key=`context-pack-rescope` | event_sha256=`cc448640c6f8760ca631dfa444d84f4b74ba61be037f41278e80409ab29fce72`
 - #18: `8a9aa092-2cc9-4f39-a146-4b6de8dd78b7` | 2026-10-11T00:26:01.532Z | STATE_CHANGE/context_rescoped | incident=`88784115-4b09-43ec-884b-46dffa130265` | lesson_key=`context-pack-rescope` | event_sha256=`3c0d7d5d1f9c2179d6f342ab991ffa0675f335903ad627862ec405bc42539be7`
 - #19: `4780628d-0a28-450c-8b02-177dd9074846` | 2026-10-11T00:38:34.290Z | STATE_CHANGE/authorized_backend_merge_and_offline_iv_acceptance | incident=`7fc73cd3-046a-4124-ad0c-0b94bf24cd05` | lesson_key=`integrated-source-and-export-evidence` | event_sha256=`fe664039bf3853ee057361d6e7405b3837cc8a3f9f6183fbf2af3436e55aa493`
+- #20: `8ab9fd53-e176-4891-b6f6-e079c55370d8` | 2026-10-11T11:38:40.437Z | STATE_CHANGE/context_rescope_required | incident=`ac2aebde-9b59-4add-b03b-c3b2da5dd8ea` | lesson_key=`context-pack-rescope` | event_sha256=`9aa36866916ac52ecc48d05b22902ce37b303361370c1e97856ba6ae93a736e3`
+- #21: `7331ff07-f725-4eef-a11b-c73423f113d6` | 2026-10-11T11:38:40.447Z | STATE_CHANGE/context_rescoped | incident=`e5017f93-6796-44b6-8ffc-a92aebaacc61` | lesson_key=`context-pack-rescope` | event_sha256=`8fc79667aaae22afee2cc09abe8e3b4d779a73c6bf51e85749b53e3d7d057e07`
+- #22: `c1bc2824-bda3-45a6-a2c8-eb135f47500d` | 2026-10-11T11:42:51.092Z | STATE_CHANGE/context_rescope_required | incident=`6f9297c4-4cd2-4f86-9553-4e0ec38f5c39` | lesson_key=`context-pack-rescope` | event_sha256=`39e5c84ecd86f9f00c3a59f69347dde91b4b692303631959cff2ee7f8eb40a08`
+- #23: `2cf648a1-2b43-46ed-9c45-fcc4672f77c6` | 2026-10-11T11:42:51.101Z | STATE_CHANGE/context_rescoped | incident=`3844e113-7dba-4842-b6db-9a869dab6d0e` | lesson_key=`context-pack-rescope` | event_sha256=`a0e7b494d5d1ae9eec3f15e57fe1fb16ea0b6b80bbfddb9d57925adc08a9b25b`
+- #24: `d279dada-765d-45a7-bc27-d3a2b1d9a057` | 2026-10-11T11:45:07.096Z | STATE_CHANGE/lmm_browser_integration_repairs | incident=`beef3ed2-d283-467c-af05-adb41f9eb845` | lesson_key=`manual-lmm-declaration-and-result-projection` | event_sha256=`b8fae74bf18e9c77487d9aeffe70fa4e15b0a8fb3101658bd76bb501d5c053a2`

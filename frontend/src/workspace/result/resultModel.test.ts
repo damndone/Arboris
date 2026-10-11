@@ -30,6 +30,15 @@ describe("result model", () => {
     expect(pickModelResult(detail, "missing")).toBeNull();
   });
 
+  test("versioned LMM uses only the matching shared coefficient view", () => {
+    const packet = { model_id: "lmm_1", source_contract: "linear_mixed_effects.result" };
+    const evidence = { ...result, model_id: "lmm_1" };
+    const run = { model_results: [packet], model_family_evidence: evidence } as unknown as RunDetail;
+    expect(pickModelResult(run, "lmm_1")).toBe(evidence);
+    expect(coefficientRows(pickModelResult(run, "lmm_1"), {}).length).toBe(2);
+    expect(pickModelResult({ ...run, model_family_evidence: { ...evidence, model_id: "other" } } as unknown as RunDetail, "lmm_1")).toBe(packet);
+  });
+
   test("coefficients carry labels, intervals and the p shown to readers; the key one is the first slope", () => {
     const rows = coefficientRows(pickModelResult(detail, "ols_1"), detail.term_labels);
     expect(rows.map((r) => [r.term, r.label, r.intercept])).toEqual([

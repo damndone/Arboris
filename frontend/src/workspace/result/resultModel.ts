@@ -25,7 +25,11 @@ export function modelIdOf(node: Pick<GraphViewNode, "raw" | "id" | "stage" | "ki
 export function pickModelResult(detail: RunDetail | null, modelId: string | null): ModelResult | null {
   const results = detail?.model_results ?? [];
   if (results.length === 0) return null;
-  return results.find((result) => rec(result)?.model_id === modelId) ?? (modelId === null ? results[0] : null);
+  const result = results.find((result) => rec(result)?.model_id === modelId) ?? (modelId === null ? results[0] : null);
+  const evidence = rec(detail?.model_family_evidence);
+  return result && evidence && rec(result)?.source_contract === "linear_mixed_effects.result" &&
+    evidence?.model_id === rec(result)?.model_id && rec(evidence.coefficients)
+    ? evidence as unknown as ModelResult : result;
 }
 
 export interface CoefficientRow {
@@ -50,7 +54,7 @@ export function coefficientRows(result: ModelResult | null, termLabels: unknown)
     const c = rec(value) ?? {};
     return {
       term,
-      label: str(labels[term]) ?? term,
+      label: str(labels[term]) ?? str(c.label) ?? term,
       estimate: num(c.estimate),
       se: num(c.std_error),
       ciLow: num(c.ci_lower),

@@ -461,6 +461,12 @@ def get_run_endpoint(run_id: str, project_root: str) -> RunDetail:
             merged_family_evidence.update(model_family_evidence)
             merged_family_evidence["diagnostics"] = model_family_evidence
         model_family_evidence = merged_family_evidence
+    if any(result.get("source_contract") == "linear_mixed_effects.result" for result in model_results):
+        from ..services.lmm_coefficients import _lmm_published_results
+
+        lmm_views = _lmm_published_results(run_root)
+        if lmm_views:
+            model_family_evidence = lmm_views[0]
     prediction_evidence = None
     if (run_root / "prediction_results").is_dir():
         try:
@@ -480,7 +486,7 @@ def get_run_endpoint(run_id: str, project_root: str) -> RunDetail:
         "statistical_evidence": diagnostic_summary.get("statistical_evidence"),
         "labels": diagnostic_summary.get("labels", {"variable_labels": {}, "value_labels": {}}),
         "term_labels": _term_labels(
-            model_results,
+            [*model_results, model_family_evidence],
             diagnostic_summary.get("labels", {"variable_labels": {}, "value_labels": {}}),
         ),
         "model_family_evidence": model_family_evidence,

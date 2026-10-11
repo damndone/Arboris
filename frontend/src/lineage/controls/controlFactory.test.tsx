@@ -74,6 +74,11 @@ describe("controlFactory", () => {
       unmount();
     }
   });
+  it("shows a structured read-only value without object coercion", () => {
+    render(<>{renderControl({ kind: "json", key: "options", label: "Options", value: { fit_method: "reml" } }, vi.fn())}</>);
+    expect(screen.getByTestId("control-json")).toHaveTextContent('Options: {"fit_method":"reml"}');
+    expect(screen.queryByText(/\[object Object\]/)).toBeNull();
+  });
   it("toggle reflects boolean value and flips it on click", () => {
     const onChange = vi.fn();
     const control: EditableControl = {
