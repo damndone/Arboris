@@ -1,0 +1,231 @@
+{
+  "tolerances": {
+    "frozen_before_native_execution": true,
+    "numerical": {
+      "absolute": 1e-07,
+      "relative": 1e-06
+    },
+    "p_value": {
+      "absolute": 1e-10,
+      "relative": 1e-05
+    },
+    "comparisons": [
+      "ML same-sample same-random-structure full versus drop x LR",
+      "fixed-only response derivative x",
+      "fixed-only response derivative time including arm interaction"
+    ],
+    "admission": "evaluation only; lr and margins registry remains closed"
+  },
+  "admission": "CLOSED",
+  "gaps": [
+    "LR refuses actual lmm_gls_conditional covariance: NOT_MODEL_BASED_VARIANCE.",
+    "Kernel lacks random-structure and variance-boundary provenance; fixed-name nesting alone is insufficient.",
+    "Row fingerprint identifies row labels, not dataset identity; same source must be checked externally.",
+    "Generic margins treats time and arm:time as independent design columns; population time derivative is wrong.",
+    "Identity link supplied only for this explicit fixed-only evaluation; this does not admit LMM prediction context."
+  ],
+  "random_intercept": {
+    "data_sha256": "f971e489477c8c912580aa09b2f0327334f0e12a2f9d5313a5e95f9ccf333828",
+    "nobs": 360,
+    "converged": true,
+    "sample_fingerprints_match": true,
+    "kernel_fields": [
+      "contract",
+      "covariance_estimator",
+      "df_method",
+      "df_resid",
+      "estimation_sample_fingerprint",
+      "interfaces",
+      "loglik",
+      "model_id",
+      "model_type",
+      "n_clusters",
+      "nobs",
+      "param_names",
+      "params",
+      "reference_distribution",
+      "unavailable",
+      "vcov",
+      "vcov_param_names",
+      "vcov_scope",
+      "weights"
+    ],
+    "covariance_estimator": "lmm_gls_conditional",
+    "computed_lr_quantity_only": {
+      "loglik_full": -391.7485475164442,
+      "loglik_restricted": -479.3897816251513,
+      "statistic": 175.28246821741413,
+      "df": 1,
+      "p_value": 5.1942537233480235e-40
+    },
+    "public_lr_refusal": {
+      "code": "NOT_MODEL_BASED_VARIANCE",
+      "message": "the fuller model uses a lmm_gls_conditional covariance; a likelihood-ratio test assumes the likelihood describes the variance, so use a Wald test instead"
+    },
+    "margins": {
+      "x": {
+        "variable": "x",
+        "estimate": 0.5494635528359969,
+        "std_error": 0.035998019951142234,
+        "statistic": 15.26371599276149,
+        "p_value": 1.3342841581269864e-52,
+        "ci": [
+          0.4789087302170038,
+          0.62001837545499
+        ]
+      },
+      "time": {
+        "variable": "time",
+        "estimate": 0.282961756936755,
+        "std_error": 0.026156230354856223,
+        "statistic": 10.818139812116302,
+        "p_value": 2.8245185723326556e-27,
+        "ci": [
+          0.2316964874699035,
+          0.3342270264036065
+        ]
+      }
+    },
+    "comparisons": {
+      "loglik_full": {
+        "R": true,
+        "Stata": true
+      },
+      "loglik_restricted": {
+        "R": true,
+        "Stata": true
+      },
+      "statistic": {
+        "R": true,
+        "Stata": true
+      },
+      "df": {
+        "R": true,
+        "Stata": true
+      },
+      "p_value": {
+        "R": true,
+        "Stata": true
+      },
+      "margins.x.estimate": {
+        "R": true,
+        "Stata": true
+      },
+      "margins.x.std_error": {
+        "R": true,
+        "Stata": true
+      },
+      "margins.time.estimate": {
+        "R": false,
+        "Stata": false
+      },
+      "margins.time.std_error": {
+        "R": false,
+        "Stata": false
+      }
+    },
+    "status": "FAIL"
+  },
+  "random_slope": {
+    "data_sha256": "8daaa586b83bf865b08f59e5af9fa2a29dc2d0b6069069cd98e10f9fedea91d3",
+    "nobs": 360,
+    "converged": true,
+    "sample_fingerprints_match": true,
+    "kernel_fields": [
+      "contract",
+      "covariance_estimator",
+      "df_method",
+      "df_resid",
+      "estimation_sample_fingerprint",
+      "interfaces",
+      "loglik",
+      "model_id",
+      "model_type",
+      "n_clusters",
+      "nobs",
+      "param_names",
+      "params",
+      "reference_distribution",
+      "unavailable",
+      "vcov",
+      "vcov_param_names",
+      "vcov_scope",
+      "weights"
+    ],
+    "covariance_estimator": "lmm_gls_conditional",
+    "computed_lr_quantity_only": {
+      "loglik_full": -460.3174861090729,
+      "loglik_restricted": -535.1577614708374,
+      "statistic": 149.680550723529,
+      "df": 1,
+      "p_value": 2.0360302290371077e-34
+    },
+    "public_lr_refusal": {
+      "code": "NOT_MODEL_BASED_VARIANCE",
+      "message": "the fuller model uses a lmm_gls_conditional covariance; a likelihood-ratio test assumes the likelihood describes the variance, so use a Wald test instead"
+    },
+    "margins": {
+      "x": {
+        "variable": "x",
+        "estimate": 0.4996103171179647,
+        "std_error": 0.035255022117558536,
+        "statistic": 14.171323321029403,
+        "p_value": 1.3787760015623755e-45,
+        "ci": [
+          0.43051174349338694,
+          0.5687088907425425
+        ]
+      },
+      "time": {
+        "variable": "time",
+        "estimate": 0.25608401882616316,
+        "std_error": 0.06004710630156979,
+        "statistic": 4.264718728327271,
+        "p_value": 2.0015418373703788e-05,
+        "ci": [
+          0.13839385309923824,
+          0.3737741845530881
+        ]
+      }
+    },
+    "comparisons": {
+      "loglik_full": {
+        "R": true,
+        "Stata": true
+      },
+      "loglik_restricted": {
+        "R": true,
+        "Stata": true
+      },
+      "statistic": {
+        "R": true,
+        "Stata": true
+      },
+      "df": {
+        "R": true,
+        "Stata": true
+      },
+      "p_value": {
+        "R": true,
+        "Stata": true
+      },
+      "margins.x.estimate": {
+        "R": true,
+        "Stata": true
+      },
+      "margins.x.std_error": {
+        "R": true,
+        "Stata": true
+      },
+      "margins.time.estimate": {
+        "R": false,
+        "Stata": false
+      },
+      "margins.time.std_error": {
+        "R": false,
+        "Stata": false
+      }
+    },
+    "status": "FAIL"
+  }
+}

@@ -8,6 +8,8 @@ turning the runtime into an operation-id switch statement.
 
 from __future__ import annotations
 
+from ..contracts.model.arma_garch import TRANSFORM_IDS as ARMA_GARCH_TRANSFORM_IDS
+
 from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
@@ -1026,7 +1028,7 @@ _ADAPTER_REQUEST_SCHEMAS: dict[str, dict[str, Any]] = {
                     "observation_order",
                 ],
             },
-            "transform": {"type": "string", "enum": ["level", "log_level", "diff_1", "log_return_pct"]},
+            "transform": {"type": "string", "enum": list(ARMA_GARCH_TRANSFORM_IDS)},
             "transform_confirmed": {"type": "boolean"},
             "analysis_goal": {"type": "string", "enum": ["balanced", "forecast", "parsimony", "replication"]},
             "selection_mode": {"type": "string", "enum": ["auto", "manual"]},

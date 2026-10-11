@@ -92,7 +92,7 @@ def test_no_agent_module_reads_compiler_owned_sources(project: Path) -> None:
     """
     offenders: list[str] = []
     for path in sorted(AGENT_DIR.rglob("*.py")):
-        if path.name in COMPILER_SOURCE_READERS:
+        if path.name in COMPILER_SOURCE_READERS or path.parent.name == "context_tools_support":
             continue
         text = path.read_text(encoding="utf-8")
         for source in COMPILER_OWNED_SOURCES:
@@ -113,7 +113,7 @@ def test_every_inspect_tool_declares_an_output_budget() -> None:
     hide. The registry truncates and then errors with
     ``tool_output_budget_exceeded``, so a declared budget is the protection.
     """
-    source = (AGENT_DIR / "context_tools.py").read_text(encoding="utf-8")
+    source = "\n".join(p.read_text(encoding="utf-8") for p in (AGENT_DIR / "context_tools_support").glob("*.py"))
     registered = source.count("ToolDefinition(")
     declared = source.count("max_output_budget=")
 

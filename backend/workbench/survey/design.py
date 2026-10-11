@@ -25,13 +25,7 @@ import pandas as pd
 from .errors import SurveyEngineError
 from .estimator import VARIANCE_METHOD_REQUIREMENTS, EstimatorSpec, missing_capabilities
 
-LONELY_PSU_POLICIES = ("fail", "remove", "adjust", "average", "certainty")
-REPLICATE_TYPES = ("brr", "jackknife", "bootstrap", "provided")
-#: Degrees of freedom for coefficient t tests and intervals. "design" is the
-#: design df itself (#PSU - #strata): Korn-Graubard, and what Stata svy, SAS
-#: SURVEYREG and SUDAAN use. "design_minus_p" also subtracts the parameters
-#: (degf - p + 1), R survey's svyglm convention. The first is the default.
-DF_CONVENTIONS = ("design", "design_minus_p")
+from .declarations import DF_CONVENTIONS, LONELY_PSU_POLICIES, REPLICATE_TYPES
 
 
 def recorded_df_convention(packet: Mapping[str, Any]) -> tuple[str, Any]:

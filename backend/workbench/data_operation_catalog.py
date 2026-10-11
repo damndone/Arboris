@@ -16,9 +16,6 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-import pandas as pd
-
-from . import data_operations as ops
 from .data_operation_registry import DataOperationDeclaration, Labels, register_data_operation
 
 # -- contract metadata (fields, schemas, enums) -------------------------------
@@ -479,6 +476,7 @@ def _validate_reshape(spec: Mapping[str, Any]) -> None:
 
 
 def _validate_subset(spec: Mapping[str, Any]) -> None:
+    from . import data_operations as ops
     _strings(spec.get("columns"), "columns")
     filters = spec.get("filters", [])
     if not isinstance(filters, list):
@@ -538,6 +536,7 @@ def _validate_rename(spec: Mapping[str, Any]) -> None:
 
 
 def _validate_aggregate(spec: Mapping[str, Any]) -> None:
+    from . import data_operations as ops
     group_by = _strings(spec.get("group_by"), "group_by")
     aggregations = spec.get("aggregations")
     if not isinstance(aggregations, list) or not aggregations:
@@ -555,6 +554,7 @@ def _validate_aggregate(spec: Mapping[str, Any]) -> None:
 
 
 def _validate_fill_missing(spec: Mapping[str, Any]) -> None:
+    from . import data_operations as ops
     strategies = spec.get("strategies")
     if not isinstance(strategies, list) or not strategies:
         raise ValueError("strategies must be non-empty")
@@ -576,6 +576,7 @@ def _validate_fill_missing(spec: Mapping[str, Any]) -> None:
 
 
 def _validate_tsset(spec: Mapping[str, Any]) -> None:
+    from . import data_operations as ops
     _text(spec.get("time_column"), "time_column")
     if spec.get("frequency") not in ops.TSSET_FREQUENCIES:
         raise ValueError("frequency is not registered")
@@ -667,7 +668,19 @@ def _declare(operation: str, contract: Mapping[str, Any], **parts: Any) -> None:
 
 
 def _frame(**columns: Any):
-    return lambda: pd.DataFrame(columns)
+    def create():
+        import pandas as pd
+        return pd.DataFrame(columns)
+    return create
+
+
+def _executor(name: str):
+    """Resolve calculation code only when this declaration is executed."""
+    def execute(*args, **kwargs):
+        from . import data_operations
+        return getattr(data_operations, name)(*args, **kwargs)
+    return execute
+
 
 
 _SECONDARY = {"secondary_run_id": "run_b", "secondary_node_id": "stage:raw", "secondary_artifact_id": "raw_b.csv"}
@@ -677,7 +690,7 @@ _declare(
     referenced_columns=lambda spec: _strs(spec.get("keys")),
     output_columns=_merge_outputs,
     validate=_validate_merge,
-    execute=ops._execute_merge,
+    execute=_executor("_execute_merge"),
     describe=_describe_merge,
     secondary_input=True,
     binding_fields=tuple(_SECONDARY),
@@ -690,7 +703,7 @@ _declare(
     referenced_columns=lambda spec: _strs(spec.get("keys")),
     output_columns=lambda spec, visible: set(visible),
     validate=_validate_append,
-    execute=ops._execute_append,
+    execute=_executor("_execute_append"),
     describe=_describe_append,
     secondary_input=True,
     binding_fields=tuple(_SECONDARY),
@@ -703,7 +716,7 @@ _declare(
     referenced_columns=_reshape_columns,
     output_columns=_reshape_outputs,
     validate=_validate_reshape,
-    execute=ops._execute_reshape,
+    execute=_executor("_execute_reshape"),
     describe=_describe_reshape,
     example={"direction": "wide_to_long", "id_columns": ["id"], "value_columns": ["y2020", "y2021"],
              "var_name": "year", "value_name": "income"},
@@ -714,7 +727,7 @@ _declare(
     referenced_columns=_subset_columns,
     output_columns=lambda spec, visible: _strs(spec.get("columns")),
     validate=_validate_subset,
-    execute=ops._execute_subset,
+    execute=_executor("_execute_subset"),
     describe=_describe_subset,
     example={"columns": ["id", "age"], "filters": [{"column": "age", "op": "between", "value": [25, 55]}]},
     example_frame=_frame(id=[1, 2, 3], age=[20.0, 30.0, 60.0], x=[1.0, 2.0, 3.0]),
@@ -724,7 +737,7 @@ _declare(
     referenced_columns=lambda spec: _strs(spec.get("columns")),
     output_columns=lambda spec, visible: set(visible),
     validate=_validate_dedupe,
-    execute=ops._execute_dedupe,
+    execute=_executor("_execute_dedupe"),
     describe=_describe_dedupe,
     example={"columns": ["id"], "keep": "first"},
     example_frame=_frame(id=[1, 1, 2], x=[1.0, 2.0, 3.0]),
@@ -735,7 +748,7 @@ _declare(
     output_columns=lambda spec, visible: (visible - _mapping_keys(spec, "mapping"))
     | {str(value) for value in (spec.get("mapping") or {}).values()},
     validate=_validate_rename,
-    execute=ops._execute_rename,
+    execute=_executor("_execute_rename"),
     describe=_describe_rename,
     example={"mapping": {"inc": "income"}},
     example_frame=_frame(id=[1, 2], inc=[10.0, 20.0]),
@@ -746,7 +759,7 @@ _declare(
     output_columns=lambda spec, visible: _strs(spec.get("group_by"))
     | {str(item["output"]) for item in spec.get("aggregations", []) if isinstance(item, Mapping) and item.get("output")},
     validate=_validate_aggregate,
-    execute=ops._execute_aggregate,
+    execute=_executor("_execute_aggregate"),
     describe=_describe_aggregate,
     example={"group_by": ["region"], "aggregations": [{"column": "wage", "func": "mean", "output": "mean_wage"}]},
     example_frame=_frame(region=["north", "north", "south"], wage=[10.0, 12.0, 9.0]),
@@ -756,7 +769,7 @@ _declare(
     referenced_columns=lambda spec: _item_columns(spec, "strategies"),
     output_columns=lambda spec, visible: set(visible),
     validate=_validate_fill_missing,
-    execute=ops._execute_fill_missing,
+    execute=_executor("_execute_fill_missing"),
     describe=_describe_fill_missing,
     example={"strategies": [{"column": "hours", "strategy": "median"}]},
     example_frame=_frame(id=[1, 2, 3], hours=[40.0, None, 38.0]),
@@ -766,7 +779,7 @@ _declare(
     referenced_columns=lambda spec: {str(spec[key]) for key in ("time_column", "panel_id_column") if spec.get(key)},
     output_columns=lambda spec, visible: set(visible),
     validate=_validate_tsset,
-    execute=ops._execute_tsset,
+    execute=_executor("_execute_tsset"),
     describe=_describe_tsset,
     example={"time_column": "year", "frequency": "Y"},
     example_frame=_frame(year=[2020, 2021, 2022], gdp=[1.0, 1.1, 1.2]),
@@ -776,7 +789,7 @@ _declare(
     referenced_columns=lambda spec: _strs(spec.get("columns")),
     output_columns=lambda spec, visible: {*visible, *(f"{column}_lag{lag}" for column in spec.get("columns", []) for lag in spec.get("lags", []))},
     validate=_validate_lag,
-    execute=ops._execute_lag,
+    execute=_executor("_execute_lag"),
     describe=_describe_lag,
     example={"columns": ["gdp"], "lags": [1]},
     example_frame=_frame(year=[2020, 2021, 2022], gdp=[1.0, 1.1, 1.2]),
@@ -831,8 +844,8 @@ def _declare_recode() -> None:
             },
             referenced_columns=lambda spec: {str(spec["column"])} if spec.get("column") else set(),
             output_columns=lambda spec, visible: visible | ({str(spec["output"])} if spec.get("output") else set()),
-            validate=lambda spec: ops._recode_static_check(spec) and None,
-            execute=ops._recode_into_new_column,
+            validate=lambda spec: _executor("_recode_static_check")(spec) and None,
+            execute=_executor("_recode_into_new_column"),
             describe=_describe_recode,
             example={
                 "column": "age",
@@ -843,7 +856,7 @@ def _declare_recode() -> None:
                     {"from": "missing", "to": 9},
                 ],
             },
-            example_frame=lambda: pd.DataFrame({"age": [20.0, 45.0, None]}),
+            example_frame=_frame(age=[20.0, 45.0, None]),
         )
     )
 

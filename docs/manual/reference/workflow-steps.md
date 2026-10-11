@@ -665,7 +665,7 @@ Likelihood-ratio test of a restricted model nested in a fuller one. Both must be
 
 ## `postestimation.margins`
 
-Marginal effects of regressors on the predicted outcome: averaged over the estimation sample (`at: average`) or at the regressors' means (`at: means`). Offered for: glm:binomial, glm:negative_binomial, glm:poisson, logit, ols, poisson, probit, the families where it has been checked against a reference implementation; for any other family say it is not offered yet because that check is missing, not because the model cannot. Plan the workflow on the dataset node the model was estimated from (its parent stage, such as stage:cleaned), not on the model node; name the model in model_ref.
+Marginal effects of regressors on the predicted outcome: averaged over the estimation sample (`at: average`) or at the regressors' means (`at: means`). Offered for: glm:binomial, glm:negative_binomial, glm:poisson, linear_mixed_effects, logit, ols, poisson, probit, the families where it has been checked against a reference implementation; for any other family say it is not offered yet because that check is missing, not because the model cannot. Plan the workflow on the dataset node the model was estimated from (its parent stage, such as stage:cleaned), not on the model node; name the model in model_ref.
 
 | Field | Required | Meaning |
 |---|---|---|

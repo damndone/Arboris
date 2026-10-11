@@ -26,45 +26,38 @@ FAMILY_OWNED = (
 )
 
 # A model id ("ols_1"), or a branch on a family name.
+# Generic graph node ids are not model families. Keep unknown family ids counted.
 FAMILY_LITERAL = re.compile(
-    r'"[a-z_]+_1"'
+    r'"(?!(?:model|table|source|input|dataset)_1")[a-z_]+_1"'
     r'|model_(?:type|family)\s*(?:==|!=)\s*"[a-z_:]+"'
     r'|model_(?:type|family)\s+(?:not\s+)?in\s*[\(\{\[]\s*"'
 )
 
 BASELINE = {
-    "agent/context_tools.py": 3,
-    "agent/notebook/materialization.py": 7,
-    "agent/notebook/service.py": 2,
+    "agent/context_tools_support/model_tools.py": 2,
+    "agent/context_tools_support/summaries.py": 1,
+    "agent/notebook/materialization.py": 3,
+    "agent/notebook/service.py": 1,
     "agent/notebook/vocabulary.py": 1,
     "agent/planner_evaluation.py": 2,
     "agent/recipe_contracts.py": 2,
     "agent/recipes/lmm_public_result_view.py": 2,
-    "agent/workflow_capability_adapters.py": 3,
+    "agent/workflow_capability_adapters.py": 2,
     "agent/workflow_runtime.py": 3,
     "analysis_loop/resolver.py": 1,
     "diagnostic_preview/guidance.py": 1,
     "engine/recommended_actions.py": 5,
     "engine/stages/diagnostics.py": 5,
-    "engine/stages/report.py": 3,
-    "engine/stages/source.py": 1,
     "engine/stages/ytype.py": 1,
     "figure_context.py": 1,
-    "http/drafts_routes.py": 1,
-    "http/runs_routes.py": 7,
-    "lineage/pipeline_drafts.py": 15,
     "lineage/role_inputs_from_ctx.py": 2,
     "model_options.py": 1,
-    "narrative/claims.py": 2,
-    "orchestrator/__init__.py": 8,
-    "orchestrator/_reliability_checks.py": 4,
-    "orchestrator/_report_build.py": 4,
+    "orchestrator/__init__.py": 3,
     "prediction.py": 5,
     "repository/run_repository.py": 3,
-    "services/draft_materialization.py": 13,
-    "services/draft_service.py": 4,
+    "services/draft_materialization.py": 2,
     "services/lmm_result_adapter.py": 1,
-    "services/run_service.py": 6,
+    "services/run_service.py": 3
 }
 
 
@@ -99,3 +92,11 @@ def test_the_post_estimation_layer_names_no_family() -> None:
     for path in (ROOT / "postestimation").rglob("*.py"):
         assert not FAMILY_LITERAL.findall(path.read_text()), path
     assert not FAMILY_LITERAL.findall((ROOT / "agent" / "postestimation_steps.py").read_text())
+
+
+def test_draft_node_ids_are_not_model_family_identifiers() -> None:
+    for node_id in ("model_1", "table_1", "source_1", "input_1", "dataset_1"):
+        assert not FAMILY_LITERAL.findall(f'"{node_id}"'), node_id
+    for family_id in ("ols_1", "linear_mixed_effects_1", "future_family_1"):
+        assert FAMILY_LITERAL.findall(f'"{family_id}"'), family_id
+    assert FAMILY_LITERAL.findall('model_type == "future_family"')

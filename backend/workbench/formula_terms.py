@@ -81,3 +81,41 @@ def categorical_level(term: str) -> tuple[str, str] | None:
     literal = match.group("literal")
     column = _decoded(literal) if literal is not None else match.group("bare").strip()
     return None if column is None else (column, match.group("level"))
+
+
+def interaction_factors(term: str) -> tuple[str, ...]:
+    """Split only formula-level colons, preserving quoted columns and levels.
+
+    A colon in Q('visit:week') or [T.before:after] belongs to the name.
+    Malformed/unbalanced encodings stay literal instead of inventing factors.
+    """
+    parts: list[str] = []
+    start = 0
+    stack: list[str] = []
+    quote: str | None = None
+    escaped = False
+    for index, char in enumerate(term):
+        if quote is not None:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+            continue
+        # Patsy's [T.level] contains display values, not Python literals.
+        if char in {"'", '"'} and (not stack or stack[-1] != "["):
+            quote = char
+        elif char in "([":
+            stack.append(char)
+        elif char in ")]":
+            expected = "(" if char == ")" else "["
+            if not stack or stack.pop() != expected:
+                return (term,)
+        elif char == ":" and not stack:
+            parts.append(term[start:index])
+            start = index + 1
+    if quote is not None or stack:
+        return (term,)
+    parts.append(term[start:])
+    return tuple(parts) if all(parts) else (term,)

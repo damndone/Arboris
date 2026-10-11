@@ -27,6 +27,8 @@ EXEMPT: dict[tuple[str, str], str] = {
     ("POST", "/agent/sessions/{session_id}/operations/{record_id}/reconcile"): LIFECYCLE,
     ("POST", "/agent/sessions/{session_id}/turns"): "read-only workflows it runs are recorded by the lifecycle",
     ("POST", "/agent/sessions/{session_id}/abort"): NO_ANALYSIS,
+    # Manual execution shares the same recorded operation lifecycle.
+    ("POST", "/operations/run"): LIFECYCLE,
     # Typed UI data operations that run through the operation lifecycle.
     ("POST", "/data-operations/column-cast/confirm"): LIFECYCLE,
     ("POST", "/data-operations/columns-cast/confirm"): LIFECYCLE,
@@ -91,6 +93,7 @@ EXEMPT: dict[tuple[str, str], str] = {
     ("POST", "/runs/{run_id}/report/export"): "exports an existing report",
     ("POST", "/runs/{run_id}/report/result-table-export"): "exports existing results",
     ("POST", "/runs/{run_id}/ai-reports"): "narrates existing results",
+    ("POST", "/runs/{run_id}/manual-reports"): "saves user prose over existing registered results",
 }
 
 

@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 from statsmodels.tsa.stattools import adfuller
 
+from workbench.contracts.model.arma_garch import TRANSFORM_IDS
 from workbench.engine.packs.arma_garch.errors import ArmaGarchInputError, diagnostic
 from workbench.engine.packs.arma_garch.input import (
     PARSED_VALUE_COLUMN,
@@ -21,7 +22,7 @@ from workbench.engine.packs.arma_garch.input import (
 
 TRANSFORMED_VALUE_COLUMN = "__wb_transformed_value__"
 LINEAGE_COLUMN = "__wb_source_row_ids__"
-TRANSFORM_IDS = ("level", "log_level", "diff_1", "log_return_pct")
+
 
 
 @dataclass(frozen=True)

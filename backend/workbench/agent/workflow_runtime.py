@@ -594,6 +594,7 @@ def _lineage_source(
 
     if "source" not in step.spec:
         return {
+            "run_id": str(draft.target["run_id"]),
             "artifact_id": str(draft.target["artifact_id"]),
             "node_ref": str(draft.target["node_ref"]),
             "sha256": str(source_context["source_sha256"]),
@@ -602,6 +603,7 @@ def _lineage_source(
         step, previous, str(draft.target["run_id"])
     )
     return {
+        "run_id": str(produced["run_id"]),
         "artifact_id": str(produced["artifact_id"]),
         "node_ref": str(produced["node_ref"]),
         "sha256": str(produced["content_sha256"]),
@@ -2082,15 +2084,26 @@ def _execute_model_genesis_branches(
     *,
     raw_source_frame: pd.DataFrame | None = None,
 ) -> WorkflowStepResult:
-    source_run_id = str(draft.target["run_id"])
-    source_run_root = root / "runs" / source_run_id
-    inputs = read_run_inputs(source_run_root)
-    upload = inputs.get("upload") or {}
-    upload_sha = upload.get("sha256")
-    filename = upload.get("filename") or "dataset.csv"
-    if not isinstance(upload_sha, str) or not upload_sha:
-        raise WorkflowExecutionError("raw source upload is unavailable for model genesis")
-    upload_bytes = verify_upload(root, upload_sha).read_bytes()
+    source_run_id = str(lineage.get("run_id", draft.target["run_id"]))
+    source, selected_frame = resolve_statistical_source(
+        root,
+        source_run_id=source_run_id,
+        source_node_id=str(lineage["node_ref"]),
+        source_artifact_id=str(lineage["artifact_id"]),
+    )
+    if source["source_sha256"] != lineage["sha256"]:
+        raise WorkflowExecutionError("model genesis selected source fingerprint changed")
+    source_path = root / "runs" / source_run_id / source["source_artifact_path"]
+    selected_bytes = source_path.read_bytes()
+    if hashlib.sha256(selected_bytes).hexdigest() != source["source_sha256"]:
+        raise WorkflowExecutionError("model genesis selected source changed during read")
+    filename = source_path.name
+    dataset_source = {
+        "source_run_id": source_run_id,
+        "op_node_id": str(lineage["node_ref"]),
+        "source_artifact_id": str(lineage["artifact_id"]),
+        "source_sha256": source["source_sha256"],
+    }
     store = PipelineDraftStore(root)
     branch_outputs: list[dict[str, Any]] = []
     artifact_ids: list[str] = []
@@ -2108,11 +2121,7 @@ def _execute_model_genesis_branches(
             branch.get("covariance") or branch_spec.get("covariance")
             or family_contract.default_covariance
         )
-        # Genesis estimates from an uploaded dataset, not from a formula, so a
-        # dummy set or a squared term has to exist as a real column first. When
-        # a branch declares derived terms, materialize an augmented upload and
-        # point this branch at it; branches without them keep the original
-        # upload untouched, so their lineage is unchanged.
+        # Expand branch terms from the selected, verified dataset.
         try:
             branch_frame, branch_predictors, references = expand_branch_terms(
                 source_frame, branch
@@ -2125,24 +2134,12 @@ def _execute_model_genesis_branches(
             family_contract.validate_branch_frame(branch_frame, {
                 **branch, "model_options": dict(branch_spec.get("model_options") or {}),
             })
-        # A branch can have no branch-local dummy/polynomial expansion and
-        # still depend on an upstream numeric derivation.  Reusing the original
-        # upload in that case would silently discard a declared column before
-        # Genesis runs.  Only retain the original upload when the final design
-        # is exactly the immutable raw source; otherwise store the complete,
-        # server-derived table for this branch.
-        raw_frame = source_frame if raw_source_frame is None else raw_source_frame
-        source_is_workflow_target = (
-            str(lineage["artifact_id"]) == str(draft.target["artifact_id"])
-            and str(lineage["node_ref"]) == str(draft.target["node_ref"])
-        )
-        use_original_upload = (
-            source_is_workflow_target
-            and list(branch_frame.columns) == list(raw_frame.columns)
-            and branch_frame.equals(raw_frame)
-        )
-        if use_original_upload:
-            branch_upload_sha = upload_sha
+        # Preserve the exact registered bytes whenever no branch expansion
+        # changes the selected table. The original run upload is not authority
+        # for a transformed target; comparing that target to itself cannot
+        # establish that it is the original upload.
+        if branch_frame.equals(selected_frame):
+            branch_upload_sha = store_upload_bytes(root, selected_bytes, filename=filename)
             branch_filename = filename
         else:
             branch_upload_sha = store_upload_bytes(
@@ -2243,6 +2240,7 @@ def _execute_model_genesis_branches(
             validated_draft_hash=compute_executable_draft_hash(stored.draft),
             execution_mode="genesis",
             idempotency_key=f"{draft.workflow_id}:{workflow_step_id}:{branch_id}",
+            dataset_source=dataset_source,
         )
         run_id = str(result["run_id"])
         _wait_for_run(root, run_id)

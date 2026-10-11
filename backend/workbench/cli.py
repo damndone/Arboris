@@ -388,7 +388,14 @@ def _models_command() -> Any:
     )
 
 
+def _data_group() -> Any:
+    from .cli_data import build_data_group
+
+    return build_data_group(_param, _json_value, _fail)
+
+
 _GENERATED_COMMANDS: dict[str, Callable[[], Any]] = {
+    "data": _data_group,
     "run": _run_command,
     "postestimation": _postestimation_group,
     "export-script": _export_script_command,

@@ -5,6 +5,7 @@ import re
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from ..contracts.model.presentation import result_presentation
 from ..term_parser import parse_term, is_q_quoted_dummy
 
 
@@ -18,8 +19,9 @@ def build_claims(
     categorical_vars: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     claims: list[dict[str, Any]] = []
-    is_logit = model_type in ("logit",)
-    is_poisson = model_type in ("poisson", "poisson_rate")
+    interpretation = result_presentation(model_type).coefficient_interpretation
+    is_logit = interpretation == "log_odds"
+    is_poisson = interpretation == "log_count"
     if binary_vars is None:
         binary_vars = set()
     if suspicious_vars is None:

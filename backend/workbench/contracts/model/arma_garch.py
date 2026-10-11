@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 from workbench.canonical import sha256_canonical
 from workbench.contracts.common.envelope import (
@@ -17,6 +17,9 @@ from workbench.contracts.common.envelope import (
 
 ARMA_GARCH_PACK_ID = "time_series.arma_garch"
 ARMA_GARCH_CONTRACT_VERSION = "1.0"
+
+ArmaGarchTransform = Literal["level", "log_level", "diff_1", "log_return_pct"]
+TRANSFORM_IDS: tuple[str, ...] = get_args(ArmaGarchTransform)
 
 AR_ORDER_LIMIT = 10
 MA_ORDER_LIMIT = 10
@@ -370,7 +373,7 @@ class ArmaGarchAnalysisContract:
         "business_or_trading_observations",
         "observation_order",
     ]
-    transform: Literal["level", "log_level", "diff_1", "log_return_pct"]
+    transform: ArmaGarchTransform
     transform_confirmed: Literal[True]
     analysis_goal: Literal["balanced", "forecast", "parsimony", "replication"]
     selection_mode: Literal["auto", "manual"]
@@ -500,7 +503,7 @@ class ArmaGarchAnalysisContract:
             ),
             transform=_require_choice(
                 resolved["transform"],
-                {"level", "log_level", "diff_1", "log_return_pct"},
+                set(TRANSFORM_IDS),
                 "transform",
             ),
             transform_confirmed=True,

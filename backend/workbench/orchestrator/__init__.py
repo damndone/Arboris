@@ -177,10 +177,9 @@ def _family_takes_covariance(model_type: str) -> bool:
     Unknown here (auto routing picks the family later) counts as applying, so
     the request is recorded; the executed estimator is in the kernel.
     """
-    from ..contracts.model.family import MODEL_FAMILY_CONTRACTS
+    from ..contracts.model.execution_profile import family_takes_covariance
 
-    contract = MODEL_FAMILY_CONTRACTS.get(model_type)
-    return True if contract is None else bool(contract.allows_covariance)
+    return family_takes_covariance(model_type)
 
 
 def run_workflow(
@@ -262,19 +261,11 @@ def run_workflow(
     )
     normalized_model_options = bound_model_options.payload
     normalized_labels = _normalize_labels(labels)
-    effective_covariance = covariance
-    from ..contracts.model.ols import PANEL_COVARIANCE_FAMILIES, effective_panel_covariance
+    from ..contracts.model.execution_profile import resolve_request_covariance
 
-    if model_type == "ols" and normalized_model_options:
-        from ..contracts.model.ols import effective_ols_covariance
-
-        effective_covariance = effective_ols_covariance(
-            covariance, normalized_model_options
-        )
-    elif model_type in PANEL_COVARIANCE_FAMILIES:
-        # Recorded resolved, so the run inputs say what was fitted; the cluster
-        # column is resolved with it in the estimation stage.
-        effective_covariance = effective_panel_covariance(covariance, normalized_model_options)[0]
+    effective_covariance = resolve_request_covariance(
+        model_type, covariance, normalized_model_options
+    )
     model_options_binding = (
         bound_model_options.binding.to_dict()
         if bound_model_options.binding is not None
@@ -350,6 +341,8 @@ def run_workflow(
         upload_bytes,
         filename=upload_filename or "upload.csv",
     )
+    from ..contracts.model.execution_profile import request_contract_summary
+
     requested_covariance = (effective_covariance or "").strip().lower()
     wire_covariance = requested_covariance or "robust"
     executable_payload = {
@@ -376,20 +369,9 @@ def run_workflow(
         rerun_reason="initial",
         override_hash=None,
         dag_hash=dag_hash(upload_sha, direct_form),
-        contract_summary={
-            "contract_version": "ols_result_contract_v1" if model_type == "ols" else None,
-            "model": "ols" if model_type == "ols" else model_type,
-            "model_type": model_type,
-            # v1.8.10: a family that does not take a covariance option does not
-            # get the OLS default recorded as if it had used it.
-            "covariance": wire_covariance if _family_takes_covariance(model_type) else None,
-            "covariance_applies": _family_takes_covariance(model_type),
-            "covariance_explicit": bool(requested_covariance),
-            "entity_col": entity_col,
-            "y": y,
-            "x": list(x),
-            "source_eligible": model_type == "ols" and requested_covariance == "unadjusted",
-        },
+        contract_summary=request_contract_summary(
+            model_type, requested_covariance, entity_col=entity_col, y=y, x=x
+        ),
         executable_payload=executable_payload,
         rerun_inputs={"rerun_of": None, "from_node": None, "rerun_reason": "initial"},
     )
@@ -700,19 +682,11 @@ def _run_workflow(
         {} if model_options is None else model_options
     )
     normalized_labels = _normalize_labels(labels)
-    effective_covariance = covariance
-    from ..contracts.model.ols import PANEL_COVARIANCE_FAMILIES, effective_panel_covariance
+    from ..contracts.model.execution_profile import resolve_request_covariance
 
-    if model_type == "ols" and normalized_model_options:
-        from ..contracts.model.ols import effective_ols_covariance
-
-        effective_covariance = effective_ols_covariance(
-            covariance, normalized_model_options
-        )
-    elif model_type in PANEL_COVARIANCE_FAMILIES:
-        # Recorded resolved, so the run inputs say what was fitted; the cluster
-        # column is resolved with it in the estimation stage.
-        effective_covariance = effective_panel_covariance(covariance, normalized_model_options)[0]
+    effective_covariance = resolve_request_covariance(
+        model_type, covariance, normalized_model_options
+    )
 
     _graph_store = GraphStore(runs_root=run_root.parent)
     _recorder = GraphRecorder(run_id=run_id, store=_graph_store)

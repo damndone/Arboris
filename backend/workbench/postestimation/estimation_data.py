@@ -65,6 +65,11 @@ def estimation_design(run_root: Path, kernel: Mapping[str, Any]) -> dict[str, np
             "the model does not record its estimation sample, so the data for marginal effects "
             "cannot be verified",
         )
+    from ..contracts.model.result_envelope_registry import declaration_for
+
+    declaration = declaration_for(str(kernel["model_type"]))
+    if declaration is not None and declaration.estimation_design_loader is not None:
+        return declaration.estimation_design_loader(run_root, kernel)
     from .comparison_data import _bound_bytes
 
     frame = pd.read_parquet(io.BytesIO(_bound_bytes(run_root, _dataset_path(run_root))))

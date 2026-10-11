@@ -153,7 +153,7 @@ def test_chain_session_canonicalizes_client_head_against_durable_chain(
     packet["node_summary"] = {"params": {"covariance": "robust", "x": ["x1"]}}
     # The persisted kernel reader has its own owner validation; this test
     # exercises the HTTP projection of its result into initial Agent context.
-    monkeypatch.setattr("workbench.agent.context_tools._executed_covariance", lambda root, model_id: "nonrobust")
+    monkeypatch.setattr("workbench.agent.context_tools_support.node_tools._executed_covariance", lambda root, model_id: "nonrobust")
     packet.update(
         {
             "context_fingerprint": "client-preview-fingerprint",
@@ -686,8 +686,13 @@ def test_get_activity_projection_returns_durable_operation_and_diff(tmp_path: Pa
 
 
 def test_graph_fork_proposal_route_confirms_into_child_agent_without_child_run(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    def no_provider(*args, **kwargs):
+        raise AssertionError("Manual graph fork must not construct a provider")
+
+    monkeypatch.setattr("workbench.http.agent_routes.OpenAICompatibleModelAdapter", no_provider)
+    monkeypatch.setattr("workbench.http.agent_routes.load_llm_config", no_provider)
     project_root = tmp_path / "project"
     project_root.mkdir()
     _write_inspectable_run(project_root)
@@ -1430,6 +1435,7 @@ def test_main_role_turn_exposes_only_read_only_project_evidence_tool(
         "inspect_project_model_figure_evidence",
         "inspect_project_linear_interaction_effects",
         "inspect_project_notebook_workflow_results",
+        "inspect_notebook_state",
         "inspect_project_numeric_summary",
         "inspect_project_statistical_evidence",
     }

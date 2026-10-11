@@ -21,16 +21,17 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
-import pandas as pd
+if TYPE_CHECKING:
+    import pandas as pd
 
 ColumnsOf = Callable[[Mapping[str, Any]], set[str]]
 OutputColumns = Callable[[Mapping[str, Any], set[str]], set[str]]
 Validate = Callable[[Mapping[str, Any]], None]
 # execute(frame, spec) -- or execute(frame, spec, secondary) when the
 # declaration takes a second dataset (merge, append).
-Execute = Callable[..., pd.DataFrame]
+Execute = Callable[..., "pd.DataFrame"]
 Describe = Callable[[Mapping[str, Any], "Labels"], str]
 Labels = Mapping[str, str]
 
@@ -100,7 +101,7 @@ def register_data_operation(declaration: DataOperationDeclaration) -> None:
 def _ensure_loaded() -> None:
     # Declarations live beside their executors; importing the modules
     # registers them. Imported lazily so this module stays free of cycles.
-    from . import data_operation_catalog, data_operations  # noqa: F401
+    from . import data_operation_catalog  # noqa: F401
 
 
 def get_data_operation(operation: str) -> DataOperationDeclaration | None:

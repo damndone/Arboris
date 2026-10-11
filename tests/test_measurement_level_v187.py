@@ -423,7 +423,7 @@ def test_low_confidence_columns_are_listed_separately_and_not_proposed():
 def test_the_agent_tool_separates_proposable_columns_from_uncertain_ones(tmp_path):
     """The split has to reach the model, or it is a detail nothing acts on."""
     source = (
-        Path(__file__).parent.parent / "backend/workbench/agent/context_tools.py"
+        Path(__file__).parent.parent / "backend/workbench/agent/context_tools_support/registration.py"
     ).read_text()
     assert "measurement_uncertain" in source, (
         "the advisory tool exposes no uncertain bucket, so a model cannot tell "
