@@ -137,15 +137,23 @@ export function WorkbenchWorkspace({
       onNewAnalysis={newAnalysis?.open}
     />
   );
-  const operationPanel = <OperationsPanel key={`${projectRoot}:${runId}`} projectRoot={projectRoot} runId={runId} initialSearch={analysisSearch}
+  const operationPanel = <OperationsPanel key={projectRoot} projectRoot={projectRoot} runId={runId} initialSearch={analysisSearch}
     models={(forest?.forest.nodes ?? []).filter(n => n.kind === "model").flatMap(n => n.runs.map(owner => ({runId: owner, nodeId: n.opNodeId, label: n.title})))}
     onClose={() => setAnalyzing(false)} onRefresh={() => forest?.refetch?.()}
     onOpenRun={owner => {forest?.setActiveRunId(owner);setAnalyzing(false);dispatch.setView("table");}}
-    onDedicated={id => {
+    onDedicated={(id, target) => {
       setAnalyzing(false);
+      if (target && "run_id" in target) {
+        forest?.setActiveRunId(target.run_id);
+        const selected = "node_id" in target ? forest?.forest.nodes.find(node => node.runs.includes(target.run_id) && node.opNodeId === target.node_id) : undefined;
+        if (selected) dispatch.selectByCanvasClick(selected.nodeKey);
+      }
       if (["data.import", "model.draft"].includes(id)) newAnalysis?.open();
       else if (id === "operation.multi_step") setAnalyzing(true);
-      else dispatch.setView(id.startsWith("data.") || id === "code.execute" ? "data" : id === "model.custom" ? "notebook" : id === "table.export" ? "table" : "graph");
+      else if (id === "data.export" || id === "metadata.edit") dispatch.setView("data");
+      else if (id === "model.custom") dispatch.setView("notebook");
+      else if (id === "table.export") dispatch.setView("table");
+      else dispatch.setView("graph");
     }}/>;
   const main = (
     <WorkbenchMain

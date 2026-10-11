@@ -775,8 +775,8 @@ def export_result_table_endpoint(
         )
 
     slug = "-".join(sections)
-    filename = f"result-table-{slug}.xlsx"
-    artifact_id = f"report_result_table_{'_'.join(sections)}_xlsx"
+    filename = f"result-table-{slug}-v2.xlsx"
+    artifact_id = f"report_result_table_{'_'.join(sections)}_xlsx_v2"
     output_path = run_root / "exports" / filename
     if not output_path.is_file() or not _artifact_registered(run_root, artifact_id):
         try:

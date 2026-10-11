@@ -42,3 +42,26 @@ it('selects an earlier model branch and removes a stale explicit owner run',asyn
   const steps=vi.mocked(api.execute).mock.calls[0][1].steps as {step_id:string;spec:Record<string,unknown>}[];
   expect(steps[1].spec.model_ref).toBe(`step:${steps[0].step_id}:fit`);expect(steps[1].spec).not.toHaveProperty('model_run_id');
 });
+
+it('keeps dedicated navigation on the explicitly selected target and explains mismatches',async()=>{
+ const onDedicated=vi.fn();
+ vi.mocked(api.catalog).mockResolvedValue({operations:[{...operation,id:'code.execute',name:'Run code',target_requirements:['dataset_node','risk_authorization'],execution:{kind:'dedicated'}}]} as never);
+ render(<OperationsPanel projectRoot="/test" runId="run" models={[{runId:'other',nodeId:'model:ols',label:'OLS'}]} onClose={vi.fn()} onRefresh={vi.fn()} onOpenRun={vi.fn()} onDedicated={onDedicated}/>);
+ await waitFor(()=>expect(screen.getByLabelText('Analysis target')).toHaveValue('0'));
+ fireEvent.click(await screen.findByRole('button',{name:/Run code/}));
+ expect(onDedicated).toHaveBeenCalledWith('code.execute',{kind:'dataset_node',run_id:'run',node_id:'data',artifact_id:'input.csv'});
+ fireEvent.change(screen.getByLabelText('Analysis target'),{target:{value:'1'}});
+ await waitFor(()=>expect(screen.getByRole('button',{name:/Run code/})).toBeDisabled());
+ expect(screen.getByRole('button',{name:/Run code/})).toHaveTextContent('Select a dataset target first.');
+});
+it('retains the original target and receipt when execution refresh selects a new run',async()=>{
+ vi.mocked(api.execute).mockResolvedValue({...preview,status:'completed'} as never);
+ const props={projectRoot:'/test',models:[],onClose:vi.fn(),onRefresh:vi.fn(),onOpenRun:vi.fn(),onDedicated:vi.fn()};
+ const view=render(<OperationsPanel {...props} runId="original"/>);await add();
+ fireEvent.click(screen.getByRole('button',{name:'Preview analysis'}));await screen.findByRole('heading',{name:'completed'});
+ view.rerender(<OperationsPanel {...props} runId="newly-created" models={[{runId:'newly-created',nodeId:'model:iv',label:'IV'}]}/>);
+ await waitFor(()=>expect(screen.getByLabelText('Analysis target')).toHaveTextContent('IV'));
+ expect(screen.getByRole('heading',{name:'completed'})).toBeVisible();
+ expect((screen.getByLabelText('Analysis target') as HTMLSelectElement).selectedOptions[0].textContent).toContain('original');
+ expect(api.execute).toHaveBeenCalledOnce();
+});

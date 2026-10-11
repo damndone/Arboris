@@ -12,6 +12,7 @@
 // widening that coverage (violin/pairplot/…) is a backend concern (roadmap
 // §3.5 V).
 
+import { ResultTableExport } from "../../workspace/result/ResultTableExport";
 import { CrossRunTable } from "../../workspace/result/CrossRunTable";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -962,6 +963,7 @@ export function TableView({ projectRoot: projectRootProp }: { projectRoot?: stri
           ))}
         </nav>
       )}
+      {activeRunId && <ResultTableExport key={`${projectRoot}:${activeRunId}`} projectRoot={projectRoot} runId={activeRunId}/>}
       <CrossRunTable key={projectRoot} projectRoot={projectRoot} runIds={runIds}/>
       {activeRunId && (
         <RunResultsPanel

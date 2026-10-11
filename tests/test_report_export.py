@@ -241,7 +241,10 @@ def test_result_table_export_route_reads_authoritative_run_evidence(tmp_path: Pa
                 "x": {
                     "estimate": 1.25,
                     "std_error": 0.2,
-                    "p_value": 0.04,
+                    "p_value": 1e-90,
+                    "p_value_display": "< 0.001",
+                    "ci_lower": 0.85,
+                    "ci_upper": 1.65,
                     "source_id": "model_results.ols_1.coefficients.x",
                 }
             },
@@ -259,6 +262,11 @@ def test_result_table_export_route_reads_authoritative_run_evidence(tmp_path: Pa
         },
     )
 
+    # A cached export from the older mapping must not hide repaired columns.
+    from workbench.exports import export_xlsx
+    export_xlsx({"regression_table": [{"term": "x", "ols_1 estimate": 1.25}]}, run_root,
+                filename="result-table-regression_table-statistical_evidence.xlsx",
+                artifact_id="report_result_table_regression_table_statistical_evidence_xlsx")
     response = TestClient(app).post(
         f"/runs/{run_id}/report/result-table-export",
         params={"project_root": str(project_root)},
@@ -273,6 +281,11 @@ def test_result_table_export_route_reads_authoritative_run_evidence(tmp_path: Pa
     assert {"regression_table", "statistical_evidence"} <= set(workbook.sheetnames)
     rows = list(workbook["regression_table"].iter_rows(values_only=True))
     assert "ols_1 estimate" in rows[0]
+    coefficient = dict(zip(rows[0], rows[1]))
+    assert coefficient["ols_1 ci_lower"] == 0.85
+    assert coefficient["ols_1 ci_upper"] == 1.65
+    assert coefficient["ols_1 p_value"] == 1e-90
+    assert coefficient["ols_1 p_value_display"] == "< 0.001"
     assert any("model_results.ols_1.coefficients.x" in row for row in rows)
     assert not (run_root / "reports" / "report.pdf").exists()
     assert not (run_root / "exports" / "tables.xlsx").exists()

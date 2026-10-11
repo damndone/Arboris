@@ -6,11 +6,11 @@
 
 ## Final status
 
-STARTED
+CONTEXT_RESCOPED
 
 ## Metrics
 
-- Failure frequency: 4/16 (25.0%; 25.0 per 100 events)
+- Failure frequency: 4/19 (21.1%; 21.1 per 100 events)
 - Repeat rate: 0/4 (0.0%)
 - Recurrence rate: 0/4 (0.0%)
 - MTTR: median=0 ms (sample=2; unresolved=2)
@@ -87,3 +87,6 @@ STARTED
 - #14: `5df00257-bc5b-47f7-a133-b3a90d467835` | 2026-10-09T21:14:16.230Z | STATE_CHANGE/floating_agent_workspace | incident=`3b17853a-ec29-4c8c-a4d3-207a731e7acb` | lesson_key=`floating-agent-bounded-layout` | event_sha256=`4f36f19f8fa8ebe88bfff93d64abf1fdd96f46b8a458ae3475d3f99c5b4735de`
 - #15: `5c817b7d-9430-4c65-a6ae-6f43994732d4` | 2026-10-10T22:42:46.714Z | STATE_CHANGE/report_reading_provider_acceptance | incident=`e1872ed7-43ab-4af3-a38e-2ed813267b42` | lesson_key=`bounded-provider-acceptance` | event_sha256=`5172035baeee8c19805aaee20a51a0864c09027aa971a5c03defa1bf8a2c046e`
 - #16: `055dcfd4-8c81-4245-829a-9c59668fc6d5` | 2026-10-10T23:04:56.630Z | STATE_CHANGE/cross_focus_proposal_research_acceptance | incident=`7c58f9f7-e565-46f2-bdf7-213447b02de3` | lesson_key=`focus-and-research-scope` | event_sha256=`b0ee6f6b87829a54715db1128e07a5b067833d5e41d3fd2dde77f1cdf760b18a`
+- #17: `c5689655-77b8-4241-ac84-8dc835964ecf` | 2026-10-11T00:26:01.525Z | STATE_CHANGE/context_rescope_required | incident=`70758ec1-a006-4058-b9d5-f8e5ea0fb0e1` | lesson_key=`context-pack-rescope` | event_sha256=`cc448640c6f8760ca631dfa444d84f4b74ba61be037f41278e80409ab29fce72`
+- #18: `8a9aa092-2cc9-4f39-a146-4b6de8dd78b7` | 2026-10-11T00:26:01.532Z | STATE_CHANGE/context_rescoped | incident=`88784115-4b09-43ec-884b-46dffa130265` | lesson_key=`context-pack-rescope` | event_sha256=`3c0d7d5d1f9c2179d6f342ab991ffa0675f335903ad627862ec405bc42539be7`
+- #19: `4780628d-0a28-450c-8b02-177dd9074846` | 2026-10-11T00:38:34.290Z | STATE_CHANGE/authorized_backend_merge_and_offline_iv_acceptance | incident=`7fc73cd3-046a-4124-ad0c-0b94bf24cd05` | lesson_key=`integrated-source-and-export-evidence` | event_sha256=`fe664039bf3853ee057361d6e7405b3837cc8a3f9f6183fbf2af3436e55aa493`

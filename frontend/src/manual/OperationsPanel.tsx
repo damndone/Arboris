@@ -5,6 +5,7 @@ import { catalog, execute, manualUrl, type Operation, type Target, type Outcome 
 import { SchemaField, initialValue, type JsonSchema } from "./SchemaFields";
 import "./manual.css";
 import { validateValue } from "./schemaModel";
+import { dedicatedTargetReason } from "./dedicatedTarget";
 export type ModelChoice = {
     runId: string;
     nodeId: string;
@@ -29,8 +30,11 @@ export function OperationsPanel({ projectRoot, runId, models, initialSearch = ""
     onClose: () => void;
     onRefresh: () => void;
     onOpenRun: (runId: string) => void;
-    onDedicated: (id: string) => void;
+    onDedicated: (id: string, target?: Target) => void;
 }) {
+    // A newly produced run can become active while this editor is still open.
+    // Keep this operation session bound to its original source and receipt.
+    const [sourceRunId] = useState(runId);
     const [choices, setChoices] = useState<Choice[]>([]);
     const [refreshRevision,setRefreshRevision]=useState(0);
     const [targetIndex, setTargetIndex] = useState("");
@@ -56,8 +60,8 @@ export function OperationsPanel({ projectRoot, runId, models, initialSearch = ""
     useEffect(() => {
         let current = true;
         (async () => {
-            const datasets = runId ? await listDatasets(projectRoot, runId) : [];
-            const data = await Promise.all(datasets.map(async (d) => { const page = await fetchDatasetPage(projectRoot, runId, d.node_id, { offset: 0, limit: 1 }); return { label: `Data · ${d.label} · ${d.node_id} · ${runId}`, target: { kind: "dataset_node", run_id: runId, node_id: d.node_id, artifact_id: page.artifact_id } as Target, columns: page.columns }; }));
+            const datasets = sourceRunId ? await listDatasets(projectRoot, sourceRunId) : [];
+            const data = await Promise.all(datasets.map(async (d) => { const page = await fetchDatasetPage(projectRoot, sourceRunId, d.node_id, { offset: 0, limit: 1 }); return { label: `Data · ${d.label} · ${d.node_id} · ${sourceRunId}`, target: { kind: "dataset_node", run_id: sourceRunId, node_id: d.node_id, artifact_id: page.artifact_id } as Target, columns: page.columns }; }));
             const all = [...data, ...models.map(m => ({ label: `Model · ${m.label} · ${m.runId}`, target: { kind: "model_node", run_id: m.runId, node_id: m.nodeId } as Target, columns: [] }))];
             if (current) {
                 const index = all.findIndex(c => JSON.stringify(c.target) === selectedTarget.current);
@@ -70,7 +74,7 @@ export function OperationsPanel({ projectRoot, runId, models, initialSearch = ""
             }
         })().catch(e => current && setError(String(e)));
         return () => { current = false; };
-    }, [projectRoot, runId, modelKey, refreshRevision]);
+    }, [projectRoot, sourceRunId, modelKey, refreshRevision]);
     useEffect(() => {
         let current = true;
         setCatalogBusy(true);
@@ -145,7 +149,7 @@ export function OperationsPanel({ projectRoot, runId, models, initialSearch = ""
     <label className="manual-field">Analysis target<select aria-label="Analysis target" disabled={busy} value={targetIndex} onChange={e => { invalidate(); setSteps([]); setTargetIndex(e.target.value); }}><option value="">Select a target</option>{choices.map((c, i) => <option key={JSON.stringify(c.target)} value={i}>{c.label}</option>)}</select></label>
     {!choices.length && !catalogBusy && <p>Import data with New analysis first.</p>}
     <label className="manual-field">Find an operation<input aria-label="Find an operation" value={search} onChange={e => setSearch(e.target.value)}/></label>
-    {catalogBusy ? <p role="status">Loading operations…</p> : <details open={steps.length === 0}><summary>{operations.length} operations</summary>{Object.entries(groups).map(([group, items]) => <section key={group}><h3>{group.replace(/_/g, ' ')}</h3><div className="manual-catalog">{items!.map(op => <button type="button" key={op.id} disabled={busy || op.availability.status === "unavailable"} title={`${op.summary}\n${op.availability.reason_code}: ${op.availability.message}`} onClick={() => op.execution.kind === "workflow" ? add(op) : onDedicated(op.id)}>{op.name}<small> · {op.id}{op.availability.status === "unavailable" ? ` · ${op.availability.reason_code}` : op.execution.kind === "dedicated" ? ' · Open workspace' : ''}</small></button>)}</div></section>)}</details>}
+    {catalogBusy ? <p role="status">Loading operations…</p> : <details open={steps.length === 0}><summary>{operations.length} operations</summary>{Object.entries(groups).map(([group, items]) => <section key={group}><h3>{group.replace(/_/g, ' ')}</h3><div className="manual-catalog">{items!.map(op => <button type="button" key={op.id} disabled={busy || op.availability.status === "unavailable" || !!dedicatedTargetReason(op,target)} title={dedicatedTargetReason(op,target) ?? `${op.summary}\n${op.availability.reason_code}: ${op.availability.message}`} onClick={() => op.execution.kind === "workflow" ? add(op) : onDedicated(op.id, target)}>{op.name}<small> · {op.id}{op.availability.status === "unavailable" ? ` · ${op.availability.reason_code}` : dedicatedTargetReason(op,target) ? ` · ${dedicatedTargetReason(op,target)}` : op.execution.kind === "dedicated" ? ' · Open workspace' : ''}</small></button>)}</div></section>)}</details>}
     <form ref={form} onChange={invalidate} onSubmit={e => { e.preventDefault(); void submit(); }}><fieldset disabled={busy}>
       {steps.map((step, i) => {
             const op = operations.find(o => o.id === step.operation_id);

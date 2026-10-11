@@ -26,7 +26,9 @@ export function DataView({ projectRoot, runId: runIdProp }: { projectRoot: strin
   const runId = runIdProp ?? forest?.activeRunId ?? "";
   const [tab, setTab] = useState<Tab>("data");
   const [datasets, setDatasets] = useState<DatasetNode[]>([]);
-  const [nodeId, setNodeId] = useState("stage:raw");
+  const workbench = useWorkbenchOptional();
+  const selected = forest?.forest.nodes?.find(node => node.nodeKey === workbench?.state.selectedKey && node.runs.includes(runId));
+  const [nodeId, setNodeId] = useState(() => selected?.kind === "dataset_stage" ? selected.opNodeId : "stage:raw");
   const [variables, setVariables] = useState<DatasetVariables | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
@@ -41,7 +43,6 @@ export function DataView({ projectRoot, runId: runIdProp }: { projectRoot: strin
 
   // The Agent is about the dataset this page shows (agent/focus.ts): a
   // question asked here runs on this dataset, not on the project overview.
-  const workbench = useWorkbenchOptional();
   const setAgentFocus = workbench?.dispatch.setAgentFocus;
   useEffect(() => {
     if (!setAgentFocus || !runId) return undefined;

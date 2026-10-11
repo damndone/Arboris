@@ -152,7 +152,10 @@ def regression_table_export_rows(
                 "estimate",
                 "std_error",
                 "confidence_interval",
+                "ci_lower",
+                "ci_upper",
                 "p_value",
+                "p_value_display",
                 "significance",
                 "source_id",
             ):
