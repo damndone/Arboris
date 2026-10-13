@@ -110,3 +110,46 @@ export function writeAgentOpen(open: boolean): void {
     // ignore
   }
 }
+
+export type AgentMode = "bubble" | "floating" | "docked";
+const AGENT_MODE_KEY = "workbench:agent-mode";
+const AGENT_WIDTH_KEY = "workbench:agent-width";
+
+/** The Agent reopens the way it was left: docked, floating, or folded to the bubble. */
+export function readAgentMode(): AgentMode {
+  try {
+    const stored = localStorage.getItem(AGENT_MODE_KEY);
+    if (stored === "bubble" || stored === "floating" || stored === "docked") return stored;
+  } catch {
+    // fall through to the older open/folded flag
+  }
+  return readAgentOpen() ? "docked" : "bubble";
+}
+
+export function writeAgentMode(mode: AgentMode): void {
+  writeAgentOpen(mode !== "bubble");
+  try {
+    localStorage.setItem(AGENT_MODE_KEY, mode);
+  } catch {
+    // ignore
+  }
+}
+
+export const DEFAULT_AGENT_WIDTH = 380;
+
+export function readAgentWidth(): number {
+  try {
+    const stored = Number(localStorage.getItem(AGENT_WIDTH_KEY));
+    return Number.isFinite(stored) && stored >= 240 && stored <= 960 ? stored : DEFAULT_AGENT_WIDTH;
+  } catch {
+    return DEFAULT_AGENT_WIDTH;
+  }
+}
+
+export function writeAgentWidth(width: number): void {
+  try {
+    localStorage.setItem(AGENT_WIDTH_KEY, String(Math.round(width)));
+  } catch {
+    // ignore
+  }
+}

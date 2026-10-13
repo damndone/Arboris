@@ -43,6 +43,18 @@ function renderShell(view: ViewMode = "graph", projectRoot = "/p") {
 
 const shell = () => screen.getByTestId("workspace-shell");
 
+// jsdom has no PointerEvent; a MouseEvent with a pointer id carries the gesture.
+if (typeof window.PointerEvent === "undefined") {
+  class TestPointerEvent extends MouseEvent {
+    pointerId: number;
+    constructor(type: string, init: PointerEventInit = {}) {
+      super(type, init);
+      this.pointerId = init.pointerId ?? 0;
+    }
+  }
+  Object.defineProperty(window, "PointerEvent", { configurable: true, value: TestPointerEvent });
+}
+
 describe("WorkspaceShell", () => {
   beforeEach(() => localStorage.clear());
 
@@ -100,7 +112,7 @@ describe("WorkspaceShell", () => {
     expect(shell().style.getPropertyValue("--ws-agent")).toBe("0px");
     fireEvent.click(screen.getByRole("button", { name: "Collapse conversation history" }));
     expect(screen.getByRole("complementary", { name: "Agent" })).toHaveAttribute("data-compact", "true");
-    fireEvent.click(screen.getByRole("button", { name: "Fully expand the Agent" }));
+    fireEvent.click(screen.getByRole("button", { name: "Dock the Agent" }));
     expect(shell().style.getPropertyValue("--ws-agent")).toBe("380px");
     expect(screen.getByTestId("agent-state")).toHaveTextContent("1");
     expect(screen.getByRole("complementary", { name: "Agent" })).toHaveAttribute("data-compact", "false");
@@ -158,6 +170,42 @@ describe("WorkspaceShell", () => {
     } finally {
       Object.defineProperty(window, "innerWidth", {configurable: true, value: original.width});
       Object.defineProperty(window, "innerHeight", {configurable: true, value: original.height});
+    }
+  });
+
+  test("⌘. reopens the Agent the way it was last open, and a reload keeps mode and width", () => {
+    const { unmount } = renderShell();
+    const agent = () => screen.getByRole("complementary", { name: "Agent" });
+    fireEvent.keyDown(screen.getByRole("separator", { name: "Agent width" }), { key: "ArrowLeft" });
+    fireEvent.keyDown(window, { key: ".", metaKey: true });
+    expect(agent()).toHaveAttribute("data-mode", "bubble");
+    fireEvent.keyDown(window, { key: ".", metaKey: true });
+    expect(agent()).toHaveAttribute("data-mode", "docked");
+    fireEvent.click(screen.getByRole("button", { name: "Float the Agent" }));
+    unmount();
+    renderShell();
+    expect(agent()).toHaveAttribute("data-mode", "floating");
+    expect(screen.getByRole("separator", { name: "Agent width" })).toHaveAttribute("aria-valuenow", "400");
+  });
+
+  test("a dragged bubble comes to rest on the nearer side edge", () => {
+    const original = { width: window.innerWidth, height: window.innerHeight };
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1512 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 982 });
+    try {
+      localStorage.setItem("workbench:agent-mode", "bubble");
+      renderShell();
+      const bubble = screen.getByRole("button", { name: "Show the Agent" });
+      const agent = screen.getByRole("complementary", { name: "Agent" });
+      fireEvent.pointerDown(bubble, { button: 0, pointerId: 1, clientX: 1476, clientY: 900 });
+      fireEvent.pointerMove(bubble, { pointerId: 1, clientX: 600, clientY: 500 });
+      fireEvent.pointerUp(bubble, { pointerId: 1, clientX: 600, clientY: 500 });
+      expect(agent.style.left).toBe("12px");
+      fireEvent.click(bubble);
+      expect(agent).toHaveAttribute("data-mode", "bubble");
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: original.width });
+      Object.defineProperty(window, "innerHeight", { configurable: true, value: original.height });
     }
   });
 

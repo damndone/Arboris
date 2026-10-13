@@ -124,3 +124,39 @@ export const ExpandIcon = () => (
     <path d="M2.5 13.5 7 9" />
   </Icon>
 );
+
+/** Dock into the right-hand column. */
+export const DockIcon = () => (
+  <Icon>
+    <rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2" />
+    <path d="M9.75 2.75v10.5" />
+    <path d="M11.5 5.5h1M11.5 7.5h1" />
+  </Icon>
+);
+
+/** Lift out into a floating window. */
+export const FloatIcon = () => (
+  <Icon>
+    <rect x="1.75" y="4.75" width="9.5" height="8.5" rx="1.75" />
+    <path d="M6.5 2.75h5.25a2 2 0 0 1 2 2V10" />
+  </Icon>
+);
+
+/** Fold down to the bubble. */
+export const MinimizeIcon = () => (
+  <Icon>
+    <path d="M4.5 4.5 11 11" />
+    <path d="M11 6.5V11H6.5" />
+  </Icon>
+);
+
+export const GripIcon = () => (
+  <svg width="10" height="16" viewBox="0 0 10 16" fill="currentColor" aria-hidden="true">
+    <circle cx="3" cy="4" r="1.1" />
+    <circle cx="7" cy="4" r="1.1" />
+    <circle cx="3" cy="8" r="1.1" />
+    <circle cx="7" cy="8" r="1.1" />
+    <circle cx="3" cy="12" r="1.1" />
+    <circle cx="7" cy="12" r="1.1" />
+  </svg>
+);

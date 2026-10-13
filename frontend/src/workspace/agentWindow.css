@@ -1,26 +1,186 @@
-.ws-agent[data-mode="floating"], .ws-agent[data-mode="bubble"] {
+/* frontend/src/workspace/agentWindow.css — v1.9.0 floating Agent and bubble.
+   Docked styles live with the grid in workspace.css. */
+
+.ws-agent[data-mode="floating"],
+.ws-agent[data-mode="bubble"] {
+  /* The window's resting size; AgentWindow sets both inline. */
+  --agent-panel-width: 380px;
+  --agent-panel-height: 540px;
   position: absolute;
   grid-area: auto;
   z-index: 12;
+  overflow: hidden;
   border: var(--hairline) solid var(--border);
   border-radius: var(--radius-xl);
-  box-shadow: var(--shadow-2);
-  overflow: visible;
+  background: var(--bg-card);
+  box-shadow: var(--shadow-pop);
+  transition:
+    left calc(var(--duration-spring) * 1.4) var(--ease-spring),
+    top calc(var(--duration-spring) * 1.4) var(--ease-spring),
+    width calc(var(--duration-spring) * 1.4) var(--ease-spring),
+    height calc(var(--duration-spring) * 1.4) var(--ease-spring),
+    border-radius calc(var(--duration-spring) * 1.4) var(--ease-spring),
+    box-shadow var(--duration-fade) var(--ease-standard);
 }
-.ws-agent[data-mode="bubble"] { border: 0; border-radius: 50%; background: transparent; }
-.ws-agent__bubble { width: 48px; height: 48px; min-height: 0; padding: 0; display: grid; place-items: center; border-radius: 50%; border: var(--hairline) solid var(--border); background: var(--bg-card); color: var(--tint); box-shadow: var(--shadow-2); cursor: grab; touch-action: none; }
-.ws-agent[data-mode="docked"] { position: relative; overflow: visible; }
-.ws-agent__body { overflow: hidden; border-radius: inherit; }
-.ws-agent__header .ws-agent__title { border: 0; background: transparent; color: var(--label); text-align: left; min-height: 36px; padding: 0; cursor: grab; touch-action: none; }
-.ws-agent__title span { margin-left: 8px; color: var(--label-secondary); }
-.ws-agent[data-moving="true"] { user-select: none; }
-.ws-agent__resize { position: absolute; left: -5px; top: 44px; bottom: 12px; width: 10px; cursor: col-resize; touch-action: none; border-radius: var(--radius-sm); }
-.ws-agent__resize:hover, .ws-agent__resize:focus-visible { background: var(--tint); }
-.ws-agent__bubble:focus-visible, .ws-agent__title:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
-/* Only history folds away. Pending approvals, errors and operation status remain reachable. */
-.ws-agent[data-compact="true"] .wb-agent-terminal { display: none; }
-.ws-agent[data-compact="true"] .ws-agent__content { overflow-y: auto; }
-.ws-agent[data-compact="true"] .wb-agent-panel { height: auto; flex: 1; }
-/* Resizing follows the pointer directly; grid easing resumes on release. */
-.ws-shell:has(.ws-agent[data-moving="true"]) { transition: none; }
-.ws-agent[data-moving="true"] .ws-agent__title, .ws-agent[data-moving="true"] .ws-agent__bubble { cursor: grabbing; }
+
+.ws-agent[data-mode="bubble"] {
+  border-radius: 24px;
+  box-shadow: var(--shadow-2);
+}
+
+.ws-agent[data-mode="bubble"]:hover {
+  box-shadow: var(--shadow-pop);
+}
+
+/* Following the pointer, nothing eases; the spring takes over on release. */
+.ws-agent[data-moving="true"] {
+  transition: none;
+  user-select: none;
+}
+
+.ws-shell:has(.ws-agent[data-moving="true"]) {
+  transition: none;
+}
+
+/* The conversation keeps the window's final size and is revealed from the
+   bubble's corner as the card grows, instead of reflowing on every frame. */
+.ws-agent[data-mode="floating"] .ws-agent__body,
+.ws-agent[data-mode="bubble"] .ws-agent__body {
+  position: absolute;
+  width: var(--agent-panel-width);
+  height: var(--agent-panel-height);
+  transition: opacity var(--duration-fade) var(--ease-standard) 60ms;
+}
+
+.ws-agent[data-corner-x="left"] .ws-agent__body { left: 0; }
+.ws-agent[data-corner-x="right"] .ws-agent__body { right: 0; }
+.ws-agent[data-corner-y="top"] .ws-agent__body { top: 0; }
+.ws-agent[data-corner-y="bottom"] .ws-agent__body { bottom: 0; }
+
+.ws-agent[data-mode="bubble"] .ws-agent__body[hidden] {
+  display: flex;
+  visibility: hidden;
+  opacity: 0;
+  transition:
+    opacity 90ms var(--ease-standard),
+    visibility 0s linear 90ms;
+}
+
+.ws-agent__bubble {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  color: var(--tint);
+  cursor: grab;
+  touch-action: none;
+}
+
+.ws-agent__bubble svg {
+  transition: transform var(--duration-spring) var(--ease-spring);
+}
+
+.ws-agent__bubble:hover svg {
+  transform: scale(1.08);
+}
+
+.ws-agent__bubble:active svg {
+  transform: scale(0.9);
+}
+
+.ws-agent[data-moving="true"] .ws-agent__bubble,
+.ws-agent[data-mode="floating"][data-moving="true"] .ws-agent__header {
+  cursor: grabbing;
+}
+
+/* Header: grip, title, then the window controls. */
+.ws-agent[data-mode="floating"] .ws-agent__header {
+  gap: var(--space-1);
+  padding-left: var(--space-1);
+  cursor: grab;
+  touch-action: none;
+}
+
+.ws-agent__grip {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 28px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--label-tertiary);
+  cursor: inherit;
+}
+
+.ws-agent__grip:hover {
+  color: var(--label-secondary);
+  background: var(--bg-elev);
+}
+
+.ws-agent__header .ws-icon-button {
+  cursor: pointer;
+}
+
+.ws-agent__bubble:focus-visible,
+.ws-agent__grip:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+/* Width handle on the leading edge; inside the card so the clip keeps it. */
+.ws-agent__resize {
+  position: absolute;
+  left: 0;
+  top: 44px;
+  bottom: var(--space-3);
+  width: 6px;
+  z-index: 1;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.ws-agent__resize::after {
+  content: "";
+  position: absolute;
+  left: 1px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  border-radius: var(--radius-pill);
+  background: var(--tint);
+  opacity: 0;
+  transition: opacity var(--duration-fade) var(--ease-standard);
+}
+
+.ws-agent__resize:hover::after,
+.ws-agent__resize:focus-visible::after,
+.ws-agent[data-moving="true"] .ws-agent__resize::after {
+  opacity: 1;
+}
+
+.ws-agent__resize:focus-visible {
+  outline: none;
+}
+
+/* Collapsed, only history folds away: approvals, errors and operation status
+   stay reachable above the input. */
+.ws-agent[data-compact="true"] .wb-agent-terminal {
+  display: none;
+}
+
+.ws-agent[data-compact="true"] .ws-agent__content {
+  overflow-y: auto;
+}
+
+.ws-agent[data-compact="true"] .wb-agent-panel {
+  height: auto;
+  flex: 1;
+}

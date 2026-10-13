@@ -14,14 +14,17 @@ import {
   effectiveLayout,
   mapPresentation,
   mapWidthFor,
-  readAgentOpen,
+  readAgentMode,
+  readAgentWidth,
   readLayout,
   releaseLayout,
-  writeAgentOpen,
+  writeAgentMode,
+  writeAgentWidth,
   writeLayout,
+  type AgentMode,
   type Layout,
 } from "./layoutModel";
-import { AgentWindow, type AgentMode } from "./AgentWindow";
+import { AgentWindow } from "./AgentWindow";
 import "./workspace.css";
 import "./agentColumn.css";
 
@@ -92,12 +95,22 @@ export function WorkspaceShell({ projectRoot, view, topbar, stageOpen, map, stag
   const shellRef = useRef<HTMLDivElement>(null);
   const shellWidth = useShellWidth(shellRef);
   const [layout, setLayoutState] = useState<Layout>(() => readLayout(projectRoot));
-  const [agentMode, setAgentMode] = useState<AgentMode>(() => readAgentOpen() ? "docked" : "bubble");
-  const [agentSize, setAgentSize] = useState(380);
+  const [agentMode, setAgentMode] = useState<AgentMode>(readAgentMode);
+  const [agentSize, setAgentSizeState] = useState(readAgentWidth);
+  // ⌘. and the bubble reopen the Agent the way it was last open.
+  const lastOpenMode = useRef<AgentMode>(agentMode === "bubble" ? "floating" : agentMode);
   const agentOpen = agentMode !== "bubble";
-  const setMode = useCallback((mode: AgentMode) => { setAgentMode(mode); writeAgentOpen(mode !== "bubble"); }, []);
+  const setMode = useCallback((mode: AgentMode) => {
+    if (mode !== "bubble") lastOpenMode.current = mode;
+    setAgentMode(mode);
+    writeAgentMode(mode);
+  }, []);
+  const setAgentSize = useCallback((width: number) => {
+    setAgentSizeState(width);
+    writeAgentWidth(width);
+  }, []);
   useEffect(() => {
-    const show = () => setAgentMode(mode => mode === "bubble" ? "floating" : mode);
+    const show = () => setAgentMode((mode) => (mode === "bubble" ? "floating" : mode));
     window.addEventListener("workbench:show-agent", show);
     return () => window.removeEventListener("workbench:show-agent", show);
   }, []);
@@ -116,13 +129,7 @@ export function WorkspaceShell({ projectRoot, view, topbar, stageOpen, map, stag
     writeLayout(projectRoot, next);
   }, [projectRoot]);
   const toggleLayout = useCallback(() => setLayout(layout === "results" ? "lineage" : "results"), [layout, setLayout]);
-  const toggleAgent = useCallback(() => {
-    setAgentMode((mode) => {
-      const next = mode === "bubble" ? "floating" : "bubble";
-      writeAgentOpen(next !== "bubble");
-      return next;
-    });
-  }, []);
+  const toggleAgent = useCallback(() => setMode(agentMode === "bubble" ? lastOpenMode.current : "bubble"), [agentMode, setMode]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {

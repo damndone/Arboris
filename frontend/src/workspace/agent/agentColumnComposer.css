@@ -6,6 +6,7 @@
 }
 
 .ws-composer {
+  container: composer / inline-size;
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
@@ -194,4 +195,47 @@
 .ws-composer__policy:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
+}
+
+/* One row at any Agent width: the toggles keep their words on one line and
+   the model name gives way first. */
+.ws-composer__bar .wb-agent-capability-trigger {
+  height: 26px;
+  padding: 0 8px;
+  font-size: var(--text-small);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.ws-composer__policy {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.ws-composer__model {
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
+.ws-composer__model select {
+  width: 100%;
+}
+
+.ws-composer__send,
+.ws-composer__bar .wb-context-ring {
+  flex: none;
+}
+
+/* In a narrow Agent, Review first keeps its icon and pressed tint; the note
+   under the input says which way it is set. */
+@container composer (max-width: 400px) {
+  .ws-composer__policy {
+    width: 26px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .ws-composer__policy-label {
+    display: none;
+  }
 }

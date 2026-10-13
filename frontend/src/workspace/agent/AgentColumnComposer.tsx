@@ -97,13 +97,14 @@ export function AgentColumnComposer() {
             <button
               type="button"
               className="ws-composer__policy"
+              aria-label="Review first"
               aria-pressed={reviewFirst}
               disabled={busy}
               title={reviewFirst ? "Every step waits for your OK. Click to let read-only analyses run at once." : "Read-only analyses run at once. Click to review every step first."}
               onClick={() => agent.setExecutionPolicy?.(reviewFirst ? "auto_read_only" : "proposal_only")}
             >
               <ReviewIcon />
-              Review first
+              <span className="ws-composer__policy-label">Review first</span>
             </button>
           )}
           <span className="ws-composer__spacer" />
