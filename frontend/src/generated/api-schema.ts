@@ -5033,6 +5033,8 @@ export interface components {
             status: string | null;
             /** Summary */
             summary: string;
+            /** Title */
+            title: string | null;
             /** What */
             what: string;
             /** Who */
@@ -7503,6 +7505,8 @@ export interface components {
         /** OperationCatalogEntry */
         OperationCatalogEntry: {
             availability: components["schemas"]["OperationAvailability"];
+            /** Blurb */
+            blurb: string;
             /** Capability Ids */
             capability_ids: string[];
             /** Category */
@@ -7518,6 +7522,12 @@ export interface components {
             field_hints: {
                 [key: string]: components["schemas"]["OperationFieldHint"];
             };
+            /** Group */
+            group: string;
+            /** Group Label */
+            group_label: string;
+            /** Group Order */
+            group_order: number;
             /** Id */
             id: string;
             /** Name */

@@ -13,6 +13,7 @@ from typing import Any, Mapping, Sequence
 from ..agent.capability_contract import capability_inventory
 from ..agent.operations import OperationRegistry
 from ..agent.workflow_contracts import WORKFLOW_STEP_SPEC_CONTRACTS
+from .operation_presentation import present
 
 
 def _field_hints(schema: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
@@ -133,13 +134,16 @@ def operation_catalog(
         if operation_id == "model.custom":
             if operation_id not in dedicated:
                 execution = {"kind": "unavailable", "method": None, "path": None}
+            # Authority stays with the dedicated endpoint: it checks the admitted
+            # notebook option, the server-owned capability binding and the trusted
+            # execution gateway; a generic workflow cannot grant any of them.
             availability = {"status": "unavailable", "reason_code": "AUTHORIZED_GATEWAY_REQUIRED",
-                            "message": "Custom execution requires a current admitted notebook option, server-owned capability binding and trusted execution gateway. The dedicated endpoint verifies these conditions; generic workflows cannot grant this authority."}
+                            "message": "Runs only from an admitted option in a notebook, through its own confirmation."}
+        summary = contract.summary if contract is not None else definition.ui_description
         entries[operation_id] = {
             "id": operation_id, "version": definition.operation_version,
-            "category": operation_id.split(".")[0],
-            "name": operation_id.replace(".", " ").replace("_", " ").title(),
-            "summary": contract.summary if contract is not None else definition.ui_description,
+            "category": operation_id.split(".")[0], **present(operation_id, summary),
+            "summary": summary,
             "spec_schema": schema, "field_hints": _field_hints(schema),
             "target_requirements": list(dedicated[operation_id]["target_requirements"])
             if operation_id in dedicated else list(definition.scope_requirements),
@@ -156,7 +160,7 @@ def operation_catalog(
         schema = deepcopy(binding["execution"]["request_schema"])
         entries[operation_id] = {
             "id": operation_id, "version": "v1", "category": operation_id.split(".")[0],
-            "name": operation_id.replace(".", " ").replace("_", " ").title(), "summary": binding["summary"],
+            **present(operation_id, binding["summary"]), "summary": binding["summary"],
             "spec_schema": schema, "field_hints": _field_hints(schema),
             "target_requirements": binding["target_requirements"],
             "confirmation_policy": binding["confirmation_policy"], "risk_level": "mutating",

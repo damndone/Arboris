@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { fireEvent, render, screen, cleanup } from '@testing-library/react';
+import { fireEvent, render, screen, cleanup, within } from '@testing-library/react';
 import { afterEach, expect, it } from 'vitest';
 import { SchemaField } from './SchemaFields';
 import { initialValue, validateValue, type JsonSchema } from './schemaModel';
@@ -62,6 +62,26 @@ it('refuses duplicate map keys and preserves unusual literal names',()=>{
   fireEvent.click(screen.getByRole('button',{name:'Add Parameters field'}));
   fireEvent.change(screen.getByLabelText('Parameters.__proto__'),{target:{value:'literal'}});
   expect(JSON.parse(screen.getByTestId('value').textContent!)).toEqual(JSON.parse('{"a\'b":"original","__proto__":"literal"}'));
+});
+
+it('reads as words, hides a field with one allowed value, and edits name lists as chips',()=>{
+  const schema:JsonSchema={type:'object',required:['input_mode','column_bindings'],additionalProperties:false,properties:{
+    input_mode:{type:'string',enum:['frame']},
+    column_bindings:{type:'object',required:['columns'],additionalProperties:false,properties:{columns:{type:'array',minItems:2,items:{type:'string',minLength:1}}}},
+  }};
+  function Columns(){const [value,setValue]=useState(initialValue(schema));return <><SchemaField schema={schema} label="Step 1" value={value} onChange={setValue} required columns={['wage','age','educ']} flat/><output data-testid="value">{JSON.stringify(value)}</output></>;}
+  render(<Columns/>);
+  expect(screen.queryByText(/Input mode/)).toBeNull();
+  expect(screen.getByText(/^Column bindings/)).toBeInTheDocument();
+  expect(screen.queryByText('Step 1')).toBeNull();
+  const group=screen.getByRole('group',{name:'Columns in this dataset for Columns'});
+  fireEvent.click(within(group).getByRole('button',{name:'wage'}));
+  fireEvent.change(screen.getByLabelText('Step 1.column_bindings.columns new item'),{target:{value:'age'}});
+  fireEvent.keyDown(screen.getByLabelText('Step 1.column_bindings.columns new item'),{key:'Enter'});
+  expect(JSON.parse(screen.getByTestId('value').textContent!)).toEqual({input_mode:'frame',column_bindings:{columns:['wage','age']}});
+  expect(within(group).getByRole('button',{name:'age'})).toHaveAttribute('aria-pressed','true');
+  fireEvent.click(screen.getByRole('button',{name:'Remove Step 1.column_bindings.columns item 1'}));
+  expect(JSON.parse(screen.getByTestId('value').textContent!).column_bindings.columns).toEqual(['age']);
 });
 
 // Opt-in integration audit reads the delivered catalog rather than a copied fixture.

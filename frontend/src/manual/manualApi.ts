@@ -20,3 +20,12 @@ export const reportDraft = (root: string, run: string) => request<Draft>(root, `
 export const reportHistory = (root: string, run: string) => request<Schema<"ManualReportHistory">>(root, reportPath(run));
 export const saveReport = (root: string, run: string, body: Schema<"ManualReportRequest">) => request<Schema<"ManualReportSaved">>(root, reportPath(run), body);
 export const reportExportUrl = (root: string, run: string, id: string, format: string) => manualUrl(root, `${reportPath(run)}/${encodeURIComponent(id)}/export`, { format });
+
+/** A saved result. Its content is whatever the step wrote (JSON, a table, a
+ *  figure), so the caller reads the response by its content type. */
+export async function readArtifact(root: string, run: string, id: string): Promise<Response> {
+    const response = await fetch(artifactUrl(root, run, id));
+    if (!response.ok) await readResponse(response);
+    return response;
+}
+export const artifactUrl = (root: string, run: string, id: string) => manualUrl(root, `/runs/${encodeURIComponent(run)}/artifacts/${encodeURIComponent(id)}`);

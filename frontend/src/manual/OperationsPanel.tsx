@@ -1,179 +1,256 @@
+// v1.9.0 — Analyze: every registered operation, run by hand without the
+// Agent (the Agent calls the same catalog). The order on screen is the order
+// of work: choose what to analyze, choose an operation, set its parameters,
+// preview, confirm, read the results.
+//
+// A preview is bound to frozen tokens (request, preview, fingerprint); any
+// edit discards it, so Confirm always runs exactly what was previewed. A
+// failed request keeps its request id, so a retry is the same request.
+
 import { useEffect, useRef, useState } from "react";
-import { listDatasets, fetchDatasetPage } from "../dataView/dataViewApi";
-import { readResponse } from "../api";
-import { catalog, execute, manualUrl, type Operation, type Target, type Outcome } from "./manualApi";
-import { SchemaField, initialValue, type JsonSchema } from "./SchemaFields";
+import { catalog, execute, type Operation, type Outcome, type Target } from "./manualApi";
+import { OperationPicker } from "./operations/OperationPicker";
+import { OutcomeView } from "./operations/OutcomeView";
+import { StepCard } from "./operations/StepCard";
+import { newStep, stepIssues, type Step } from "./operations/steps";
+import { useTargetChoices, type ModelChoice } from "./operations/targets";
 import "./manual.css";
-import { validateValue } from "./schemaModel";
-import { dedicatedTargetReason } from "./dedicatedTarget";
-export type ModelChoice = {
-    runId: string;
-    nodeId: string;
-    label: string;
-};
-type Choice = {
-    label: string;
-    target: Target;
-    columns: string[];
-};
-type Step = {
-    step_id: string;
-    operation_id: string;
-    spec: Record<string, unknown>;
-};
+import "./operations/operations.css";
+
+export type { ModelChoice };
+
 const uid = () => crypto.randomUUID();
-export function OperationsPanel({ projectRoot, runId, models, initialSearch = "", initialTarget, onClose, onRefresh, onOpenRun, onDedicated }: {
-    projectRoot: string;
-    runId: string;
-    initialSearch?: string;
-    initialTarget?: Target;
-    models: ModelChoice[];
-    onClose: () => void;
-    onRefresh: () => void;
-    onOpenRun: (runId: string) => void;
-    onDedicated: (id: string, target?: Target) => void;
+
+export function OperationsPanel({
+  projectRoot,
+  runId,
+  models,
+  initialSearch = "",
+  initialTarget,
+  onClose,
+  onRefresh,
+  onOpenRun,
+  onDedicated,
+}: {
+  projectRoot: string;
+  runId: string;
+  initialSearch?: string;
+  initialTarget?: Target;
+  models: ModelChoice[];
+  onClose: () => void;
+  onRefresh: () => void;
+  onOpenRun: (runId: string) => void;
+  onDedicated: (id: string, target?: Target) => void;
 }) {
-    // A newly produced run can become active while this editor is still open.
-    // Keep this operation session bound to its original source and receipt.
-    const [sourceRunId] = useState(runId);
-    const [choices, setChoices] = useState<Choice[]>([]);
-    const [refreshRevision,setRefreshRevision]=useState(0);
-    const [targetIndex, setTargetIndex] = useState("");
-    const [operations, setOperations] = useState<Operation[]>([]);
-    const [search, setSearch] = useState(initialSearch);
-    useEffect(() => setSearch(initialSearch), [initialSearch]);
-    const [steps, setSteps] = useState<Step[]>([]);
-    const [outcome, setOutcome] = useState<Outcome | null>(null);
-    const [busy, setBusy] = useState(false);
-    const [error, setError] = useState("");
-    const [catalogBusy, setCatalogBusy] = useState(true);
-    const [artifact, setArtifact] = useState<unknown>();
-    const requestId = useRef(uid());
-    const pending = useRef(false);
-    const choice = choices[Number(targetIndex)];
-    const target = targetIndex === "" ? undefined : choice?.target;
-    const targetKey = JSON.stringify(target);
-    const form = useRef<HTMLFormElement>(null);
-    const invalidate = () => { setOutcome(null); setArtifact(undefined); setError(""); requestId.current = uid(); };
-    const modelKey = JSON.stringify(models);
-    const selectedTarget = useRef(targetKey);
-    selectedTarget.current = targetKey;
-    useEffect(() => {
-        let current = true;
-        (async () => {
-            const datasets = sourceRunId ? await listDatasets(projectRoot, sourceRunId) : [];
-            const data = await Promise.all(datasets.map(async (d, index) => { const page = await fetchDatasetPage(projectRoot, sourceRunId, d.node_id, { offset: 0, limit: 1 }); return { label: `Data · ${d.label} · dataset ${index + 1}`, target: { kind: "dataset_node", run_id: sourceRunId, node_id: d.node_id, artifact_id: page.artifact_id } as Target, columns: page.columns }; }));
-            const all = [...data, ...models.map(m => ({ label: `Model · ${m.label} · version ${models.indexOf(m) + 1}`, target: { kind: "model_node", run_id: m.runId, node_id: m.nodeId } as Target, columns: [] }))];
-            if (current) {
-                const index = all.findIndex(c => JSON.stringify(c.target) === (selectedTarget.current ?? JSON.stringify(initialTarget)));
-                setChoices(all);
-                setTargetIndex(index >= 0 ? String(index) : all.length ? "0" : "");
-                if (selectedTarget.current && index < 0) {
-                    invalidate();
-                    setSteps([]);
-                }
-            }
-        })().catch(e => current && setError(String(e)));
-        return () => { current = false; };
-    }, [projectRoot, sourceRunId, modelKey, refreshRevision]);
-    useEffect(() => {
-        let current = true;
-        setCatalogBusy(true);
-        setOperations([]);
-        catalog(projectRoot, target).then(v => { if (current)
-            setOperations(v.operations); }).catch(e => current && setError(String(e))).finally(() => current && setCatalogBusy(false));
-        return () => { current = false; };
-    }, [projectRoot, targetKey]);
-    function changeStep(index: number, spec: Record<string, unknown>) { invalidate(); setSteps(old => old.map((s, i) => i === index ? { ...s, spec } : s)); }
-    function add(op: Operation) {
-        invalidate();
-        let spec = (initialValue(op.spec_schema as JsonSchema) ?? {}) as Record<string, unknown>;
-        if (target?.kind === "model_node" && (op.spec_schema as JsonSchema).properties?.model_ref)
-            spec = { ...spec, model_ref: target.node_id, model_run_id: target.run_id };
-        setSteps(old => [...old, { step_id: `step_${old.length + 1}_${uid().slice(0, 4)}`, operation_id: op.id, spec }]);
+  // A run produced here can become the active run while Analyze is open; this
+  // session stays bound to the run it was opened on.
+  const [sourceRunId] = useState(runId);
+  const [revision, setRevision] = useState(0);
+  const { choices, error: targetError } = useTargetChoices(projectRoot, sourceRunId, models, revision);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [operations, setOperations] = useState<Operation[]>([]);
+  const [catalogBusy, setCatalogBusy] = useState(true);
+  const [steps, setSteps] = useState<Step[]>([]);
+  const [picking, setPicking] = useState(false);
+  const [outcome, setOutcome] = useState<Outcome | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const requestId = useRef(uid());
+  const pending = useRef(false);
+  const form = useRef<HTMLFormElement>(null);
+
+  const selectedIndex = choices?.findIndex((choice) => choice.key === selectedKey) ?? -1;
+  const choice = selectedIndex >= 0 ? choices![selectedIndex] : undefined;
+  const target = choice?.target;
+  const targetKey = choice?.key ?? "";
+
+  const invalidate = () => {
+    setOutcome(null);
+    setError("");
+    requestId.current = uid();
+  };
+
+  // First load picks the requested target (or the first); a refresh that
+  // drops the selected target discards the work built on it.
+  useEffect(() => {
+    if (!choices) return;
+    if (selectedKey === null) {
+      const wanted = initialTarget ? JSON.stringify(initialTarget) : undefined;
+      setSelectedKey(choices.find((c) => c.key === wanted)?.key ?? choices[0]?.key ?? "");
+    } else if (selectedKey && !choices.some((c) => c.key === selectedKey)) {
+      invalidate();
+      setSteps([]);
+      setSelectedKey("");
     }
-    async function submit(confirm = false) {
-        if (pending.current || !form.current?.reportValidity())
-            return;
-        const issues = steps.flatMap((step,index) => {
-            const op=operations.find(o=>o.id===step.operation_id);
-            if(!op) return [`Step ${index+1}: operation declaration is unavailable.`];
-            const schema=op.spec_schema as JsonSchema;
-            const {source,...fields}=step.spec;
-            const earlier=steps.slice(0,index);
-            if(source && !earlier.some(s=>s.step_id===(source as {from_step?:string}).from_step)) return [`Step ${index+1}: the selected dataset producer no longer exists before this step.`];
-            if(typeof step.spec.model_ref==='string'&&step.spec.model_ref.startsWith('step:')) {
-                const [,producerId,branchId]=step.spec.model_ref.split(':');
-                const producer=earlier.find(s=>s.step_id===producerId);
-                if(!producer||!Array.isArray(producer.spec.branches)||!producer.spec.branches.some(b=>(b as {branch_id?:unknown})?.branch_id===branchId)) return [`Step ${index+1}: select a declared model branch from an earlier step.`];
-            }
-            return validateValue(schema, schema.properties?.source ? step.spec : fields, schema, `Step ${index+1}`);
-        });
-        if(issues.length){setError(issues.join("\n"));return;}
-        if (!target && !confirm)
-            return;
-        pending.current = true;
-        setBusy(true);
-        setError("");
-        try {
-            const body = confirm && outcome ? { mode: "confirm" as const, request_id: outcome.request_id, preview_id: outcome.preview_id, fingerprint: outcome.fingerprint } : { mode: "preview" as const, request_id: requestId.current, target, steps };
-            const result = await execute(projectRoot, body);
-            setOutcome(result);
-            if (result.status === "completed" || result.status === "partial" || result.status === "failed") {
-                setRefreshRevision(value=>value+1);onRefresh();
-            }
-        }
-        catch (e) {
-            setError(e instanceof Error ? e.message : String(e));
-        }
-        finally {
-            pending.current = false;
-            setBusy(false);
-        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [choices]);
+
+  useEffect(() => {
+    if (selectedKey === null) return;
+    let live = true;
+    setCatalogBusy(true);
+    setOperations([]);
+    catalog(projectRoot, target)
+      .then((value) => live && setOperations(value.operations))
+      .catch((reason) => live && setError(String(reason)))
+      .finally(() => live && setCatalogBusy(false));
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectRoot, targetKey, selectedKey === null]);
+
+  const chooseTarget = (key: string) => {
+    invalidate();
+    setSteps([]);
+    setPicking(false);
+    setSelectedKey(key);
+  };
+  const changeStep = (index: number, step: Step) => {
+    invalidate();
+    setSteps((old) => old.map((s, i) => (i === index ? step : s)));
+  };
+  const removeStep = (index: number) => {
+    invalidate();
+    setSteps((old) => old.filter((_, i) => i !== index));
+  };
+  const pick = (op: Operation) => {
+    if (op.execution.kind !== "workflow") return onDedicated(op.id, target);
+    invalidate();
+    setSteps((old) => [...old, newStep(op, old.length, target, uid().slice(0, 4))]);
+    setPicking(false);
+  };
+
+  async function submit(confirm = false) {
+    if (pending.current || !form.current?.reportValidity()) return;
+    const issues = stepIssues(steps, operations);
+    if (issues.length) return setError(issues.join("\n"));
+    if (!target && !confirm) return;
+    pending.current = true;
+    setBusy(true);
+    setError("");
+    try {
+      const body =
+        confirm && outcome
+          ? { mode: "confirm" as const, request_id: outcome.request_id, preview_id: outcome.preview_id, fingerprint: outcome.fingerprint }
+          : { mode: "preview" as const, request_id: requestId.current, target, steps };
+      const result = await execute(projectRoot, body);
+      setOutcome(result);
+      if (["completed", "partial", "failed"].includes(result.status)) {
+        setRevision((n) => n + 1);
+        onRefresh();
+      }
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      pending.current = false;
+      setBusy(false);
     }
-    async function readArtifact(run: string, id: string) { setError(""); try {
-        const r = await fetch(manualUrl(projectRoot, `/runs/${encodeURIComponent(run)}/artifacts/${encodeURIComponent(id)}`));
-        if (!r.ok)
-            await readResponse(r);
-        if (r.headers.get('content-type')?.includes('json'))
-            setArtifact(await r.json());
-        else
-            setArtifact('Use the artifact link to open or download this result.');
-    }
-    catch (e) {
-        setError(String(e));
-    } }
-    const groups = operations.filter(op => `${op.name} ${op.id} ${op.category}`.toLowerCase().includes(search.toLowerCase())).reduce<Record<string, Operation[]>>((groups, op) => { (groups[op.category] ??= []).push(op); return groups; }, {});
-    return <section className="manual-panel" aria-label="Analyze operations"><header><h2>Analyze</h2><button type="button" onClick={onClose} disabled={busy}>Close Analyze</button></header>
-    <p>Choose an operation and its data or model. Runs locally without a language model.</p>
-    {error && <p role="alert">{error}</p>}
-    <label className="manual-field">Analysis target<select aria-label="Analysis target" disabled={busy} value={targetIndex} onChange={e => { invalidate(); setSteps([]); setTargetIndex(e.target.value); }}><option value="">Select a target</option>{choices.map((c, i) => <option key={JSON.stringify(c.target)} value={i}>{c.label}</option>)}</select></label>
-    {target && <details><summary>Selected target source</summary><dl>{Object.entries(target).map(([key, value]) => <div key={key}><dt>{key.replace(/_/g, " ")}</dt><dd>{String(value)}</dd></div>)}</dl></details>}
-    {!choices.length && !catalogBusy && <p>Import data with New analysis first.</p>}
-    <label className="manual-field">Find an operation<input aria-label="Find an operation" value={search} onChange={e => setSearch(e.target.value)}/></label>
-    {catalogBusy ? <p role="status">Loading operations…</p> : <details open={steps.length === 0}><summary>{operations.length} operations</summary>{Object.entries(groups).map(([group, items]) => <section key={group}><h3>{group.replace(/_/g, ' ')}</h3><div className="manual-catalog">{items!.map(op => <button type="button" key={op.id} disabled={busy || op.availability.status === "unavailable" || !!dedicatedTargetReason(op,target)} title={dedicatedTargetReason(op,target) ?? `${op.summary}\n${op.availability.reason_code}: ${op.availability.message}`} onClick={() => op.execution.kind === "workflow" ? add(op) : onDedicated(op.id, target)}>{op.name}<small>{op.availability.status === "unavailable" ? ` · ${op.availability.message}` : dedicatedTargetReason(op,target) ? ` · ${dedicatedTargetReason(op,target)}` : op.execution.kind === "dedicated" ? ' · Open workspace' : ''}</small></button>)}</div></section>)}</details>}
-    <form ref={form} onChange={invalidate} onSubmit={e => { e.preventDefault(); void submit(); }}><fieldset disabled={busy}>
-      {steps.map((step, i) => {
-            const op = operations.find(o => o.id === step.operation_id);
-            return <article key={step.step_id}><header><h3>{i + 1}. {op?.name ?? step.operation_id}</h3><button type="button" onClick={() => { invalidate(); setSteps(old => old.filter((_, j) => j !== i)); }}>Remove step {i + 1}</button></header><details><summary>Operation details</summary><p>{op?.summary}</p></details><details><summary>Source</summary><small>Step reference: {step.step_id}</small></details>
-        <SchemaField key={step.step_id} label={`Step ${i + 1}`} schema={(op?.spec_schema ?? { type: 'object' }) as JsonSchema} value={step.spec} onChange={v => changeStep(i, v as Record<string, unknown>)} columns={choice?.columns}/>
-        {i > 0 && <details><summary>Use an earlier result</summary><p>Dataset input uses a producer step. Choose a model branch below when an earlier step produces it.</p><label className="manual-field">Dataset producer<select aria-label={`Step ${i + 1} dataset producer`} value={String((step.spec.source as {
-                from_step?: string;
-            })?.from_step ?? '')} onChange={e => { const next = { ...step.spec }; if (e.target.value)
-                next.source = { from_step: e.target.value, output: 'produced_dataset' };
-            else
-                delete next.source; changeStep(i, next); }}><option value="">Selected target</option>{steps.slice(0, i).map(s => <option key={s.step_id} value={s.step_id}>{steps.indexOf(s) + 1}. {operations.find(op => op.id === s.operation_id)?.name ?? "Earlier operation"}</option>)}</select></label>
-          {(op?.spec_schema as JsonSchema)?.properties?.model_ref && <label className="manual-field">Model producer<select aria-label={`Step ${i+1} model producer`} value={String(step.spec.model_ref??'').startsWith('step:')?String(step.spec.model_ref):''} onChange={e=>{const next={...step.spec};if(e.target.value){next.model_ref=e.target.value;delete next.model_run_id;}else if(target?.kind==='model_node'){next.model_ref=target.node_id;next.model_run_id=target.run_id;}else{delete next.model_ref;delete next.model_run_id;}changeStep(i,next);}}><option value="">Selected model / explicit reference</option>{steps.slice(0,i).flatMap(producer=>Array.isArray(producer.spec.branches)?producer.spec.branches.flatMap((branch:unknown)=>{const id=(branch as {branch_id?:unknown})?.branch_id;return typeof id==='string'&&id?[<option key={`${producer.step_id}:${id}`} value={`step:${producer.step_id}:${id}`}>{steps.indexOf(producer) + 1}. {id}</option>]:[];}):[])}</select></label>}
-        </details>}
-      </article>;
-        })}
-      <button type="submit" disabled={!steps.length || !target || catalogBusy || busy}>Preview analysis</button>
-    </fieldset></form>
-    {outcome && <section aria-label="Analysis preview and results"><h3>{outcome.status.replace(/_/g, ' ')}</h3><ul>{[...outcome.expected_effect, ...outcome.risks].map((s, i) => <li key={i}>{s}</li>)}</ul>
-      {outcome.error && <pre role="alert">{JSON.stringify(outcome.error, null, 2)}</pre>}
-      {outcome.status === 'awaiting_confirmation' && <button type="button" disabled={busy} onClick={() => void submit(true)}>Confirm analysis</button>}
-      {outcome.steps.map(s => <article key={s.step_id}><h4>{operations.find(op => op.id === s.operation_id)?.name ?? s.operation_id.replace(/[._]/g, " ")} · {s.status}</h4>{s.error && <p role="alert">{s.error}</p>}{s.node_refs.map(n => <button type="button" key={`${n.run_id}:${n.node_id}`} onClick={() => onOpenRun(n.run_id)} title={n.run_id}>Open result</button>)}{s.artifact_refs.map(a => <div key={`${a.run_id}:${a.artifact_id}`}><button type="button" onClick={() => void readArtifact(a.run_id, a.artifact_id)} title={a.artifact_id}>View saved result</button><a href={manualUrl(projectRoot, `/runs/${encodeURIComponent(a.run_id)}/artifacts/${encodeURIComponent(a.artifact_id)}`)} target="_blank" rel="noreferrer">Download artifact</a></div>)}</article>)}
-      {artifact !== undefined && <pre aria-label="Analysis result">{JSON.stringify(artifact, null, 2)}</pre>}
-    </section>}{busy && <p role="status">Working…</p>}
-  </section>;
+  }
+
+  const showPicker = steps.length === 0 || picking;
+  const groups = (["Data", "Model"] as const).map((kind) => ({
+    kind,
+    items: (choices ?? []).map((c, index) => ({ c, index })).filter(({ c }) => c.kind === kind),
+  }));
+
+  return (
+    <section className="manual-panel op-panel" aria-label="Analyze operations">
+      <header className="op-head">
+        <h2>Analyze</h2>
+        <label className="op-target">
+          <span>On</span>
+          <select
+            aria-label="Analysis target"
+            disabled={busy}
+            value={selectedIndex >= 0 ? String(selectedIndex) : ""}
+            onChange={(event) => chooseTarget(choices?.[Number(event.target.value)]?.key ?? "")}
+          >
+            <option value="">Nothing selected</option>
+            {groups.map(({ kind, items }) =>
+              items.length ? (
+                <optgroup key={kind} label={kind === "Data" ? "Data" : "Models"}>
+                  {items.map(({ c, index }) => (
+                    <option key={c.key} value={index}>{c.label}</option>
+                  ))}
+                </optgroup>
+              ) : null,
+            )}
+          </select>
+        </label>
+        {target && (
+          <details className="op-source">
+            <summary>Source details</summary>
+            <dl>
+              {Object.entries(target).map(([key, value]) => (
+                <div key={key}>
+                  <dt>{key.replace(/_/g, " ")}</dt>
+                  <dd>{String(value)}</dd>
+                </div>
+              ))}
+            </dl>
+          </details>
+        )}
+        <button type="button" className="ws-icon-button op-close" aria-label="Close Analyze" title="Close" onClick={onClose} disabled={busy}>
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
+            <path d="M4 4l8 8M12 4l-8 8" />
+          </svg>
+        </button>
+      </header>
+      <p className="op-lede">Runs on this machine, without a language model. The Agent uses the same operations.</p>
+
+      {(error || targetError) && <p role="alert">{error || targetError}</p>}
+      {choices?.length === 0 && <p className="op-note">Import data with New analysis first.</p>}
+
+      {steps.length > 0 && (
+        <form
+          ref={form}
+          className="op-steps"
+          onChange={invalidate}
+          onSubmit={(event) => {
+            event.preventDefault();
+            void submit();
+          }}
+        >
+          <fieldset disabled={busy}>
+            <legend className="ws-visually-hidden">Steps</legend>
+            {steps.map((step, index) => (
+              <StepCard
+                key={step.step_id}
+                step={step}
+                index={index}
+                steps={steps}
+                operations={operations}
+                target={target}
+                columns={choice?.columns}
+                onChange={(next) => changeStep(index, next)}
+                onRemove={() => removeStep(index)}
+              />
+            ))}
+            <div className="op-bar">
+              <button type="button" className="op-secondary" aria-expanded={picking} onClick={() => setPicking(!picking)}>
+                {picking ? "Done adding" : "Add a step"}
+              </button>
+              <span className="op-bar__spacer" />
+              <button type="submit" className="op-primary" disabled={!target || catalogBusy || busy}>
+                Preview analysis
+              </button>
+            </div>
+          </fieldset>
+        </form>
+      )}
+
+      {outcome && (
+        <OutcomeView projectRoot={projectRoot} outcome={outcome} operations={operations} busy={busy} onConfirm={() => void submit(true)} onOpenRun={onOpenRun} />
+      )}
+      {busy && <p className="op-note" role="status">Working…</p>}
+
+      {showPicker &&
+        (catalogBusy ? (
+          <p className="op-note" role="status">Loading operations…</p>
+        ) : (
+          <OperationPicker key={initialSearch} operations={operations} target={target} busy={busy} initialSearch={initialSearch} onPick={pick} />
+        ))}
+    </section>
+  );
 }

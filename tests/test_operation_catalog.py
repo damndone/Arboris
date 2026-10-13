@@ -123,6 +123,32 @@ def test_catalog_groups_operations_by_research_domain_and_hides_endpoint_names()
     assert entries['multivariate.pca']['category'] == 'multivariate'
     assert entries['postestimation.wald']['category'] == 'postestimation'
     assert entries['time_series.var']['category'] == 'time_series'
-    assert entries['data.export']['name'] == 'Data Export'
-    assert entries['model.draft']['name'] == 'Model Draft'
+    assert entries['data.export']['name'] == 'Export data'
+    assert entries['model.draft']['name'] == 'New model'
     assert all('Endpoint' not in item['name'] for item in entries.values())
+
+
+def test_every_registered_operation_reads_in_plain_words():
+    from workbench.services.operation_presentation import FALLBACK_GROUP, GROUPS, PRESENTATION
+
+    entries = {item['id']: item for item in _client().get('/operations').json()['operations']}
+    assert set(entries) == set(PRESENTATION), "add or remove the operation's words in operation_presentation.py"
+    groups = dict(GROUPS)
+    for item in entries.values():
+        assert item['group'] in groups and item['group'] != FALLBACK_GROUP[0]
+        assert item['group_label'] == groups[item['group']]
+        # Sentence case; statistical names keep their own case ("t-test").
+        assert item['name'] and (item['name'][0].isupper() or item['name'].startswith('t-')) and len(item['name']) <= 32
+        assert item['blurb'].endswith('.') and len(item['blurb']) <= 90
+        assert 'frozen' not in item['blurb'] and 'adapter' not in item['blurb']
+    assert entries['postestimation.wald']['group_order'] < entries['report.compose']['group_order']
+
+
+def test_an_operation_without_words_still_reads_sensibly(monkeypatch):
+    from workbench.agent.workflow_contracts import WORKFLOW_STEP_SPEC_CONTRACTS
+
+    contract = replace(WORKFLOW_STEP_SPEC_CONTRACTS["data.aggregate"], summary="Probe the catalog. More detail here.")
+    monkeypatch.setitem(WORKFLOW_STEP_SPEC_CONTRACTS, "data.catalog_probe", contract)
+    entries = {item["id"]: item for item in _client().get("/operations").json()["operations"]}
+    probe = entries["data.catalog_probe"]
+    assert (probe["name"], probe["blurb"], probe["group_label"]) == ("Data catalog probe", "Probe the catalog.", "More")

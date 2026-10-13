@@ -1,30 +1,316 @@
-.manual-panel { padding: 20px; color: var(--label); background: var(--bg-card); min-width: 0; overflow: auto; height: 100%; box-sizing: border-box; }
-.manual-panel header, .manual-actions { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:16px; }
-.manual-panel h2 { margin:0; flex:1; }
-.manual-field { display:grid; gap:5px; margin:10px 0; }
-.manual-field small, .manual-panel small { color:var(--label-secondary); }
-.manual-panel input:not([type=checkbox]), .manual-panel select, .manual-panel textarea { box-sizing:border-box; width:100%; color:var(--label); background:var(--bg-card-2); border:1px solid var(--separator); padding:8px; border-radius:6px; }
-.manual-panel textarea { min-height:90px; font-family:inherit; }
-.manual-panel fieldset, .manual-panel article { border:1px solid var(--separator); border-radius:8px; padding:12px; margin:12px 0; min-width:0; }
-.manual-panel button { padding:6px 10px; }
-.manual-panel pre { white-space:pre-wrap; overflow-wrap:anywhere; }
-.manual-panel [role=alert] { color:var(--label); border-left:3px solid var(--label-secondary); padding:10px; }
-.manual-catalog { display:flex; gap:8px; flex-wrap:wrap; max-height:240px; overflow:auto; padding:8px 0; }
-.manual-catalog button { text-align:left; }
-.manual-facts { max-height:300px; overflow:auto; }
-.manual-facts label { display:block; padding:6px; }
-.manual-panel a { color:var(--tint); margin-right:12px; }
+/* frontend/src/manual/manual.css — manual panels (Analyze, Report) and the
+   schema-generated forms they share. Analyze's own layout is in
+   operations/operations.css. */
 
-.manual-field > fieldset { margin:0; }
-.manual-field fieldset fieldset { border:0; border-left:2px solid var(--separator); border-radius:0; padding:0 0 0 12px; margin:8px 0; }
-.manual-array-row, .manual-object-row { margin:12px 0; }
-.manual-array-row > .manual-actions { margin:6px 0 12px; }
-.manual-map-add { display:flex; align-items:end; gap:8px; flex-wrap:wrap; }
-.manual-map-add .manual-field { flex:1; min-width:140px; }
-.manual-panel [role=alert] { white-space:pre-line; }
-.manual-field[hidden] { display: none; }
-.manual-reading { max-width: 72ch; line-height: 1.6; padding: 12px 0; overflow-wrap: anywhere; }
-.manual-reading p { white-space: pre-wrap; margin: 0 0 8px; }
-.manual-reading__fact { margin: 4px 0; }
-.manual-reading__fact summary { cursor: pointer; }
-.manual-reading__fact small { display: block; color: var(--label-secondary); padding: 4px 16px; }
+.manual-panel {
+  box-sizing: border-box;
+  height: 100%;
+  min-width: 0;
+  overflow: auto;
+  padding: var(--space-5);
+  background: var(--bg-card);
+  color: var(--label);
+}
+
+.manual-panel header,
+.manual-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.manual-panel h2 {
+  flex: 1;
+  margin: 0;
+}
+
+.manual-panel a {
+  margin-right: var(--space-3);
+  color: var(--tint);
+}
+
+.manual-panel pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.manual-panel [role="alert"] {
+  padding: var(--space-2) var(--space-3);
+  border-left: 3px solid var(--label-secondary);
+  color: var(--label);
+  white-space: pre-line;
+}
+
+/* Fields */
+.manual-field {
+  display: grid;
+  gap: 5px;
+  margin: var(--space-2) 0;
+  color: var(--label-secondary);
+  font-size: var(--text-small);
+  font-weight: 500;
+}
+
+.manual-field[hidden] {
+  display: none;
+}
+
+.manual-field small,
+.manual-panel small {
+  color: var(--label-tertiary);
+  font-size: var(--text-caption);
+  font-weight: 400;
+  line-height: 1.4;
+}
+
+.manual-panel input:not([type="checkbox"]):not([type="radio"]),
+.manual-panel select,
+.manual-panel textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 0;
+  height: 30px;
+  padding: 0 10px;
+  border: var(--hairline) solid var(--border);
+  border-radius: var(--radius-sm);
+  background-color: var(--field-bg);
+  color: var(--label);
+  font: inherit;
+  font-size: var(--text-ui);
+  font-weight: 400;
+}
+
+.manual-panel textarea {
+  height: auto;
+  min-height: 90px;
+  padding: var(--space-2) 10px;
+  font-family: inherit;
+}
+
+.manual-panel input:not([type="checkbox"]):not([type="radio"]):focus-visible,
+.manual-panel select:focus-visible,
+.manual-panel textarea:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 0;
+  border-color: transparent;
+}
+
+.manual-panel fieldset,
+.manual-panel article {
+  min-width: 0;
+  margin: var(--space-2) 0;
+  padding: var(--space-2) 0 0;
+  border: 0;
+  border-radius: 0;
+}
+
+.manual-panel legend {
+  padding: 0;
+  color: var(--label);
+  font-size: var(--text-ui);
+  font-weight: 600;
+}
+
+/* Nested fields hang from a quiet rule instead of boxes inside boxes. */
+.manual-field fieldset fieldset {
+  margin: var(--space-2) 0;
+  padding: 0 0 0 var(--space-3);
+  border-left: 2px solid var(--separator-faint);
+}
+
+.manual-field fieldset fieldset > legend {
+  color: var(--label-secondary);
+  font-size: var(--text-small);
+}
+
+.manual-object {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.manual-object-row,
+.manual-array-row {
+  position: relative;
+  margin: var(--space-1) 0;
+}
+
+.manual-array-row > .manual-actions {
+  margin: var(--space-1) 0 var(--space-3);
+}
+
+.manual-panel button:not([class]),
+.manual-remove {
+  min-height: 0;
+  height: 26px;
+  padding: 0 var(--space-3);
+  border: var(--hairline) solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--bg-card);
+  color: var(--label-secondary);
+  font-size: var(--text-small);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.manual-panel button:not([class]):hover:not(:disabled),
+.manual-remove:hover {
+  background: var(--bg-elev);
+  color: var(--label);
+}
+
+.manual-panel button:not([class]):disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.manual-add {
+  max-width: 260px;
+}
+
+.manual-map-add {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.manual-map-add .manual-field {
+  flex: 1;
+  min-width: 140px;
+}
+
+/* Name lists as chips */
+.manual-chips__box {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 30px;
+  margin-top: 5px;
+  padding: 3px var(--space-1);
+  border: var(--hairline) solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--field-bg);
+}
+
+.manual-chips__box:focus-within {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 0;
+}
+
+.manual-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 22px;
+  padding: 0 2px 0 8px;
+  border-radius: var(--radius-pill);
+  background: var(--tint-bg);
+  color: var(--tint-label);
+  font-size: var(--text-small);
+  font-weight: 500;
+}
+
+.manual-panel .manual-chip button {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.manual-panel .manual-chip button:hover {
+  background: color-mix(in oklch, var(--tint) 18%, transparent);
+}
+
+.manual-panel .manual-chips__box input:not([type="checkbox"]) {
+  flex: 1;
+  width: auto;
+  min-width: 120px;
+  height: 22px;
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+}
+
+.manual-panel .manual-chips__box input:focus-visible {
+  outline: none;
+}
+
+.manual-chips__columns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: var(--space-2);
+}
+
+.manual-panel .manual-chips__columns button {
+  height: 22px;
+  min-height: 0;
+  padding: 0 8px;
+  border: var(--hairline) solid var(--border);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--label-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
+  cursor: pointer;
+}
+
+.manual-panel .manual-chips__columns button:hover:not(:disabled) {
+  border-color: var(--tint);
+  color: var(--tint);
+}
+
+.manual-panel .manual-chips__columns button[aria-pressed="true"] {
+  border-color: transparent;
+  background: var(--tint-bg);
+  color: var(--tint-label);
+}
+
+/* Report panel */
+.manual-facts {
+  max-height: 300px;
+  overflow: auto;
+}
+
+.manual-facts label {
+  display: block;
+  padding: 6px;
+}
+
+.manual-reading {
+  max-width: 72ch;
+  padding: var(--space-3) 0;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.manual-reading p {
+  margin: 0 0 var(--space-2);
+  white-space: pre-wrap;
+}
+
+.manual-reading__fact {
+  margin: 4px 0;
+}
+
+.manual-reading__fact summary {
+  cursor: pointer;
+}
+
+.manual-reading__fact small {
+  display: block;
+  padding: 4px var(--space-4);
+  color: var(--label-secondary);
+}

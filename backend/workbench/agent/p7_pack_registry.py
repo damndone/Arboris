@@ -1434,10 +1434,10 @@ def p7_workflow_step_contracts() -> dict[str, object]:
                         "Registry-declared adapter input mode; it is not inferred from the data."
                     ),
                     "column_bindings": (
-                        "Server-resolved source column bindings declared by this operation."
+                        "Which columns of the dataset play which role."
                     ),
                     "options": (
-                        "Operation policy and estimator options validated by the frozen pack contract."
+                        "Settings for this method; each is checked against the method's contract."
                     ),
                 },
                 required=("input_mode", "column_bindings", "options"),

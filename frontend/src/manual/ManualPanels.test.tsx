@@ -21,7 +21,7 @@ it("saves immutable evidence references and creates a linked report revision", a
 it("keeps typed union values consistent after deleting an earlier rule",async()=>{vi.mocked(api.catalog).mockResolvedValue({operations:[{...operation,spec_schema:{type:"object",properties:{rules:{type:"array",items:{type:"object",required:["from"],properties:{from:{anyOf:[{type:"string"},{type:"number"}]}}}}},required:["rules"]}}]} as never);operations();await add();for(const [index,value] of ["first","second"].entries()){fireEvent.click(screen.getByRole("button",{name:"Add Step 1.rules item"}));fireEvent.change(screen.getByLabelText(`Step 1.rules[${index+1}].from value type`),{target:{value:"0"}});fireEvent.change(screen.getByLabelText(`Step 1.rules[${index+1}].from`),{target:{value}});}fireEvent.click(screen.getByRole("button",{name:"Remove Step 1.rules item 1"}));expect(screen.getByLabelText("Step 1.rules[1].from")).toHaveValue("second");fireEvent.click(screen.getByRole("button",{name:"Preview analysis"}));await screen.findByRole("button",{name:"Confirm analysis"});expect(vi.mocked(api.execute).mock.calls[0][1].steps?.[0].spec).toEqual({rules:[{from:"second"}]});});
 it('passes a selected producer binding through preview and refuses a deleted producer',async()=>{
   vi.mocked(api.catalog).mockResolvedValue({operations:[{...operation,spec_schema:{...operation.spec_schema,additionalProperties:false}}]} as never);
-  operations();await add();fireEvent.click(screen.getByRole('button',{name:/^Example$/}));
+  operations();await add();fireEvent.click(screen.getByRole('button',{name:'Add a step'}));fireEvent.click(screen.getByRole('button',{name:/^Example$/}));
   const select=screen.getByLabelText('Step 2 dataset producer') as HTMLSelectElement;
   fireEvent.change(select,{target:{value:select.options[1].value}});
   fireEvent.click(screen.getByRole('button',{name:'Preview analysis'}));await screen.findByRole('button',{name:'Confirm analysis'});
@@ -37,7 +37,7 @@ it('selects an earlier model branch and removes a stale explicit owner run',asyn
   const consumer={...operation,id:'postestimation.example',name:'Model test',spec_schema:{type:'object',required:['model_ref'],additionalProperties:false,properties:{model_ref:{type:'string'},model_run_id:{type:'string'}}}};
   vi.mocked(api.catalog).mockResolvedValue({operations:[producer,consumer]} as never);
   operations();await add();fireEvent.click(screen.getByRole('button',{name:'Add Step 1.branches item'}));fireEvent.change(screen.getByLabelText('Step 1.branches[1].branch_id'),{target:{value:'fit'}});
-  fireEvent.click(screen.getByRole('button',{name:/^Model test$/}));fireEvent.change(screen.getByLabelText('Step 2 optional field'),{target:{value:'model_run_id'}});fireEvent.change(screen.getByLabelText('Step 2.model_run_id'),{target:{value:'stale-owner'}});
+  fireEvent.click(screen.getByRole('button',{name:'Add a step'}));fireEvent.click(screen.getByRole('button',{name:/^Model test$/}));fireEvent.change(screen.getByLabelText('Step 2 optional field'),{target:{value:'model_run_id'}});fireEvent.change(screen.getByLabelText('Step 2.model_run_id'),{target:{value:'stale-owner'}});
   const select=screen.getByLabelText('Step 2 model producer') as HTMLSelectElement;fireEvent.change(select,{target:{value:select.options[1].value}});
   fireEvent.click(screen.getByRole('button',{name:'Preview analysis'}));await screen.findByRole('button',{name:'Confirm analysis'});
   const steps=vi.mocked(api.execute).mock.calls[0][1].steps as {step_id:string;spec:Record<string,unknown>}[];
@@ -59,10 +59,10 @@ it('retains the original target and receipt when execution refresh selects a new
  vi.mocked(api.execute).mockResolvedValue({...preview,status:'completed'} as never);
  const props={projectRoot:'/test',models:[],onClose:vi.fn(),onRefresh:vi.fn(),onOpenRun:vi.fn(),onDedicated:vi.fn()};
  const view=render(<OperationsPanel {...props} runId="original"/>);await add();
- fireEvent.click(screen.getByRole('button',{name:'Preview analysis'}));await screen.findByRole('heading',{name:'completed'});
+ fireEvent.click(screen.getByRole('button',{name:'Preview analysis'}));await screen.findByRole('heading',{name:'Completed'});
  view.rerender(<OperationsPanel {...props} runId="newly-created" models={[{runId:'newly-created',nodeId:'model:iv',label:'IV'}]}/>);
  await waitFor(()=>expect(screen.getByLabelText('Analysis target')).toHaveTextContent('IV'));
- expect(screen.getByRole('heading',{name:'completed'})).toBeVisible();
+ expect(screen.getByRole('heading',{name:'Completed'})).toBeVisible();
  expect(vi.mocked(api.catalog).mock.calls.some(([,target]) => target?.kind === 'dataset_node' && target.run_id === 'original')).toBe(true);
  expect(api.execute).toHaveBeenCalledOnce();
 });
@@ -76,9 +76,26 @@ it("binds an inline model test to its owner rather than the first dataset", asyn
 it('distinguishes repeated dataset labels and exposes the selected source', async () => {
   vi.mocked(dataApi.listDatasets).mockResolvedValueOnce([{node_id:'recode:first',label:'Recode dataset'},{node_id:'recode:second',label:'Recode dataset'}] as never);
   operations();
-  await screen.findByRole('option',{name:'Data · Recode dataset · dataset 2'});
+  await screen.findByRole('option',{name:'Recode dataset (2)'});
   fireEvent.change(screen.getByLabelText('Analysis target'),{target:{value:'1'}});
-  fireEvent.click(screen.getByText('Selected target source'));
+  fireEvent.click(screen.getByText('Source details'));
   expect(screen.getByText('recode:second')).toBeVisible();
   await waitFor(()=>expect(api.catalog).toHaveBeenLastCalledWith('/test',expect.objectContaining({node_id:'recode:second'})));
+});
+
+it("groups operations by the catalog's own words and says why one cannot run", async () => {
+  vi.mocked(api.catalog).mockResolvedValue({ operations: [
+    { ...operation, id: "postestimation.wald", name: "Wald test", blurb: "Jointly test restrictions.", group: "check", group_label: "Check a model", group_order: 4 },
+    { ...operation, id: "data.rename", name: "Rename columns", blurb: "Give columns new names.", group: "prepare", group_label: "Prepare data", group_order: 0 },
+    { ...operation, id: "model.custom", name: "Custom model", blurb: "Admitted custom models.", group: "advanced", group_label: "Advanced", group_order: 14,
+      availability: { status: "unavailable", message: "Needs an admitted notebook option." } },
+  ] } as never);
+  operations();
+  const groups = await screen.findByRole("navigation", { name: "Operation groups" });
+  expect([...groups.querySelectorAll("button")].map((b) => b.firstChild?.textContent)).toEqual(["All", "Prepare data", "Check a model", "Advanced"]);
+  expect(screen.getByRole("button", { name: "Custom model" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Custom model" })).toHaveAccessibleDescription("Needs an admitted notebook option.");
+  fireEvent.change(screen.getByLabelText("Find an operation"), { target: { value: "restrictions" } });
+  expect(screen.getByRole("button", { name: "Wald test" })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Rename columns" })).toBeNull();
 });

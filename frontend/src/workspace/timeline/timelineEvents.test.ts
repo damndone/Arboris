@@ -15,6 +15,7 @@ describe("timeline events in reader terms", () => {
     expect(describeEvent(entry("export.analysis_script", "Local stata script export"))).toBe("Exported a Stata script");
     expect(describeEvent(entry("data.recode", "Recoded age into 3 groups"))).toBe("Recoded age into 3 groups");
     expect(describeEvent(entry("survival.kaplan_meier"))).toBe("Survival: kaplan meier");
+    expect(describeEvent({ ...(entry("test.correlations") as object), title: "Pearson correlations" } as never)).toBe("Pearson correlations");
   });
 
   test("who acted: you or the Agent", () => {

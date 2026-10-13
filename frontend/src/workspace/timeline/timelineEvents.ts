@@ -49,6 +49,8 @@ export function describeEvent(entry: Entry): string {
     return changes ? `Reran with changes: ${changes}` : "Reran with changes";
   }
   if (family === "postestimation") return POSTESTIMATION[action] ?? `Post-estimation: ${words(action)}`;
+  // The operation's own title, from the same words Analyze shows.
+  if (entry.title) return entry.title;
   if (entry.what === "export.analysis_script") {
     const language = Object.keys(SCRIPT_LANGUAGES).find((key) => new RegExp(`\\b${key}\\b`, "i").test(entry.summary));
     return language ? `Exported a ${SCRIPT_LANGUAGES[language]} script` : "Exported an analysis script";

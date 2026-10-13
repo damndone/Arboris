@@ -749,7 +749,8 @@ export function fetchRunDetail(
   );
   const shared = runDetailInFlight.get(url);
   if (shared) return shared;
-  const request = fetch(url).then((response) => readResponse<RunDetail>(response));
+  // async: a failure to even start the request still arrives as a rejection.
+  const request = (async () => readResponse<RunDetail>(await fetch(url)))();
   runDetailInFlight.set(url, request);
   queueMicrotask(() => runDetailInFlight.delete(url));
   return request;
