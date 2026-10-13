@@ -257,11 +257,14 @@ export function AgentPanel({
   runId,
   projectRoot,
   composer,
+  compactHeader = false,
 }: {
   runId: string;
   projectRoot: string;
   /** v1.9.0: a host may supply its own composer (the workspace Agent column). */
   composer?: ReactNode;
+  /** The workspace shows the focus in its composer; it keeps only the audit link here. */
+  compactHeader?: boolean;
 }) {
   const agent = useAgentSurface();
   const [revisionIssues, setRevisionIssues] = useState<string[]>([]);
@@ -372,7 +375,8 @@ export function AgentPanel({
       aria-label="Agent panel"
       className="wb-agent-panel"
     >
-      <header
+      {(!compactHeader || auditSessionId) && <header
+        className={compactHeader ? "wb-agent-panel__header wb-agent-panel__header--compact" : "wb-agent-panel__header"}
         style={{
           display: "flex",
           alignItems: "center",
@@ -381,20 +385,20 @@ export function AgentPanel({
           fontFamily: "var(--font-mono, ui-monospace, monospace)",
         }}
       >
-        <strong style={{ color: "var(--label)" }}>agent</strong>
-        <span style={{ color: "var(--label-secondary)" }}>{agent.scopeLabel}</span>
-        {turnActive && (
+        {!compactHeader && <strong style={{ color: "var(--label)" }}>agent</strong>}
+        {!compactHeader && <span style={{ color: "var(--label-secondary)" }}>{agent.scopeLabel}</span>}
+        {!compactHeader && turnActive && (
           <span data-testid="agent-turn-progress" style={{ color: "var(--label-tertiary)" }} aria-live="polite">
             {`Working · ${elapsedSeconds}s`}
           </span>
         )}
-        <span
+        {!compactHeader && <span
           data-testid="agent-event-cursor"
           title={agent.lastEventType ? `last event: ${agent.lastEventType}` : "No Agent events yet"}
           style={{ color: "var(--label-tertiary)" }}
         >
           events #{agent.eventCursor}
-        </span>
+        </span>}
         {auditSessionId && (
           <a
             href={agentAuditExportUrl(projectRoot, auditSessionId)}
@@ -405,7 +409,7 @@ export function AgentPanel({
             Export Agent audit
           </a>
         )}
-      </header>
+      </header>}
       {turnActive && (
         <div
           data-testid="agent-execution-trace"

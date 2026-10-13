@@ -58,12 +58,13 @@ describe("AgentColumnComposer", () => {
     expect(screen.queryByRole("button", { name: "Voice input" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add context" })).not.toBeInTheDocument();
   });
-});
 
-test("lets the user require review before read-only calculations", () => {
- render(<AgentColumnComposer/>);
- const control = screen.getByRole("checkbox",{name:"Review before execution"});
- expect(control).toBeChecked();
- fireEvent.click(control);
- expect(surface.setExecutionPolicy).toHaveBeenCalledWith("auto_read_only");
+  test("Review first is a pressed toggle that switches the execution policy", () => {
+    render(<AgentColumnComposer />);
+    const control = screen.getByRole("button", { name: "Review first" });
+    expect(control).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("Every step waits for your OK")).toBeInTheDocument();
+    fireEvent.click(control);
+    expect(surface.setExecutionPolicy).toHaveBeenCalledWith("auto_read_only");
+  });
 });

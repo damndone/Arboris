@@ -5,6 +5,7 @@
 import type { ReactNode } from "react";
 import type { ViewMode } from "../workbench/state/urlSchema";
 import { ProjectSwitcher } from "../workbench/WorkbenchTopbar";
+import { ThemeToggle } from "../theme";
 import type { LayoutControls } from "./WorkspaceShell";
 import { BrandIcon, LineageIcon, PlusIcon, ResultsIcon, SearchIcon, SettingsIcon, SidebarIcon } from "./icons";
 import "./workspaceTopbar.css";
@@ -135,6 +136,8 @@ export function WorkspaceTopbar({
           </button>
         )}
         {actions}
+        {/* The user asked to keep the light / Auto / dark switch in the bar (review 2). */}
+        <ThemeToggle />
         <button type="button" className="ws-icon-button" aria-label="Settings" title="Settings" onClick={onOpenSettings}>
           <SettingsIcon />
         </button>

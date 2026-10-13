@@ -733,15 +733,26 @@ export async function fetchRuns(projectRoot: string): Promise<RunsListResponse> 
   return readResponse<RunsListResponse>(response);
 }
 
-export async function fetchRunDetail(
+// Several panels open on the same run in one commit (result view, equation,
+// table, report context) and each asks for its detail. Calls made in the same
+// synchronous pass share one response; the share ends at the next microtask,
+// so a refresh after an operation always reads the run again. Callers treat
+// the detail as read-only.
+const runDetailInFlight = new Map<string, Promise<RunDetail>>();
+
+export function fetchRunDetail(
   projectRoot: string,
   runId: string,
 ): Promise<RunDetail> {
   const url = apiUrl(
     `/runs/${encodeURIComponent(runId)}?project_root=${encodeURIComponent(projectRoot)}`,
   );
-  const response = await fetch(url);
-  return readResponse<RunDetail>(response);
+  const shared = runDetailInFlight.get(url);
+  if (shared) return shared;
+  const request = fetch(url).then((response) => readResponse<RunDetail>(response));
+  runDetailInFlight.set(url, request);
+  queueMicrotask(() => runDetailInFlight.delete(url));
+  return request;
 }
 
 export async function previewRunDeletion(

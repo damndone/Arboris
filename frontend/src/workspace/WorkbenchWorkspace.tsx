@@ -196,7 +196,10 @@ export function WorkbenchWorkspace({
 
   const analysis = state.view === "graph";
   const hasOpenItem = stagePanel !== null;
-  const stageOpen = analyzing ? true : analysis ? (hasOpenItem || model.nodes.length > 0) && !stageFolded : true;
+  // The stage shows what is open; with nothing open (or folded away) the map
+  // takes the width as the full graph (user review 1: the stage must not sit
+  // empty over the map).
+  const stageOpen = analyzing ? true : analysis ? hasOpenItem && !stageFolded : true;
   const bottomTabs: BottomTab[] = [
     { id: "timeline", label: "Timeline", render: () => <TimelinePanel value={timeline.value} error={timeline.error} onRefresh={timeline.refresh}/> },
     { id: "runs", label: "Runs", render: () => <RunsTable projectRoot={projectRoot} /> },
@@ -238,7 +241,7 @@ export function WorkbenchWorkspace({
             main
           )
         }
-        agent={<AgentPanel runId={runId} projectRoot={projectRoot} composer={<AgentColumnComposer />} />}
+        agent={<AgentPanel runId={runId} projectRoot={projectRoot} composer={<AgentColumnComposer />} compactHeader />}
         bottom={<WorkspaceBottomPanel projectRoot={projectRoot} tabs={bottomTabs} summary={timelineSummary(timeline.value)} />}
       />
       {overlays}

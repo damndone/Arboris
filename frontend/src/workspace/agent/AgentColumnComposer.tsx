@@ -7,7 +7,7 @@ import { useLayoutEffect, useRef } from "react";
 import { useAgentSurfaceOptional } from "../../workbench/agent/AgentSurfaceContext";
 import { AgentCapabilityPopover } from "../../workbench/agent/AgentCapabilityPopover";
 import { ContextUsageRing } from "../../workbench/agent/ContextUsageRing";
-import { SendIcon, StopIcon } from "../icons";
+import { ReviewIcon, SendIcon, StopIcon } from "../icons";
 import "./agentColumnComposer.css";
 
 const MAX_TEXT_HEIGHT = 200;
@@ -47,6 +47,7 @@ export function AgentColumnComposer() {
     setPrompt,
   } = agent;
   const canSend = prompt.trim().length > 0;
+  const reviewFirst = agent.executionPolicy === "proposal_only";
   const busy = isSubmitting || sessionStatus.toLowerCase() === "running";
 
   return (
@@ -84,10 +85,6 @@ export function AgentColumnComposer() {
             }
           }}
         />
-        <label className="ws-composer__policy"><input type="checkbox" checked={agent.executionPolicy === "proposal_only"} disabled={busy}
-          onChange={event => agent.setExecutionPolicy?.(event.target.checked ? "proposal_only" : "auto_read_only")}/>
-          Review before execution
-        </label>
         <div className="ws-composer__bar">
           <AgentCapabilityPopover
             catalog={capabilityCatalog}
@@ -96,6 +93,19 @@ export function AgentColumnComposer() {
               textRef.current?.focus();
             }}
           />
+          {agent.setExecutionPolicy && (
+            <button
+              type="button"
+              className="ws-composer__policy"
+              aria-pressed={reviewFirst}
+              disabled={busy}
+              title={reviewFirst ? "Every step waits for your OK. Click to let read-only analyses run at once." : "Read-only analyses run at once. Click to review every step first."}
+              onClick={() => agent.setExecutionPolicy?.(reviewFirst ? "auto_read_only" : "proposal_only")}
+            >
+              <ReviewIcon />
+              Review first
+            </button>
+          )}
           <span className="ws-composer__spacer" />
           {busy && (
             <span className="ws-composer__status" role="status" aria-live="polite">
@@ -141,7 +151,9 @@ export function AgentColumnComposer() {
           {error}
         </p>
       )}
-      <p className="ws-composer__note">{agent.executionPolicy === "proposal_only" ? "Calculations wait for your OK" : "Read-only analyses run at once"} · changes wait for your OK · Shift+Enter for a new line</p>
+      <p className="ws-composer__note">
+        {reviewFirst ? "Every step waits for your OK" : "Read-only analyses run at once; changes wait for your OK"}
+      </p>
     </div>
   );
 }

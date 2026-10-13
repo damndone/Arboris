@@ -84,6 +84,13 @@ export const StopIcon = () => (
   </svg>
 );
 
+export const ReviewIcon = () => (
+  <Icon size={14}>
+    <path d="M8 1.75 13 3.5v4c0 3.2-2.1 5.6-5 6.75C5.1 13.1 3 10.7 3 7.5v-4z" />
+    <path d="M5.75 8.1 7.3 9.6l3-3.2" />
+  </Icon>
+);
+
 export const PlusIcon = () => (
   <Icon size={13}>
     <path d="M8 3.25v9.5M3.25 8h9.5" />

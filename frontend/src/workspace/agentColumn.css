@@ -14,9 +14,6 @@
 }
 
 /* Focus: what the Agent is about, as a chip under the column title. */
-.ws-agent__content .wb-agent-panel > header:has(+ *) {
-  display: none;
-}
 
 .ws-agent__content .wb-agent-panel > header {
   display: flex;

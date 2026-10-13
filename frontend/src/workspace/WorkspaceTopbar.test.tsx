@@ -72,7 +72,8 @@ describe("WorkspaceTopbar", () => {
     fireEvent.click(screen.getByRole("button", { name: "New analysis" }));
     expect(onOpenSettings).toHaveBeenCalled();
     expect(onNewAnalysis).toHaveBeenCalled();
-    expect(screen.queryByRole("radio", { name: "Dark theme" })).toBeNull();
+    // Required by the user: the theme switch stays in the bar.
+    expect(screen.getByRole("radio", { name: "Dark theme" })).toBeInTheDocument();
   });
 
   test("the map toggle exists only where there is a map column to hide", () => {

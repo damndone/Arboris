@@ -162,3 +162,36 @@
 .ws-composer__bar > *:first-child button {
   min-height: 0;
 }
+
+/* Review first: a quiet toggle; pressed means every step waits for an OK. */
+.ws-composer__policy {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  min-height: 0;
+  padding: 0 8px;
+  border: var(--hairline) solid transparent;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--label-secondary);
+  font-size: var(--text-small);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.ws-composer__policy:hover:not(:disabled) {
+  background: var(--bg-elev);
+  color: var(--label);
+}
+
+.ws-composer__policy[aria-pressed="true"] {
+  border-color: color-mix(in oklch, var(--tint) 35%, transparent);
+  background: var(--tint-bg);
+  color: var(--tint-label);
+}
+
+.ws-composer__policy:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}

@@ -951,3 +951,21 @@ describe("runWorkflow panel+prediction params", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
+
+describe("fetchRunDetail sharing", () => {
+  test("calls in one pass share a request; a later call reads the run again", async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify({ run_id: "r1", status: "succeeded" }))));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const [a, b] = await Promise.all([fetchRunDetail("/p", "r1"), fetchRunDetail("/p", "r1")]);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(a).toBe(b);
+      await fetchRunDetail("/p", "r1");
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      await fetchRunDetail("/p", "r2");
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
