@@ -149,3 +149,17 @@ def test_object_normalization_sorts_keys():
     assert normalize_for_compare({"b": 2, "a": 1}) == normalize_for_compare(
         {"a": 1, "b": 2}
     )
+
+@pytest.mark.parametrize('kind', ['object', 'json'])
+def test_structured_options_are_field_names_not_scalar_choices(kind):
+    before = {'quantiles': [0.5], 'bootstrap_reps': 0}
+    after = {'quantiles': [0.25], 'bootstrap_reps': 20}
+    schema = [{'key': 'model_options', 'kind': kind, 'options': ['quantiles', 'bootstrap_reps']}]
+    patch = _patch(changes=[{'field_id': 'model_options', 'old_value': before, 'new_value': after}])
+    assert validate_manual_patch(patch=patch, current_values={'model_options': before},
+        editable_schema=schema, editable_schema_version='schema:v1') == {'model_options': after}
+    for invalid in [{'undeclared': 1}, ['quantiles']]:
+        patch = _patch(changes=[{'field_id': 'model_options', 'old_value': before, 'new_value': invalid}])
+        with pytest.raises(ManualPatchValidationError):
+            validate_manual_patch(patch=patch, current_values={'model_options': before},
+                editable_schema=schema, editable_schema_version='schema:v1')

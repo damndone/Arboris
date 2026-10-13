@@ -107,6 +107,7 @@ describe("AgentPanel — declared post-estimation results", () => {
           column: "experience",
           stationary_point: 211.59338521178753,
           stationary_point_within_observed_range: false,
+          p_value: 9.1e-74,
         },
       },
     ],
@@ -125,6 +126,8 @@ describe("AgentPanel — declared post-estimation results", () => {
     const results = screen.getByTestId("agent-operation-post-estimation");
     expect(results).toHaveTextContent("Quadratic stationary point");
     expect(results).toHaveTextContent("stationary point: 211.5934");
+    expect(results).toHaveTextContent("p value: < 0.001");
+    expect(results).not.toHaveTextContent("p value: 0.0000");
     // The out-of-range flag is what separates a number from a claim.
     expect(results).toHaveTextContent("stationary point within observed range: no");
     expect(results).not.toHaveTextContent("workbench.model.quadratic");

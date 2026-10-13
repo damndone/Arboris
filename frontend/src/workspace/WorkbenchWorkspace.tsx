@@ -7,6 +7,8 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { useCompareOptional } from "../lineage/compare/CompareContext";
+import { createAgentForkProposal } from "../workbench/agent/agentApi";
+import { useAgentNavigationOptional } from "../workbench/agent/agentNavigation";
 import { AgentPanel } from "../workbench/agent/AgentPanel";
 import { LogsPanel } from "../workbench/panels/LogsPanel";
 import { AiActivityPanel } from "../workbench/panels/AiActivityPanel";
@@ -27,10 +29,12 @@ import { rootToSlug } from "../workbench/projectSlug";
 import { RunsTable } from "./RunsTable";
 import { AgentColumnComposer } from "./agent/AgentColumnComposer";
 import { MapTree } from "./MapTree";
+import { DeferredMap } from "./DeferredMap";
 import { StageHost } from "./StageHost";
 import { WorkspaceBottomPanel, type BottomTab } from "./WorkspaceBottomPanel";
 import { WorkspaceShell, type MapPresentation } from "./WorkspaceShell";
 import { OperationsPanel } from "../manual/OperationsPanel";
+import { TimelinePanel, timelineSummary, useTimeline } from "./TimelinePanel";
 import { WorkspaceTopbar } from "./WorkspaceTopbar";
 
 export interface WorkbenchWorkspaceProps {
@@ -88,6 +92,8 @@ export function WorkbenchWorkspace({
 }: WorkbenchWorkspaceProps) {
   const { state, dispatch } = useWorkbench();
   const compare = useCompareOptional();
+  const openAgentNavigation = useAgentNavigationOptional();
+  const [operationError, setOperationError] = useState<string | null>(null);
   const { model } = useLineage();
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisSearch, setAnalysisSearch] = useState("");
@@ -97,6 +103,9 @@ export function WorkbenchWorkspace({
     return () => window.removeEventListener("workbench:analyze", open);
   }, []);
   const forest = useForest();
+  const selectedNode = forest?.forest.nodes.find(node => node.nodeKey === state.selectedKey);
+  const timelineRun = selectedNode && forest ? ownerRunOf(selectedNode, forest.forest, forest.activeRunId) : forest?.activeRunId;
+  const timeline = useTimeline(projectRoot, timelineRun ?? runId);
   const navigate = useNavigate();
   const detailSlots: DetailSlots = {
     hiddenSections: STAGE_HIDDEN_SECTIONS,
@@ -108,7 +117,7 @@ export function WorkbenchWorkspace({
       return (
         <>
           <StageIndex key={node.id} />
-          <ModelResultView key={`${owner}:${node.id}`} projectRoot={projectRoot} runId={owner} node={node} />
+          <ModelResultView key={`${owner}:${node.id}`} projectRoot={projectRoot} runId={owner} node={node} onRefresh={() => {forest?.refetch?.();timeline.refresh();}} />
         </>
       );
     },
@@ -137,11 +146,22 @@ export function WorkbenchWorkspace({
       onNewAnalysis={newAnalysis?.open}
     />
   );
-  const operationPanel = <OperationsPanel key={projectRoot} projectRoot={projectRoot} runId={runId} initialSearch={analysisSearch}
+  const operationPanel = <>{operationError && <p role="alert">{operationError}</p>}<OperationsPanel key={projectRoot} projectRoot={projectRoot} runId={runId} initialSearch={analysisSearch}
     models={(forest?.forest.nodes ?? []).filter(n => n.kind === "model").flatMap(n => n.runs.map(owner => ({runId: owner, nodeId: n.opNodeId, label: n.title})))}
-    onClose={() => setAnalyzing(false)} onRefresh={() => forest?.refetch?.()}
+    onClose={() => setAnalyzing(false)} onRefresh={() => {forest?.refetch?.();timeline.refresh();}}
     onOpenRun={owner => {forest?.setActiveRunId(owner);setAnalyzing(false);dispatch.setView("table");}}
-    onDedicated={(id, target) => {
+    onDedicated={async (id, target) => {
+      setOperationError(null);
+      if (id === "graph.fork") {
+        if (!target || !("run_id" in target) || !("node_id" in target) || !openAgentNavigation) {setOperationError("Select a saved graph node before creating a branch.");return;}
+        try {
+          const result = await createAgentForkProposal(projectRoot, {source_run_id: target.run_id, source_node_ref: target.node_id, active_head_run_id: target.run_id});
+          openAgentNavigation(result.navigation);
+          window.dispatchEvent(new Event("workbench:show-agent"));
+          setAnalyzing(false);
+        } catch (error) {setOperationError(error instanceof Error ? error.message : String(error));}
+        return;
+      }
       setAnalyzing(false);
       if (target && "run_id" in target) {
         forest?.setActiveRunId(target.run_id);
@@ -154,7 +174,7 @@ export function WorkbenchWorkspace({
       else if (id === "model.custom") dispatch.setView("notebook");
       else if (id === "table.export") dispatch.setView("table");
       else dispatch.setView("graph");
-    }}/>;
+    }}/></>;
   const main = (
     <WorkbenchMain
       projectRoot={projectRoot}
@@ -176,19 +196,20 @@ export function WorkbenchWorkspace({
 
   const analysis = state.view === "graph";
   const hasOpenItem = stagePanel !== null;
-  const stageOpen = analyzing ? true : analysis ? hasOpenItem && !stageFolded : true;
+  const stageOpen = analyzing ? true : analysis ? (hasOpenItem || model.nodes.length > 0) && !stageFolded : true;
   const bottomTabs: BottomTab[] = [
+    { id: "timeline", label: "Timeline", render: () => <TimelinePanel value={timeline.value} error={timeline.error} onRefresh={timeline.refresh}/> },
     { id: "runs", label: "Runs", render: () => <RunsTable projectRoot={projectRoot} /> },
     { id: "logs", label: "Logs", render: () => <LogsPanel runId={runId} projectRoot={projectRoot} /> },
     { id: "activity", label: "Activity", render: () => <AiActivityPanel runId={runId} projectRoot={projectRoot} /> },
   ];
   const map = (presentation: MapPresentation) => (
     <>
-      <div className="ws-map__graph" hidden={presentation !== "graph"}>
+      <DeferredMap visible={presentation === "graph" && model.nodes.length > 0}>
         <GraphAutoFitContext.Provider value={true}>
           <GraphView />
         </GraphAutoFitContext.Provider>
-      </div>
+      </DeferredMap>
       {presentation === "tree" && (
         <MapTree nodes={model.nodes} edges={model.edges} selectedKey={state.selectedKey} onSelect={key => { if (!compare?.handleCanvasSelect(key)) dispatch.selectByCanvasClick(key); }} />
       )}
@@ -218,7 +239,7 @@ export function WorkbenchWorkspace({
           )
         }
         agent={<AgentPanel runId={runId} projectRoot={projectRoot} composer={<AgentColumnComposer />} />}
-        bottom={<WorkspaceBottomPanel projectRoot={projectRoot} tabs={bottomTabs} />}
+        bottom={<WorkspaceBottomPanel projectRoot={projectRoot} tabs={bottomTabs} summary={timelineSummary(timeline.value)} />}
       />
       {overlays}
     </>

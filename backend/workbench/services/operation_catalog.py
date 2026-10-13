@@ -137,7 +137,7 @@ def operation_catalog(
                             "message": "Custom execution requires a current admitted notebook option, server-owned capability binding and trusted execution gateway. The dedicated endpoint verifies these conditions; generic workflows cannot grant this authority."}
         entries[operation_id] = {
             "id": operation_id, "version": definition.operation_version,
-            "category": contract.capability_kind if contract is not None else operation_id.split(".")[0],
+            "category": operation_id.split(".")[0],
             "name": operation_id.replace(".", " ").replace("_", " ").title(),
             "summary": contract.summary if contract is not None else definition.ui_description,
             "spec_schema": schema, "field_hints": _field_hints(schema),
@@ -156,7 +156,7 @@ def operation_catalog(
         schema = deepcopy(binding["execution"]["request_schema"])
         entries[operation_id] = {
             "id": operation_id, "version": "v1", "category": operation_id.split(".")[0],
-            "name": binding["name"], "summary": binding["summary"],
+            "name": operation_id.replace(".", " ").replace("_", " ").title(), "summary": binding["summary"],
             "spec_schema": schema, "field_hints": _field_hints(schema),
             "target_requirements": binding["target_requirements"],
             "confirmation_policy": binding["confirmation_policy"], "risk_level": "mutating",

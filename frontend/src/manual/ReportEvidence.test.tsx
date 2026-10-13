@@ -29,3 +29,9 @@ it("moves generated internal identifiers into expandable technical evidence", ()
  expect(screen.getByText("Methods and technical evidence (1)")).toBeVisible();
  expect(screen.getByText("coef:private-id")).not.toBeVisible();
 });
+
+it("keeps generated model ownership identifiers out of the reading surface", () => {
+ const internal = {...fact,field:"post_estimation/lincom/model_run_id",label:"post estimation · model run id",value:"run-internal"};
+ render(<ReportReadingView text="- post estimation · model run id: run-internal [[c:f_x]]" facts={[internal]}/>);
+ expect(screen.getByText("run-internal")).not.toBeVisible();
+});

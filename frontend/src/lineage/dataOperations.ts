@@ -231,7 +231,7 @@ export async function confirmDataColumnsCast(
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(request),
+      body: JSON.stringify({ ...request, session_id: ("session_id" in request && request.session_id) || `agent_data_ui_${request.source_run_id}` }),
     },
   );
   return readResponse<DataColumnCastConfirmResponse>(response);
@@ -249,7 +249,7 @@ export async function confirmDataColumnCast(
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(request),
+      body: JSON.stringify({ ...request, session_id: ("session_id" in request && request.session_id) || `agent_data_ui_${request.source_run_id}` }),
     },
   );
   return readResponse<DataColumnCastConfirmResponse>(response);
@@ -279,7 +279,7 @@ export async function confirmFeatureRecipe(
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(request),
+      body: JSON.stringify({ ...request, session_id: ("session_id" in request && request.session_id) || `agent_data_ui_${request.source_run_id}` }),
     },
   );
   return readResponse<FeatureRecipeConfirmResponse>(response);
@@ -309,7 +309,7 @@ export async function confirmDataTransform(
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(request),
+      body: JSON.stringify({ ...request, session_id: ("session_id" in request && request.session_id) || `agent_data_ui_${request.source_run_id}` }),
     },
   );
   return readResponse<DataTransformConfirmResponse>(response);

@@ -1,5 +1,5 @@
-// v1.9.0 — the new workspace runs behind a switch until it is accepted
-// (design spec §8.8). Settings › Appearance flips it; `?workspace=new` or
+// v1.9.0 — the accepted workspace is default; the classic shell remains
+// available in Settings › Appearance (design spec §8.8). `?workspace=new` or
 // `?workspace=classic` on any project URL flips it too and is remembered, so a
 // test or a screenshot can pin a shell without touching settings.
 
@@ -9,7 +9,7 @@ export type WorkspaceMode = "new" | "classic";
 
 const KEY = "workbench:workspace";
 const EVENT = "workbench:workspace-change";
-const DEFAULT_MODE: WorkspaceMode = "classic";
+const DEFAULT_MODE: WorkspaceMode = "new";
 
 function isMode(value: string | null): value is WorkspaceMode {
   return value === "new" || value === "classic";

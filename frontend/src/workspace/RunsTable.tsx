@@ -7,7 +7,7 @@ import { useMemo } from "react";
 import type { RunSummary } from "../api";
 import { useForest } from "../workbench/ForestContext";
 import { useRunHistory } from "../lineage/runRail/useRunHistory";
-import { formatRelativeTime, shortRunId, statusClass } from "../lineage/runRail/runFormat";
+import { formatRelativeTime, statusClass } from "../lineage/runRail/runFormat";
 
 function contents(run: RunSummary): string {
   if (!run.y) return run.mode ?? "—";
@@ -52,11 +52,11 @@ export function RunsTable({ projectRoot }: { projectRoot: string }) {
           </tr>
         </thead>
         <tbody>
-          {sorted.map((run) => {
+          {sorted.map((run, index) => {
             const active = run.run_id === activeRunId;
             return (
               <tr key={run.run_id} aria-current={active ? "true" : undefined} data-testid={`ws-run-${run.run_id}`}>
-                <td className="ws-runs__id" title={run.run_id}>{shortRunId(run.run_id)}</td>
+                <td className="ws-runs__id">Analysis {sorted.length - index}<details><summary>Source</summary><span>{run.run_id}</span></details></td>
                 <td title={run.started_at ?? undefined}>{formatRelativeTime(run.started_at)}</td>
                 <td className="ws-runs__contents">{contents(run)}</td>
                 <td><span className={statusClass(run.status)}>{run.status ?? "unknown"}</span></td>

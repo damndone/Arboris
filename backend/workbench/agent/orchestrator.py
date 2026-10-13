@@ -603,6 +603,7 @@ class WorkbenchOrchestrator:
         # Set by the HTTP layer, which owns the context-fingerprint and active
         # head checks a confirmation needs. When absent, every proposal waits
         # for the user (see read_only_policy).
+        self.execution_policy = "auto_read_only"
         self.read_only_runner: Callable[[Any], Awaitable[OperationRecord]] | None = None
         self._lease_owner = f"agent:{uuid4().hex}"
 
@@ -3077,6 +3078,12 @@ class WorkbenchOrchestrator:
         from ..analysis_ledger import inferential_count, read as read_ledger
         from .read_only_policy import ACTOR, decide
 
+        if self.execution_policy != "auto_read_only":
+            return {
+                "requires_confirmation": True,
+                "proposal": proposal.to_dict(),
+                "confirmation_reason": "Review before execution was requested for this turn.",
+            }
         project_root = getattr(self.context_provider, "project_root", None)
         if self.read_only_runner is None or project_root is None:
             return {"requires_confirmation": True, "proposal": proposal.to_dict()}

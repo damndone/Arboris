@@ -29,7 +29,7 @@ function collect(drawer: Element): Entry[] {
     seen.add(label);
     entries.push({ label, target });
   };
-  for (const element of Array.from(drawer.querySelectorAll(":scope > article[aria-label], :scope > section[aria-label], :scope > article > section[aria-labelledby]"))) {
+  for (const element of Array.from(drawer.querySelectorAll(":scope > .ws-result-selection > article[aria-label], :scope > .ws-result-selection > article > section[aria-labelledby], :scope > article[aria-label], :scope > section[aria-label], :scope > article > section[aria-labelledby]"))) {
     const labelledBy = element.getAttribute("aria-labelledby");
     const raw = labelledBy ? drawer.querySelector(`#${CSS.escape(labelledBy)}`)?.textContent ?? "" : element.getAttribute("aria-label") ?? "";
     const label = SHORT_NAMES[raw.trim()] ?? raw.trim();

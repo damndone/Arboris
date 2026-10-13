@@ -21,28 +21,34 @@ import {
 } from "./resultModel";
 import { IntervalPlot } from "./IntervalPlot";
 import "./modelResult.css";
+import {ResultSelection} from "./ResultSelection";
+import {ResultActions} from "./ResultActions";
+import {modelTests} from "./PostEstimationResults";
+import {useCompletedOperation} from "../../workbench/agent/useCompletedOperation";
 
 type Load = { status: "loading" } | { status: "error"; message: string } | { status: "ready"; detail: RunDetail };
 
-function useRunDetail(projectRoot: string, runId: string): Load {
+function useRunDetail(projectRoot: string, runId: string, revision: number): Load {
+  const completedOperation = useCompletedOperation();
   const [load, setLoad] = useState<Load>({ status: "loading" });
   useEffect(() => {
     let live = true;
-    setLoad({ status: "loading" });
+    // A refresh must not unmount an open operation or its completed receipt.
     fetchRunDetail(projectRoot, runId)
       .then((detail) => live && setLoad({ status: "ready", detail }))
       .catch((error: unknown) => live && setLoad({ status: "error", message: error instanceof Error ? error.message : String(error) }));
     return () => {
       live = false;
     };
-  }, [projectRoot, runId]);
+  }, [projectRoot, runId, revision, completedOperation]);
   return load;
 }
 
 const pText = (row: CoefficientRow) => row.pDisplay ?? formatPValue(row.p);
 
-export function ModelResultView({ projectRoot, runId, node }: { projectRoot: string; runId: string; node: GraphViewNode }) {
-  const load = useRunDetail(projectRoot, runId);
+export function ModelResultView({ projectRoot, runId, node, onRefresh }: { projectRoot: string; runId: string; node: GraphViewNode; onRefresh?: () => void }) {
+  const [revision, setRevision] = useState(0);
+  const load = useRunDetail(projectRoot, runId, revision);
   if (load.status === "loading") return <p className="ws-result__note" aria-live="polite">Loading the result…</p>;
   if (load.status === "error") return <p className="ws-result__note" role="alert">The result could not be loaded: {load.message}</p>;
 
@@ -62,7 +68,7 @@ export function ModelResultView({ projectRoot, runId, node }: { projectRoot: str
   const inference = inferenceLine(result);
 
   return (
-    <article className="ws-result" aria-label="Result" id="ws-result">
+    <><ResultSelection runId={runId} modelId={modelIdOf(node)!}><article className="ws-result" aria-label="Result" id="ws-result">
       <div className="ws-result__chips">
         {checks && (
           <span className="ws-chip" data-status={checks.status}>
@@ -155,6 +161,8 @@ export function ModelResultView({ projectRoot, runId, node }: { projectRoot: str
           )}
         </section>
       )}
-    </article>
+    </article></ResultSelection><ResultActions projectRoot={projectRoot} runId={runId} modelId={modelIdOf(node)!} label={node.title}
+      entries={modelTests(detail.post_estimation_results ?? [], runId, modelIdOf(node)!)}
+      onRefresh={() => {setRevision(value => value + 1);onRefresh?.();}}/></>
   );
 }

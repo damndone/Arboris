@@ -2707,6 +2707,12 @@ export interface components {
             context_packet?: {
                 [key: string]: unknown;
             } | null;
+            /**
+             * Execution Policy
+             * @default auto_read_only
+             * @enum {string}
+             */
+            execution_policy?: "auto_read_only" | "proposal_only";
             /** Question */
             question: string;
         };

@@ -30,7 +30,7 @@ export function ReportReadingView({ text, facts }: { text: string; facts: Fact[]
       : scalar === (fact.value === null ? "None" : typeof fact.value === "boolean" ? (fact.value ? "True" : "False") : fact.value));
     if (fact && matches) {
       const item = <details key={index} className="manual-reading__fact"><summary>{factLabel(fact)}: <strong>{factValue(fact)}</strong></summary><small>Original line: {line}<br/>Exact value: {String(fact.value)} · Field: {fact.field} · Evidence: {fact.id} · Run: {fact.source.run_id}</small></details>;
-      const technicalField = /^(?:param|decision)\//.test(fact.field) || /\/(?:id|result_id|source_id|execution_key|contract|contract_version|reason_code|operation_id)$/.test(fact.field) || /\/retained_positions\//.test(fact.field);
+      const technicalField = /^(?:param|decision)\//.test(fact.field) || /\/(?:id|model_id|model_run_id|model_type|artifact_id|result_id|source_id|execution_key|contract|contract_version|reason_code|operation_id)$/.test(fact.field) || /\/retained_positions\//.test(fact.field);
       if (technicalField) { technical.push(item); return null; }
       return item;
     }

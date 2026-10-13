@@ -24,6 +24,7 @@ import { useResolvedNodeOperationContext } from "../NodeOperationContextProvider
 import { useProjectRootOptional } from "../../../workbench/ProjectRootContext";
 import { fetchRunDetail, type ModelResult, type CoefficientRecord } from "../../../api";
 import type { GraphViewNode, HeadSetNode } from "../../api/graphViewTypes";
+import {formatPValue} from "../../../format/numbers";
 import {CountModelResultCard} from "../../../runResult/CountModelResultCard";
 
 const INTERCEPT_TERMS = new Set(["intercept", "(intercept)", "const", "constant", "1"]);
@@ -40,7 +41,7 @@ function displayTerm(term: string): string {
 function termTooltip(term: string, c: CoefficientRecord): string {
   const parts = [`${displayTerm(term)}: ${c.estimate != null ? fmt(c.estimate) : "—"}`];
   if (c.std_error != null) parts.push(`se ${fmt(c.std_error)}`);
-  const p = c.p_value_display ?? (c.p_value != null ? fmt(c.p_value) : null);
+  const p = c.p_value != null ? formatPValue(c.p_value) : c.p_value_display;
   if (p != null) parts.push(`p ${p}`);
   return parts.join(" · ");
 }

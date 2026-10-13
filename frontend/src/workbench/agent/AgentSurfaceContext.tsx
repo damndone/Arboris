@@ -178,6 +178,8 @@ export interface AgentSurfaceContextValue {
   messages: AgentMessage[];
   prompt: string;
   setPrompt: (value: string) => void;
+  executionPolicy?: "auto_read_only" | "proposal_only";
+  setExecutionPolicy?: (value: "auto_read_only" | "proposal_only") => void;
   sendPrompt: (value?: string) => Promise<void>;
   abortTurn: () => Promise<void>;
   isSubmitting: boolean;
@@ -239,6 +241,7 @@ export function AgentSurfaceProvider({
   const [searchParams] = useSearchParams();
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [prompt, setPrompt] = useState("");
+  const [executionPolicy, setExecutionPolicy] = useState<"auto_read_only" | "proposal_only">("proposal_only");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [sessionStatus, setSessionStatus] = useState("idle");
   const [proposals, setProposals] = useState<AgentProposal[]>([]);
@@ -267,9 +270,9 @@ export function AgentSurfaceProvider({
   const declaredFocus = workbench.state.agentFocus;
   // Whichever changed last wins: a node selected after a run switch is the
   // focus even in another run; a run switched after a selection outranks the
-  // leftover detail tab. With no history (first render) the run wins.
+  // leftover detail tab. A restored URL selection is authoritative on first render.
   const activeRunForFocus = forest?.activeRunId ?? runId;
-  const lastFocusChange = useRef<"selection" | "run">("run");
+  const lastFocusChange = useRef<"selection" | "run">(selectedKey ? "selection" : "run");
   const previousSelection = useRef(selectedKey);
   const previousActiveRun = useRef(activeRunForFocus);
   if (previousSelection.current !== selectedKey) {
@@ -531,7 +534,13 @@ export function AgentSurfaceProvider({
   const contextPercent = contextWindowTokens
     ? Math.min(100, (contextUsedTokens / contextWindowTokens) * 100)
     : null;
-  const scopeLabel = isGlobalScope && resolvedFocus.focus.kind === "project"
+  const linkedTarget = linkedSessionId ? proposals[proposals.length - 1]?.target : null;
+  const linkedNode = linkedTarget && forest?.forest.nodes.find(node =>
+    node.opNodeId === linkedTarget.node_ref && node.runs.includes(String(linkedTarget.run_id)),
+  );
+  const scopeLabel = linkedSessionId
+    ? linkedNode ? `Linked chain · ${linkedNode.title}` : "Linked Agent session"
+    : isGlobalScope && resolvedFocus.focus.kind === "project"
     ? `Global Agent · ${forest?.forest.familyRunCount ?? 0} runs · ${forest?.forest.familyCount ?? 0} families`
     : resolvedFocus.label;
 
@@ -610,6 +619,7 @@ export function AgentSurfaceProvider({
         question,
         controller.signal,
         isGlobalScope ? (contextPacket as Record<string, unknown>) : undefined,
+        executionPolicy,
       );
       if (activeScopeRef.current !== requestScope) return;
       setMessages(result.session.messages);
@@ -639,7 +649,7 @@ export function AgentSurfaceProvider({
         setActiveTurnStartedAt(null);
       }
     }
-  }, [contextPacket, eventCursor, forest, isGlobalScope, isSubmitting, linkedSessionId, projectRoot, prompt, refreshNavigation, replayEvents, resolvedFocus, runId, scopeLabel, scopeRunId, sessionId, sessionScope, storageKey]);
+  }, [contextPacket, eventCursor, executionPolicy, forest, isGlobalScope, isSubmitting, linkedSessionId, projectRoot, prompt, refreshNavigation, replayEvents, resolvedFocus, runId, scopeLabel, scopeRunId, sessionId, sessionScope, storageKey]);
 
   const abortTurn = useCallback(async () => {
     const controller = activeTurnControllerRef.current;
@@ -670,8 +680,10 @@ export function AgentSurfaceProvider({
     const activeHead = ownership && typeof ownership === "object"
       ? (ownership as { active_head_run_id?: unknown }).active_head_run_id
       : undefined;
-    const activeHeadRunId = typeof activeHead === "string" && activeHead
-      ? activeHead
+    const proposalHead = proposal.preconditions.active_head_run_id;
+    const activeHeadRunId = linkedSessionId && typeof proposalHead === "string" && proposalHead
+      ? proposalHead
+      : typeof activeHead === "string" && activeHead ? activeHead
       : forest?.activeRunId ?? runId;
     setConfirmationBusyId(proposalId);
     setError(null);
@@ -709,7 +721,7 @@ export function AgentSurfaceProvider({
     } finally {
       if (activeScopeRef.current === requestScope) setConfirmationBusyId(null);
     }
-  }, [confirmationBusyId, contextPacket, forest?.activeRunId, projectRoot, proposals, refreshNavigation, runId, sessionId, sessionScope]);
+  }, [confirmationBusyId, contextPacket, forest?.activeRunId, linkedSessionId, projectRoot, proposals, refreshNavigation, runId, sessionId, sessionScope]);
 
   const declineProposal = useCallback(async (proposalId: string, reason?: string) => {
     if (!sessionId || confirmationBusyId !== null) return false;
@@ -818,6 +830,8 @@ export function AgentSurfaceProvider({
     messages,
     prompt,
     setPrompt,
+    executionPolicy,
+    setExecutionPolicy,
     sendPrompt,
     abortTurn,
     isSubmitting,
@@ -858,6 +872,7 @@ export function AgentSurfaceProvider({
     model,
     modelOptions,
     prompt,
+    executionPolicy,
     scopeLabel,
     sendPrompt,
     abortTurn,

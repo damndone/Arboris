@@ -713,6 +713,8 @@ def test_graph_fork_proposal_route_confirms_into_child_agent_without_child_run(
         body = created.json()
         assert body["proposal"]["operation_id"] == "graph.fork"
         assert body["navigation"]["kind"] == "proposal"
+        assert body["navigation"]["href"]["run_id"] == "run-a"
+        assert body["navigation"]["href"]["forest_node_key"] == body["proposal"]["target"]["forest_node_key"]
         session_id = body["session_id"]
         proposal = body["proposal"]
 
@@ -1304,12 +1306,21 @@ def test_proposal_revision_route_preserves_scope_and_rejects_stale_revision(
         assert invalid.json()["error"]["code"] == "AGENT_PROPOSAL_INVALID"
 
 
+@pytest.mark.parametrize("execution_policy", ["auto_read_only", "proposal_only"])
 def test_chain_turn_wires_scoped_read_only_tools_without_mutation(
     tmp_path: Path,
     monkeypatch,
+    execution_policy,
 ) -> None:
     from workbench.http import agent_routes
 
+    constructed = []
+    original_orchestrator = agent_routes.WorkbenchOrchestrator
+    def capture_orchestrator(*args, **kwargs):
+        instance = original_orchestrator(*args, **kwargs)
+        constructed.append(instance)
+        return instance
+    monkeypatch.setattr(agent_routes, "WorkbenchOrchestrator", capture_orchestrator)
     ToolCallingAdapter.instances.clear()
     monkeypatch.setattr(agent_routes, "load_llm_config", _config)
     monkeypatch.setattr(agent_routes, "OpenAICompatibleModelAdapter", ToolCallingAdapter)
@@ -1330,9 +1341,10 @@ def test_chain_turn_wires_scoped_read_only_tools_without_mutation(
         turn = client.post(
             f"/agent/sessions/{session_id}/turns",
             params={"project_root": str(project_root)},
-            json={"question": "检查这个模型节点的上下文。"},
+            json={"question": "检查这个模型节点的上下文。", "execution_policy": execution_policy},
         )
         assert turn.status_code == 200
+        assert constructed[-1].execution_policy == execution_policy
         assert turn.json()["assistant"]["content"] == "模型上下文已核对，无需变更。"
 
         # The route (not the model) attached the chain-scoped tool descriptors.
@@ -2135,3 +2147,11 @@ def test_two_turns_sent_at_once_to_one_session_run_one_and_refuse_the_other(
 
     assert sorted(statuses) == [200, 409]
     assert after.status_code == 200
+
+
+def test_agent_turn_policy_preserves_old_requests_and_rejects_unknown_authority():
+    from pydantic import ValidationError
+    from workbench.http.agent_routes import AgentTurnRequest
+    assert AgentTurnRequest(question="Inspect").execution_policy == "auto_read_only"
+    with pytest.raises(ValidationError):
+        AgentTurnRequest(question="Inspect", execution_policy="execute_everything")

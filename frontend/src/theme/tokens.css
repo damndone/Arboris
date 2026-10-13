@@ -57,7 +57,7 @@
 
   /* Motion — critically damped spring (damping 1.0, response 0.35 s).
    * Momentum gestures add their own overshoot; nothing else bounces. */
-  --duration-spring: 350ms;
+  --duration-spring: 260ms;
   --duration-fade: 160ms;
   --ease-spring: linear(0, 0.040, 0.131, 0.243, 0.358, 0.466, 0.562, 0.645, 0.715, 0.774, 0.821, 0.859, 0.890, 0.914, 0.934, 0.949, 0.960, 0.970, 0.977, 0.982, 1);
   --ease-standard: cubic-bezier(0.2, 0, 0, 1);

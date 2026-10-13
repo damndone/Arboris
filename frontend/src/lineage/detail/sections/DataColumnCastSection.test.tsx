@@ -367,6 +367,14 @@ describe("DataColumnCastSection", () => {
     }));
   });
 
+  it("invalidates a data-transform preview when editable inputs change", async () => {
+    render(<DataColumnCastSection node={node()}/>);
+    fireEvent.click(await screen.findByTestId("data-transform-preview"));
+    await screen.findByTestId("data-transform-confirm");
+    fireEvent.change(screen.getByLabelText("Subset row indices"), {target:{value:"0"}});
+    expect(screen.queryByTestId("data-transform-confirm")).toBeNull();
+  });
+
   it("exposes a real OLS run action from a numeric data node", async () => {
     previewMock.mockImplementation((...args: unknown[]) => {
       if (args[0] === "preview") return Promise.resolve({ preview: { status: "ready", fingerprint: "fp-1", row_count: 2, items: [], downstream_invalidation: [] } });

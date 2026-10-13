@@ -43,7 +43,7 @@ function useSessionState<T>(key: string, fallback: T): [T, (next: T) => void] {
   return [value, set];
 }
 
-export function WorkspaceBottomPanel({ projectRoot, tabs }: { projectRoot: string; tabs: BottomTab[] }) {
+export function WorkspaceBottomPanel({ projectRoot, tabs, summary }: { projectRoot: string; tabs: BottomTab[]; summary?: string }) {
   const [activeId, setActiveId] = useSessionState(`workbench:bottom:tab:${projectRoot}`, tabs[0]?.id ?? "");
   const [open, setOpen] = useSessionState(`workbench:bottom:open:${projectRoot}`, false);
   const [height, setHeight] = useSessionState(`workbench:bottom:height:${projectRoot}`, DEFAULT_HEIGHT);
@@ -111,6 +111,7 @@ export function WorkspaceBottomPanel({ projectRoot, tabs }: { projectRoot: strin
             </button>
           ))}
         </div>
+        {!open && summary && <span className="ws-bottom-panel__summary" title={summary}>{summary}</span>}
         <button
           type="button"
           className="ws-icon-button"

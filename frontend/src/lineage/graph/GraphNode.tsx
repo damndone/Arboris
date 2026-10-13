@@ -248,7 +248,7 @@ export function GraphNode({ data }: GraphNodeProps) {
       <div className="ln-graph-node__bar" />
       <div className="ln-graph-node__body">
         <div className="ln-graph-node__row1">
-          <span className="ln-graph-node__kind">{node.kind}</span>
+          <span className="ln-graph-node__kind">{node.kind.replace(/_/g, " ")}</span>
           {role && (
             <span
               className="ln-graph-node__role-badge"

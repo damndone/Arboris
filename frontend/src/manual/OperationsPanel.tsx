@@ -22,10 +22,11 @@ type Step = {
     spec: Record<string, unknown>;
 };
 const uid = () => crypto.randomUUID();
-export function OperationsPanel({ projectRoot, runId, models, initialSearch = "", onClose, onRefresh, onOpenRun, onDedicated }: {
+export function OperationsPanel({ projectRoot, runId, models, initialSearch = "", initialTarget, onClose, onRefresh, onOpenRun, onDedicated }: {
     projectRoot: string;
     runId: string;
     initialSearch?: string;
+    initialTarget?: Target;
     models: ModelChoice[];
     onClose: () => void;
     onRefresh: () => void;
@@ -61,10 +62,10 @@ export function OperationsPanel({ projectRoot, runId, models, initialSearch = ""
         let current = true;
         (async () => {
             const datasets = sourceRunId ? await listDatasets(projectRoot, sourceRunId) : [];
-            const data = await Promise.all(datasets.map(async (d) => { const page = await fetchDatasetPage(projectRoot, sourceRunId, d.node_id, { offset: 0, limit: 1 }); return { label: `Data · ${d.label} · ${d.node_id} · ${sourceRunId}`, target: { kind: "dataset_node", run_id: sourceRunId, node_id: d.node_id, artifact_id: page.artifact_id } as Target, columns: page.columns }; }));
-            const all = [...data, ...models.map(m => ({ label: `Model · ${m.label} · ${m.runId}`, target: { kind: "model_node", run_id: m.runId, node_id: m.nodeId } as Target, columns: [] }))];
+            const data = await Promise.all(datasets.map(async (d, index) => { const page = await fetchDatasetPage(projectRoot, sourceRunId, d.node_id, { offset: 0, limit: 1 }); return { label: `Data · ${d.label} · dataset ${index + 1}`, target: { kind: "dataset_node", run_id: sourceRunId, node_id: d.node_id, artifact_id: page.artifact_id } as Target, columns: page.columns }; }));
+            const all = [...data, ...models.map(m => ({ label: `Model · ${m.label} · version ${models.indexOf(m) + 1}`, target: { kind: "model_node", run_id: m.runId, node_id: m.nodeId } as Target, columns: [] }))];
             if (current) {
-                const index = all.findIndex(c => JSON.stringify(c.target) === selectedTarget.current);
+                const index = all.findIndex(c => JSON.stringify(c.target) === (selectedTarget.current ?? JSON.stringify(initialTarget)));
                 setChoices(all);
                 setTargetIndex(index >= 0 ? String(index) : all.length ? "0" : "");
                 if (selectedTarget.current && index < 0) {
@@ -147,21 +148,22 @@ export function OperationsPanel({ projectRoot, runId, models, initialSearch = ""
     <p>Choose an operation and its data or model. Runs locally without a language model.</p>
     {error && <p role="alert">{error}</p>}
     <label className="manual-field">Analysis target<select aria-label="Analysis target" disabled={busy} value={targetIndex} onChange={e => { invalidate(); setSteps([]); setTargetIndex(e.target.value); }}><option value="">Select a target</option>{choices.map((c, i) => <option key={JSON.stringify(c.target)} value={i}>{c.label}</option>)}</select></label>
+    {target && <details><summary>Selected target source</summary><dl>{Object.entries(target).map(([key, value]) => <div key={key}><dt>{key.replace(/_/g, " ")}</dt><dd>{String(value)}</dd></div>)}</dl></details>}
     {!choices.length && !catalogBusy && <p>Import data with New analysis first.</p>}
     <label className="manual-field">Find an operation<input aria-label="Find an operation" value={search} onChange={e => setSearch(e.target.value)}/></label>
-    {catalogBusy ? <p role="status">Loading operations…</p> : <details open={steps.length === 0}><summary>{operations.length} operations</summary>{Object.entries(groups).map(([group, items]) => <section key={group}><h3>{group.replace(/_/g, ' ')}</h3><div className="manual-catalog">{items!.map(op => <button type="button" key={op.id} disabled={busy || op.availability.status === "unavailable" || !!dedicatedTargetReason(op,target)} title={dedicatedTargetReason(op,target) ?? `${op.summary}\n${op.availability.reason_code}: ${op.availability.message}`} onClick={() => op.execution.kind === "workflow" ? add(op) : onDedicated(op.id, target)}>{op.name}<small> · {op.id}{op.availability.status === "unavailable" ? ` · ${op.availability.reason_code}` : dedicatedTargetReason(op,target) ? ` · ${dedicatedTargetReason(op,target)}` : op.execution.kind === "dedicated" ? ' · Open workspace' : ''}</small></button>)}</div></section>)}</details>}
+    {catalogBusy ? <p role="status">Loading operations…</p> : <details open={steps.length === 0}><summary>{operations.length} operations</summary>{Object.entries(groups).map(([group, items]) => <section key={group}><h3>{group.replace(/_/g, ' ')}</h3><div className="manual-catalog">{items!.map(op => <button type="button" key={op.id} disabled={busy || op.availability.status === "unavailable" || !!dedicatedTargetReason(op,target)} title={dedicatedTargetReason(op,target) ?? `${op.summary}\n${op.availability.reason_code}: ${op.availability.message}`} onClick={() => op.execution.kind === "workflow" ? add(op) : onDedicated(op.id, target)}>{op.name}<small>{op.availability.status === "unavailable" ? ` · ${op.availability.message}` : dedicatedTargetReason(op,target) ? ` · ${dedicatedTargetReason(op,target)}` : op.execution.kind === "dedicated" ? ' · Open workspace' : ''}</small></button>)}</div></section>)}</details>}
     <form ref={form} onChange={invalidate} onSubmit={e => { e.preventDefault(); void submit(); }}><fieldset disabled={busy}>
       {steps.map((step, i) => {
             const op = operations.find(o => o.id === step.operation_id);
-            return <article key={step.step_id}><header><h3>{i + 1}. {op?.name ?? step.operation_id}</h3><button type="button" onClick={() => { invalidate(); setSteps(old => old.filter((_, j) => j !== i)); }}>Remove step {i + 1}</button></header><p>{op?.summary}</p><small>Step reference: {step.step_id}</small>
+            return <article key={step.step_id}><header><h3>{i + 1}. {op?.name ?? step.operation_id}</h3><button type="button" onClick={() => { invalidate(); setSteps(old => old.filter((_, j) => j !== i)); }}>Remove step {i + 1}</button></header><details><summary>Operation details</summary><p>{op?.summary}</p></details><details><summary>Source</summary><small>Step reference: {step.step_id}</small></details>
         <SchemaField key={step.step_id} label={`Step ${i + 1}`} schema={(op?.spec_schema ?? { type: 'object' }) as JsonSchema} value={step.spec} onChange={v => changeStep(i, v as Record<string, unknown>)} columns={choice?.columns}/>
         {i > 0 && <details><summary>Use an earlier result</summary><p>Dataset input uses a producer step. Choose a model branch below when an earlier step produces it.</p><label className="manual-field">Dataset producer<select aria-label={`Step ${i + 1} dataset producer`} value={String((step.spec.source as {
                 from_step?: string;
             })?.from_step ?? '')} onChange={e => { const next = { ...step.spec }; if (e.target.value)
                 next.source = { from_step: e.target.value, output: 'produced_dataset' };
             else
-                delete next.source; changeStep(i, next); }}><option value="">Selected target</option>{steps.slice(0, i).map(s => <option key={s.step_id} value={s.step_id}>{s.step_id} · {s.operation_id}</option>)}</select></label>
-          {(op?.spec_schema as JsonSchema)?.properties?.model_ref && <label className="manual-field">Model producer<select aria-label={`Step ${i+1} model producer`} value={String(step.spec.model_ref??'').startsWith('step:')?String(step.spec.model_ref):''} onChange={e=>{const next={...step.spec};if(e.target.value){next.model_ref=e.target.value;delete next.model_run_id;}else if(target?.kind==='model_node'){next.model_ref=target.node_id;next.model_run_id=target.run_id;}else{delete next.model_ref;delete next.model_run_id;}changeStep(i,next);}}><option value="">Selected model / explicit reference</option>{steps.slice(0,i).flatMap(producer=>Array.isArray(producer.spec.branches)?producer.spec.branches.flatMap((branch:unknown)=>{const id=(branch as {branch_id?:unknown})?.branch_id;return typeof id==='string'&&id?[<option key={`${producer.step_id}:${id}`} value={`step:${producer.step_id}:${id}`}>{producer.step_id} · {id}</option>]:[];}):[])}</select></label>}
+                delete next.source; changeStep(i, next); }}><option value="">Selected target</option>{steps.slice(0, i).map(s => <option key={s.step_id} value={s.step_id}>{steps.indexOf(s) + 1}. {operations.find(op => op.id === s.operation_id)?.name ?? "Earlier operation"}</option>)}</select></label>
+          {(op?.spec_schema as JsonSchema)?.properties?.model_ref && <label className="manual-field">Model producer<select aria-label={`Step ${i+1} model producer`} value={String(step.spec.model_ref??'').startsWith('step:')?String(step.spec.model_ref):''} onChange={e=>{const next={...step.spec};if(e.target.value){next.model_ref=e.target.value;delete next.model_run_id;}else if(target?.kind==='model_node'){next.model_ref=target.node_id;next.model_run_id=target.run_id;}else{delete next.model_ref;delete next.model_run_id;}changeStep(i,next);}}><option value="">Selected model / explicit reference</option>{steps.slice(0,i).flatMap(producer=>Array.isArray(producer.spec.branches)?producer.spec.branches.flatMap((branch:unknown)=>{const id=(branch as {branch_id?:unknown})?.branch_id;return typeof id==='string'&&id?[<option key={`${producer.step_id}:${id}`} value={`step:${producer.step_id}:${id}`}>{steps.indexOf(producer) + 1}. {id}</option>]:[];}):[])}</select></label>}
         </details>}
       </article>;
         })}
@@ -170,7 +172,7 @@ export function OperationsPanel({ projectRoot, runId, models, initialSearch = ""
     {outcome && <section aria-label="Analysis preview and results"><h3>{outcome.status.replace(/_/g, ' ')}</h3><ul>{[...outcome.expected_effect, ...outcome.risks].map((s, i) => <li key={i}>{s}</li>)}</ul>
       {outcome.error && <pre role="alert">{JSON.stringify(outcome.error, null, 2)}</pre>}
       {outcome.status === 'awaiting_confirmation' && <button type="button" disabled={busy} onClick={() => void submit(true)}>Confirm analysis</button>}
-      {outcome.steps.map(s => <article key={s.step_id}><h4>{s.operation_id} · {s.status}</h4>{s.error && <p role="alert">{s.error}</p>}{s.node_refs.map(n => <button type="button" key={`${n.run_id}:${n.node_id}`} onClick={() => onOpenRun(n.run_id)}>Open result run {n.run_id}</button>)}{s.artifact_refs.map(a => <div key={`${a.run_id}:${a.artifact_id}`}><button type="button" onClick={() => void readArtifact(a.run_id, a.artifact_id)}>View {a.artifact_id}</button><a href={manualUrl(projectRoot, `/runs/${encodeURIComponent(a.run_id)}/artifacts/${encodeURIComponent(a.artifact_id)}`)} target="_blank" rel="noreferrer">Download artifact</a></div>)}</article>)}
+      {outcome.steps.map(s => <article key={s.step_id}><h4>{operations.find(op => op.id === s.operation_id)?.name ?? s.operation_id.replace(/[._]/g, " ")} · {s.status}</h4>{s.error && <p role="alert">{s.error}</p>}{s.node_refs.map(n => <button type="button" key={`${n.run_id}:${n.node_id}`} onClick={() => onOpenRun(n.run_id)} title={n.run_id}>Open result</button>)}{s.artifact_refs.map(a => <div key={`${a.run_id}:${a.artifact_id}`}><button type="button" onClick={() => void readArtifact(a.run_id, a.artifact_id)} title={a.artifact_id}>View saved result</button><a href={manualUrl(projectRoot, `/runs/${encodeURIComponent(a.run_id)}/artifacts/${encodeURIComponent(a.artifact_id)}`)} target="_blank" rel="noreferrer">Download artifact</a></div>)}</article>)}
       {artifact !== undefined && <pre aria-label="Analysis result">{JSON.stringify(artifact, null, 2)}</pre>}
     </section>}{busy && <p role="status">Working…</p>}
   </section>;

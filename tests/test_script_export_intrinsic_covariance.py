@@ -14,3 +14,20 @@ def test_family_intrinsic_variance_requires_exact_kernel_and_no_conflicting_requ
         _export_covariance({}, {}, {'covariance': 'robust'}, kernel, layout)
     with pytest.raises(ScriptExportRefusal):
         _export_covariance({}, {}, {}, {'covariance_estimator': 'unknown'}, layout)
+
+
+def test_transport_default_is_not_an_executed_covariance_for_a_family_without_that_option():
+    layout = SCRIPT_RESULT_LAYOUTS['quantile_regression']
+    kernel = {'model_type': 'quantile_regression', 'covariance_estimator': 'nonrobust'}
+    evidence = {'model_type': 'quantile_regression', 'covariance_applies': False,
+                'covariance_explicit': False, 'covariance': None}
+    assert _export_covariance({'covariance': 'robust'}, {}, {}, kernel, layout,
+                              request_summary=evidence) == 'unadjusted'
+    for form, summary in [({'covariance': 'robust'}, evidence), ({}, {}),
+                          ({}, {**evidence, 'covariance_explicit': True})]:
+        with pytest.raises(ScriptExportRefusal):
+            _export_covariance({'covariance': 'robust'}, {}, form, kernel, layout, request_summary=summary)
+    with pytest.raises(ScriptExportRefusal):
+        _export_covariance({'covariance': 'robust'}, {}, {},
+                           {**kernel, 'model_type': 'ols'}, layout,
+                           request_summary={**evidence, 'model_type': 'ols'})

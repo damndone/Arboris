@@ -175,7 +175,7 @@ export function DataView({ projectRoot, runId: runIdProp }: { projectRoot: strin
       </div>
       {saved && (
         <div data-testid="data-view-saved" style={{ fontSize: 12, marginBottom: 8 }}>
-          Saved as run {saved.slice(-8)}; it is re-estimating with the new metadata.
+          Saved as run {saved.slice(-8)}; {ready ? "the updated data and metadata are ready." : "it is re-estimating with the new metadata."}
         </div>
       )}
       {error && <div role="alert" style={{ color: "var(--red)", fontSize: 12 }}>{error}</div>}

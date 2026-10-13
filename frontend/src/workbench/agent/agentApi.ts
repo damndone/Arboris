@@ -194,13 +194,14 @@ export async function sendAgentTurn(
   question: string,
   signal?: AbortSignal,
   contextPacket?: Record<string, unknown>,
+  executionPolicy: "auto_read_only" | "proposal_only" = "auto_read_only",
 ): Promise<ResponseOf<"/agent/sessions/{session_id}/turns", "post">> {
   return request(
     agentPath(projectRoot, `/agent/sessions/${encodeURIComponent(sessionId)}/turns`),
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(contextPacket ? { question, context_packet: contextPacket } : { question }),
+      body: JSON.stringify({question, execution_policy: executionPolicy, ...(contextPacket ? {context_packet: contextPacket} : {})}),
       signal,
     },
   );

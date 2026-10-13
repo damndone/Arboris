@@ -29,7 +29,8 @@ describe("RunsTable", () => {
       </MemoryRouter>,
     );
     const rows = screen.getAllByRole("row").slice(1);
-    expect(rows[0]).toHaveTextContent("bbbbbbbb");
+    expect(rows[0]).toHaveTextContent("Analysis 2");
+    expect(screen.getByText("20261008_100000_000000_bbbbbbbb")).not.toBeVisible();
     expect(rows[0]).toHaveTextContent("failed");
     expect(rows[1]).toHaveTextContent("wage on educ, age");
     expect(rows[1]).toHaveAttribute("aria-current", "true");

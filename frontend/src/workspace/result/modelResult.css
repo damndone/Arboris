@@ -361,3 +361,5 @@
     height: auto;
   }
 }
+
+.ws-result-selection__ask { position: sticky; top: 40px; z-index: 2; background: var(--bg-card); border: 1px solid var(--tint); }

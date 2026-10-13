@@ -147,3 +147,5 @@
   font-size: var(--text-small);
   color: var(--tint);
 }
+
+.ws-bottom-panel__summary { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--label-secondary); font-size:11px; padding-inline:12px; }

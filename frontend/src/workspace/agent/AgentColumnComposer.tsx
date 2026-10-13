@@ -84,6 +84,10 @@ export function AgentColumnComposer() {
             }
           }}
         />
+        <label className="ws-composer__policy"><input type="checkbox" checked={agent.executionPolicy === "proposal_only"} disabled={busy}
+          onChange={event => agent.setExecutionPolicy?.(event.target.checked ? "proposal_only" : "auto_read_only")}/>
+          Review before execution
+        </label>
         <div className="ws-composer__bar">
           <AgentCapabilityPopover
             catalog={capabilityCatalog}
@@ -137,7 +141,7 @@ export function AgentColumnComposer() {
           {error}
         </p>
       )}
-      <p className="ws-composer__note">Read-only analyses run at once · changes wait for your OK · Shift+Enter for a new line</p>
+      <p className="ws-composer__note">{agent.executionPolicy === "proposal_only" ? "Calculations wait for your OK" : "Read-only analyses run at once"} · changes wait for your OK · Shift+Enter for a new line</p>
     </div>
   );
 }

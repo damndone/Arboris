@@ -6,6 +6,7 @@ import type { AgentMessage } from "./agentTypes";
 import { AgentRowsTable, shownRows } from "./AgentRowsTable";
 import { renderMarkdown } from "../../report/markdown";
 import "./agent.css";
+import { formatPValue } from "../../format/numbers";
 import { ProposalFields } from "./ProposalFields";
 
 function roleMarker(role: string): string {
@@ -541,7 +542,7 @@ export function AgentPanel({
                 <div style={{ fontVariantNumeric: "tabular-nums" }}>
                   {Object.entries(entry.result)
                     .filter(([key]) => key !== "schema_version")
-                    .map(([key, value]) => `${key.replace(/_/g, " ")}: ${formatAgentResultValue(value)}`)
+                    .map(([key, value]) => `${key.replace(/_/g, " ")}: ${/p_value$/.test(key) && typeof value === "number" ? formatPValue(value) : formatAgentResultValue(value)}`)
                     .join(" · ")}
                 </div>
               </div>

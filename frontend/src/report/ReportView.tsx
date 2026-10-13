@@ -29,6 +29,8 @@ import {
 import type { CitableFact } from "./factTable";
 import type { ReportRecord } from "./reportHistory";
 import "./report.css";
+import { ReportReviewPanel } from "./ReportReviewPanel";
+import { ReportSources } from "./ReportSources";
 import { ManualReportPanel } from "../manual/ManualReportPanel";
 import { useWorkspaceMode } from "../workspace/workspaceMode";
 
@@ -61,6 +63,7 @@ function AIReportView({ projectRoot, focusRequest = 0 }: { projectRoot?: string;
 
 /** Center-column report writing surface. Review prose is rendered by ReportReviewPanel. */
 export function ReportViewContent({ focusRequest = 0 }: { focusRequest?: number } = {}) {
+  const mode = useWorkspaceMode();
   const forest = useForest();
   const wb = useWorkbenchOptional();
   const workspace = useReportWorkspace();
@@ -138,7 +141,7 @@ export function ReportViewContent({ focusRequest = 0 }: { focusRequest?: number 
         </nav>
       )}
 
-      <ReportComposer
+      <div className="report-document-layout"><div className="report-document"><ReportComposer
         value={promptValue}
         onChange={promptChange}
         onSubmit={promptSubmit}
@@ -161,7 +164,7 @@ export function ReportViewContent({ focusRequest = 0 }: { focusRequest?: number 
 
       <ReportActionBar />
 
-      <section data-testid="report-scope-summary" className="report-scope-summary">
+      {mode === "new" && <ReportReviewPanel/>}</div><ReportSources defaultOpen={mode !== "new"}><section data-testid="report-scope-summary" className="report-scope-summary">
         <div className="report-scope-summary__heading">
           <div>
             <strong>Scope</strong>
@@ -298,7 +301,7 @@ export function ReportViewContent({ focusRequest = 0 }: { focusRequest?: number 
         </div>
       )}
 
-      <span aria-hidden="true" data-report-result-families={resultFamilies.join(",")} hidden />
+      </ReportSources></div><span aria-hidden="true" data-report-result-families={resultFamilies.join(",")} hidden />
     </div>
   );
 }

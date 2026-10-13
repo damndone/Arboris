@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
+import { SchemaField } from "../../../manual/SchemaFields";
+import { validateValue, type JsonSchema } from "../../../manual/schemaModel";
 import { useProjectRootOptional } from "../../../workbench/ProjectRootContext";
 import type { GraphViewNode } from "../../api/graphViewTypes";
 import { useResolvedNodeOperationContext } from "../NodeOperationContextProvider";
@@ -64,6 +66,8 @@ function backendNodeId(node: GraphViewNode): string {
   return raw && typeof raw.id === "string" ? raw.id : node.id;
 }
 
+const scalarMapping: JsonSchema = {type: "object", additionalProperties: {type: ["string", "number", "boolean", "null"]}};
+
 interface CastRow {
   column: string;
   target_dtype: DataColumnCastTarget;
@@ -80,13 +84,13 @@ function FeatureRecipeBuilder({
   sourceNodeId: string;
   sourceContext: DataColumnCastContext;
 }) {
-  const columns = sourceContext.columns.map((column) => column.name);
+  const columns = useMemo(() => sourceContext.columns.map((column) => column.name), [sourceContext.columns]);
   const [operation, setOperation] = useState<FeatureRecipeOperation>("interaction");
   const [inputOne, setInputOne] = useState(columns[0] ?? "");
   const [inputTwo, setInputTwo] = useState(columns[1] ?? columns[0] ?? "");
   const [output, setOutput] = useState("derived_value");
   const [operator, setOperator] = useState<"add" | "subtract" | "multiply">("add");
-  const [mapping, setMapping] = useState('{"1":"one","2":"two"}');
+  const [mapping, setMapping] = useState<Record<string, unknown>>({"1":"one","2":"two"});
   const [preview, setPreview] = useState<FeatureRecipePreview | null>(null);
   const [status, setStatus] = useState<"idle" | "previewing" | "confirming" | "complete" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
@@ -97,13 +101,7 @@ function FeatureRecipeBuilder({
     else if (operation === "derived_variable") parameters = { operator };
     else if (operation === "log") parameters = { input: inputOne, base: "e" };
     else if (operation === "ratio") parameters = { numerator: inputOne, denominator: inputTwo, zero_policy: "fail_closed" };
-    else {
-      try {
-        parameters = { input: inputOne, mapping: JSON.parse(mapping) };
-      } catch {
-        parameters = { input: inputOne, mapping: {} };
-      }
-    }
+    else parameters = { input: inputOne, mapping };
     const inputs = operation === "log" || operation === "recode" ? [inputOne] : [inputOne, inputTwo];
     return {
       source_run_id: sourceRunId,
@@ -121,12 +119,19 @@ function FeatureRecipeBuilder({
     };
   }, [inputOne, inputTwo, mapping, operation, operator, output, sourceContext.source_artifact_id, sourceNodeId, sourceRunId]);
 
+  const requestKey = JSON.stringify(request);
+  const currentRequest = useRef(requestKey);
+  currentRequest.current = requestKey;
+  useEffect(() => setPreview(null), [requestKey]);
+
   async function handlePreview() {
+    const issues = operation === "recode" ? validateValue(scalarMapping, mapping) : [];
+    if (issues.length) {setError(issues.join("; "));return;}
     setStatus("previewing");
     setError(null);
     try {
       const response = await previewFeatureRecipe(projectRoot, request);
-      setPreview(response.preview);
+      if (currentRequest.current === requestKey) setPreview(response.preview);
       setStatus("idle");
     } catch (reason: unknown) {
       setStatus("error");
@@ -168,7 +173,7 @@ function FeatureRecipeBuilder({
         {operation === "derived_variable" && <label>Operator <select aria-label="Feature operator" value={operator} onChange={(event) => setOperator(event.target.value as typeof operator)}>
           <option value="add">add</option><option value="subtract">subtract</option><option value="multiply">multiply</option>
         </select></label>}
-        {operation === "recode" && <label>Mapping JSON <input aria-label="Recode mapping" value={mapping} onChange={(event) => { setMapping(event.target.value); setPreview(null); }} /></label>}
+        {operation === "recode" && <SchemaField label="Recode mapping" schema={scalarMapping} value={mapping} onChange={value => setMapping(value as Record<string, unknown>)}/> }
         <label>Output <input aria-label="Feature output" value={output} onChange={(event) => { setOutput(event.target.value); setPreview(null); }} /></label>
       </div>
       <div style={{ color: "var(--label-tertiary)", marginTop: 5 }}>Preview is required. The source stays unchanged and downstream models are marked for rerun.</div>
@@ -250,10 +255,10 @@ function DataTransformBuilder({
   sourceNodeId: string;
   sourceContext: DataColumnCastContext;
 }) {
-  const columns = sourceContext.columns.map((column) => column.name);
+  const columns = useMemo(() => sourceContext.columns.map((column) => column.name), [sourceContext.columns]);
   const [operation, setOperation] = useState<DataTransformOperation>("subset");
   const [columnsText, setColumnsText] = useState(columns.join(","));
-  const [filterText, setFilterText] = useState("{}");
+  const [filters, setFilters] = useState<Record<string, unknown>>({});
   const [rowIndicesText, setRowIndicesText] = useState("");
   const [rowRangeText, setRowRangeText] = useState("");
   const [keysText, setKeysText] = useState(columns[0] ?? "");
@@ -295,9 +300,7 @@ function DataTransformBuilder({
 
     let parameters: DataTransformParameters;
     if (operation === "subset") {
-      let equals: Record<string, unknown> = {};
-      try { equals = JSON.parse(filterText) as Record<string, unknown>; } catch { /* server returns typed validation error */ }
-      parameters = { columns: parseColumns(columnsText), equals };
+      parameters = { columns: parseColumns(columnsText), equals: filters };
       if (rowIndicesText.trim()) {
         parameters.row_indices = rowIndicesText.split(",").map((value) => Number(value.trim()));
       } else if (rowRangeText.trim()) {
@@ -343,11 +346,18 @@ function DataTransformBuilder({
         ? { secondary_run_id: secondaryRunId, secondary_node_id: secondaryNodeId, secondary_artifact_id: secondaryArtifactId }
         : {}),
     };
-  }, [appendGrowthFactor, appendMaxRows, appendSchemaPolicy, columns, columnsText, filterText, keysText, mergeGrowthFactor, mergeHow, mergeMaxRows, operation, reshapeColumnsColumn, reshapeDirection, reshapeIdColumnsText, reshapeIndexText, reshapeValueColumnsText, reshapeValueName, reshapeValuesColumn, reshapeVarName, rowIndicesText, rowRangeText, secondaryArtifactId, secondaryNodeId, secondaryRunId, sourceContext.source_artifact_id, sourceNodeId, sourceRunId]);
+  }, [appendGrowthFactor, appendMaxRows, appendSchemaPolicy, columns, columnsText, filters, keysText, mergeGrowthFactor, mergeHow, mergeMaxRows, operation, reshapeColumnsColumn, reshapeDirection, reshapeIdColumnsText, reshapeIndexText, reshapeValueColumnsText, reshapeValueName, reshapeValuesColumn, reshapeVarName, rowIndicesText, rowRangeText, secondaryArtifactId, secondaryNodeId, secondaryRunId, sourceContext.source_artifact_id, sourceNodeId, sourceRunId]);
+
+  const requestKey = JSON.stringify(request);
+  const currentRequest = useRef(requestKey);
+  currentRequest.current = requestKey;
+  useEffect(() => setPreview(null), [requestKey]);
 
   async function handlePreview() {
+    const issues = operation === "subset" ? validateValue(scalarMapping, filters) : [];
+    if (issues.length) {setError(issues.join("; "));return;}
     setStatus("previewing"); setError(null);
-    try { const response = await previewDataTransform(projectRoot, request); setPreview(response.preview); setStatus("idle"); }
+    try { const response = await previewDataTransform(projectRoot, request); if (currentRequest.current === requestKey) setPreview(response.preview); setStatus("idle"); }
     catch (reason: unknown) { setStatus("error"); setError(reason instanceof Error ? reason.message : String(reason)); }
   }
   async function handleConfirm() {
@@ -366,7 +376,7 @@ function DataTransformBuilder({
         </select></label>
         {operation === "subset" && <>
           <label>Columns <input aria-label="Transform columns" value={columnsText} onChange={(event) => setColumnsText(event.target.value)} /></label>
-          <label>Equals JSON <input aria-label="Subset equals" value={filterText} onChange={(event) => setFilterText(event.target.value)} /></label>
+          <SchemaField label="Subset equals" schema={scalarMapping} value={filters} onChange={value => setFilters(value as Record<string, unknown>)} columns={columns}/>
           <label>Row indices <input aria-label="Subset row indices" placeholder="0,2,5" value={rowIndicesText} onChange={(event) => setRowIndicesText(event.target.value)} /></label>
           <label>Row range <input aria-label="Subset row range" placeholder="start:stop" value={rowRangeText} onChange={(event) => setRowRangeText(event.target.value)} /></label>
         </>}

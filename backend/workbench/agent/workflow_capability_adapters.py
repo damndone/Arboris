@@ -533,7 +533,8 @@ def _execute_resample(frame: pd.DataFrame, request: Mapping[str, Any]) -> Workfl
     if sampler is None:
         raise WorkflowCapabilityAdapterError(f"{operation_id} did not resolve a sampler")
     features_out, target_out = sampler.fit_resample(selected[features], selected[outcome])
-    output = pd.DataFrame(features_out, columns=features)
+    # Samplers may preserve source row labels; pair returned rows by position.
+    output = pd.DataFrame(features_out, columns=features).reset_index(drop=True)
     output.insert(0, outcome, pd.Series(target_out).reset_index(drop=True))
     payload = {
         "operation_id": operation_id,

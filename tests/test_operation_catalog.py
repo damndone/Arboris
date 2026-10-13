@@ -116,3 +116,13 @@ def test_upload_target_discovery_does_not_materialize_a_run(tmp_path, monkeypatc
     invalid = _client().get("/operations", params={**params, "target": json.dumps(target)})
     entries = {item["id"]: item for item in invalid.json()["operations"]}
     assert entries["data.recode"]["availability"]["reason_code"] == "TARGET_INVALID"
+
+
+def test_catalog_groups_operations_by_research_domain_and_hides_endpoint_names():
+    entries = {item['id']: item for item in _client().get('/operations').json()['operations']}
+    assert entries['multivariate.pca']['category'] == 'multivariate'
+    assert entries['postestimation.wald']['category'] == 'postestimation'
+    assert entries['time_series.var']['category'] == 'time_series'
+    assert entries['data.export']['name'] == 'Data Export'
+    assert entries['model.draft']['name'] == 'Model Draft'
+    assert all('Endpoint' not in item['name'] for item in entries.values())

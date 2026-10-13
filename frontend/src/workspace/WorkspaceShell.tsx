@@ -96,6 +96,11 @@ export function WorkspaceShell({ projectRoot, view, topbar, stageOpen, map, stag
   const [agentSize, setAgentSize] = useState(380);
   const agentOpen = agentMode !== "bubble";
   const setMode = useCallback((mode: AgentMode) => { setAgentMode(mode); writeAgentOpen(mode !== "bubble"); }, []);
+  useEffect(() => {
+    const show = () => setAgentMode(mode => mode === "bubble" ? "floating" : mode);
+    window.addEventListener("workbench:show-agent", show);
+    return () => window.removeEventListener("workbench:show-agent", show);
+  }, []);
   // The Analysis map column shows by default; Data, Tables, Report and Plans
   // are wide documents, so their map column starts folded.
   const [analysisMapHidden, setAnalysisMapHidden] = useState(false);

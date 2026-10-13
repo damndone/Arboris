@@ -295,6 +295,7 @@ describe("AgentSurfaceProvider", () => {
       "先检查这个图",
       expect.any(AbortSignal),
       undefined, // a chain session's context is bound by the server, not refreshed per turn
+      "proposal_only",
     ));
   });
 
@@ -474,11 +475,19 @@ describe("AgentSurfaceProvider", () => {
         familyCount: 2,
         familyRunCount: 2,
       },
-      activeRunId: "run-new",
+      activeRunId: "run-old",
       setActiveRunId: vi.fn(),
     };
 
-    mount();
+    const view = mount();
+    (mocks.forest.current as {activeRunId: string}).activeRunId = "run-new";
+    view.rerender(
+      <MemoryRouter>
+        <AgentSurfaceProvider projectRoot="/proj" runId="run-a">
+          <AgentPanel projectRoot="/proj" runId="run-a" />
+        </AgentSurfaceProvider>
+      </MemoryRouter>,
+    );
     fireEvent.change(await screen.findByRole("textbox", { name: "Ask Agent" }), {
       target: { value: "检查刚切换的运行" },
     });
@@ -501,7 +510,7 @@ describe("AgentSurfaceProvider", () => {
     ));
   });
 
-  it("acts on a node selected in another run, in that run (v1.8.10 focus)", async () => {
+  it.each([false, true])("acts on a node in another run, including restored selection (%s)", async (restored) => {
     const olsModel = {
       id: "node-ols", nodeKey: "node-ols", opNodeId: "model:ols_1", nodeHash: "node-ols", raw: null,
       stage: "model", kind: "model", title: "ols_robust", parentStageId: null, trust: "ok", decisions: [],
@@ -511,7 +520,7 @@ describe("AgentSurfaceProvider", () => {
                       nodeHash: "node-iv", title: "iv_2sls", runs: ["run-iv"] };
     const head = (runId: string, hash: string) => ({ runId, headNodeHash: hash, fromNode: null, rerunOf: null,
                                                      rerunReason: null, status: "completed", createdAt: null });
-    mocks.workbenchState.selectedKey = null;
+    mocks.workbenchState.selectedKey = restored ? ivModel.nodeKey : null;
     mocks.workbenchState.agentFocus = null;
     mocks.lineageModel.current = { nodes: [olsModel, ivModel] };
     mocks.forest.current = {
@@ -752,6 +761,18 @@ describe("AgentSurfaceProvider", () => {
       { revision: 1, fingerprint: "fingerprint-1", active_head_run_id: "run-a" },
     ));
     expect(await screen.findByText("confirmed")).toBeInTheDocument();
+  });
+
+  it("confirms a linked proposal against its bound chain rather than another visible run", async () => {
+    const proposal = {...pendingProposal, preconditions: {active_head_run_id: "run-source"}};
+    mocks.getAgentSession.mockResolvedValue(session("agent_linked", [], [proposal]));
+    render(<MemoryRouter initialEntries={["/?agent_session=agent_linked"]}>
+      <AgentSurfaceProvider projectRoot="/proj" runId="run-other"><AgentPanel projectRoot="/proj" runId="run-other" /></AgentSurfaceProvider>
+    </MemoryRouter>);
+    fireEvent.click(await screen.findByRole("button", {name: "Confirm proposal proposal-1"}));
+    await waitFor(() => expect(mocks.confirmAgentProposal).toHaveBeenCalledWith("/proj", "agent_linked", "proposal-1",
+      {revision: 1, fingerprint: "fingerprint-1", active_head_run_id: "run-source"}));
+    expect(screen.getByText("Linked Agent session")).toBeInTheDocument();
   });
 
   it("declines a visible proposal through the scoped Agent API", async () => {

@@ -268,6 +268,7 @@ class AgentTurnRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     question: str = Field(min_length=1, max_length=MAX_QUESTION_CHARS)
+    execution_policy: Literal["auto_read_only", "proposal_only"] = "auto_read_only"
     # The panel's current project context. A Main session's overview was
     # written once, at creation, so runs made afterwards (a metadata edit, a
     # rerun) were invisible and the Agent kept reading the old run.
@@ -1838,6 +1839,8 @@ def create_agent_fork_proposal(
             "view": "agent",
             "session_id": session_id,
             "proposal_id": proposal.proposal_id,
+            "run_id": body.source_run_id,
+            "forest_node_key": snapshot["forest_node_key"],
         },
     )
     return {
@@ -2242,6 +2245,7 @@ async def _run_reserved_agent_turn(
             operation_registry=operation_registry,
             context_provider=NodeOperationContextProvider(root),
         )
+        orchestrator.execution_policy = body.execution_policy
         orchestrator.register_chain(str(metadata.get("chain_id")), session_id, agent)
         orchestrator.read_only_runner = lambda proposal: _run_read_only_proposal(root, orchestrator, proposal)
         tool_context = {

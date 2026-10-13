@@ -9,10 +9,11 @@ function Probe() {
 describe("workspace mode switch", () => {
   beforeEach(() => localStorage.clear());
 
-  test("the classic shell stays the default until the new one is accepted", () => {
-    expect(resolveWorkspaceMode("", null)).toBe("classic");
+  test("the accepted new shell is default and explicit classic preference survives", () => {
+    expect(resolveWorkspaceMode("", null)).toBe("new");
+    expect(resolveWorkspaceMode("", "classic")).toBe("classic");
     expect(resolveWorkspaceMode("", "new")).toBe("new");
-    expect(resolveWorkspaceMode("", "garbage")).toBe("classic");
+    expect(resolveWorkspaceMode("", "garbage")).toBe("new");
   });
 
   test("a URL parameter wins over the stored choice", () => {
@@ -23,9 +24,9 @@ describe("workspace mode switch", () => {
 
   test("changing the setting updates every subscriber and is remembered", () => {
     render(<Probe />);
-    expect(screen.getByTestId("mode")).toHaveTextContent("classic");
-    act(() => setWorkspaceMode("new"));
     expect(screen.getByTestId("mode")).toHaveTextContent("new");
-    expect(localStorage.getItem("workbench:workspace")).toBe("new");
+    act(() => setWorkspaceMode("classic"));
+    expect(screen.getByTestId("mode")).toHaveTextContent("classic");
+    expect(localStorage.getItem("workbench:workspace")).toBe("classic");
   });
 });

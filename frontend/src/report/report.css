@@ -737,3 +737,16 @@
     min-width: 0;
   }
 }
+
+.report-document-layout { display: flex; align-items: flex-start; gap: 16px; min-width: 0; container-type: inline-size; }
+.report-document { flex: 1; min-width: 0; max-width: 860px; margin-inline: auto; }
+.report-sources { flex: 0 1 auto; min-width: 0; position: sticky; top: 0; }
+.report-sources:has(> button[aria-expanded="true"]) { flex-basis: 320px; max-width: 42%; }
+.report-sources__body { max-height: 70vh; overflow: auto; overflow-wrap: anywhere; padding: 12px; border: 1px solid var(--separator); border-radius: 8px; background: var(--bg-card-2); }
+@container (max-width: 650px) { .report-sources:has(> button[aria-expanded="true"]) { max-width: 48%; } }
+.report-document-layout { max-width: 1220px; margin-inline: auto; }
+.manual-panel .report-document { margin-inline: auto; }
+.report-sources .report-scope-summary__heading,
+.report-sources .report-scope-summary__heading > div { display: grid; gap: 6px; }
+.report-sources .report-scope-summary__hint { text-align: start; }
+.report-sources label { flex-wrap: wrap; }

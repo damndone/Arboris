@@ -254,3 +254,25 @@ def test_imputation_adapter_rejects_unimplemented_multiple_imputation_count() ->
                 "options": {"m": 5},
             }
         )
+
+
+@pytest.mark.parametrize("method", ["oversample", "smote", "undersample"])
+def test_real_resampling_preserves_positional_target_alignment(method: str) -> None:
+    pytest.importorskip("imblearn")
+    from workbench.agent.workflow_capability_adapters import _execute_resample
+    from workbench.prediction import build_sampler
+
+    frame = pd.DataFrame({"y": [0] * 24 + [1] * 8, "x": np.arange(32, dtype=float), "z": np.arange(32) % 5}, index=np.arange(32) * 3 + 100)
+    result = _execute_resample(frame, {
+        "operation_id": f"resample.{method}",
+        "column_bindings": {"outcome": "y", "features": ["x", "z"]},
+        "options": {"random_seed": 7},
+    })
+    expected_x, expected_y = build_sampler(method, model_type="prediction_ridge", random_seed=7).fit_resample(frame[["x", "z"]], frame["y"])
+    output = result.output_frame
+    assert output is not None
+    assert not output.isna().any().any()
+    np.testing.assert_array_equal(output[["x", "z"]].to_numpy(), expected_x.to_numpy())
+    np.testing.assert_array_equal(output["y"].to_numpy(), expected_y.to_numpy())
+    expected_count = 8 if method == "undersample" else 24
+    assert output["y"].value_counts().to_dict() == {0: expected_count, 1: expected_count}

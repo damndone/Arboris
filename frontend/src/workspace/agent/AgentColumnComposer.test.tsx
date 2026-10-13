@@ -16,6 +16,8 @@ const surface = {
   sessionStatus: "idle",
   setModel: vi.fn(),
   setPrompt: vi.fn(),
+  executionPolicy: "proposal_only",
+  setExecutionPolicy: vi.fn(),
 };
 
 vi.mock("../../workbench/agent/AgentSurfaceContext", () => ({ useAgentSurfaceOptional: () => surface }));
@@ -56,4 +58,12 @@ describe("AgentColumnComposer", () => {
     expect(screen.queryByRole("button", { name: "Voice input" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add context" })).not.toBeInTheDocument();
   });
+});
+
+test("lets the user require review before read-only calculations", () => {
+ render(<AgentColumnComposer/>);
+ const control = screen.getByRole("checkbox",{name:"Review before execution"});
+ expect(control).toBeChecked();
+ fireEvent.click(control);
+ expect(surface.setExecutionPolicy).toHaveBeenCalledWith("auto_read_only");
 });

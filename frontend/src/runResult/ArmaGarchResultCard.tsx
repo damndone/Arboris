@@ -1,4 +1,7 @@
 import { useMemo, useState } from "react";
+import {formatPValue} from "../format/numbers";
+
+export const pValueText = (value: unknown) => formatPValue(typeof value === "number" ? value : null);
 
 export type JsonObject = Record<string, unknown>;
 
@@ -145,8 +148,8 @@ export function ArmaGarchResultCard({ artifacts }: Props) {
       {tab === "Volatility Selection" && <CandidateTable candidates={volatilityCandidates} kind="variance" />}
 
       {tab === "Diagnostics" && <dl className="summary-list">
-        <div><dt>Normality p-value</dt><dd>{numberText(object(artifacts.diagnostics?.normality).p_value)}</dd></div>
-        <div><dt>ARCH-LM p-value</dt><dd>{numberText(object(artifacts.diagnostics?.arch_lm).p_value)}</dd></div>
+        <div><dt>Normality p-value</dt><dd>{pValueText(object(artifacts.diagnostics?.normality).p_value)}</dd></div>
+        <div><dt>ARCH-LM p-value</dt><dd>{pValueText(object(artifacts.diagnostics?.arch_lm).p_value)}</dd></div>
         <div><dt>Warnings</dt><dd>{Array.isArray(report.warnings) ? report.warnings.map(text).join(", ") || "None" : "None"}</dd></div>
       </dl>}
 
