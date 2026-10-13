@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject, type PointerEvent, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type ReactNode, type RefObject, type PointerEvent, type CSSProperties } from "react";
 import { AgentRailIcon, FoldRightIcon } from "./icons";
 import "./agentWindow.css";
 
@@ -20,7 +20,8 @@ export function AgentWindow({ mode, setMode, width, maxWidth, setWidth, shellRef
   const suppressClick = useRef(false);
   const bubbleRef = useRef<HTMLButtonElement>(null);
   const titleRef = useRef<HTMLButtonElement>(null);
-  useLayoutEffect(() => {
+  // A parent ref is attached after child layout effects; observe it after commit.
+  useEffect(() => {
     const el = shellRef.current;
     if (!el) return;
     const measure = () => {

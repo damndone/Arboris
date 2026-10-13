@@ -136,6 +136,31 @@ describe("WorkspaceShell", () => {
     expect(shell()).toHaveAttribute("data-agent", "folded");
   });
 
+  test("the bubble measures its parent after mount and follows later window resizing", () => {
+    const original = {width: window.innerWidth, height: window.innerHeight};
+    Object.defineProperty(window, "innerWidth", {configurable: true, value: 1512});
+    Object.defineProperty(window, "innerHeight", {configurable: true, value: 982});
+    try {
+      localStorage.setItem("workbench:agent-open", "false");
+      renderShell();
+      const bubble = screen.getByRole("button", {name: "Show the Agent"});
+      for (let i = 0; i < 100; i++) {
+        fireEvent.keyDown(bubble, {key: "ArrowRight"});
+        fireEvent.keyDown(bubble, {key: "ArrowDown"});
+      }
+      const panel = screen.getByRole("complementary", {name: "Agent"});
+      expect(panel).toHaveStyle({left: "1452px", top: "922px"});
+      Object.defineProperty(window, "innerWidth", {configurable: true, value: 1280});
+      Object.defineProperty(window, "innerHeight", {configurable: true, value: 800});
+      fireEvent(window, new Event("resize"));
+      expect(panel).toHaveStyle({left: "1220px", top: "740px"});
+      expect(panel).toHaveAttribute("data-mode", "bubble");
+    } finally {
+      Object.defineProperty(window, "innerWidth", {configurable: true, value: original.width});
+      Object.defineProperty(window, "innerHeight", {configurable: true, value: original.height});
+    }
+  });
+
   test("wide views borrow the wide stage in lineage first and give it back", () => {
     localStorage.setItem("workbench:layout:/p", "lineage");
     const { rerender } = renderShell("data");
