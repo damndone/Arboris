@@ -10,10 +10,10 @@ COMPLETED
 
 ## Metrics
 
-- Failure frequency: 5/44 (11.4%; 11.4 per 100 events)
-- Repeat rate: 0/5 (0.0%)
-- Recurrence rate: 0/5 (0.0%)
-- MTTR: median=0 ms (sample=3; unresolved=2)
+- Failure frequency: 6/46 (13.0%; 13.0 per 100 events)
+- Repeat rate: 0/6 (0.0%)
+- Recurrence rate: 0/6 (0.0%)
+- MTTR: median=0 ms (sample=4; unresolved=2)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
@@ -29,6 +29,7 @@ COMPLETED
 
 - #9 2026-10-08T22:18:48.255Z `backdrop_filter_contains_fixed_overlay`; cause_status: `known`; cause: The new top bar uses backdrop-filter; that makes it the containing block for position:fixed descendants, so the create-project dialog opened from the project menu was laid out inside the 48 px bar and clipped.; resolution: `resolved`; lesson: Overlays that must cover the window render through a portal; filters, transforms and backdrop-filters on an ancestor capture fixed positioning.
 - #10 2026-10-08T22:18:48.255Z `search_button_dead_on_home`; cause_status: `known`; cause: The search button dispatched a synthetic Cmd+K, and project home did not mount the search palette at all, so the button did nothing there.; resolution: `resolved`; lesson: Wire a control to an explicit event or API, and test it on every page it appears on.
+- #45 2026-10-13T19:18:49.000Z `user_required_controls_regressed_by_completion`; cause_status: `known`; cause: The completion commits removed the top-bar light/Auto/dark switch (74ac598f) and reverted the stage-open rule so the stage covered the map whenever nodes existed, both explicit user review requirements.; resolution: `resolved`; lesson: Treat recorded user review requirements as regression tests: each one gets an automated assertion when it is first met.
 
 ## All gaps
 
@@ -46,6 +47,7 @@ COMPLETED
 - `finish-transitions-before-measuring`: occurrences=1; cause_status: `known`; root cause: The contrast audit ran while the browser pane was hidden; CSS transitions do not advance there, so a theme switch left segmented controls at their light background and the audit reported 1.12 for selected items in dark.; solution: `resolved`
 - `portal-window-overlays`: occurrences=1; cause_status: `known`; root cause: The new top bar uses backdrop-filter; that makes it the containing block for position:fixed descendants, so the create-project dialog opened from the project menu was laid out inside the 48 px bar and clipped.; solution: `resolved`
 - `proposal-only-must-restrict-read-only-autorun`: occurrences=1; cause_status: `known`; root cause: Read-only auto-run policy ignores a turn that requests a reviewable proposal before execution.; solution: `open`
+- `user-review-requirements-as-tests`: occurrences=1; cause_status: `known`; root cause: The completion commits removed the top-bar light/Auto/dark switch (74ac598f) and reverted the stage-open rule so the stage covered the map whenever nodes existed, both explicit user review requirements.; solution: `resolved`
 - `warm-up-before-timing-dev-builds`: occurrences=1; cause_status: `known`; root cause: First open-time measurement put the new shell at 1.60x the classic one; it included Vite compiling the new modules on first request. Warm runs measured 1.00x and 0.93x.; solution: `open`
 
 ## Added tests
@@ -59,6 +61,7 @@ COMPLETED
 - `finish-transitions-before-measuring`: line experience occurrence(s)=1
 - `portal-window-overlays`: line experience occurrence(s)=1
 - `proposal-only-must-restrict-read-only-autorun`: line experience occurrence(s)=1
+- `user-review-requirements-as-tests`: line experience occurrence(s)=1
 - `warm-up-before-timing-dev-builds`: line experience occurrence(s)=1
 
 ## Future guidance
@@ -70,7 +73,9 @@ COMPLETED
 - Overlays that must cover the window render through a portal; filters, transforms and backdrop-filters on an ancestor capture fixed positioning.
 - Placing old pieces into new regions is not a redesign; each region needs content designed for its size (a tree for a 280px map, a result view for the stage) before the user sees it.
 - Read-only is an impact classification, not permission to override a requested review boundary. Enforce execution policy independently of model prose.
+- Treat recorded user review requirements as regression tests: each one gets an automated assertion when it is first met.
 - Wire a control to an explicit event or API, and test it on every page it appears on.
+- Words a person reads about an operation belong beside its declaration in the backend, with a drift test, so the UI never guesses from ids.
 
 ## Event index
 
@@ -118,3 +123,5 @@ COMPLETED
 - #42: `a3495f22-c386-48ef-b043-5c9062587e55` | 2026-10-13T08:12:30.713Z | STATE_CHANGE/implementation_acceptance_complete | incident=`ed4d7f83-0f7b-4c13-b11d-c36fea6005d8` | lesson_key=`evidence-reuse-final-acceptance` | event_sha256=`6261adaa59556c2dbfeca0e010ceaa71331d253e786438de4135984134bd6dd9`
 - #43: `39625205-c924-4667-831b-d421e6f0409d` | 2026-10-13T08:17:37.170Z | STATE_CHANGE/reopen_agent_parent_bounds | incident=`c8ec96f8-126d-468d-bea3-0e2338145c12` | lesson_key=`parent-ref-layout-effect-order` | event_sha256=`210cd8e1583e8e0922191277450db1d9f32d46571679a260528dfe558df76f33`
 - #44: `b92f5729-ce02-4d61-a473-77cc538e5058` | 2026-10-13T08:19:56.962Z | STATE_CHANGE/agent_parent_bounds_resolved | incident=`c8ec96f8-126d-468d-bea3-0e2338145c12` | lesson_key=`parent-ref-layout-effect-order` | event_sha256=`88c925ffff5eb4ba7cfc5ee851021fef13fcc4c12360ee4669f6da1d4a26fbdd`
+- #45: `3d033d84-5307-460d-9622-85c9ce09e5ef` | 2026-10-13T19:18:49.000Z | ERROR/user_required_controls_regressed_by_completion | incident=`bf623c9c-4c83-4296-8c07-b7e27d5965a2` | lesson_key=`user-review-requirements-as-tests` | event_sha256=`1248249820ea9e9e2e29228c3486ac2b5338ee6fbb3209a35c2f6321724309fe`
+- #46: `960b3611-ca38-4e24-9207-5828d8196072` | 2026-10-13T19:18:49.000Z | REVIEW/post_completion_review_ux_structure_performance | incident=`bf623c9c-4c83-4296-8c07-b7e27d5965a2` | lesson_key=`operation-words-at-the-declaration` | event_sha256=`84041b49b45838b06a2303d781b4dfd79e0ffc70aa4468e88d320c640d30bf75`
