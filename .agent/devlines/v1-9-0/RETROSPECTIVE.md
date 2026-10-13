@@ -6,24 +6,24 @@
 
 ## Final status
 
-CONTEXT_RESCOPED
+COMPLETED
 
 ## Metrics
 
-- Failure frequency: 4/27 (14.8%; 14.8 per 100 events)
-- Repeat rate: 0/4 (0.0%)
-- Recurrence rate: 0/4 (0.0%)
-- MTTR: median=0 ms (sample=2; unresolved=2)
+- Failure frequency: 5/44 (11.4%; 11.4 per 100 events)
+- Repeat rate: 0/5 (0.0%)
+- Recurrence rate: 0/5 (0.0%)
+- MTTR: median=0 ms (sample=3; unresolved=2)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: 0/1 (0.0%)
+- Gate waste rate: 0/2 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0; coverage=0/1)
 
 ## All failures
 
-- None recorded.
+- #30 2026-10-13T06:10:11.126Z `agent_proposal_only_autorun`; cause_status: `known`; cause: Read-only auto-run policy ignores a turn that requests a reviewable proposal before execution.; resolution: `open`; lesson: Read-only is an impact classification, not permission to override a requested review boundary. Enforce execution policy independently of model prose.
 
 ## All errors
 
@@ -45,6 +45,7 @@ CONTEXT_RESCOPED
 - `explicit-open-events`: occurrences=1; cause_status: `known`; root cause: The search button dispatched a synthetic Cmd+K, and project home did not mount the search palette at all, so the button did nothing there.; solution: `resolved`
 - `finish-transitions-before-measuring`: occurrences=1; cause_status: `known`; root cause: The contrast audit ran while the browser pane was hidden; CSS transitions do not advance there, so a theme switch left segmented controls at their light background and the audit reported 1.12 for selected items in dark.; solution: `resolved`
 - `portal-window-overlays`: occurrences=1; cause_status: `known`; root cause: The new top bar uses backdrop-filter; that makes it the containing block for position:fixed descendants, so the create-project dialog opened from the project menu was laid out inside the 48 px bar and clipped.; solution: `resolved`
+- `proposal-only-must-restrict-read-only-autorun`: occurrences=1; cause_status: `known`; root cause: Read-only auto-run policy ignores a turn that requests a reviewable proposal before execution.; solution: `open`
 - `warm-up-before-timing-dev-builds`: occurrences=1; cause_status: `known`; root cause: First open-time measurement put the new shell at 1.60x the classic one; it included Vite compiling the new modules on first request. Warm runs measured 1.00x and 0.93x.; solution: `open`
 
 ## Added tests
@@ -57,6 +58,7 @@ CONTEXT_RESCOPED
 - `explicit-open-events`: line experience occurrence(s)=1
 - `finish-transitions-before-measuring`: line experience occurrence(s)=1
 - `portal-window-overlays`: line experience occurrence(s)=1
+- `proposal-only-must-restrict-read-only-autorun`: line experience occurrence(s)=1
 - `warm-up-before-timing-dev-builds`: line experience occurrence(s)=1
 
 ## Future guidance
@@ -67,6 +69,7 @@ CONTEXT_RESCOPED
 - Keep the controls users rely on when moving them; removing one is a regression even if it moved to Settings.
 - Overlays that must cover the window render through a portal; filters, transforms and backdrop-filters on an ancestor capture fixed positioning.
 - Placing old pieces into new regions is not a redesign; each region needs content designed for its size (a tree for a 280px map, a result view for the stage) before the user sees it.
+- Read-only is an impact classification, not permission to override a requested review boundary. Enforce execution policy independently of model prose.
 - Wire a control to an explicit event or API, and test it on every page it appears on.
 
 ## Event index
@@ -98,3 +101,20 @@ CONTEXT_RESCOPED
 - #25: `b6622d22-98cd-46f4-b002-e63e60c071da` | 2026-10-11T12:07:19.208Z | STATE_CHANGE/context_rescope_required | incident=`41dc23b1-8c2f-4be3-b526-0293d6c15608` | lesson_key=`context-pack-rescope` | event_sha256=`4564c09245eee1b7720aafb21ef513804d99877f2fbedb770b3901c2241d7eb7`
 - #26: `04a48e75-9973-4d94-af07-c9866b60af0c` | 2026-10-11T12:07:19.219Z | STATE_CHANGE/context_rescoped | incident=`c93d4b30-5799-49f3-8c58-f92d38950f5a` | lesson_key=`context-pack-rescope` | event_sha256=`ce468a69bc5267284045bd502b1722bb27017e0f60ff9a3fb96460a81a20e802`
 - #27: `8333e261-e8b1-438a-b6d4-5973055a5eb8` | 2026-10-11T12:12:07.146Z | GATE/integrated_gate_targeted_corrections | incident=`3fd8ded7-7b68-4b28-8baf-a4c387495e2c` | lesson_key=`integrated-gate-declaration-projection` | event_sha256=`52e7c452194202849419db721e31fafbe21c940d2fb725e806d2d728f9c81a5e`
+- #28: `629bc2db-08f2-4b96-b66c-a0a5087455b7` | 2026-10-13T05:38:10.828Z | STATE_CHANGE/context_rescope_required | incident=`e8a13286-7242-4ee4-b809-130a9133691c` | lesson_key=`context-pack-rescope` | event_sha256=`5ecba0f4aacdebe30b7b28602db84ade64d62a21eaec6d397c480f5193b26a3d`
+- #29: `76c4b6b9-d2b8-4425-a7a2-ce8c484022af` | 2026-10-13T05:38:10.839Z | STATE_CHANGE/context_rescoped | incident=`5068d25d-7f3b-49c2-916a-6e5ed1e21b11` | lesson_key=`context-pack-rescope` | event_sha256=`47687ac422a8258b7e6057f382914f6c9a2e5689e24372b76aea3cc2b8fc1553`
+- #30: `00c6adbb-0823-4499-9ad3-246ccc92db90` | 2026-10-13T06:10:11.126Z | FAILURE/agent_proposal_only_autorun | incident=`f8d806cd-0181-437f-8680-2fcd26db6d7c` | lesson_key=`proposal-only-must-restrict-read-only-autorun` | event_sha256=`d611b578381089b50d8bb311afb42ba6a3f3006ef6bb9e2160ec76e6846a918e`
+- #31: `fa1f0270-b8f7-4ab2-8b68-52aa20771bc3` | 2026-10-13T06:11:23.805Z | STATE_CHANGE/context_rescope_required | incident=`fb0d9f66-5c2c-4fb3-81a9-820ea3cc4778` | lesson_key=`context-pack-rescope` | event_sha256=`da1bc67d1efb8def6c48608eb25ebdb602b5f501d9ca801ff81f99055b5265ea`
+- #32: `07926215-5f29-41b1-adaf-6cd47f0c5251` | 2026-10-13T06:11:23.817Z | STATE_CHANGE/context_rescoped | incident=`01773c67-4420-4c2e-a6dd-805abed38a2f` | lesson_key=`context-pack-rescope` | event_sha256=`2b21a4d86eeb7c38452f118c270dc466d04aa1837d51330ff58f36a61d1bd3b7`
+- #33: `9a544e5f-999e-4db1-b890-22b09c827e1d` | 2026-10-13T06:26:18.552Z | STATE_CHANGE/context_rescope_required | incident=`a0fa79e7-3ee1-425c-ab56-84a44bacb382` | lesson_key=`context-pack-rescope` | event_sha256=`81d802d488b3a10c95a920abba94c7f71f489835d679b2daed48be789470c43b`
+- #34: `6dabb5c7-e5e3-4b57-9a7d-320347b1f079` | 2026-10-13T06:26:18.566Z | STATE_CHANGE/context_rescoped | incident=`199c78c1-ec88-4c1a-b9a1-495556923456` | lesson_key=`context-pack-rescope` | event_sha256=`d7d4b384341971a9f20d10ff34a7ebc85f2d1b813a503371a2135ea3dd9cc4ce`
+- #35: `b0776380-0f06-4294-a0fe-1caf9fe53e9c` | 2026-10-13T06:34:10.663Z | STATE_CHANGE/agent_proposal_only_enforced | incident=`f8d806cd-0181-437f-8680-2fcd26db6d7c` | lesson_key=`proposal-only-must-restrict-read-only-autorun` | event_sha256=`36a9d99037aaf47e0152b4cb53e967e5130504ba8de3ac27a602d928800673d2`
+- #36: `912a3f9e-7030-4ebb-87f6-833a5c7bdf0f` | 2026-10-13T06:34:10.663Z | STATE_CHANGE/resampling_target_alignment | incident=`b66789ba-aa93-41a0-a953-4248ec9d0faf` | lesson_key=`resampling-output-positional-alignment` | event_sha256=`e35e28b8949cf163f3472d63dafc5966b796c5164cc31a157f852913b3aa10b9`
+- #37: `20c5487c-ae52-4c7a-b9d0-fc6e6ed51d43` | 2026-10-13T07:00:12.292Z | STATE_CHANGE/context_rescope_required | incident=`aa8c1304-42fb-47e8-a6a3-22af81252d1d` | lesson_key=`context-pack-rescope` | event_sha256=`185341ad0702900051242e5680804c10f6a8dec75372551ef8c021adc1a50b0e`
+- #38: `a69afa8c-2160-4374-8188-06ae10598bec` | 2026-10-13T07:00:12.307Z | STATE_CHANGE/context_rescoped | incident=`e3fc96c0-5d14-46ac-96b6-08a56ac3e96b` | lesson_key=`context-pack-rescope` | event_sha256=`2f0623968fc8f75dbd53049692b5007ff62eda19f7153599c9dbaa28ef0a2bda`
+- #39: `0999301d-bf8a-42c5-b460-9e55d735bd10` | 2026-10-13T07:30:15.196Z | STATE_CHANGE/integrated_acceptance_candidate | incident=`17085d08-e5a3-49f5-88b3-c52070ea4924` | lesson_key=`integrated-evidence-must-preserve-boundaries` | event_sha256=`39ff1a4826e5ca394583c3150626756db4a848f82beeafd9989832ba6d73ca61`
+- #40: `d1287bfe-0a89-4423-b202-1c32bcd68420` | 2026-10-13T08:05:05.950Z | GATE/integrated_full_gate_failed | incident=`266fc8e8-2def-46a4-a97e-cf6baf1d337b` | lesson_key=`workspace-default-migration-test-contract` | event_sha256=`26edf7df51100bce9e064d597b4adbe52fe8b136baa3051df17f106d9357faaf`
+- #41: `b9427ebd-5e3f-4875-980b-6c51aa1c2545` | 2026-10-13T08:12:05.362Z | STATE_CHANGE/targeted_gate_failure_closure | incident=`266fc8e8-2def-46a4-a97e-cf6baf1d337b` | lesson_key=`workspace-default-migration-test-contract` | event_sha256=`fe921e4f0fbf8ba7b8a7056f478c905d1fd48438e1f92431794942f48d500700`
+- #42: `a3495f22-c386-48ef-b043-5c9062587e55` | 2026-10-13T08:12:30.713Z | STATE_CHANGE/implementation_acceptance_complete | incident=`ed4d7f83-0f7b-4c13-b11d-c36fea6005d8` | lesson_key=`evidence-reuse-final-acceptance` | event_sha256=`6261adaa59556c2dbfeca0e010ceaa71331d253e786438de4135984134bd6dd9`
+- #43: `39625205-c924-4667-831b-d421e6f0409d` | 2026-10-13T08:17:37.170Z | STATE_CHANGE/reopen_agent_parent_bounds | incident=`c8ec96f8-126d-468d-bea3-0e2338145c12` | lesson_key=`parent-ref-layout-effect-order` | event_sha256=`210cd8e1583e8e0922191277450db1d9f32d46571679a260528dfe558df76f33`
+- #44: `b92f5729-ce02-4d61-a473-77cc538e5058` | 2026-10-13T08:19:56.962Z | STATE_CHANGE/agent_parent_bounds_resolved | incident=`c8ec96f8-126d-468d-bea3-0e2338145c12` | lesson_key=`parent-ref-layout-effect-order` | event_sha256=`88c925ffff5eb4ba7cfc5ee851021fef13fcc4c12360ee4669f6da1d4a26fbdd`
