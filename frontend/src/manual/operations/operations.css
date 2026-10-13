@@ -342,7 +342,7 @@
 
 .op-step__what h3 {
   margin: 0;
-  font-size: var(--text-key);
+  font-size: var(--text-section);
   font-weight: 600;
 }
 
@@ -434,7 +434,7 @@
 
 .op-outcome__status {
   margin: 0;
-  font-size: var(--text-key);
+  font-size: var(--text-section);
   font-weight: 600;
 }
 

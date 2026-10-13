@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { fetchDatasetPage, type DatasetPage, type DatasetVariable } from "./dataViewApi";
 import { matchesMissingCode, valueLabelFor } from "./metadataText";
+import { ChevronIcon } from "../workspace/icons";
 
 const PAGE_SIZE = 100;
 
@@ -70,58 +71,71 @@ export function DataGrid({
     });
   }
 
-  if (error) return <div role="alert" style={{ color: "var(--red)", fontSize: 12 }}>{error}</div>;
-  if (!page) return <div style={{ color: "var(--label-secondary)", fontSize: 12 }}>Loading rows…</div>;
+  if (error) return <p role="alert" className="dv-alert">{error}</p>;
+  if (!page) return <p className="dv-note">Loading rows…</p>;
 
   const last = Math.min(page.offset + page.rows.length, page.total_rows);
+  // Value labels name coded values (1 → "Male"). The switch is offered only
+  // when some variable here has them; otherwise it would do nothing.
+  const labelled = variables.filter((variable) => Object.keys(variable.value_labels ?? {}).length > 0);
   return (
-    <div data-testid="data-grid">
-      <div style={{ display: "flex", gap: 12, alignItems: "center", fontSize: 12, marginBottom: 6 }}>
-        <label>
-          <input
-            type="checkbox"
-            checked={showLabels}
-            onChange={(event) => setShowLabels(event.target.checked)}
-          />{" "}
-          Show value labels
-        </label>
-        <span style={{ color: "var(--label-secondary)" }}>
-          Rows {page.total_rows === 0 ? 0 : page.offset + 1}–{last} of {page.total_rows}
-          {sort ? ` · sorted by ${sort.column}${sort.descending ? " (desc)" : ""} for viewing only` : ""}
+    <div data-testid="data-grid" className="dv-grid">
+      <div className="dv-grid-bar">
+        {labelled.length > 0 && (
+          <button
+            type="button"
+            role="switch"
+            className="dv-switch"
+            aria-checked={showLabels}
+            aria-label="Show value labels"
+            title={`Show the label of each coded value instead of the code, for ${labelled.map((variable) => variable.name).join(", ")}`}
+            onClick={() => setShowLabels(!showLabels)}
+          >
+            <span className="dv-switch__track" aria-hidden="true" />
+            Value labels
+          </button>
+        )}
+        <span className="dv-spacer" />
+        <span>
+          {sort ? `Sorted by ${sort.column}${sort.descending ? " (descending)" : ""} for viewing · ` : ""}
+          Rows {page.total_rows === 0 ? 0 : page.offset + 1}–{last} of {page.total_rows.toLocaleString("en")}
         </span>
-        <button
-          type="button"
-          disabled={page.offset === 0}
-          onClick={() => setOffset(Math.max(0, page.offset - PAGE_SIZE))}
-        >
-          Previous
-        </button>
-        <button
-          type="button"
-          disabled={last >= page.total_rows}
-          onClick={() => setOffset(page.offset + PAGE_SIZE)}
-        >
-          Next
-        </button>
+        <span className="dv-pager">
+          <button
+            type="button"
+            className="dv-pager__step"
+            aria-label="Previous"
+            title="Previous rows"
+            disabled={page.offset === 0}
+            onClick={() => setOffset(Math.max(0, page.offset - PAGE_SIZE))}
+          >
+            <ChevronIcon direction="left" />
+          </button>
+          <button
+            type="button"
+            className="dv-pager__step"
+            aria-label="Next"
+            title="Next rows"
+            disabled={last >= page.total_rows}
+            onClick={() => setOffset(page.offset + PAGE_SIZE)}
+          >
+            <ChevronIcon direction="right" />
+          </button>
+        </span>
       </div>
-      <div className="wb-result-table-scroll" tabIndex={0} aria-label="Data rows" style={{ maxHeight: "60vh", overflowY: "auto" }}>
-        <table className="wb-result-table" style={{ borderCollapse: "collapse", fontSize: 12 }}>
+      <div className="dv-table-wrap" tabIndex={0} aria-label="Data rows">
+        <table className="dv-table">
           <thead>
-            <tr style={{ textAlign: "left", color: "var(--label-secondary)" }}>
-              <th style={{ padding: "2px 8px" }}>#</th>
+            <tr>
+              <th className="dv-table__n" scope="col">#</th>
               {page.columns.map((column) => {
                 const variable = byName.get(column);
-                const marker = sort?.column === column ? (sort.descending ? " ▼" : " ▲") : "";
+                const sorted = sort?.column === column;
                 return (
-                  <th key={column} style={{ padding: "2px 8px", whiteSpace: "nowrap" }}>
-                    <button
-                      type="button"
-                      onClick={() => toggleSort(column)}
-                      title={variable?.variable_label ?? column}
-                      style={{ background: "none", border: "none", padding: 0, font: "inherit", color: "inherit", cursor: "pointer" }}
-                    >
+                  <th key={column} scope="col" aria-sort={sorted ? (sort.descending ? "descending" : "ascending") : undefined}>
+                    <button type="button" className="dv-table__sort" onClick={() => toggleSort(column)} title={variable?.variable_label || `Sort by ${column}`}>
                       {column}
-                      {marker}
+                      {sorted && <span aria-hidden="true">{sort.descending ? "↓" : "↑"}</span>}
                     </button>
                   </th>
                 );
@@ -130,8 +144,8 @@ export function DataGrid({
           </thead>
           <tbody>
             {page.rows.map((row, index) => (
-              <tr key={page.row_numbers[index]} style={{ borderTop: "1px solid var(--separator)" }}>
-                <td style={{ padding: "2px 8px", color: "var(--label-tertiary)" }}>{page.row_numbers[index]}</td>
+              <tr key={page.row_numbers[index]}>
+                <td className="dv-table__n">{page.row_numbers[index]}</td>
                 {page.columns.map((column) => {
                   const variable = byName.get(column);
                   const value = row[column];
@@ -140,14 +154,9 @@ export function DataGrid({
                   return (
                     <td
                       key={column}
+                      data-numeric={(typeof value === "number" && label === undefined) || undefined}
                       data-declared-missing={declaredMissing || undefined}
                       title={declaredMissing ? "Declared missing code" : typeof value === "number" && !Number.isInteger(value) ? String(value) : undefined}
-                      style={{
-                        padding: "2px 8px",
-                        whiteSpace: "nowrap",
-                        color: declaredMissing ? "var(--label-tertiary)" : undefined,
-                        fontStyle: declaredMissing ? "italic" : undefined,
-                      }}
                     >
                       {label ?? display(value)}
                     </td>

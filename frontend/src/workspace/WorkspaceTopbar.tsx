@@ -57,23 +57,26 @@ export function WorkspaceTopbar({
   return (
     <div className="ws-topbar__row" data-testid="workspace-topbar">
       <div className="ws-topbar__start">
-        {controls?.mapFoldable && (
-          <button
-            type="button"
-            className="ws-icon-button"
-            aria-label={controls.mapHidden ? "Show the map" : "Hide the map"}
-            aria-pressed={!controls.mapHidden}
-            onClick={controls.toggleMap}
-          >
-            <SidebarIcon />
-          </button>
-        )}
         <span className="ws-topbar__brand ws-topbar__brand--static">
           <BrandIcon />
           <span>Arboris</span>
         </span>
         <span className="ws-topbar__rule" aria-hidden="true" />
         <ProjectSwitcher projectRoot={projectRoot} />
+        {/* After the project, so the logo and project never move when the
+            map toggle comes and goes (user review 3). */}
+        {controls?.mapFoldable && (
+          <button
+            type="button"
+            className="ws-icon-button"
+            aria-label={controls.mapHidden ? "Show the map" : "Hide the map"}
+            aria-pressed={!controls.mapHidden}
+            title={controls.mapHidden ? "Show the map of steps" : "Hide the map of steps"}
+            onClick={controls.toggleMap}
+          >
+            <SidebarIcon />
+          </button>
+        )}
       </div>
 
       <div className="ws-segmented ws-topbar__views" role="tablist" aria-label="View">

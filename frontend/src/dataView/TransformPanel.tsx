@@ -10,17 +10,18 @@ import {
 } from "../lineage/dataOperations";
 import type { DatasetVariable } from "./dataViewApi";
 import { parseRecodeRules } from "./recodeRules";
+import { ToolSheet } from "./ToolSheet";
 
 type Operation = "filter" | "keep" | "recode" | "compute" | "rename" | "dedupe" | "fill";
 
-const OPERATIONS: { id: Operation; label: string }[] = [
-  { id: "filter", label: "Select rows" },
-  { id: "keep", label: "Keep variables" },
-  { id: "recode", label: "Recode into new variable" },
-  { id: "compute", label: "Compute new variable" },
-  { id: "rename", label: "Rename variable" },
-  { id: "dedupe", label: "Remove duplicate rows" },
-  { id: "fill", label: "Fill missing values" },
+const OPERATIONS: { id: Operation; label: string; hint: string }[] = [
+  { id: "filter", label: "Select rows", hint: "Keep the rows where every condition holds." },
+  { id: "keep", label: "Keep variables", hint: "Keep only the variables you tick." },
+  { id: "recode", label: "Recode into new variable", hint: "Map values and ranges to new codes, one rule per line; the first match wins." },
+  { id: "compute", label: "Compute new variable", hint: "A sum, difference, product, ratio or natural log of numeric variables." },
+  { id: "rename", label: "Rename variable", hint: "Give one variable a new name." },
+  { id: "dedupe", label: "Remove duplicate rows", hint: "Rows equal on the ticked variables count as duplicates; the first is kept." },
+  { id: "fill", label: "Fill missing values", hint: "Replace missing values of one variable, or drop those rows." },
 ];
 
 const FILTER_OPS = [
@@ -56,6 +57,7 @@ export function TransformPanel({
   artifactId,
   variables,
   onCreated,
+  onClose,
 }: {
   projectRoot: string;
   runId: string;
@@ -63,6 +65,7 @@ export function TransformPanel({
   artifactId: string;
   variables: DatasetVariable[];
   onCreated: (childNodeId: string) => void;
+  onClose?: () => void;
 }) {
   const names = variables.map((variable) => variable.name);
   const numeric = new Set(variables.filter((variable) => variable.type === "numeric").map((variable) => variable.name));
@@ -199,114 +202,165 @@ export function TransformPanel({
       {options.map((name) => <option key={name} value={name}>{name}</option>)}
     </select>
   );
+  const updateCondition = (index: number, patch: Partial<Condition>) => {
+    setConditions((all) => all.map((item, i) => (i === index ? { ...item, ...patch } : item)));
+    reset();
+  };
+  const numericNames = names.filter((name) => numeric.has(name));
+  const current = OPERATIONS.find((item) => item.id === operation)!;
 
   return (
-    <section data-testid="transform-panel" style={{ fontSize: 12, border: "1px solid var(--separator)", padding: 8, marginBottom: 8 }}>
-      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6, flexWrap: "wrap" }}>
-        <strong>Transform</strong>
-        <select aria-label="Operation" value={operation} onChange={(event) => { setOperation(event.target.value as Operation); reset(); }}>
-          {OPERATIONS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-        </select>
-        <span style={{ color: "var(--label-secondary)" }}>creates a new dataset; this one is not changed</span>
+    <ToolSheet
+      title="Transform"
+      description="Creates a new dataset from this one; this dataset is not changed."
+      onClose={onClose}
+      testId="transform-panel"
+    >
+      <div className="dv-chips" role="radiogroup" aria-label="Operation">
+        {OPERATIONS.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            role="radio"
+            className="dv-chip"
+            aria-checked={operation === item.id}
+            onClick={() => { setOperation(item.id); reset(); }}
+          >
+            {item.label}
+          </button>
+        ))}
       </div>
+      <p className="dv-note">{current.hint}</p>
 
       {operation === "filter" && (
-        <div>
+        <div className="dv-sheet__section">
           {conditions.map((condition, index) => (
-            <div key={index} style={{ display: "flex", gap: 6, marginBottom: 4 }}>
-              {select(`Condition ${index + 1} variable`, condition.column, (value) => setConditions((all) => all.map((item, i) => (i === index ? { ...item, column: value } : item))))}
-              <select aria-label={`Condition ${index + 1} operator`} value={condition.op} onChange={(event) => { setConditions((all) => all.map((item, i) => (i === index ? { ...item, op: event.target.value } : item))); reset(); }}>
+            <div key={index} className="dv-row">
+              {select(`Condition ${index + 1} variable`, condition.column, (value) => updateCondition(index, { column: value }))}
+              <select aria-label={`Condition ${index + 1} operator`} value={condition.op} onChange={(event) => updateCondition(index, { op: event.target.value })}>
                 {FILTER_OPS.map(([id, text]) => <option key={id} value={id}>{text}</option>)}
               </select>
               {condition.op !== "is_missing" && condition.op !== "not_missing" && (
-                <input aria-label={`Condition ${index + 1} value`} value={condition.value} size={8} onChange={(event) => { setConditions((all) => all.map((item, i) => (i === index ? { ...item, value: event.target.value } : item))); reset(); }} />
+                <input aria-label={`Condition ${index + 1} value`} placeholder="value" value={condition.value} size={10} onChange={(event) => updateCondition(index, { value: event.target.value })} />
               )}
               {condition.op === "between" && (
-                <input aria-label={`Condition ${index + 1} upper value`} value={condition.high} size={8} onChange={(event) => { setConditions((all) => all.map((item, i) => (i === index ? { ...item, high: event.target.value } : item))); reset(); }} />
+                <input aria-label={`Condition ${index + 1} upper value`} placeholder="and" value={condition.high} size={10} onChange={(event) => updateCondition(index, { high: event.target.value })} />
               )}
               {conditions.length > 1 && (
-                <button type="button" onClick={() => { setConditions((all) => all.filter((_, i) => i !== index)); reset(); }}>Remove</button>
+                <button type="button" className="dv-link" onClick={() => { setConditions((all) => all.filter((_, i) => i !== index)); reset(); }}>Remove</button>
               )}
             </div>
           ))}
-          <button type="button" onClick={() => { setConditions((all) => [...all, { column: first, op: "eq", value: "", high: "" }]); reset(); }}>
-            Add condition (all must hold)
-          </button>
+          <div>
+            <button type="button" className="dv-link" onClick={() => { setConditions((all) => [...all, { column: first, op: "eq", value: "", high: "" }]); reset(); }}>
+              + Add a condition
+            </button>
+          </div>
         </div>
       )}
 
       {(operation === "keep" || operation === "dedupe") && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-          <span>{operation === "keep" ? "Keep:" : "Duplicates judged on:"}</span>
+        <div className="dv-chips" role="group" aria-label={operation === "keep" ? "Variables to keep" : "Variables that define a duplicate"}>
           {names.map((name) => (
-            <label key={name}>
-              <input type="checkbox" checked={keep.includes(name)} onChange={(event) => { setKeep((all) => (event.target.checked ? [...all, name] : all.filter((item) => item !== name))); reset(); }} /> {name}
+            <label key={name} className="dv-chip">
+              <input type="checkbox" checked={keep.includes(name)} onChange={(event) => { setKeep((all) => (event.target.checked ? [...all, name] : all.filter((item) => item !== name))); reset(); }} />
+              {name}
             </label>
           ))}
         </div>
       )}
 
       {(operation === "recode" || operation === "rename" || operation === "fill" || operation === "compute") && (
-        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-          {select("Variable", column, setColumn, operation === "compute" ? names.filter((name) => numeric.has(name)) : names)}
+        <div className="dv-row">
+          <label className="dv-field">
+            {operation === "compute" ? "First variable" : "Variable"}
+            {select("Variable", column, setColumn, operation === "compute" ? numericNames : names)}
+          </label>
           {operation === "compute" && (
             <>
-              <select aria-label="Compute operation" value={computeOp} onChange={(event) => { setComputeOp(event.target.value); reset(); }}>
-                <option value="add">+</option>
-                <option value="subtract">−</option>
-                <option value="multiply">×</option>
-                <option value="ratio">÷</option>
-                <option value="log">ln( )</option>
-              </select>
-              {computeOp !== "log" && select("Second variable", second, setSecond, names.filter((name) => numeric.has(name)))}
+              <label className="dv-field">
+                Operation
+                <select aria-label="Compute operation" value={computeOp} onChange={(event) => { setComputeOp(event.target.value); reset(); }}>
+                  <option value="add">+ add</option>
+                  <option value="subtract">− subtract</option>
+                  <option value="multiply">× multiply</option>
+                  <option value="ratio">÷ divide</option>
+                  <option value="log">ln natural log</option>
+                </select>
+              </label>
+              {computeOp !== "log" && (
+                <label className="dv-field">
+                  Second variable
+                  {select("Second variable", second, setSecond, numericNames)}
+                </label>
+              )}
             </>
           )}
           {operation === "fill" && (
             <>
-              <select aria-label="Fill strategy" value={fillStrategy} onChange={(event) => { setFillStrategy(event.target.value); reset(); }}>
-                {["mean", "median", "mode", "constant", "drop_rows"].map((item) => <option key={item} value={item}>{item.replace("_", " ")}</option>)}
-              </select>
-              {fillStrategy === "constant" && <input aria-label="Fill value" value={fillValue} onChange={(event) => { setFillValue(event.target.value); reset(); }} size={8} />}
+              <label className="dv-field">
+                Replace with
+                <select aria-label="Fill strategy" value={fillStrategy} onChange={(event) => { setFillStrategy(event.target.value); reset(); }}>
+                  <option value="mean">the mean</option>
+                  <option value="median">the median</option>
+                  <option value="mode">the most common value</option>
+                  <option value="constant">a value</option>
+                  <option value="drop_rows">drop those rows</option>
+                </select>
+              </label>
+              {fillStrategy === "constant" && (
+                <label className="dv-field">
+                  Value
+                  <input aria-label="Fill value" value={fillValue} onChange={(event) => { setFillValue(event.target.value); reset(); }} size={10} />
+                </label>
+              )}
             </>
           )}
           {operation !== "fill" && (
-            <label>
-              {operation === "rename" ? "New name" : "New variable"}{" "}
-              <input aria-label={operation === "rename" ? "New name" : "New variable"} value={output} onChange={(event) => { setOutput(event.target.value); reset(); }} size={14} />
+            <label className="dv-field">
+              {operation === "rename" ? "New name" : "New variable"}
+              <input aria-label={operation === "rename" ? "New name" : "New variable"} value={output} onChange={(event) => { setOutput(event.target.value); reset(); }} size={16} />
             </label>
           )}
         </div>
       )}
       {operation === "recode" && (
-        <textarea
-          aria-label="Recode rules"
-          value={rulesText}
-          onChange={(event) => { setRulesText(event.target.value); reset(); }}
-          placeholder={"18..29 = 1\n30..49 = 2\n50..120 = 3\nelse = missing"}
-          rows={4}
-          style={{ display: "block", marginTop: 6, width: 260, fontFamily: "var(--font-mono, monospace)" }}
-        />
+        <label className="dv-field">
+          Rules
+          <textarea
+            aria-label="Recode rules"
+            value={rulesText}
+            onChange={(event) => { setRulesText(event.target.value); reset(); }}
+            placeholder={"18..29 = 1\n30..49 = 2\n50..120 = 3\nelse = missing"}
+            rows={4}
+            cols={32}
+          />
+        </label>
       )}
 
-      <div style={{ marginTop: 6, display: "flex", gap: 6 }}>
-        <button type="button" disabled={busy} onClick={() => void runPreview()}>{busy && !preview ? "Previewing…" : "Preview"}</button>
+      <div className="dv-actions">
+        <button type="button" className="dv-button" disabled={busy} onClick={() => void runPreview()}>
+          {busy && !preview ? "Previewing…" : "Preview"}
+        </button>
         {preview && !preview.blocked && (
-          <button type="button" disabled={busy} onClick={() => void confirm()}>{busy ? "Applying…" : "Apply as new dataset"}</button>
+          <button type="button" className="dv-button dv-button--primary" disabled={busy} onClick={() => void confirm()}>
+            {busy ? "Applying…" : "Apply as new dataset"}
+          </button>
         )}
       </div>
       {preview && (
-        <div data-testid="transform-preview" style={{ marginTop: 6, color: "var(--label-secondary)" }}>
+        <div data-testid="transform-preview">
           {preview.blocked ? (
-            <span role="alert" style={{ color: "var(--red)" }}>Blocked: {preview.blocked}</span>
+            <p role="alert" className="dv-alert">Blocked: {preview.blocked}</p>
           ) : (
-            <>
-              Rows {preview.rowsBefore} → {preview.rowsAfter} · {preview.outputColumns.length} variables
+            <p className="dv-result">
+              Rows {preview.rowsBefore.toLocaleString("en")} → {preview.rowsAfter.toLocaleString("en")} · {preview.outputColumns.length} variables
               {preview.invalidates.length > 0 && ` · results built on this dataset (${preview.invalidates.join(", ")}) stay tied to the original`}
-            </>
+            </p>
           )}
         </div>
       )}
-      {error && <div role="alert" style={{ color: "var(--red)", marginTop: 6 }}>{error}</div>}
-    </section>
+      {error && <p role="alert" className="dv-alert">{error}</p>}
+    </ToolSheet>
   );
 }

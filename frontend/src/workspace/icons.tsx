@@ -110,9 +110,16 @@ export const FoldRightIcon = () => (
   </Icon>
 );
 
-export const ChevronIcon = ({ direction }: { direction: "up" | "down" }) => (
+const CHEVRON = {
+  up: "M3.5 10 8 5.5l4.5 4.5",
+  down: "M3.5 6 8 10.5 12.5 6",
+  left: "M10 3.5 5.5 8l4.5 4.5",
+  right: "M6 3.5 10.5 8 6 12.5",
+};
+
+export const ChevronIcon = ({ direction }: { direction: keyof typeof CHEVRON }) => (
   <Icon size={14}>
-    <path d={direction === "up" ? "M3.5 10 8 5.5l4.5 4.5" : "M3.5 6 8 10.5 12.5 6"} />
+    <path d={CHEVRON[direction]} />
   </Icon>
 );
 
@@ -159,4 +166,35 @@ export const GripIcon = () => (
     <circle cx="3" cy="12" r="1.1" />
     <circle cx="7" cy="12" r="1.1" />
   </svg>
+);
+
+/** Transform: a wand. */
+export const TransformIcon = () => (
+  <Icon>
+    <path d="M2.5 13.5 9.5 6.5" />
+    <path d="M11 2v2M11 6v2M9 4h-2M15 4h-2" />
+    <path d="M13 9.5v1.5M12.25 10.25h1.5" />
+  </Icon>
+);
+
+/** Export: an arrow out of a tray. */
+export const ExportIcon = () => (
+  <Icon>
+    <path d="M8 10V2.5M5 5.5 8 2.5l3 3" />
+    <path d="M2.75 9.5v3a1 1 0 0 0 1 1h8.5a1 1 0 0 0 1-1v-3" />
+  </Icon>
+);
+
+/** Sharing with AI providers: a shield. */
+export const ShieldIcon = () => (
+  <Icon>
+    <path d="M8 1.75 13.25 3.75v4c0 3.1-2.2 5.4-5.25 6.5-3.05-1.1-5.25-3.4-5.25-6.5v-4z" />
+    <path d="M5.75 8 7.4 9.6 10.5 6.4" />
+  </Icon>
+);
+
+export const CloseIcon = () => (
+  <Icon size={14}>
+    <path d="M4 4l8 8M12 4l-8 8" />
+  </Icon>
 );

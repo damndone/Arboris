@@ -1,8 +1,10 @@
 /* frontend/src/workspace/workspaceTopbar.css — v1.9.0 top bar. */
 
+/* Three columns: the view tabs stay centred whatever the sides hold, so
+   moving between Home and the other views never shifts them. */
 .ws-topbar__row {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: var(--space-3);
   min-height: 48px;
@@ -89,4 +91,4 @@
 
 .ws-topbar__end { margin-left: auto; flex-wrap: wrap; }
 .ws-topbar__views { flex-shrink: 0; max-width: 100%; overflow-x: auto; }
-.ws-topbar__start { flex-wrap: wrap; }
+.ws-topbar__start { flex-wrap: nowrap; }

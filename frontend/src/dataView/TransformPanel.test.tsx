@@ -61,7 +61,7 @@ describe("TransformPanel", () => {
   it("recodes a numeric variable into bands", async () => {
     ops.previewDataTransform.mockResolvedValue({ preview: { ...readyPreview, row_count_after: 100 } });
     renderPanel();
-    fireEvent.change(screen.getByLabelText("Operation"), { target: { value: "recode" } });
+    fireEvent.click(screen.getByRole("radio", { name: "Recode into new variable" }));
     fireEvent.change(screen.getByLabelText("New variable"), { target: { value: "age_group" } });
     fireEvent.change(screen.getByLabelText("Recode rules"), { target: { value: "18..29 = 1\n30..49 = 2\nelse = 3" } });
     fireEvent.click(screen.getByRole("button", { name: "Preview" }));
@@ -75,7 +75,7 @@ describe("TransformPanel", () => {
   it("computes a ratio through the feature recipe", async () => {
     ops.previewFeatureRecipe.mockResolvedValue({ preview: { ...readyPreview, row_count: 100 } });
     renderPanel();
-    fireEvent.change(screen.getByLabelText("Operation"), { target: { value: "compute" } });
+    fireEvent.click(screen.getByRole("radio", { name: "Compute new variable" }));
     fireEvent.change(screen.getByLabelText("Compute operation"), { target: { value: "ratio" } });
     fireEvent.change(screen.getByLabelText("Second variable"), { target: { value: "wage" } });
     fireEvent.change(screen.getByLabelText("New variable"), { target: { value: "age_per_wage" } });
@@ -95,7 +95,7 @@ describe("TransformPanel", () => {
     expect((await screen.findByRole("alert")).textContent).toContain("no rows remain");
     expect(screen.queryByRole("button", { name: "Apply as new dataset" })).toBeNull();
     ops.previewDataTransform.mockRejectedValueOnce(new Error("recode: 3 value(s) of age match no rule"));
-    fireEvent.change(screen.getByLabelText("Operation"), { target: { value: "recode" } });
+    fireEvent.click(screen.getByRole("radio", { name: "Recode into new variable" }));
     fireEvent.change(screen.getByLabelText("New variable"), { target: { value: "g" } });
     fireEvent.change(screen.getByLabelText("Recode rules"), { target: { value: "18..29 = 1" } });
     fireEvent.click(screen.getByRole("button", { name: "Preview" }));

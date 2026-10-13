@@ -14,6 +14,8 @@ import { SharingPanel } from "./SharingPanel";
 import { TransformPanel } from "./TransformPanel";
 import { VariableView } from "./VariableView";
 import { useWorkbenchOptional } from "../workbench/WorkbenchStateProvider";
+import { ExportIcon, ShieldIcon, TransformIcon } from "../workspace/icons";
+import "./dataView.css";
 
 type Tab = "data" | "variables";
 
@@ -128,72 +130,86 @@ export function DataView({ projectRoot, runId: runIdProp }: { projectRoot: strin
   }
 
   if (!runId) {
-    return <div style={{ padding: 16, color: "var(--label-secondary)" }}>Open or create a run to see its data.</div>;
+    return (
+      <div className="dv">
+        <p className="dv-note">Open or create a run to see its data.</p>
+      </div>
+    );
   }
+  const tool = (open: boolean, set: (open: boolean) => void, others: Array<(open: boolean) => void>) => () => {
+    // One tool at a time: the sheets share the space above the grid.
+    others.forEach((close) => close(false));
+    set(!open);
+  };
   return (
-    <div data-testid="data-view" style={{ padding: 12, overflow: "auto", flex: 1, minHeight: 0 }}>
-      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8, fontSize: 12 }}>
-        <div role="tablist" aria-label="Data view mode">
+    <div data-testid="data-view" className="dv dv-controls">
+      <div className="dv-toolbar">
+        <div role="tablist" aria-label="Data view mode" className="dv-seg">
           {(["data", "variables"] as const).map((mode) => (
-            <button
-              key={mode}
-              role="tab"
-              type="button"
-              aria-selected={tab === mode}
-              onClick={() => setTab(mode)}
-              style={{ fontWeight: tab === mode ? 600 : 400 }}
-            >
+            <button key={mode} role="tab" type="button" className="dv-seg__item" aria-selected={tab === mode} onClick={() => setTab(mode)}>
               {mode === "data" ? "Data View" : "Variable View"}
             </button>
           ))}
         </div>
-        <label>
-          Dataset{" "}
-          <select aria-label="Dataset" value={nodeId} onChange={(event) => setNodeId(event.target.value)}>
-            {datasets.map((node) => (
-              <option key={node.node_id} value={node.node_id}>
-                {node.label} ({node.node_id})
-              </option>
-            ))}
-          </select>
-        </label>
+        <select aria-label="Dataset" className="dv-dataset" value={nodeId} onChange={(event) => setNodeId(event.target.value)}>
+          {datasets.map((node) => (
+            <option key={node.node_id} value={node.node_id}>
+              {datasets.filter((other) => other.label === node.label).length > 1 ? `${node.label} (${node.node_id})` : node.label}
+            </option>
+          ))}
+        </select>
+        <span className="dv-spacer" />
         <button
           type="button"
+          className="dv-tool"
           aria-expanded={transforming}
           disabled={!variables}
-          onClick={() => setTransforming((open) => !open)}
+          title="Filter, recode, compute or rename into a new dataset"
+          onClick={tool(transforming, setTransforming, [setExportOpen, setSharingOpen])}
         >
-          Transform…
+          <TransformIcon />
+          Transform
         </button>
-        <button type="button" aria-expanded={exportOpen} disabled={!variables} onClick={() => setExportOpen((open) => !open)}>
-          Export…
+        <button
+          type="button"
+          className="dv-tool"
+          aria-expanded={exportOpen}
+          disabled={!variables}
+          title="Save this dataset as Stata, SPSS, CSV or Excel"
+          onClick={tool(exportOpen, setExportOpen, [setTransforming, setSharingOpen])}
+        >
+          <ExportIcon />
+          Export
         </button>
-        <button type="button" aria-expanded={sharingOpen} onClick={() => setSharingOpen((open) => !open)}>
-          AI sharing…
+        <button
+          type="button"
+          className="dv-tool"
+          aria-expanded={sharingOpen}
+          title="What the AI provider may see from this project"
+          onClick={tool(sharingOpen, setSharingOpen, [setTransforming, setExportOpen])}
+        >
+          <ShieldIcon />
+          AI sharing
         </button>
-        <span style={{ color: "var(--label-tertiary)" }}>run {runId.slice(-8)}</span>
+        <span className="dv-run" title={runId}>run {runId.slice(-8)}</span>
       </div>
       {saved && (
-        <div data-testid="data-view-saved" style={{ fontSize: 12, marginBottom: 8 }}>
+        <p data-testid="data-view-saved" className="dv-note">
           Saved as run {saved.slice(-8)}; {ready ? "the updated data and metadata are ready." : "it is re-estimating with the new metadata."}
-        </div>
+        </p>
       )}
-      {error && <div role="alert" style={{ color: "var(--red)", fontSize: 12 }}>{error}</div>}
+      {error && <p role="alert" className="dv-alert">{error}</p>}
       {!error && runStatus !== null && !ready && (
-        <div data-testid="data-view-running" style={{ fontSize: 12, color: "var(--label-secondary)" }}>
-          This run is still {runStatus}; its data appears when it finishes.
-        </div>
+        <p data-testid="data-view-running" className="dv-note">This run is still {runStatus}; its data appears when it finishes.</p>
       )}
       {!error && ready && runStatus !== "completed" && (
-        <div role="alert" style={{ fontSize: 12, color: "var(--red)" }}>
-          This run ended {runStatus}; its datasets may be incomplete.
-        </div>
+        <p role="alert" className="dv-alert">This run ended {runStatus}; its datasets may be incomplete.</p>
       )}
-      {!error && (runStatus === null || (ready && !variables)) && (
-        <div style={{ fontSize: 12, color: "var(--label-secondary)" }}>Loading…</div>
+      {!error && (runStatus === null || (ready && !variables)) && <p className="dv-note">Loading…</p>}
+      {sharingOpen && <SharingPanel projectRoot={projectRoot} onClose={() => setSharingOpen(false)} />}
+      {exportOpen && variables && (
+        <DatasetExportPanel projectRoot={projectRoot} runId={runId} nodeId={nodeId} onClose={() => setExportOpen(false)} />
       )}
-      {sharingOpen && <SharingPanel projectRoot={projectRoot} />}
-      {exportOpen && variables && <DatasetExportPanel projectRoot={projectRoot} runId={runId} nodeId={nodeId} />}
       {variables && transforming && (
         <TransformPanel
           key={`${runId}:${nodeId}`}
@@ -203,6 +219,7 @@ export function DataView({ projectRoot, runId: runIdProp }: { projectRoot: strin
           artifactId={variables.artifact_id}
           variables={variables.variables}
           onCreated={onDatasetCreated}
+          onClose={() => setTransforming(false)}
         />
       )}
       {variables && tab === "data" && (

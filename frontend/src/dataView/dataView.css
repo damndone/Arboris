@@ -1,0 +1,607 @@
+/* frontend/src/dataView/dataView.css — v1.9.0 Data view: toolbar, tool
+   sheets (Transform, Export, AI sharing), grid. One control height (30px)
+   across the page so every row lines up. */
+
+.dv {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  flex: 1;
+  min-height: 0;
+  padding: var(--space-3) var(--space-5) var(--space-4);
+  overflow: auto;
+  font-size: var(--text-ui);
+  color: var(--label);
+}
+
+.dv-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 32px;
+  flex-wrap: wrap;
+}
+
+.dv-spacer {
+  flex: 1;
+}
+
+/* Segmented control */
+.dv-seg {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: var(--radius-md);
+  background: var(--bg-elev);
+}
+
+.dv-controls button.dv-seg__item {
+  height: 26px;
+  min-height: 0;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: calc(var(--radius-md) - 2px);
+  background: transparent;
+  color: var(--label-secondary);
+  font-size: var(--text-ui);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--duration-fade) var(--ease-standard), color var(--duration-fade) var(--ease-standard);
+}
+
+.dv-controls button.dv-seg__item[aria-selected="true"],
+.dv-controls button.dv-seg__item[aria-pressed="true"],
+.dv-controls button.dv-seg__item[aria-checked="true"] {
+  background: var(--bg-card);
+  color: var(--label);
+  box-shadow: var(--shadow-1);
+}
+
+/* Inputs, selects and buttons share one height. */
+.dv-controls select,
+.dv-controls input:not([type="checkbox"]):not([type="radio"]),
+.dv-controls textarea {
+  box-sizing: border-box;
+  height: 30px;
+  min-height: 0;
+  padding: 0 10px;
+  border: var(--hairline) solid var(--border);
+  border-radius: var(--radius-sm);
+  background-color: var(--field-bg);
+  color: var(--label);
+  font: inherit;
+  font-size: var(--text-ui);
+}
+
+.dv-controls select {
+  padding-right: 28px;
+}
+
+.dv-controls textarea {
+  height: auto;
+  padding: var(--space-2) 10px;
+  font-family: var(--font-mono);
+  font-size: var(--text-small);
+  line-height: 1.5;
+}
+
+.dv-controls select:focus-visible,
+.dv-controls input:not([type="checkbox"]):not([type="radio"]):focus-visible,
+.dv-controls textarea:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 0;
+  border-color: transparent;
+}
+
+.dv-dataset {
+  max-width: 280px;
+}
+
+.dv-controls button.dv-tool,
+.dv-controls button.dv-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  min-height: 0;
+  padding: 0 var(--space-3);
+  border: var(--hairline) solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--bg-card);
+  color: var(--label);
+  font-size: var(--text-ui);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--duration-fade) var(--ease-standard), border-color var(--duration-fade) var(--ease-standard);
+}
+
+.dv-controls button.dv-tool svg {
+  color: var(--label-secondary);
+}
+
+.dv-controls button.dv-tool:hover:not(:disabled),
+.dv-controls button.dv-button:hover:not(:disabled) {
+  background: var(--bg-elev);
+}
+
+.dv-controls button.dv-tool[aria-expanded="true"] {
+  border-color: transparent;
+  background: var(--tint-bg);
+  color: var(--tint-label);
+}
+
+.dv-controls button.dv-tool[aria-expanded="true"] svg {
+  color: inherit;
+}
+
+.dv-controls button.dv-button--primary {
+  border-color: transparent;
+  background: var(--tint);
+  color: var(--on-tint);
+  font-weight: 600;
+}
+
+.dv-controls button.dv-button--primary:hover:not(:disabled) {
+  background: var(--tint-hover);
+}
+
+.dv-controls button.dv-tool:disabled,
+.dv-controls button.dv-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.dv-controls button.dv-link {
+  height: auto;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--tint);
+  font-size: var(--text-small);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.dv-run {
+  color: var(--label-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
+}
+
+.dv-note {
+  margin: 0;
+  color: var(--label-secondary);
+  font-size: var(--text-small);
+}
+
+.dv-alert {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--status-fails-bg);
+  color: var(--status-fails-fg);
+  font-size: var(--text-small);
+}
+
+/* Tool sheet: one card per open tool. */
+.dv-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  border: var(--hairline) solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-1);
+}
+
+.dv-sheet__head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.dv-sheet__head > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.dv-sheet__head h3 {
+  margin: 0;
+  font-size: var(--text-section);
+  font-weight: 600;
+}
+
+.dv-sheet__head p {
+  margin: 2px 0 0;
+  color: var(--label-secondary);
+  font-size: var(--text-small);
+}
+
+.dv-sheet__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.dv-sheet__section > h4 {
+  margin: 0;
+  color: var(--label-secondary);
+  font-size: var(--text-caption);
+  font-weight: 600;
+  letter-spacing: var(--tracking-key);
+  text-transform: uppercase;
+}
+
+.dv-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-2) var(--space-3);
+}
+
+.dv-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--label-secondary);
+  font-size: var(--text-small);
+  font-weight: 500;
+}
+
+.dv-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding-top: var(--space-1);
+}
+
+.dv-result {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card-2);
+  color: var(--label-secondary);
+  font-size: var(--text-small);
+}
+
+/* Chips: choose variables, operations, kinds of content. */
+.dv-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.dv-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border: var(--hairline) solid var(--border);
+  border-radius: var(--radius-pill);
+  color: var(--label-secondary);
+  font-size: var(--text-small);
+  cursor: pointer;
+  user-select: none;
+}
+
+.dv-chip input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.dv-chip:has(input:checked),
+.dv-controls button.dv-chip[aria-checked="true"] {
+  border-color: transparent;
+  background: var(--tint-bg);
+  color: var(--tint-label);
+  font-weight: 500;
+}
+
+.dv-chip:has(input:focus-visible),
+.dv-controls button.dv-chip:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.dv-controls button.dv-chip {
+  min-height: 0;
+  background: transparent;
+  font-weight: 400;
+}
+
+.dv-checklist {
+  display: grid;
+  gap: 6px;
+}
+
+.dv-checklist label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--label);
+}
+
+/* Small tables inside sheets */
+.dv-mini-table {
+  border-collapse: collapse;
+  font-size: var(--text-small);
+  font-variant-numeric: tabular-nums;
+}
+
+.dv-mini-table th {
+  padding: 4px 10px 4px 0;
+  color: var(--label-tertiary);
+  font-weight: 500;
+  text-align: left;
+}
+
+.dv-mini-table td {
+  padding: 4px 10px 4px 0;
+  border-top: var(--hairline) solid var(--separator-faint);
+  color: var(--label);
+}
+
+/* Grid */
+.dv-grid-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 30px;
+  color: var(--label-secondary);
+  font-size: var(--text-small);
+}
+
+.dv-pager {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.dv-controls button.dv-pager__step {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--label-secondary);
+  cursor: pointer;
+}
+
+.dv-controls button.dv-pager__step:hover:not(:disabled) {
+  background: var(--bg-elev);
+  color: var(--label);
+}
+
+.dv-controls button.dv-pager__step:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.dv-table-wrap {
+  flex: 1;
+  min-height: 160px;
+  overflow: auto;
+  border: var(--hairline) solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+}
+
+.dv-table-wrap:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.dv-table {
+  min-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: var(--text-small);
+  font-variant-numeric: tabular-nums;
+}
+
+.dv-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 0;
+  border-bottom: var(--hairline) solid var(--border);
+  background: var(--table-header-bg);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.dv-controls button.dv-table__sort {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  height: 30px;
+  min-height: 0;
+  padding: 0 12px;
+  border: 0;
+  background: transparent;
+  color: var(--label-secondary);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.dv-controls button.dv-table__sort:hover {
+  color: var(--label);
+}
+
+.dv-table th[aria-sort] .dv-table__sort {
+  color: var(--tint-label);
+}
+
+.dv-table td {
+  height: 28px;
+  padding: 0 12px;
+  border-bottom: var(--hairline) solid var(--table-row-border);
+  white-space: nowrap;
+}
+
+.dv-table td[data-numeric] {
+  text-align: right;
+}
+
+.dv-table td.dv-table__n,
+.dv-table th.dv-table__n {
+  width: 1%;
+  padding: 0 12px;
+  color: var(--label-tertiary);
+  text-align: right;
+}
+
+.dv-table th.dv-table__n {
+  height: 30px;
+  font-weight: 500;
+}
+
+.dv-table tbody tr:hover td {
+  background: var(--bg-elev);
+}
+
+.dv-table td[data-declared-missing] {
+  color: var(--label-tertiary);
+  font-style: italic;
+}
+
+/* Switch */
+.dv-controls button.dv-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 26px;
+  min-height: 0;
+  padding: 0 var(--space-1);
+  border: 0;
+  background: transparent;
+  color: var(--label-secondary);
+  font-size: var(--text-small);
+  cursor: pointer;
+}
+
+.dv-switch__track {
+  position: relative;
+  width: 26px;
+  height: 16px;
+  border-radius: var(--radius-pill);
+  background: var(--border-strong);
+  transition: background var(--duration-fade) var(--ease-standard);
+}
+
+.dv-switch__track::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--bg-card);
+  box-shadow: var(--shadow-1);
+  transition: transform var(--duration-spring) var(--ease-spring);
+}
+
+.dv-controls button.dv-switch[aria-checked="true"] .dv-switch__track {
+  background: var(--tint);
+}
+
+.dv-controls button.dv-switch[aria-checked="true"] .dv-switch__track::after {
+  transform: translateX(10px);
+}
+
+.dv-grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  flex: 1;
+  min-height: 0;
+}
+
+/* Controls take the width of their content, not the row's. */
+.dv-controls select,
+.dv-controls input:not([type="checkbox"]):not([type="radio"]) {
+  width: auto;
+  max-width: 100%;
+}
+
+.dv-controls .dv-sheet__head h3 {
+  font-size: var(--text-section);
+  line-height: 1.3;
+}
+
+.dv-sheet__section > h4 .dv-link {
+  margin-left: var(--space-2);
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+/* Variable View: cells edit in place; fields show their edge on hover/focus. */
+.dv-table__head {
+  display: block;
+  padding: 0 12px;
+  line-height: 30px;
+  color: var(--label-secondary);
+  font-weight: 600;
+}
+
+.dv-table--edit td {
+  height: auto;
+  padding: 4px 6px;
+  vertical-align: middle;
+}
+
+.dv-table--edit td.dv-var {
+  padding: 6px 12px;
+}
+
+.dv-var__name {
+  display: block;
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+
+.dv-var__summary {
+  display: block;
+  color: var(--label-tertiary);
+  font-size: var(--text-caption);
+}
+
+.dv-controls .dv-table--edit input:not([type="checkbox"]):not([type="radio"]),
+.dv-controls .dv-table--edit select {
+  width: 100%;
+  min-width: 110px;
+  height: 28px;
+  border-color: transparent;
+  background-color: transparent;
+}
+
+.dv-controls .dv-table--edit input:not([type="checkbox"]):not([type="radio"]):hover,
+.dv-controls .dv-table--edit select:hover {
+  border-color: var(--border);
+  background-color: var(--field-bg);
+}
+
+.dv-controls .dv-table--edit input:not([type="checkbox"]):not([type="radio"])::placeholder {
+  color: var(--label-tertiary);
+}
+
+.dv-table--edit tbody tr:hover td {
+  background: transparent;
+}
+
+.dv-changes {
+  margin: 0;
+  padding-left: var(--space-5);
+  font-size: var(--text-small);
+  line-height: 1.6;
+}
