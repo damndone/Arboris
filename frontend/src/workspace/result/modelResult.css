@@ -197,10 +197,35 @@
   margin: 0;
 }
 
+.ws-interval__caption {
+  margin: 0 0 2px;
+  color: var(--label-tertiary);
+  font-size: var(--text-caption);
+  font-weight: 600;
+  letter-spacing: var(--tracking-key);
+  text-transform: uppercase;
+}
+
 .ws-interval__zero {
-  stroke: var(--chart-grid);
+  stroke: var(--chart-axis);
   stroke-width: 1;
   stroke-dasharray: 3 3;
+}
+
+.ws-interval__grid {
+  stroke: var(--chart-grid);
+  stroke-width: 1;
+}
+
+.ws-interval__value {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  fill: var(--label-secondary);
+}
+
+.ws-interval__row--null .ws-interval__bar,
+.ws-interval__row--null .ws-interval__dot {
+  opacity: 0.45;
 }
 
 .ws-interval__bar {
@@ -277,10 +302,10 @@
 .ws-stage-index__item {
   min-height: 0;
   height: 26px;
-  padding: 0 var(--space-2);
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
+  padding: 0 10px;
+  border: var(--hairline) solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--bg-card);
   color: var(--label-secondary);
   font-size: var(--text-small);
   font-weight: 500;

@@ -458,10 +458,17 @@
 }
 
 /* Stage tabs: quiet chips; the open one is a raised card, not a fill. */
+/* Every tab reads as a tab (user review 3): unselected ones sit recessed
+   with an edge; the open one is raised. */
 .ws-stage-host__tabs .detail-tabs__item {
   max-width: 240px;
-  border-color: transparent;
+  border: var(--hairline) solid var(--separator);
   border-radius: var(--radius-sm);
+  background: var(--bg-card-2);
+}
+
+.ws-stage-host__tabs .detail-tabs__item:hover {
+  background: var(--bg-elev);
 }
 
 .ws-stage-host__tabs .detail-tabs__item[data-active="true"] {
