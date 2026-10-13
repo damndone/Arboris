@@ -4,7 +4,7 @@
 // overlays) into the new regions, so both shells share one source of state
 // while the new one is behind its switch (design spec §8.8).
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { useCompareOptional } from "../lineage/compare/CompareContext";
 import { createAgentForkProposal } from "../workbench/agent/agentApi";
@@ -36,6 +36,9 @@ import { WorkspaceShell, type MapPresentation } from "./WorkspaceShell";
 import { OperationsPanel } from "../manual/OperationsPanel";
 import { TimelinePanel, timelineSummary, useTimeline } from "./TimelinePanel";
 import { WorkspaceTopbar } from "./WorkspaceTopbar";
+import { openDedicated } from "./dedicatedOperations";
+import { stageIsOpen } from "./layoutModel";
+import { WorkspaceCommandsContext, type WorkspaceCommands } from "./workspaceCommands";
 
 export interface WorkbenchWorkspaceProps {
   runId: string;
@@ -97,11 +100,14 @@ export function WorkbenchWorkspace({
   const { model } = useLineage();
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisSearch, setAnalysisSearch] = useState("");
-  useEffect(() => {
-    const open = (event: Event) => {setAnalysisSearch(String((event as CustomEvent).detail ?? ""));setAnalyzing(true);};
-    window.addEventListener("workbench:analyze", open);
-    return () => window.removeEventListener("workbench:analyze", open);
-  }, []);
+  const agentHandle = useRef<{ show(): void } | null>(null);
+  const commands = useMemo<WorkspaceCommands>(() => ({
+    analyze: (search = "") => {
+      setAnalysisSearch(search);
+      setAnalyzing(true);
+    },
+    showAgent: () => agentHandle.current?.show(),
+  }), []);
   const forest = useForest();
   const selectedNode = forest?.forest.nodes.find(node => node.nodeKey === state.selectedKey);
   const timelineRun = selectedNode && forest ? ownerRunOf(selectedNode, forest.forest, forest.activeRunId) : forest?.activeRunId;
@@ -117,7 +123,11 @@ export function WorkbenchWorkspace({
       return (
         <>
           <StageIndex key={node.id} />
-          <ModelResultView key={`${owner}:${node.id}`} projectRoot={projectRoot} runId={owner} node={node} onRefresh={() => {forest?.refetch?.();timeline.refresh();}} />
+          <ModelResultView key={`${owner}:${node.id}`} projectRoot={projectRoot} runId={owner} node={node} onRefresh={() => {
+              forest?.refetch?.();
+              timeline.refresh();
+            }}
+          />
         </>
       );
     },
@@ -138,7 +148,12 @@ export function WorkbenchWorkspace({
       projectRoot={projectRoot}
       view={state.view}
       controls={controls}
-      actions={<><button type="button" className="ws-button" onClick={() => {setAnalysisSearch("");setAnalyzing(true);}}>Analyze</button><TopbarActions /></>}
+      actions={
+        <>
+          <button type="button" className="ws-button" onClick={() => commands.analyze()}>Analyze</button>
+          <TopbarActions />
+        </>
+      }
       newAnalysisLabel={newAnalysis?.label}
       onView={view => {setAnalyzing(false);dispatch.setView(view);}}
       onHome={() => {setAnalyzing(false);dispatch.setView("home");}}
@@ -146,35 +161,60 @@ export function WorkbenchWorkspace({
       onNewAnalysis={newAnalysis?.open}
     />
   );
-  const operationPanel = <>{operationError && <p role="alert">{operationError}</p>}<OperationsPanel key={projectRoot} projectRoot={projectRoot} runId={runId} initialSearch={analysisSearch}
-    models={(forest?.forest.nodes ?? []).filter(n => n.kind === "model").flatMap(n => n.runs.map(owner => ({runId: owner, nodeId: n.opNodeId, label: n.title})))}
-    onClose={() => setAnalyzing(false)} onRefresh={() => {forest?.refetch?.();timeline.refresh();}}
-    onOpenRun={owner => {forest?.setActiveRunId(owner);setAnalyzing(false);dispatch.setView("table");}}
-    onDedicated={async (id, target) => {
-      setOperationError(null);
-      if (id === "graph.fork") {
-        if (!target || !("run_id" in target) || !("node_id" in target) || !openAgentNavigation) {setOperationError("Select a saved graph node before creating a branch.");return;}
-        try {
-          const result = await createAgentForkProposal(projectRoot, {source_run_id: target.run_id, source_node_ref: target.node_id, active_head_run_id: target.run_id});
-          openAgentNavigation(result.navigation);
-          window.dispatchEvent(new Event("workbench:show-agent"));
+  const models = (forest?.forest.nodes ?? [])
+    .filter((n) => n.kind === "model")
+    .flatMap((n) => n.runs.map((owner) => ({ runId: owner, nodeId: n.opNodeId, label: n.title })));
+  const refresh = () => {
+    forest?.refetch?.();
+    timeline.refresh();
+  };
+  const operationPanel = (
+    <>
+      {operationError && <p role="alert">{operationError}</p>}
+      <OperationsPanel
+        key={projectRoot}
+        projectRoot={projectRoot}
+        runId={runId}
+        initialSearch={analysisSearch}
+        models={models}
+        onClose={() => setAnalyzing(false)}
+        onRefresh={refresh}
+        onOpenRun={(owner) => {
+          forest?.setActiveRunId(owner);
           setAnalyzing(false);
-        } catch (error) {setOperationError(error instanceof Error ? error.message : String(error));}
-        return;
-      }
-      setAnalyzing(false);
-      if (target && "run_id" in target) {
-        forest?.setActiveRunId(target.run_id);
-        const selected = "node_id" in target ? forest?.forest.nodes.find(node => node.runs.includes(target.run_id) && node.opNodeId === target.node_id) : undefined;
-        if (selected) dispatch.selectByCanvasClick(selected.nodeKey);
-      }
-      if (["data.import", "model.draft"].includes(id)) newAnalysis?.open();
-      else if (id === "operation.multi_step") setAnalyzing(true);
-      else if (id === "data.export" || id === "metadata.edit") dispatch.setView("data");
-      else if (id === "model.custom") dispatch.setView("notebook");
-      else if (id === "table.export") dispatch.setView("table");
-      else dispatch.setView("graph");
-    }}/></>;
+          dispatch.setView("table");
+        }}
+        onDedicated={async (op, target) => {
+          setOperationError(null);
+          const problem = await openDedicated(op, target, {
+            focus: (chosen) => {
+              if (!("run_id" in chosen)) return;
+              forest?.setActiveRunId(chosen.run_id);
+              const node = "node_id" in chosen
+                ? forest?.forest.nodes.find((n) => n.runs.includes(chosen.run_id) && n.opNodeId === chosen.node_id)
+                : undefined;
+              if (node) dispatch.selectByCanvasClick(node.nodeKey);
+            },
+            setView: dispatch.setView,
+            openNewAnalysis: newAnalysis?.open,
+            openAnalyze: () => commands.analyze(),
+            closeAnalyze: () => setAnalyzing(false),
+            proposeFork: async (chosen) => {
+              if (!openAgentNavigation) throw new Error("The Agent is not available in this view.");
+              const result = await createAgentForkProposal(projectRoot, {
+                source_run_id: chosen.run_id,
+                source_node_ref: chosen.node_id,
+                active_head_run_id: chosen.run_id,
+              });
+              openAgentNavigation(result.navigation);
+              commands.showAgent();
+            },
+          });
+          setOperationError(problem);
+        }}
+      />
+    </>
+  );
   const main = (
     <WorkbenchMain
       projectRoot={projectRoot}
@@ -186,20 +226,19 @@ export function WorkbenchWorkspace({
 
   if (state.view === "home") {
     return (
-      <div className="ws-page" data-testid="workspace-home">
-        <header className="ws-topbar" role="banner">{topbarFor()}</header>
-        <main className="ws-page__body" aria-label="Project home">{analyzing ? operationPanel : main}</main>
-        {overlays}
-      </div>
+      <WorkspaceCommandsContext.Provider value={commands}>
+        <div className="ws-page" data-testid="workspace-home">
+          <header className="ws-topbar" role="banner">{topbarFor()}</header>
+          <main className="ws-page__body" aria-label="Project home">{analyzing ? operationPanel : main}</main>
+          {overlays}
+        </div>
+      </WorkspaceCommandsContext.Provider>
     );
   }
 
   const analysis = state.view === "graph";
   const hasOpenItem = stagePanel !== null;
-  // The stage shows what is open; with nothing open (or folded away) the map
-  // takes the width as the full graph (user review 1: the stage must not sit
-  // empty over the map).
-  const stageOpen = analyzing ? true : analysis ? hasOpenItem && !stageFolded : true;
+  const stageOpen = stageIsOpen({ analyzing, analysisView: analysis, hasOpenItem, folded: stageFolded });
   const bottomTabs: BottomTab[] = [
     { id: "timeline", label: "Timeline", render: () => <TimelinePanel value={timeline.value} error={timeline.error} onRefresh={timeline.refresh}/> },
     { id: "runs", label: "Runs", render: () => <RunsTable projectRoot={projectRoot} /> },
@@ -225,7 +264,7 @@ export function WorkbenchWorkspace({
   );
 
   return (
-    <>
+    <WorkspaceCommandsContext.Provider value={commands}>
       <WorkspaceShell
         projectRoot={projectRoot}
         view={state.view}
@@ -243,8 +282,9 @@ export function WorkbenchWorkspace({
         }
         agent={<AgentPanel runId={runId} projectRoot={projectRoot} composer={<AgentColumnComposer />} compactHeader />}
         bottom={<WorkspaceBottomPanel projectRoot={projectRoot} tabs={bottomTabs} summary={timelineSummary(timeline.value)} />}
+        agentHandle={agentHandle}
       />
       {overlays}
-    </>
+    </WorkspaceCommandsContext.Provider>
   );
 }

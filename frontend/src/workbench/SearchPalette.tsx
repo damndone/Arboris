@@ -30,12 +30,12 @@ import { buildRunSnapshot, type SearchItem } from "./RunSnapshotAdapter";
 import { useWorkbench } from "./WorkbenchStateProvider";
 import { isEditableTarget } from "./keyboard";
 
-import { useWorkspaceMode } from "../workspace/workspaceMode";
+import { useWorkspaceCommands } from "../workspace/workspaceCommands";
 
 const MAX_RESULTS = 25;
 
 export function SearchPalette() {
-  const workspaceMode = useWorkspaceMode();
+  const commands = useWorkspaceCommands();
   const { model } = useLineage();
   const { state, dispatch } = useWorkbench();
   const [open, setOpen] = useState(false);
@@ -206,7 +206,17 @@ export function SearchPalette() {
           data-testid="search-palette-results"
           style={{ overflow: "auto", flex: 1 }}
         >
-          {workspaceMode === "new" && <button type="button" onClick={() => {setOpen(false);window.dispatchEvent(new CustomEvent("workbench:analyze", {detail: input}));}}>Analyze operations{input.trim() ? ` matching “${input}”` : ""}</button>}
+          {commands && (
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                commands.analyze(input);
+              }}
+            >
+              Analyze operations{input.trim() ? ` matching “${input}”` : ""}
+            </button>
+          )}
           {results.length === 0 && input.trim() !== "" && (
             <div
               style={{

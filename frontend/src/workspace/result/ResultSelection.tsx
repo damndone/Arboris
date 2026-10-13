@@ -1,11 +1,13 @@
 import {useRef, useState, type ReactNode} from 'react';
 import {useAgentSurfaceOptional} from '../../workbench/agent/AgentSurfaceContext';
+import {useWorkspaceCommands} from '../workspaceCommands';
 
 export function resultQuestion(text: string, context: string, runId: string, modelId: string): string {
   return `Explain this selected result: ${text}\nDisplayed context: ${context}\nSource: run ${runId}, model ${modelId}. Verify the persisted source before interpreting; do not execute or change anything.`;
 }
 export function ResultSelection({runId, modelId, children}: {runId: string; modelId: string; children: ReactNode}) {
   const agent = useAgentSurfaceOptional();
+  const commands = useWorkspaceCommands();
   const surface = useRef<HTMLDivElement>(null);
   const [selection, setSelection] = useState<{text: string; context: string} | null>(null);
   const capture = () => {
@@ -21,7 +23,7 @@ export function ResultSelection({runId, modelId, children}: {runId: string; mode
     {selection && agent && <button type="button" className="ws-result-selection__ask" onClick={() => {
       const question = resultQuestion(selection.text, selection.context, runId, modelId);
       agent.setPrompt(agent.prompt.trim() ? `${agent.prompt}\n\n${question}` : question);
-      window.dispatchEvent(new Event('workbench:show-agent'));
+      commands?.showAgent();
       setSelection(null);
     }}>Ask Agent about selection</button>}
     {children}

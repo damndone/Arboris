@@ -153,3 +153,14 @@ export function writeAgentWidth(width: number): void {
     // ignore
   }
 }
+
+/**
+ * Whether the stage takes width beside the map. Analyze and the document views
+ * always have content; on Analysis the stage shows only while a step is open
+ * and not folded away, so the map gets the whole width otherwise (user review
+ * 1: the stage must not sit empty over the map).
+ */
+export function stageIsOpen(state: { analyzing: boolean; analysisView: boolean; hasOpenItem: boolean; folded: boolean }): boolean {
+  if (state.analyzing || !state.analysisView) return true;
+  return state.hasOpenItem && !state.folded;
+}

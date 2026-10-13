@@ -7575,6 +7575,11 @@ export interface components {
             request_schema?: {
                 [key: string]: unknown;
             };
+            /**
+             * Surface
+             * @enum {string}
+             */
+            surface?: "graph" | "data" | "table" | "notebook" | "new_analysis" | "analyze" | "agent";
         };
         /** OperationFieldHint */
         OperationFieldHint: {
@@ -8275,6 +8280,8 @@ export interface components {
             run_id: string;
             /** Source Sha256 */
             source_sha256?: string;
+            /** Title */
+            title?: string | null;
             /** Workflow Id */
             workflow_id: string;
             /** Workflow Step Id */

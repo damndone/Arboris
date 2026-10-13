@@ -193,6 +193,11 @@ def _first_sentence(text: str) -> str:
     return head + "." if dot else line
 
 
+def operation_title(operation_id: str) -> str | None:
+    entry = PRESENTATION.get(operation_id)
+    return entry.title if entry else None
+
+
 def present(operation_id: str, summary: str) -> dict[str, object]:
     """The catalog fields a person reads: title, one line, and group."""
     entry = PRESENTATION.get(operation_id)

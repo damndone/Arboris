@@ -24,6 +24,8 @@ class OperationExecution(TypedDict):
     path: str | None
     confirmation_path: NotRequired[str]
     request_schema: NotRequired[JsonSchema]
+    # Dedicated operations: where in the workbench a person operates it.
+    surface: NotRequired[Literal["graph", "data", "table", "notebook", "new_analysis", "analyze", "agent"]]
 
 
 class OperationCatalogEntry(TypedDict):

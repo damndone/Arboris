@@ -6,7 +6,7 @@
 // switch can be reversed mid-flight. The divider between map and stage is
 // draggable: on release the momentum-projected landing picks the nearer layout.
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type MutableRefObject, type PointerEvent, type ReactNode } from "react";
 import type { ViewMode } from "../workbench/state/urlSchema";
 import {
   WIDE_VIEWS,
@@ -56,6 +56,8 @@ export interface WorkspaceShellProps {
   stage: ReactNode;
   agent: ReactNode;
   bottom: ReactNode;
+  /** Filled with the Agent's controls so the workspace can bring it forward. */
+  agentHandle?: MutableRefObject<{ show(): void } | null>;
 }
 
 const DEFAULT_WIDTH = 1512;
@@ -91,7 +93,7 @@ function releaseVelocity(samples: DragState["samples"]): number {
   return last.t > first.t ? (last.x - first.x) / (last.t - first.t) : 0;
 }
 
-export function WorkspaceShell({ projectRoot, view, topbar, stageOpen, map, stage, agent, bottom }: WorkspaceShellProps) {
+export function WorkspaceShell({ projectRoot, view, topbar, stageOpen, map, stage, agent, bottom, agentHandle }: WorkspaceShellProps) {
   const shellRef = useRef<HTMLDivElement>(null);
   const shellWidth = useShellWidth(shellRef);
   const [layout, setLayoutState] = useState<Layout>(() => readLayout(projectRoot));
@@ -110,10 +112,9 @@ export function WorkspaceShell({ projectRoot, view, topbar, stageOpen, map, stag
     writeAgentWidth(width);
   }, []);
   useEffect(() => {
-    const show = () => setAgentMode((mode) => (mode === "bubble" ? "floating" : mode));
-    window.addEventListener("workbench:show-agent", show);
-    return () => window.removeEventListener("workbench:show-agent", show);
-  }, []);
+    if (!agentHandle) return;
+    agentHandle.current = { show: () => agentMode === "bubble" && setMode(lastOpenMode.current) };
+  }, [agentHandle, agentMode, setMode]);
   // The Analysis map column shows by default; Data, Tables, Report and Plans
   // are wide documents, so their map column starts folded.
   const [analysisMapHidden, setAnalysisMapHidden] = useState(false);

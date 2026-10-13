@@ -3,7 +3,25 @@ import type { Draft } from "./manualApi";
 import { formatEstimate, formatPValue } from "../format/numbers";
 
 type Fact = Draft["facts"][number];
-const labels: Record<string, string> = { p_value: "p-value", std_error: "Standard error", ci_lower: "Confidence interval lower bound", ci_upper: "Confidence interval upper bound", nobs: "Observations", n_observations: "Observations", r_squared: "R²", adjusted_r_squared: "Adjusted R²", estimate: "Estimate" };
+const labels: Record<string, string> = {
+  p_value: "p-value",
+  std_error: "Standard error",
+  ci_lower: "Confidence interval lower bound",
+  ci_upper: "Confidence interval upper bound",
+  nobs: "Observations",
+  n_observations: "Observations",
+  r_squared: "R²",
+  adjusted_r_squared: "Adjusted R²",
+  estimate: "Estimate",
+};
+
+// Identities and bookkeeping a reader does not need inline; they stay listed
+// under "Methods and technical evidence".
+const TECHNICAL_FIELD = [
+  /^(?:param|decision)\//,
+  /\/(?:id|model_id|model_run_id|model_type|artifact_id|result_id|source_id|execution_key|contract|contract_version|reason_code|operation_id)$/,
+  /\/retained_positions\//,
+];
 export function factLabel(fact: Fact): string {
   return fact.label.split(" · ").map(part => labels[part] ?? part.replace(/_/g, " ")).join(" · ");
 }
@@ -25,17 +43,44 @@ export function ReportReadingView({ text, facts }: { text: string; facts: Fact[]
     const prefix = fact ? `- ${fact.label}: ` : "";
     const suffix = fact ? ` [[c:${fact.id}]]` : "";
     const scalar = fact && line.startsWith(prefix) && line.endsWith(suffix) ? line.slice(prefix.length, -suffix.length) : null;
-    const matches = fact && scalar !== null && (typeof fact.value === "number"
-      ? /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:e[+-]?\d+)?$/i.test(scalar) && Number(scalar) === fact.value
-      : scalar === (fact.value === null ? "None" : typeof fact.value === "boolean" ? (fact.value ? "True" : "False") : fact.value));
+    const pythonScalar = (value: Fact["value"]) => (value === null ? "None" : typeof value === "boolean" ? (value ? "True" : "False") : value);
+    const matches =
+      fact &&
+      scalar !== null &&
+      (typeof fact.value === "number"
+        ? /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:e[+-]?\d+)?$/i.test(scalar) && Number(scalar) === fact.value
+        : scalar === pythonScalar(fact.value));
     if (fact && matches) {
-      const item = <details key={index} className="manual-reading__fact"><summary>{factLabel(fact)}: <strong>{factValue(fact)}</strong></summary><small>Original line: {line}<br/>Exact value: {String(fact.value)} · Field: {fact.field} · Evidence: {fact.id} · Run: {fact.source.run_id}</small></details>;
-      const technicalField = /^(?:param|decision)\//.test(fact.field) || /\/(?:id|model_id|model_run_id|model_type|artifact_id|result_id|source_id|execution_key|contract|contract_version|reason_code|operation_id)$/.test(fact.field) || /\/retained_positions\//.test(fact.field);
-      if (technicalField) { technical.push(item); return null; }
+      const item = (
+        <details key={index} className="manual-reading__fact">
+          <summary>
+            {factLabel(fact)}: <strong>{factValue(fact)}</strong>
+          </summary>
+          <small>
+            Original line: {line}
+            <br />
+            Exact value: {String(fact.value)} · Field: {fact.field} · Evidence: {fact.id} · Run: {fact.source.run_id}
+          </small>
+        </details>
+      );
+      if (TECHNICAL_FIELD.some((pattern) => pattern.test(fact.field))) {
+        technical.push(item);
+        return null;
+      }
       return item;
     }
     if (line.startsWith("# ")) return <h3 key={index}>{line.slice(2)}</h3>;
     return <p key={index}>{line || "\u00a0"}</p>;
   });
-  return <section aria-label="Report reading view" className="manual-reading">{lines}{technical.length > 0 && <details><summary>Methods and technical evidence ({technical.length})</summary>{technical}</details>}</section>;
+  return (
+    <section aria-label="Report reading view" className="manual-reading">
+      {lines}
+      {technical.length > 0 && (
+        <details>
+          <summary>Methods and technical evidence ({technical.length})</summary>
+          {technical}
+        </details>
+      )}
+    </section>
+  );
 }

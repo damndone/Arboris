@@ -14,9 +14,26 @@ export function modelTests(entries: PostEstimationResult[], runId: string, model
   return entries.filter(entry => entry.model_run_id === runId && entry.result.model_id === modelId);
 }
 export function PostEstimationResults({entries}: {entries: PostEstimationResult[]}) {
-  return <div aria-label="Saved model tests">{entries.length === 0 ? <p>No saved tests for this model yet.</p> : entries.map(entry => <article key={`${entry.run_id}:${entry.artifact_id}`}>
-    <h3>{entry.operation_id.replace(/^postestimation\./, '').replace(/[._]/g, ' ')}</h3>
-    <dl>{Object.entries(entry.result).filter(([key]) => !technical.test(key)).map(([key, value]) => <div key={key}><dt>{key.replace(/_/g, ' ')}</dt><dd>{valueText(key, value)}</dd></div>)}</dl>
-    <details><summary>Source</summary><pre>{JSON.stringify(entry, null, 2)}</pre></details>
-  </article>)}</div>;
+  if (entries.length === 0) return <div aria-label="Saved model tests"><p>No saved tests for this model yet.</p></div>;
+  return (
+    <div aria-label="Saved model tests">
+      {entries.map((entry) => (
+        <article key={`${entry.run_id}:${entry.artifact_id}`}>
+          <h3>{entry.title ?? entry.operation_id.replace(/^postestimation\./, '').replace(/[._]/g, ' ')}</h3>
+          <dl>
+            {Object.entries(entry.result).filter(([key]) => !technical.test(key)).map(([key, value]) => (
+              <div key={key}>
+                <dt>{key.replace(/_/g, ' ')}</dt>
+                <dd>{valueText(key, value)}</dd>
+              </div>
+            ))}
+          </dl>
+          <details>
+            <summary>Source</summary>
+            <pre>{JSON.stringify(entry, null, 2)}</pre>
+          </details>
+        </article>
+      ))}
+    </div>
+  );
 }

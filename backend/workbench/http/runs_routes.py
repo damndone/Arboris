@@ -31,6 +31,7 @@ from ..api_errors import (
 )
 from ..agent.family_evidence import bounded_model_family_evidence
 from ..agent.workflow_runtime import collect_post_estimation_results, count_post_estimation_results
+from ..services.operation_presentation import operation_title
 from ..artifacts import read_json
 from ..config import load_config
 from ..diagnostic_preview import build_diagnostic_summary_preview
@@ -494,9 +495,10 @@ def get_run_endpoint(run_id: str, project_root: str) -> RunDetail:
         # Serve-time projection of already-durable evidence: a declared
         # post-estimation step answers a question, and this is what lets the
         # run surface show that answer instead of leaving it in an artifact.
-        "post_estimation_results": collect_post_estimation_results(
-            run_root.parent.parent, run_id, keep_latest=True
-        ),
+        "post_estimation_results": [
+            {**item, "title": operation_title(item["operation_id"])}
+            for item in collect_post_estimation_results(run_root.parent.parent, run_id, keep_latest=True)
+        ],
         "post_estimation_results_total": count_post_estimation_results(run_root.parent.parent, run_id),
     }
 

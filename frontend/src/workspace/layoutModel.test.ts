@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from "vitest";
 import {
+  stageIsOpen,
   columnSpec,
   effectiveLayout,
   mapPresentation,
@@ -75,5 +76,16 @@ describe("wide views and memory", () => {
     expect(readAgentOpen()).toBe(true);
     writeAgentOpen(false);
     expect(readAgentOpen()).toBe(false);
+  });
+});
+
+describe("stageIsOpen", () => {
+  test("Analyze and document views always show the stage; Analysis only with an open, unfolded step", () => {
+    const base = { analyzing: false, analysisView: true, hasOpenItem: false, folded: false };
+    expect(stageIsOpen(base)).toBe(false);
+    expect(stageIsOpen({ ...base, hasOpenItem: true })).toBe(true);
+    expect(stageIsOpen({ ...base, hasOpenItem: true, folded: true })).toBe(false);
+    expect(stageIsOpen({ ...base, analyzing: true })).toBe(true);
+    expect(stageIsOpen({ ...base, analysisView: false })).toBe(true);
   });
 });

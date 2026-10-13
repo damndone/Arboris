@@ -50,7 +50,7 @@ it('keeps dedicated navigation on the explicitly selected target and explains mi
  render(<OperationsPanel projectRoot="/test" runId="run" models={[{runId:'other',nodeId:'model:ols',label:'OLS'}]} onClose={vi.fn()} onRefresh={vi.fn()} onOpenRun={vi.fn()} onDedicated={onDedicated}/>);
  await waitFor(()=>expect(screen.getByLabelText('Analysis target')).toHaveValue('0'));
  fireEvent.click(await screen.findByRole('button',{name:/Run code/}));
- expect(onDedicated).toHaveBeenCalledWith('code.execute',{kind:'dataset_node',run_id:'run',node_id:'data',artifact_id:'input.csv'});
+ expect(onDedicated).toHaveBeenCalledWith(expect.objectContaining({id:'code.execute'}),{kind:'dataset_node',run_id:'run',node_id:'data',artifact_id:'input.csv'});
  fireEvent.change(screen.getByLabelText('Analysis target'),{target:{value:'1'}});
  await waitFor(()=>expect(screen.getByRole('button',{name:/Run code/})).toBeDisabled());
  expect(screen.getByRole('button',{name:/Run code/})).toHaveTextContent('Select a dataset target first.');

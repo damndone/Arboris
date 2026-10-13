@@ -40,7 +40,8 @@ export function OperationsPanel({
   onClose: () => void;
   onRefresh: () => void;
   onOpenRun: (runId: string) => void;
-  onDedicated: (id: string, target?: Target) => void;
+  /** An operation with its own place in the workbench (its `execution.surface`). */
+  onDedicated: (op: Operation, target?: Target) => void;
 }) {
   // A run produced here can become the active run while Analyze is open; this
   // session stays bound to the run it was opened on.
@@ -115,7 +116,7 @@ export function OperationsPanel({
     setSteps((old) => old.filter((_, i) => i !== index));
   };
   const pick = (op: Operation) => {
-    if (op.execution.kind !== "workflow") return onDedicated(op.id, target);
+    if (op.execution.kind !== "workflow") return onDedicated(op, target);
     invalidate();
     setSteps((old) => [...old, newStep(op, old.length, target, uid().slice(0, 4))]);
     setPicking(false);

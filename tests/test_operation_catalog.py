@@ -152,3 +152,13 @@ def test_an_operation_without_words_still_reads_sensibly(monkeypatch):
     entries = {item["id"]: item for item in _client().get("/operations").json()["operations"]}
     probe = entries["data.catalog_probe"]
     assert (probe["name"], probe["blurb"], probe["group_label"]) == ("Data catalog probe", "Probe the catalog.", "More")
+
+
+def test_every_dedicated_operation_says_where_it_is_operated():
+    entries = {item['id']: item for item in _client().get('/operations').json()['operations']}
+    dedicated = {key: item for key, item in entries.items() if item['execution']['kind'] == 'dedicated'}
+    assert dedicated, "the catalog binds dedicated endpoints"
+    surfaces = {'graph', 'data', 'table', 'notebook', 'new_analysis', 'analyze', 'agent'}
+    assert {key: item['execution'].get('surface') for key, item in dedicated.items() if item['execution'].get('surface') not in surfaces} == {}
+    assert dedicated['data.import']['execution']['surface'] == 'new_analysis'
+    assert dedicated['graph.fork']['execution']['surface'] == 'agent'
