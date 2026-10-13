@@ -18,7 +18,10 @@ describe("AppearanceSettings", () => {
     expect(document.documentElement.dataset.theme).toBe("dark");
 
     const workspace = screen.getByRole("radiogroup", { name: "Workspace" });
+    expect(within(workspace).getByRole("radio", { name: /New workspace/ })).toBeChecked();
+    fireEvent.click(within(workspace).getByRole("radio", { name: /Classic/ }));
     expect(within(workspace).getByRole("radio", { name: /Classic/ })).toBeChecked();
+    expect(localStorage.getItem("workbench:workspace")).toBe("classic");
     fireEvent.click(within(workspace).getByRole("radio", { name: /New workspace/ }));
     expect(within(workspace).getByRole("radio", { name: /New workspace/ })).toBeChecked();
     expect(localStorage.getItem("workbench:workspace")).toBe("new");

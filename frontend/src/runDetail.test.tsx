@@ -30,6 +30,8 @@ let fetchMock: ReturnType<typeof vi.fn<typeof fetch>>;
 const originalFetch = globalThis.fetch;
 
 beforeEach(() => {
+  // Explicitly exercise the retained classic graph shell.
+  localStorage.setItem("workbench:workspace", "classic");
   fetchMock = vi.fn<typeof fetch>();
   vi.stubGlobal("fetch", fetchMock);
 });

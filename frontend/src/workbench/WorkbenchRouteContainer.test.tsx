@@ -28,6 +28,9 @@ import {
 } from "../apiFixtures";
 import { forestEdgeFixture, forestHeadFixture, forestNodeFixture } from "../apiFixtures";
 
+// These assertions cover the retained classic route, rails and panels.
+beforeEach(() => localStorage.setItem("workbench:workspace", "classic"));
+
 const routerFuture = { v7_startTransition: true, v7_relativeSplatPath: true };
 
 vi.mock("../capabilities/useCapabilities", () => ({

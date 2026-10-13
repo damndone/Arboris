@@ -66,6 +66,8 @@ beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn());
   try {
     localStorage.clear();
+    // This suite retains the classic-shell compatibility contract.
+    localStorage.setItem("workbench:workspace", "classic");
   } catch {
     // ignore
   }
@@ -993,4 +995,17 @@ describe("validatePanelPrediction", () => {
       isPanelData: false, predictionEnabled: false, predictionModelType: "",
     })).toBeNull();
   });
+});
+
+
+test("an unconfigured project opens the new workspace with the import action", async () => {
+  localStorage.removeItem("workbench:workspace");
+  (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse({
+    schema_version: 2, nodes: {}, edges: [], heads: [], families: [], legacy: false,
+  }));
+  const { rootToSlug } = await import("./workbench/projectSlug");
+  renderAt(`/p/${rootToSlug("/tmp/default-workspace")}/graph`);
+  expect(await screen.findByTestId("workspace-project-start")).toBeInTheDocument();
+  expect(screen.getByTestId("genesis-cta")).toBeInTheDocument();
+  expect(screen.queryByRole("tab", {name: "Workbench"})).not.toBeInTheDocument();
 });

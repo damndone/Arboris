@@ -68,6 +68,8 @@ beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn());
   try {
     localStorage.clear();
+    // This suite retains the classic-shell compatibility contract.
+    localStorage.setItem("workbench:workspace", "classic");
   } catch {
     // ignore
   }

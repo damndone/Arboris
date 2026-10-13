@@ -30,6 +30,8 @@ beforeEach(() => {
     }));
   }));
   localStorage.clear();
+    // This suite retains the classic-shell compatibility contract.
+    localStorage.setItem("workbench:workspace", "classic");
   document.body.innerHTML = '<div id="root"></div>';
 });
 
