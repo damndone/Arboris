@@ -9,6 +9,16 @@ from typing import Any
 import numpy as np
 from scipy import stats
 
+from workbench.contracts.model.nonparametric import (
+    FRIEDMAN_METHODS,
+    KENDALL_VARIANTS,
+    KRUSKAL_WALLIS_METHODS,
+    MANN_WHITNEY_METHODS,
+    NONPARAMETRIC_ALTERNATIVES,
+    WILCOXON_METHODS,
+    WILCOXON_ZERO_METHODS,
+)
+
 from .common import (
     MAX_PERMUTATION_RESAMPLES,
     MIN_PERMUTATION_RESAMPLES,
@@ -24,12 +34,12 @@ from .common import (
 
 
 def _alternative(value: str) -> str:
-    if value not in {"two-sided", "less", "greater"}:
+    if value not in NONPARAMETRIC_ALTERNATIVES:
         reject("NONPARAMETRIC_UNSUPPORTED_POLICY", "alternative is not declared")
     return value
 
 
-def _method(value: str, allowed: set[str]) -> str:
+def _method(value: str, allowed: frozenset[str]) -> str:
     if value not in allowed:
         reject("NONPARAMETRIC_UNSUPPORTED_POLICY", "inference method is not declared")
     return value
@@ -84,7 +94,7 @@ def run_mann_whitney(
 ) -> dict[str, Any]:
     level = alpha_value(alpha)
     alternative = _alternative(alternative)
-    method = _method(method, {"asymptotic", "exact", "permutation"})
+    method = _method(method, MANN_WHITNEY_METHODS)
     left = clean_1d(x, "x", missing_policy=missing_policy)
     right = clean_1d(y, "y", missing_policy=missing_policy)
     if left.size < 2 or right.size < 2:
@@ -134,8 +144,8 @@ def run_wilcoxon_signed_rank(
 ) -> dict[str, Any]:
     level = alpha_value(alpha)
     alternative = _alternative(alternative)
-    method = _method(method, {"asymptotic", "exact"})
-    if zero_method not in {"wilcox", "pratt", "zsplit"}:
+    method = _method(method, WILCOXON_METHODS)
+    if zero_method not in WILCOXON_ZERO_METHODS:
         reject("NONPARAMETRIC_UNSUPPORTED_POLICY", "zero_method is not declared")
     left, right = paired_clean(x, y, missing_policy=missing_policy)
     differences = left - right
@@ -183,7 +193,7 @@ def run_kruskal_wallis(
     alpha: float = 0.05,
 ) -> dict[str, Any]:
     level = alpha_value(alpha)
-    _method(method, {"asymptotic"})
+    _method(method, KRUSKAL_WALLIS_METHODS)
     labels, arrays = groups_clean(groups, missing_policy=missing_policy)
     if len(labels) < 2 or any(array.size < 2 for array in arrays):
         reject("NONPARAMETRIC_TOO_FEW_OBSERVATIONS", "Kruskal-Wallis needs at least two groups of size two")
@@ -217,7 +227,7 @@ def run_friedman(
     alpha: float = 0.05,
 ) -> dict[str, Any]:
     level = alpha_value(alpha)
-    _method(method, {"asymptotic"})
+    _method(method, FRIEDMAN_METHODS)
     matrix = matrix_clean(values, "values")
     outcome = stats.friedmanchisquare(*matrix.T)
     n, k = matrix.shape
@@ -284,7 +294,7 @@ def run_kendall(
     alpha: float = 0.05,
 ) -> dict[str, Any]:
     level = alpha_value(alpha)
-    if variant not in {"b", "c"}:
+    if variant not in KENDALL_VARIANTS:
         reject("NONPARAMETRIC_UNSUPPORTED_POLICY", "Kendall variant must be b or c")
     left, right = _correlation_input(x, y, missing_policy)
     if left.size < 3 or np.unique(left).size < 2 or np.unique(right).size < 2:

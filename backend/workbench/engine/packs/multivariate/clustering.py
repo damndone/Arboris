@@ -13,13 +13,9 @@ from scipy.spatial.distance import cdist
 from workbench.contracts.model.multivariate import make_result_envelope
 
 from .common import MultivariatePackError, json_native, prepare_numeric_frame
+from workbench.contracts.model.multivariate import CLUSTERING_ALGORITHMS, CLUSTERING_STANDARDIZATIONS, CLUSTERING_SELECTIONS, CLUSTERING_LINKAGES, CLUSTERING_METRICS
 
 
-CLUSTERING_ALGORITHMS = frozenset({"kmeans", "hierarchical"})
-CLUSTERING_STANDARDIZATIONS = frozenset({"none", "zscore_sample"})
-CLUSTERING_SELECTIONS = frozenset({"fixed", "silhouette_candidates"})
-CLUSTERING_LINKAGES = frozenset({"single", "complete", "average", "ward"})
-CLUSTERING_METRICS = frozenset({"euclidean", "cityblock", "cosine"})
 MAX_CLUSTER_CANDIDATES = 12
 MAX_SILHOUETTE_OBSERVATIONS = 2_000
 

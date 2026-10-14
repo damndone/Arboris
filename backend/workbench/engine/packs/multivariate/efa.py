@@ -15,10 +15,9 @@ import statsmodels
 from workbench.contracts.model.multivariate import make_result_envelope
 
 from .common import MultivariatePackError, json_native, prepare_numeric_frame
+from workbench.contracts.model.multivariate import EFA_EXTRACTIONS, EFA_ROTATIONS
 
 
-EFA_EXTRACTIONS = frozenset({"principal_axis", "maximum_likelihood"})
-EFA_ROTATIONS = frozenset({"none", "varimax", "promax", "oblimin"})
 _EXTRACTION_METHODS = {
     "principal_axis": "pa",
     "maximum_likelihood": "ml",

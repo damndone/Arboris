@@ -29,6 +29,16 @@ NONPARAMETRIC_OPERATION_IDS = frozenset(
     }
 )
 NONPARAMETRIC_STATUSES = frozenset({"completed", "rejected", "failed"})
+# The closed option vocabularies the rank kernels accept; the workflow
+# registry publishes these same sets as each option's allowed values.
+NONPARAMETRIC_ALTERNATIVES = frozenset({"two-sided", "less", "greater"})
+NONPARAMETRIC_MISSING_POLICIES = frozenset({"reject", "complete_case_v1"})
+MANN_WHITNEY_METHODS = frozenset({"asymptotic", "exact", "permutation"})
+WILCOXON_METHODS = frozenset({"asymptotic", "exact"})
+WILCOXON_ZERO_METHODS = frozenset({"wilcox", "pratt", "zsplit"})
+KRUSKAL_WALLIS_METHODS = frozenset({"asymptotic"})
+FRIEDMAN_METHODS = frozenset({"asymptotic"})
+KENDALL_VARIANTS = frozenset({"b", "c"})
 NONPARAMETRIC_REASON_CODES = frozenset(
     {
         "NONPARAMETRIC_COMPLETED",
@@ -153,7 +163,15 @@ def make_result_envelope(
 
 
 __all__ = [
+    "FRIEDMAN_METHODS",
+    "KENDALL_VARIANTS",
+    "KRUSKAL_WALLIS_METHODS",
+    "MANN_WHITNEY_METHODS",
     "MAX_NONPARAMETRIC_OBSERVATIONS",
+    "NONPARAMETRIC_ALTERNATIVES",
+    "NONPARAMETRIC_MISSING_POLICIES",
+    "WILCOXON_METHODS",
+    "WILCOXON_ZERO_METHODS",
     "NONPARAMETRIC_CONTRACT",
     "NONPARAMETRIC_CONTRACT_VERSION",
     "NONPARAMETRIC_OPERATION_IDS",

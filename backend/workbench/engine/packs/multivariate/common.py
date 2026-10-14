@@ -8,6 +8,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from workbench.contracts.model.multivariate import MULTIVARIATE_MISSING_POLICIES
+
 
 class MultivariatePackError(ValueError):
     """A stable, machine-readable multivariate input or option failure."""
@@ -67,7 +69,7 @@ def prepare_numeric_frame(
         raise MultivariatePackError(
             "MULTIVARIATE_BAD_INPUT", "frame must be a pandas DataFrame"
         )
-    if missing_policy != "complete_case_v1":
+    if missing_policy not in MULTIVARIATE_MISSING_POLICIES:
         raise MultivariatePackError(
             "MULTIVARIATE_UNSUPPORTED_MISSING_POLICY",
             "only complete_case_v1 is currently declared",

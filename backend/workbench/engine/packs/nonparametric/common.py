@@ -9,6 +9,7 @@ from typing import Any
 import numpy as np
 
 from workbench.contracts.model.nonparametric import (
+    NONPARAMETRIC_MISSING_POLICIES,
     MAX_NONPARAMETRIC_OBSERVATIONS,
     make_result_envelope,
 )
@@ -52,7 +53,7 @@ def _numeric_1d(values: Sequence[float], name: str) -> np.ndarray:
 
 
 def clean_1d(values: Sequence[float], name: str, *, missing_policy: str) -> np.ndarray:
-    if missing_policy not in {"reject", "complete_case_v1"}:
+    if missing_policy not in NONPARAMETRIC_MISSING_POLICIES:
         reject("NONPARAMETRIC_UNSUPPORTED_POLICY", "missing_policy is not declared")
     array = _numeric_1d(values, name)
     if np.isinf(array).any():
@@ -78,7 +79,7 @@ def paired_clean(
     mask = np.isfinite(x) & np.isfinite(y)
     if not mask.all() and missing_policy == "reject":
         reject("NONPARAMETRIC_NONFINITE_VALUE", "paired samples contain missing values")
-    if missing_policy not in {"reject", "complete_case_v1"}:
+    if missing_policy not in NONPARAMETRIC_MISSING_POLICIES:
         reject("NONPARAMETRIC_UNSUPPORTED_POLICY", "missing_policy is not declared")
     x, y = x[mask], y[mask]
     if x.size == 0:

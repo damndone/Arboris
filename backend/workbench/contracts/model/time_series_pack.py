@@ -95,7 +95,38 @@ def make_time_series_result(
     ).to_dict()
 
 
+
+# Closed option vocabularies the kernels validate against (moved here from
+# the kernels so the workflow registry can publish them without importing
+# numerical code). Kernels import them back under the same names.
+TIME_ORDER_POLICIES = frozenset({"declared_monotonic", "sort_by_time"})
+ARIMA_TRENDS = frozenset({"n", "c", "t", "ct"})
+VAR_TRENDS = frozenset({"n", "c", "ct", "ctt"})
+GRANGER_TESTS = frozenset({"ssr_ftest", "ssr_chi2test", "lrtest", "params_ftest"})
+STABILITY_POLICIES = frozenset({"reject_unstable", "report_only"})
+IRF_CI_METHODS = frozenset({"asymptotic_normal"})
+COINTEGRATION_METHODS = frozenset({"engle_granger", "johansen"})
+ENGLE_GRANGER_TRENDS = frozenset({"c", "ct", "ctt", "n"})
+VECM_DETERMINISTICS = frozenset({"n", "co", "ci", "lo", "li"})
+PACF_METHODS = frozenset({"ywm"})
+ADF_REGRESSIONS = frozenset({"c", "ct", "ctt", "n"})
+ADF_AUTOLAGS = frozenset({"aic", "bic", "t_stat", "none"})
+KPSS_REGRESSIONS = frozenset({"c", "ct"})
+
 __all__ = [
+    "TIME_ORDER_POLICIES",
+    "ARIMA_TRENDS",
+    "VAR_TRENDS",
+    "GRANGER_TESTS",
+    "STABILITY_POLICIES",
+    "IRF_CI_METHODS",
+    "COINTEGRATION_METHODS",
+    "ENGLE_GRANGER_TRENDS",
+    "VECM_DETERMINISTICS",
+    "PACF_METHODS",
+    "ADF_REGRESSIONS",
+    "ADF_AUTOLAGS",
+    "KPSS_REGRESSIONS",
     "TIME_SERIES_PACK_CONTRACT",
     "TIME_SERIES_PACK_CONTRACT_VERSION",
     "TIME_SERIES_PACK_OPERATION_IDS",

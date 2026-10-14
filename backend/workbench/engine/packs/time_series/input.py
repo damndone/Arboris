@@ -10,9 +10,9 @@ import numpy as np
 import pandas as pd
 
 from .errors import TimeSeriesPackError
+from workbench.contracts.model.time_series_pack import TIME_ORDER_POLICIES
 
 
-TIME_ORDER_POLICIES = frozenset({"declared_monotonic", "sort_by_time"})
 
 
 @dataclass(frozen=True)

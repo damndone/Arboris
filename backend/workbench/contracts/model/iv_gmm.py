@@ -160,7 +160,16 @@ def make_iv_gmm_result(
     return payload
 
 
+
+# Closed option vocabularies the kernels validate against (moved here from
+# the kernels so the workflow registry can publish them without importing
+# numerical code). Kernels import them back under the same names.
+GMM_ESTIMATORS = frozenset({"one_step", "two_step"})
+GMM_COVARIANCE_METHODS = frozenset({"heteroskedastic_hc0"})
+
 __all__ = [
+    "GMM_ESTIMATORS",
+    "GMM_COVARIANCE_METHODS",
     "IV_GMM_CONTRACT",
     "IV_GMM_CONTRACT_VERSION",
     "IV_GMM_OPERATION_IDS",

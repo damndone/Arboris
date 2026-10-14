@@ -17,12 +17,10 @@ from .common import json_native
 from .errors import TimeSeriesPackError
 from .input import PreparedTimeSeries, prepare_time_series
 from .models import MAX_FORECAST_HORIZON, _validate_confidence
+from workbench.contracts.model.time_series_pack import COINTEGRATION_METHODS, ENGLE_GRANGER_TRENDS, VECM_DETERMINISTICS
 
 
-COINTEGRATION_METHODS = frozenset({"engle_granger", "johansen"})
-ENGLE_GRANGER_TRENDS = frozenset({"c", "ct", "ctt", "n"})
 JOHANSEN_DET_ORDERS = frozenset({-1, 0, 1})
-VECM_DETERMINISTICS = frozenset({"n", "co", "ci", "lo", "li"})
 MAX_COINTEGRATION_LAG = 50
 _CRITICAL_VALUE_INDEX = {0.9: 0, 0.95: 1, 0.99: 2}
 

@@ -8,14 +8,12 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 
-from workbench.contracts.model.multivariate import make_result_envelope
+from workbench.contracts.model.multivariate import MULTIVARIATE_MISSING_POLICIES, make_result_envelope
 
 from .common import MultivariatePackError, json_native
+from workbench.contracts.model.multivariate import DISCRIMINANT_METHODS, DISCRIMINANT_PRIOR_POLICIES, DISCRIMINANT_EVALUATIONS
 
 
-DISCRIMINANT_METHODS = frozenset({"lda", "qda"})
-DISCRIMINANT_PRIOR_POLICIES = frozenset({"empirical", "declared"})
-DISCRIMINANT_EVALUATIONS = frozenset({"none", "holdout"})
 
 
 def _normalize_features(features: Sequence[str]) -> list[str]:
@@ -337,7 +335,7 @@ def fit_discriminant(
             )
     values, labels, feature_order, retained_positions = _prepare_supervised(frame, features, target)
     class_order = tuple(sorted(set(labels), key=lambda value: (type(value).__name__, value)))
-    if missing_policy != "complete_case_v1":
+    if missing_policy not in MULTIVARIATE_MISSING_POLICIES:
         raise MultivariatePackError(
             "MULTIVARIATE_UNSUPPORTED_MISSING_POLICY",
             "only complete_case_v1 is currently declared",

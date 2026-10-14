@@ -216,7 +216,40 @@ def make_result_envelope(
     ).to_dict()
 
 
+
+# Closed option vocabularies the kernels validate against (moved here from
+# the kernels so the workflow registry can publish them without importing
+# numerical code). Kernels import them back under the same names.
+CLUSTERING_ALGORITHMS = frozenset({"kmeans", "hierarchical"})
+CLUSTERING_STANDARDIZATIONS = frozenset({"none", "zscore_sample"})
+CLUSTERING_SELECTIONS = frozenset({"fixed", "silhouette_candidates"})
+CLUSTERING_LINKAGES = frozenset({"single", "complete", "average", "ward"})
+CLUSTERING_METRICS = frozenset({"euclidean", "cityblock", "cosine"})
+PCA_MATRICES = frozenset({"correlation", "covariance"})
+PCA_COMPONENT_SELECTIONS = frozenset(
+    {"all", "fixed", "kaiser", "cumulative_variance"}
+)
+EFA_EXTRACTIONS = frozenset({"principal_axis", "maximum_likelihood"})
+EFA_ROTATIONS = frozenset({"none", "varimax", "promax", "oblimin"})
+DISCRIMINANT_METHODS = frozenset({"lda", "qda"})
+DISCRIMINANT_PRIOR_POLICIES = frozenset({"empirical", "declared"})
+DISCRIMINANT_EVALUATIONS = frozenset({"none", "holdout"})
+MCA_MISSING_POLICIES = frozenset({"complete_case_v1"})
+
 __all__ = [
+    "CLUSTERING_ALGORITHMS",
+    "CLUSTERING_STANDARDIZATIONS",
+    "CLUSTERING_SELECTIONS",
+    "CLUSTERING_LINKAGES",
+    "CLUSTERING_METRICS",
+    "PCA_MATRICES",
+    "PCA_COMPONENT_SELECTIONS",
+    "EFA_EXTRACTIONS",
+    "EFA_ROTATIONS",
+    "DISCRIMINANT_METHODS",
+    "DISCRIMINANT_PRIOR_POLICIES",
+    "DISCRIMINANT_EVALUATIONS",
+    "MCA_MISSING_POLICIES",
     "MULTIVARIATE_CONTRACT",
     "MULTIVARIATE_CONTRACT_VERSION",
     "MULTIVARIATE_ALL_OPERATION_IDS",

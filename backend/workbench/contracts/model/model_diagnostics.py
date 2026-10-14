@@ -24,6 +24,9 @@ MODEL_DIAGNOSTICS_OPERATION_IDS = frozenset(
         "diagnostics.influence",
     }
 )
+# How the rows are ordered in time for Breusch-Godfrey; published as the
+# allowed values of its time_order option.
+MODEL_DIAGNOSTICS_TIME_ORDERS = frozenset({"declared_monotonic", "declared_order"})
 MODEL_DIAGNOSTICS_STATUSES = frozenset({"completed", "failed", "rejected"})
 MODEL_DIAGNOSTICS_REASON_CODES = frozenset(
     {
@@ -156,7 +159,7 @@ class ModelDiagnosticsInput:
         metadata = _metadata(self.model_metadata)
         if metadata["parameter_count"] != len(columns) or metadata["residual_df"] != len(response) - len(columns):
             raise ContractError("model_metadata does not match design degrees of freedom")
-        if self.time_order is not None and self.time_order not in {"declared_monotonic", "declared_order"}:
+        if self.time_order is not None and self.time_order not in MODEL_DIAGNOSTICS_TIME_ORDERS:
             raise ContractError("time_order is not declared")
         times = _numeric_sequence(self.time_values, "time_values")
         if times is not None and len(times) != len(response):
@@ -257,6 +260,7 @@ def make_model_diagnostics_result(**kwargs: Any) -> dict[str, Any]:
 
 
 __all__ = [
+    "MODEL_DIAGNOSTICS_TIME_ORDERS",
     "MODEL_DIAGNOSTICS_CONTRACT", "MODEL_DIAGNOSTICS_CONTRACT_VERSION", "MODEL_DIAGNOSTICS_OPERATION_IDS",
     "MODEL_DIAGNOSTICS_REASON_CODES", "ModelDiagnosticsInput", "ModelDiagnosticsResultEnvelope",
     "make_model_diagnostics_result",

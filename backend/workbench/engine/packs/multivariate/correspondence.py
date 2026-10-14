@@ -11,12 +11,12 @@ import pandas as pd
 from workbench.contracts.model.multivariate import make_result_envelope
 
 from .common import MultivariatePackError, json_native
+from workbench.contracts.model.multivariate import MCA_MISSING_POLICIES
 
 
 MAX_CA_CATEGORIES = 100
 MAX_CA_DIMENSIONS = 10
 MAX_MCA_ROWS = 2000
-MCA_MISSING_POLICIES = frozenset({"complete_case_v1"})
 
 
 def _validate_dimensions(n_dimensions: int, *, maximum_rank: int) -> None:

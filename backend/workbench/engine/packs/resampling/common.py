@@ -10,15 +10,12 @@ import numpy as np
 from workbench.canonical import sha256_canonical
 from workbench.contracts.model.resampling import make_resampling_result
 from workbench.engine.replicate_combine import ReplicateCombinedResult
+from workbench.contracts.model.resampling import BOOTSTRAP_STATISTICS, PERMUTATION_STATISTICS
 
 
 MAX_RESAMPLES = 10_000
 MAX_OBSERVATIONS = 100_000
 MAX_EXACT_PERMUTATION_STATES = 10_000
-BOOTSTRAP_STATISTICS = frozenset({"mean", "median"})
-PERMUTATION_STATISTICS = frozenset(
-    {"difference_in_means", "difference_in_medians"}
-)
 
 
 class ResamplingPackError(ValueError):

@@ -191,7 +191,22 @@ def make_resampling_result(
     return payload
 
 
+
+# Closed option vocabularies the kernels validate against (moved here from
+# the kernels so the workflow registry can publish them without importing
+# numerical code). Kernels import them back under the same names.
+BOOTSTRAP_STATISTICS = frozenset({"mean", "median"})
+PERMUTATION_STATISTICS = frozenset(
+    {"difference_in_means", "difference_in_medians"}
+)
+BOOTSTRAP_INTERVAL_METHODS = frozenset({"percentile", "basic", "bca"})
+PERMUTATION_ALTERNATIVES = frozenset({"two-sided", "greater", "less"})
+
 __all__ = [
+    "BOOTSTRAP_STATISTICS",
+    "PERMUTATION_STATISTICS",
+    "BOOTSTRAP_INTERVAL_METHODS",
+    "PERMUTATION_ALTERNATIVES",
     "RESAMPLING_CONTRACT",
     "RESAMPLING_CONTRACT_VERSION",
     "RESAMPLING_OPERATION_IDS",
