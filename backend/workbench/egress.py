@@ -68,6 +68,9 @@ TOOL_CONTENT_CLASSES: Mapping[str, str] = {
     # Agent (main and chain sessions)
     "propose_analysis_loop": "workbench_state",
     "calculate": "workbench_state",
+    # What the person and the Agent said earlier; tool results are excluded.
+    "search_project_conversations": "workbench_state",
+    "read_project_conversation": "workbench_state",
     "propose_operation": "workbench_state",
     "submit_analysis_loop_intent": "workbench_state",
     "inspect_completed_operations": "workbench_state",

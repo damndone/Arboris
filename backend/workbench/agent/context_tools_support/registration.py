@@ -476,6 +476,7 @@ class RegistrationMixin:
         return [
             self.show_dataset_rows_tool(session_id=session_id, scope_requirements=("project", "chain")),
             self.calculate_tool(session_id=session_id, scope_requirements=("project", "chain")),
+            *self.conversation_recall_tools(session_id=session_id, scope_requirements=("project", "chain")),
             ToolDefinition(
                 tool_id="export_analysis_script", version="v1", side_effect="artifact",
                 scope_requirements=("project", "chain"), max_output_budget=16384,
@@ -1082,6 +1083,85 @@ class RegistrationMixin:
             ),
         )
 
+    def conversation_recall_tools(
+        self, *, session_id: str, scope_requirements: tuple[str, ...]
+    ) -> list[ToolDefinition]:
+        """Search and read this project's earlier conversations (agent/recall.py)."""
+
+        from ..recall import read, search
+        from ..session import JsonlSessionRepository
+
+        def repository() -> JsonlSessionRepository:
+            return JsonlSessionRepository(self.project_root / "workbench", create=False)
+
+        def search_conversations(arguments: dict[str, Any], context: ToolContext) -> dict[str, Any]:
+            if context.session_id != session_id:
+                raise ValueError("tool session is outside the registered scope")
+            hits = search(repository(), str(arguments["query"]), limit=int(arguments.get("limit") or 8))
+            return {"hits": hits, "note": "A record of what was said, not verified results."}
+
+        def read_conversation(arguments: dict[str, Any], context: ToolContext) -> dict[str, Any]:
+            if context.session_id != session_id:
+                raise ValueError("tool session is outside the registered scope")
+            try:
+                return read(
+                    repository(),
+                    str(arguments["session_id"]),
+                    around_entry_id=arguments.get("around_entry_id"),
+                    before=int(arguments.get("before", 4)),
+                    after=int(arguments.get("after", 4)),
+                )
+            except KeyError as exc:
+                raise ToolVisibleError(f"PROJECT_CONVERSATION_NOT_FOUND: {exc.args[0]}") from exc
+
+        return [
+            ToolDefinition(
+                tool_id="search_project_conversations",
+                version="v1",
+                description=(
+                    "Search this project's conversations (including the earlier, summarized part of this one) "
+                    "for what the person asked or decided and what you answered. Returns passages with their "
+                    "session and entry ids. Tool results are not searchable; inspect evidence again by id."
+                ),
+                input_schema={
+                    "type": "object",
+                    "required": ["query"],
+                    "properties": {
+                        "query": {"type": "string", "minLength": 1, "maxLength": 300},
+                        "limit": {"type": "integer", "minimum": 1, "maximum": 12},
+                    },
+                    "additionalProperties": False,
+                },
+                side_effect="none",
+                scope_requirements=scope_requirements,
+                max_output_budget=8192,
+                handler=search_conversations,
+            ),
+            ToolDefinition(
+                tool_id="read_project_conversation",
+                version="v1",
+                description=(
+                    "Read messages of one of this project's conversations, around an entry id from "
+                    "search_project_conversations, or from its start."
+                ),
+                input_schema={
+                    "type": "object",
+                    "required": ["session_id"],
+                    "properties": {
+                        "session_id": {"type": "string", "minLength": 1, "maxLength": 200},
+                        "around_entry_id": {"type": "string", "minLength": 1, "maxLength": 128},
+                        "before": {"type": "integer", "minimum": 0, "maximum": 12},
+                        "after": {"type": "integer", "minimum": 0, "maximum": 12},
+                    },
+                    "additionalProperties": False,
+                },
+                side_effect="none",
+                scope_requirements=scope_requirements,
+                max_output_budget=12288,
+                handler=read_conversation,
+            ),
+        ]
+
     def calculate_tool(
         self, *, session_id: str, scope_requirements: tuple[str, ...]
     ) -> ToolDefinition:
@@ -1264,6 +1344,7 @@ class RegistrationMixin:
             notebook_state_tool(self.project_root, session_id=session_id),
             self.show_dataset_rows_tool(session_id=session_id, scope_requirements=("project",)),
             self.calculate_tool(session_id=session_id, scope_requirements=("project",)),
+            *self.conversation_recall_tools(session_id=session_id, scope_requirements=("project",)),
             ToolDefinition(
                 tool_id="inspect_project_model_coefficients",
                 version="v1",
