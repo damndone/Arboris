@@ -1557,21 +1557,12 @@ def create_agent_analysis_loop_proposal(
         main_session_id=_ensure_main_session(repository, root),
         context_provider=provider,
     )
-    # Proposal creation needs a registered Chain identity but does not invoke
-    # an LLM. The adapter is constructed locally; this read/plan path makes no
-    # provider call.
-    agent = AgentCore(
-        repository,
-        events,
-        OpenAICompatibleModelAdapter(load_llm_config()),
-        session_id=session_id,
-    )
-    orchestrator.register_chain(chain_id, session_id, agent)
     plan_started = perf_counter()
     try:
         proposal = create_analysis_loop_proposal(
             orchestrator=orchestrator,
             chain_id=chain_id,
+            session_id=session_id,
             plan_store=PlanDiffStore(repository.root, create=False),
             source=resolved.source,
             intent={
@@ -1804,16 +1795,10 @@ def create_agent_fork_proposal(
         main_session_id=_ensure_main_session(repository, root),
         context_provider=NodeOperationContextProvider(root),
     )
-    agent = AgentCore(
-        repository,
-        events,
-        OpenAICompatibleModelAdapter(load_llm_config()),
-        session_id=session_id,
-    )
-    orchestrator.register_chain(chain_id, session_id, agent)
     try:
         proposal = orchestrator.create_proposal(
             chain_id=chain_id,
+            session_id=session_id,
             operation_id="graph.fork",
             target={
                 "run_id": body.source_run_id,

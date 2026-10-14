@@ -462,6 +462,11 @@ def test_dataset_notebook_confirmation_executes_a_source_pinned_composed_workflo
     )
     assert selected.status_code == 200, selected.text
 
+    from workbench.lineage.run_family import resolve_run_family
+
+    source_family = resolve_run_family(project, source_run_id).run_family_id
+    notebook_family = service.get_notebook(notebook_id).run_family_id
+    assert source_family != notebook_family
     confirmed = client.post(
         f"/notebooks/{notebook_id}/options/{option['option_id']}/confirm",
         params=params,
@@ -481,6 +486,20 @@ def test_dataset_notebook_confirmation_executes_a_source_pinned_composed_workflo
         "curved",
     }
     assert workflow["post_estimation_artifact_ids"]
+    # Selecting a dataset from another analysis line preserves data provenance
+    # without pretending the new Genesis models are reruns of that line.
+    assert resolve_run_family(project, source_run_id).run_family_id == source_family
+    for branch in workflow["branch_runs"]:
+        child_id = branch["run_id"]
+        assert resolve_run_family(project, child_id).run_family_id == notebook_family
+        child_root = project / "runs" / child_id
+        inputs = json.loads((child_root / "run_inputs.json").read_text())
+        assert inputs["rerun_of"] is None and inputs["from_node"] is None
+        assert inputs["dataset_source"]["source_run_id"] == source_run_id
+        assert inputs["dataset_source"]["op_node_id"] == workflow_source["target"]["node_ref"]
+        assert inputs["dataset_source"]["source_artifact_id"] == _source_artifact_id
+        manifest = json.loads((child_root / "run_manifest.json").read_text())
+        assert manifest["dataset_source"] == inputs["dataset_source"]
     listed = client.post(f"/notebooks/{notebook_id}/options", params=params)
     assert listed.status_code == 200, listed.text
     result = listed.json()["execution_results"][option["option_id"]]

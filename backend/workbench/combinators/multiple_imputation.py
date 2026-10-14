@@ -32,8 +32,6 @@ import math
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-import numpy as np
-from scipy import stats
 
 POOL_CONTRACT = "workbench.multiple_imputation_pool.v1"
 POOLING_METHOD = "rubin_barnard_rubin"
@@ -147,6 +145,8 @@ def pool_kernels(kernels: Sequence[Mapping[str, Any]], *, alpha: float = 0.05) -
     later multi-parameter test (D1) will need. Estimates are pooled unrounded;
     p-values and intervals are never averaged.
     """
+    import numpy as np
+    from scipy import stats
     m = len(kernels)
     if not MIN_IMPUTATIONS <= m <= MAX_IMPUTATIONS:
         raise MultipleImputationRefusal(

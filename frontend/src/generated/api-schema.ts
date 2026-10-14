@@ -1447,6 +1447,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/operations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Operations
+         * @description Discover operations; target is the JSON target used by POST /operations/run.
+         */
+        get: operations["get_operations_operations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/operations/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run Operations */
+        post: operations["run_operations_operations_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/pipeline-drafts": {
         parameters: {
             query?: never;
@@ -1975,6 +2012,58 @@ export interface paths {
         };
         /** Get Run Graph */
         get: operations["get_run_graph_runs__run_id__graph_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/runs/{run_id}/manual-reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Manual Report History */
+        get: operations["manual_report_history_runs__run_id__manual_reports_get"];
+        put?: never;
+        /** Manual Report Save */
+        post: operations["manual_report_save_runs__run_id__manual_reports_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/runs/{run_id}/manual-reports/{report_id}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Manual Report Export */
+        get: operations["manual_report_export_runs__run_id__manual_reports__report_id__export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/runs/{run_id}/manual-reports/draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Manual Report Draft */
+        get: operations["manual_report_draft_runs__run_id__manual_reports_draft_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -4545,6 +4634,20 @@ export interface components {
             /** Run Id */
             run_id: string;
         };
+        /** DatasetNodeTarget */
+        DatasetNodeTarget: {
+            /** Artifact Id */
+            artifact_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "dataset_node";
+            /** Node Id */
+            node_id: string;
+            /** Run Id */
+            run_id: string;
+        };
         /** DatasetPage */
         DatasetPage: {
             /** Artifact Id */
@@ -6406,6 +6509,224 @@ export interface components {
             /** Timeout S */
             timeout_s: number;
         };
+        /** ManualArtifactRef */
+        ManualArtifactRef: {
+            /** Artifact Id */
+            artifact_id: string;
+            /** Run Id */
+            run_id: string;
+        };
+        /** ManualFactSource */
+        ManualFactSource: {
+            /** Artifact Ids */
+            artifact_ids: string[];
+            /** Node Key */
+            node_key: string;
+            /** Result Ref */
+            result_ref: string;
+            /** Run Id */
+            run_id: string;
+        };
+        /** ManualNodeRef */
+        ManualNodeRef: {
+            /** Node Id */
+            node_id: string;
+            /** Run Id */
+            run_id: string;
+        };
+        /** ManualOperationRequest */
+        ManualOperationRequest: {
+            /** Fingerprint */
+            fingerprint?: string | null;
+            /**
+             * Mode
+             * @default preview
+             * @enum {string}
+             */
+            mode?: "preview" | "execute" | "confirm";
+            /** Preview Id */
+            preview_id?: string | null;
+            /** Request Id */
+            request_id: string;
+            /** Steps */
+            steps?: {
+                [key: string]: unknown;
+            }[] | null;
+            /** Target */
+            target?: (components["schemas"]["DatasetNodeTarget"] | components["schemas"]["ModelNodeTarget"] | components["schemas"]["UploadTarget"]) | null;
+        };
+        /** ManualOperationResponse */
+        ManualOperationResponse: {
+            /** Confirmation Required */
+            confirmation_required: boolean;
+            /** Error */
+            error: {
+                [key: string]: unknown;
+            } | null;
+            /** Expected Effect */
+            expected_effect: string[];
+            /** Fingerprint */
+            fingerprint: string;
+            /** Operation Record Id */
+            operation_record_id: string | null;
+            /** Preview Id */
+            preview_id: string;
+            /** Request Id */
+            request_id: string;
+            /** Revision */
+            revision: number;
+            /** Risks */
+            risks: string[];
+            /** Status */
+            status: string;
+            /** Steps */
+            steps: components["schemas"]["ManualStepStatus"][];
+            /** Target */
+            target: {
+                [key: string]: string;
+            };
+            /** Workflow Id */
+            workflow_id: string | null;
+        };
+        /** ManualReportDraft */
+        ManualReportDraft: {
+            /**
+             * Draft Origin
+             * @constant
+             */
+            draft_origin: "deterministic";
+            /** Facts */
+            facts: components["schemas"]["ManualReportFact"][];
+            /** Figures */
+            figures: components["schemas"]["ManualReportFigure"][];
+            /** Limitations */
+            limitations: string[];
+            /** Run Id */
+            run_id: string;
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: "workbench-manual-report-draft/v1";
+            /** Source Fingerprint */
+            source_fingerprint: string;
+            /** Text */
+            text: string;
+            /** Title */
+            title: string;
+        };
+        /** ManualReportFact */
+        ManualReportFact: {
+            /** Field */
+            field: string;
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            source: components["schemas"]["ManualFactSource"];
+            /** Value */
+            value: string | number | boolean | null;
+        };
+        /** ManualReportFigure */
+        ManualReportFigure: {
+            /** Artifact Id */
+            artifact_id: string;
+            /** Chart Type */
+            chart_type: string;
+            /** Sha256 */
+            sha256: string;
+        };
+        /** ManualReportHistory */
+        ManualReportHistory: {
+            /** Reports */
+            reports: components["schemas"]["ManualReportRecord"][];
+        };
+        /** ManualReportRecord */
+        ManualReportRecord: {
+            /**
+             * Author
+             * @constant
+             */
+            author: "user";
+            /** Created At */
+            created_at: string;
+            /** Document Id */
+            document_id: string;
+            /**
+             * Draft Origin
+             * @constant
+             */
+            draft_origin: "deterministic";
+            /** Facts */
+            facts: components["schemas"]["ManualReportFact"][];
+            /** Figures */
+            figures: components["schemas"]["ManualReportFigure"][];
+            /** Id */
+            id: string;
+            /** Limitations */
+            limitations: string[];
+            /** Parent Report Id */
+            parent_report_id: string | null;
+            /** Revision Number */
+            revision_number: number;
+            /** Run Id */
+            run_id: string;
+            /** Source Fingerprint */
+            source_fingerprint: string;
+            /** Text */
+            text: string;
+            /** Title */
+            title: string;
+        };
+        /** ManualReportRequest */
+        ManualReportRequest: {
+            /** Fact Ids */
+            fact_ids: string[];
+            /** Figure Ids */
+            figure_ids?: string[];
+            /** Id */
+            id: string;
+            /** Parent Report Id */
+            parent_report_id?: string | null;
+            /** Source Fingerprint */
+            source_fingerprint: string;
+            /** Text */
+            text: string;
+            /** Title */
+            title: string;
+        };
+        /** ManualReportSaved */
+        ManualReportSaved: {
+            record: components["schemas"]["ManualReportRecord"];
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: "workbench-manual-report/v1";
+        };
+        /** ManualStepStatus */
+        ManualStepStatus: {
+            /** Artifact Refs */
+            artifact_refs: components["schemas"]["ManualArtifactRef"][];
+            /** Error */
+            error: string | null;
+            /** Node Refs */
+            node_refs: components["schemas"]["ManualNodeRef"][];
+            /** Operation Id */
+            operation_id: string;
+            /** Row Counts */
+            row_counts: {
+                [key: string]: number;
+            };
+            /** Spec */
+            spec: {
+                [key: string]: unknown;
+            };
+            /** Status */
+            status: string;
+            /** Step Id */
+            step_id: string;
+        };
         /** MaterializationV11View */
         MaterializationV11View: {
             /** Capability Resolution Binding Ref */
@@ -6734,6 +7055,18 @@ export interface components {
             x_variables?: string[];
             /** Y Variable */
             y_variable: string;
+        };
+        /** ModelNodeTarget */
+        ModelNodeTarget: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "model_node";
+            /** Node Id */
+            node_id: string;
+            /** Run Id */
+            run_id: string;
         };
         /**
          * ModelResult
@@ -7096,6 +7429,18 @@ export interface components {
             /** Unverified */
             unverified: components["schemas"]["Finding"][];
         };
+        /** OperationAvailability */
+        OperationAvailability: {
+            /** Message */
+            message: string;
+            /** Reason Code */
+            reason_code: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "available" | "needs_target" | "needs_parameters" | "unavailable";
+        };
         /** OperationCapability */
         OperationCapability: {
             /** Confirmation Policy */
@@ -7137,6 +7482,55 @@ export interface components {
             /** Verification Builder */
             verification_builder: string;
         };
+        /** OperationCatalog */
+        OperationCatalog: {
+            /**
+             * Catalog Version
+             * @constant
+             */
+            catalog_version: "workbench.operations/v1";
+            /** Operations */
+            operations: components["schemas"]["OperationCatalogEntry"][];
+            /** Total */
+            total: number;
+        };
+        /** OperationCatalogEntry */
+        OperationCatalogEntry: {
+            availability: components["schemas"]["OperationAvailability"];
+            /** Capability Ids */
+            capability_ids: string[];
+            /** Category */
+            category: string;
+            /** Column Resolver */
+            column_resolver: string | null;
+            /** Confirmation Policy */
+            confirmation_policy: string;
+            /** Declaration Source */
+            declaration_source: string;
+            execution: components["schemas"]["OperationExecution"];
+            /** Field Hints */
+            field_hints: {
+                [key: string]: components["schemas"]["OperationFieldHint"];
+            };
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Output Schema Ref */
+            output_schema_ref: string | null;
+            /** Risk Level */
+            risk_level: string;
+            /** Spec Schema */
+            spec_schema: {
+                [key: string]: unknown;
+            };
+            /** Summary */
+            summary: string;
+            /** Target Requirements */
+            target_requirements: string[];
+            /** Version */
+            version: string;
+        };
         /**
          * OperationConfirmed
          * @description A proposal-backed operation: the latest proposal revision, the durable
@@ -7147,6 +7541,34 @@ export interface components {
             proposal: components["schemas"]["ProposalRevisionView"];
             /** Status */
             status: string;
+        };
+        /** OperationExecution */
+        OperationExecution: {
+            /** Confirmation Path */
+            confirmation_path?: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "workflow" | "dedicated" | "unavailable";
+            /** Method */
+            method: string | null;
+            /** Path */
+            path: string | null;
+            /** Request Schema */
+            request_schema?: {
+                [key: string]: unknown;
+            };
+        };
+        /** OperationFieldHint */
+        OperationFieldHint: {
+            /**
+             * Control
+             * @enum {string}
+             */
+            control: "text" | "number" | "checkbox" | "select" | "list" | "object";
+            /** Required */
+            required: boolean;
         };
         /** OperationLookup */
         OperationLookup: {
@@ -9301,6 +9723,20 @@ export interface components {
             filename: string;
             /** Sha256 */
             sha256: string;
+        };
+        /** UploadTarget */
+        UploadTarget: {
+            /** Filename */
+            filename: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "upload";
+            /** Sheet Names */
+            sheet_names?: string[];
+            /** Upload Sha256 */
+            upload_sha256: string;
         };
         /**
          * ValidatedPredictionEvidence
@@ -12268,6 +12704,76 @@ export interface operations {
             };
         };
     };
+    get_operations_operations_get: {
+        parameters: {
+            query?: {
+                project_root?: string | null;
+                source_artifact_id?: string | null;
+                source_node_id?: string | null;
+                source_run_id?: string | null;
+                target?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperationCatalog"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_operations_operations_run_post: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ManualOperationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManualOperationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_pipeline_drafts_pipeline_drafts_get: {
         parameters: {
             query: {
@@ -13390,6 +13896,144 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RunGraph"] | components["schemas"]["ForestGraph"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    manual_report_history_runs__run_id__manual_reports_get: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManualReportHistory"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    manual_report_save_runs__run_id__manual_reports_post: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ManualReportRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManualReportSaved"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    manual_report_export_runs__run_id__manual_reports__report_id__export_get: {
+        parameters: {
+            query: {
+                format?: "html" | "docx" | "tex" | "pdf-print";
+                project_root: string;
+            };
+            header?: never;
+            path: {
+                report_id: string;
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": string;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    manual_report_draft_runs__run_id__manual_reports_draft_get: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManualReportDraft"];
                 };
             };
             /** @description Validation Error */

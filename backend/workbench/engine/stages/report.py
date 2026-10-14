@@ -147,20 +147,10 @@ class ReportStage:
             variable_labels=variable_labels,
             value_labels=value_labels,
         )
-        model_family_display = {
-            "ols": "OLS",
-            "ols_robust": "OLS (robust SE)",
-            "ols_hac": "OLS (Newey-West SE)",
-            "logit": "Logit",
-            "ordinal_logit": "Ordinal logit",
-            "multinomial_logit": "Multinomial logit",
-            "survival_cox": "Survival / Cox",
-            "quantile_regression": "Quantile regression",
-            "poisson": "Poisson",
-            "poisson_rate": "Poisson (rate model)",
-            "panel_ols": "Panel OLS",
-        }
         primary_type = model_results[0][1].get("model_type", "ols") if model_results else "ols"
+        from ...contracts.model.presentation import result_presentation
+
+        presentation = result_presentation(primary_type)
         # Which document is a family's evidence is declared once, beside the
         # family (contracts.model.result_envelope_registry), not kept here.
         family_evidence: dict[str, Any] | None = report_family_evidence(
@@ -177,7 +167,7 @@ class ReportStage:
             ]
         else:
             facts = [
-                f"Model: {model_family_display.get(primary_type, primary_type)}",
+                f"Model: {presentation.label or primary_type}",
             ]
             facts.extend([
                 f"y = {normalized_y};  X = {', '.join(normalized_x)}",
@@ -199,8 +189,8 @@ class ReportStage:
             )
         if imputation_summary and imputation_summary.get("status") == "completed":
             facts.append(_mice_imputation_fact(imputation_summary))
-        if primary_type in ("poisson", "poisson_rate"):
-            poisson_diag = diagnostic_artifacts.get("poisson_1", {})
+        if presentation.overdispersion_artifact:
+            poisson_diag = diagnostic_artifacts.get(presentation.overdispersion_artifact, {})
             overdisp = poisson_diag.get("overdispersion", {})
             if isinstance(overdisp, dict):
                 zero_rate = overdisp.get("zero_rate")
@@ -239,8 +229,8 @@ class ReportStage:
             "diagnostics": diagnostic_artifacts,
             "model_family_evidence": family_evidence,
         }
-        if primary_type in ("poisson", "poisson_rate"):
-            poisson_diag = diagnostic_artifacts.get("poisson_1", {})
+        if presentation.overdispersion_artifact:
+            poisson_diag = diagnostic_artifacts.get(presentation.overdispersion_artifact, {})
             overdisp = poisson_diag.get("overdispersion", {})
             if isinstance(overdisp, dict) and overdisp:
                 report["overdispersion"] = overdisp
@@ -251,7 +241,7 @@ class ReportStage:
 
         # Build diagnostic_summary.json
         primary_type = model_results[0][1].get("model_type", "ols") if model_results else "ols"
-        effective_exposure_col = exposure_col if primary_type == "poisson_rate" else None
+        effective_exposure_col = exposure_col if result_presentation(primary_type).uses_exposure else None
         diagnostic_summary = build_diagnostic_summary(
             issue_dicts=issue_dicts,
             model_results=[result for _, result in model_results],

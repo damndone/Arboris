@@ -31,7 +31,7 @@ from .run_service import _submit_run, encode_form_override, merge_form_overrides
 from .draft_materialization import normalize_ols_genesis_model_params
 
 
-def validate_exploration_context(root: Path, draft: dict[str, Any]) -> None:
+def validate_exploration_context(root: Path, draft: dict[str, Any]) -> dict[str, Any] | None:
     """Revalidate a pre-model exploration binding before OLS execution."""
     context = draft.get("exploration_context")
     if not isinstance(context, dict):
@@ -75,6 +75,12 @@ def validate_exploration_context(root: Path, draft: dict[str, Any]) -> None:
             raise ValueError("exploration fingerprint changed")
     except (KeyError, TypeError, ValueError, StatisticalExplorationValidationError) as exc:
         raise HTTPException(status_code=409, detail="STATISTICAL_EXPLORATION_STALE") from exc
+    return {
+        "source_run_id": resolved["source_run_id"],
+        "op_node_id": resolved["source_node_id"],
+        "source_artifact_id": resolved["source_artifact_id"],
+        "source_sha256": resolved["source_sha256"],
+    }
 
 
 def _draft_run_family_id(draft: dict[str, Any]) -> str | None:
@@ -166,14 +172,14 @@ def execute_genesis_draft(
     validated_draft_hash: str,
     execution_mode: str,
     idempotency_key: str | None,
+    dataset_source: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """v1.6.8 genesis execute: parentless draft chain -> FIRST run of a project.
+    """Execute a complete Genesis draft through the shared run lifecycle.
 
-    PARALLEL implementation to the from-node branch (same skeleton: hash check
-    outside lock -> dedupe -> execution_lock -> re-check + re-validate -> submit),
-    but genesis is NOT a rerun: no parent run_inputs to merge, no rerun_of /
-    from_node / op_overrides / rerun_from — the full form is synthesized from the
-    draft chain and dispatched via _submit_run(rerun_reason='initial')."""
+    The form is synthesized from the draft, without merging parent settings.
+    A trusted workflow adapter may supply verified selected-dataset lineage;
+    ordinary first-run drafts remain parentless.
+    """
     if first.draft_hash != validated_draft_hash:
         raise HTTPException(status_code=409, detail="VALIDATED_DRAFT_HASH_MISMATCH")
 
@@ -228,7 +234,12 @@ def execute_genesis_draft(
             }
 
         draft = current.draft
-        validate_exploration_context(root, draft)
+        validated_source = validate_exploration_context(root, draft)
+        # Only a trusted service adapter may request dataset lineage. An HTTP
+        # exploration_context alone never grants this provenance; re-resolve
+        # and compare the entire binding before it reaches durable run inputs.
+        if dataset_source is not None and dataset_source != validated_source:
+            raise HTTPException(status_code=409, detail="GENESIS_DATASET_SOURCE_MISMATCH")
         # --- genesis: synthesize the full form (no parent run to merge) ---
         nodes = {n["node_id"]: n for n in draft["graph"]["nodes"]}
         sha = nodes["source_1"]["upload"]["sha256"]
@@ -351,7 +362,11 @@ def execute_genesis_draft(
                 upload_bytes=upload_bytes,
                 upload_filename=filename,
                 started_at=datetime.now(timezone.utc).isoformat(),
-                rerun_reason="initial",
+                rerun_reason="workflow_dataset_model" if dataset_source else "initial",
+                # Dataset provenance is independent of analysis-family
+                # ancestry. Genesis creates a model in its explicitly pinned
+                # family; selecting another run's data is not a rerun of it.
+                dataset_source=validated_source if dataset_source else None,
                 run_family_id=_draft_run_family_id(draft),
                 before_dispatch=_record_snapshot_before_dispatch,
             )

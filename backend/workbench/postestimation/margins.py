@@ -47,6 +47,31 @@ INVERSE_LINKS = {"identity": _identity, "logit": _logit, "probit": _probit, "log
 AT_OPTIONS = ("average", "means")
 
 
+def _design_derivative(names, matrix, variable, products):
+    """Derivative of products declared by the verified design, never labels."""
+    derivative = None
+    positions = {name: index for index, name in enumerate(names)}
+    for term, factors in products.items():
+        column = positions[term]
+        if term == variable:
+            continue
+        targets = [i for i, factor in enumerate(factors) if factor == variable]
+        if targets and derivative is None:
+            derivative = np.zeros_like(matrix)
+            derivative[:, positions[variable]] = 1.0
+        for target in targets:
+            values = np.ones(len(matrix))
+            for i, factor in enumerate(factors):
+                if i == target:
+                    continue
+                name = factor
+                if name not in positions:
+                    raise PostestimationRefusal("TRANSFORMED_TERM", f"The factor {factor} of {term} has no verified design column")
+                values *= matrix[:, positions[name]]
+            derivative[:, column] += values
+    return derivative
+
+
 def marginal_effects(
     kernel: Mapping[str, Any],
     design: Mapping[str, np.ndarray],
@@ -93,6 +118,10 @@ def marginal_effects(
             f"{', '.join(unknown)} is not a regressor of this model; its regressors are {', '.join(names)}",
         )
 
+    continuous = getattr(design, "continuous_variables", None)
+    if continuous is not None and any(name not in continuous for name in requested):
+        raise PostestimationRefusal("CONTINUOUS_VARIABLE_REQUIRED", "Request the continuous input variable, not a categorical contrast or interaction coefficient")
+
     beta = np.asarray(kernel["params"], dtype=float)
     vcov = np.asarray(kernel["vcov"], dtype=float)
     matrix = np.column_stack([np.asarray(design[name], dtype=float) for name in names])
@@ -104,17 +133,25 @@ def marginal_effects(
         raise PostestimationRefusal("UNDEFINED_AT_ESTIMATE", "the prediction is not finite on the estimation data")
 
     mean_first = float(first.mean())
-    # d/d beta of mean_i f(eta_i): mean_i f'(eta_i) x_i
     curvature = (second[:, None] * matrix).mean(axis=0)
     use_t = kernel.get("reference_distribution") == "t" and (kernel.get("df_resid") or 0) > 0
     df = float(kernel["df_resid"]) if use_t else None
     critical = float(stats.t.ppf(0.5 + level / 2, df) if use_t else stats.norm.ppf(0.5 + level / 2))
     effects = []
     for name in requested:
-        j = names.index(name)
-        estimate = mean_first * beta[j]
-        gradient = curvature * beta[j]
-        gradient[j] += mean_first
+        design_derivative = _design_derivative(names, matrix, name, getattr(design, "product_factors", {}))
+        if design_derivative is None:
+            # Preserve the original vectorized path for additive regressors.
+            j = names.index(name)
+            estimate = mean_first * beta[j]
+            gradient = curvature * beta[j]
+            gradient[j] += mean_first
+        else:
+            slope = design_derivative @ beta
+            estimate = float(np.mean(first * slope))
+            # d/d beta mean[F'(X beta) * (dX/dx beta)]. Keep cross-covariances.
+            gradient = (second[:, None] * slope[:, None] * matrix
+                        + first[:, None] * design_derivative).mean(axis=0)
         std_error = math.sqrt(max(float(gradient @ vcov @ gradient), 0.0))
         statistic = estimate / std_error if std_error > 0 else math.nan
         p_value = (
@@ -129,7 +166,12 @@ def marginal_effects(
             "p_value": p_value,
             "ci": [float(estimate - critical * std_error), float(estimate + critical * std_error)],
         })
+    from ..contracts.model.result_envelope_registry import declaration_for
+
+    declaration = declaration_for(str(kernel["model_type"]))
+    target = declaration.marginal_prediction_target if declaration is not None else None
     return {
+        **({"prediction_target": target} if target else {}),
         "operation": "margins",
         "model_id": kernel["model_id"],
         "model_type": kernel["model_type"],

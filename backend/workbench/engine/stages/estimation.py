@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from ..fit_support import _orch, _model_id, _record_fitted_kernel
+from ..packs.binary_models.adapters import _fit_logit, _fit_probit
+from ..packs.count_regression.adapters import _fit_poisson, _fit_negative_binomial, _fit_glm
+
 import math
 from collections.abc import Mapping
 from typing import Any
@@ -114,18 +118,6 @@ def _validate_model_family_weights(
         )
 
 
-def _record_fitted_kernel(ctx, fitted, *, model_id: str, model_type: str,
-                          param_positions: tuple[int, ...] | None = None) -> None:
-    """Record the kernel of the fit whose covariance the result reports."""
-    kernel = kernel_from_fitted(
-        fitted, model_id=model_id, model_type=model_type,
-        nobs=int(getattr(fitted, "nobs", 0) or 0), public_name=_public_term,
-        param_positions=param_positions,
-    )
-    if kernel is not None:
-        record_inference_kernel(ctx, kernel)
-
-
 def _kernel_source_packet(result: dict[str, Any]) -> dict[str, Any]:
     """The packet whose sample size and fingerprint the kernel repeats.
 
@@ -176,20 +168,6 @@ def _result_for_downstream(model_type: str, result: dict[str, Any]) -> dict[str,
 # `run_logit`, etc. continue to work. Importing the runners directly here
 # would bypass those monkeypatches.
 
-def _orch():
-    from ... import orchestrator as _o
-    return _o
-
-
-def _model_id(ctx, default: str) -> str:
-    """The result id a fit writes: the family's own, or a combinator's per-member id.
-
-    By-group execution fits the same family once per group; each group's
-    result, kernel, stable ids and source ids must carry the group's id.
-    """
-    override = ctx.artifacts.get("_model_id_override")
-    return str(override) if override else default
-
 
 def _panel_covariance_request(ctx) -> tuple[str, str | None]:
     """Covariance and cluster column for a panel or DID fit (clustered by default)."""
@@ -225,83 +203,6 @@ def _fit_panel_ols(ctx, env):
     if kernel is not None:
         record_inference_kernel(ctx, kernel)
     return "panel_ols_1", primary, None
-
-
-def _fit_probit(ctx, env):
-    model_id = _model_id(ctx, "probit_1")
-    primary, fitted = _orch().run_probit(
-        ctx.data.frame,
-        y=ctx.artifacts["_normalized_y"],
-        x=ctx.artifacts["_normalized_x"],
-        model_id=model_id,
-        categorical_x=ctx.artifacts.get("_categorical_vars"),
-    )
-    return model_id, primary, fitted
-
-
-def _fit_negative_binomial(ctx, env):
-    options = ctx.artifacts.get("_model_options") or {}
-    primary, fitted = _orch().run_negative_binomial(
-        ctx.data.frame,
-        y=ctx.artifacts["_normalized_y"],
-        x=ctx.artifacts["_normalized_x"],
-        model_id="negative_binomial_1",
-        categorical_x=ctx.artifacts.get("_categorical_vars"),
-        dispersion=options.get("dispersion", "mean"),
-        alpha=options.get("alpha"),
-    )
-    # This owner fits beta first, followed by the estimated ancillary term.
-    # Positions retain a real regressor named alpha, even with duplicate names.
-    _record_fitted_kernel(ctx, fitted, model_id="negative_binomial_1",
-        model_type="negative_binomial", param_positions=tuple(range(fitted.model.exog.shape[1])))
-    return "negative_binomial_1", primary, fitted
-
-
-def _fit_glm(ctx, env):
-    options = ctx.artifacts.get("_model_options") or {}
-    family = ctx.artifacts.get("_glm_family") or ""
-    validate_glm_family_options(options, family)
-    primary, fitted = _orch().run_glm(
-        ctx.data.frame,
-        y=ctx.artifacts["_normalized_y"],
-        x=ctx.artifacts["_normalized_x"],
-        model_id="glm_1",
-        family_name=family,
-        categorical_x=ctx.artifacts.get("_categorical_vars"),
-        alpha=options.get("alpha"),
-    )
-    # The packet stays `glm`; its kernel names the family, because what is
-    # valid after the fit (and how it predicts) depends on the family.
-    primary["kernel_family"] = f"glm:{primary.get('glm_family')}"
-    return "glm_1", primary, fitted
-
-
-def _fit_logit(ctx, env):
-    model_id = _model_id(ctx, "logit_1")
-    primary, fitted = _orch().run_logit(
-        ctx.data.frame,
-        y=ctx.artifacts["_normalized_y"],
-        x=ctx.artifacts["_normalized_x"],
-        model_id=model_id,
-        categorical_x=ctx.artifacts.get("_categorical_vars"),
-    )
-    return model_id, primary, fitted
-
-
-def _fit_poisson(ctx, env):
-    model_id = _model_id(ctx, "poisson_1")
-    poisson_x = ctx.artifacts["_poisson_x"]
-    cat_all = ctx.artifacts.get("_categorical_vars") or set()
-    poisson_cat = {v for v in cat_all if v in poisson_x}
-    primary, fitted = _orch().run_poisson(
-        ctx.data.frame,
-        y=ctx.artifacts["_normalized_y"],
-        x=poisson_x,
-        model_id=model_id,
-        exposure_col=ctx.exposure_col,
-        categorical_x=poisson_cat,
-    )
-    return model_id, primary, fitted
 
 
 def _fit_iv_2sls(ctx, env):
@@ -527,7 +428,6 @@ def _ols_covariance_plan(ctx) -> tuple[bool, str | None]:
     return covariance not in {"unadjusted", "hac"}, None
 
 
-
 def _survey_design_declared(ctx) -> bool:
     """Whether the run carries a complex sampling design.
 
@@ -632,7 +532,6 @@ def _fit_ols(ctx, env):
         # diagnostics on it would describe the wrong sample.
         return model_id, primary, None
     return model_id, primary, fitted
-
 
 
 #: Terms the result payload and the design engine spell differently.  The engine

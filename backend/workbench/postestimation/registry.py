@@ -121,12 +121,13 @@ VALIDATED: Mapping[tuple[str, str], tuple[str, ...]] = {
         for operation, cases in (("wald", ("wald_joint", "wald_shifted")), ("lincom", ("lincom",)), ("nlcom", ("nlcom",)))
     },
     # v1.8.11: LMM fixed effects on the GLS covariance, against lme4 vcov() and
-    # Stata mixed (REML and ML, random intercept and slope). No LR (REML
-    # likelihoods do not compare fixed-effect designs; ML LR is unchecked) and
-    # no margins (no agreed prediction target for random effects).
+    # Stata mixed (REML and ML, random intercept and slope). LR stays closed:
+    # the kernel cannot certify matching random structures or interior variances.
+    # Margins uses population fixed effects, never empirical-Bayes random effects.
     ("linear_mixed_effects", "wald"): ("linear_mixed_effects.wald_joint", "linear_mixed_effects.wald_shifted"),
     ("linear_mixed_effects", "lincom"): ("linear_mixed_effects.lincom",),
     ("linear_mixed_effects", "nlcom"): ("linear_mixed_effects.nlcom",),
+    ("linear_mixed_effects", "margins"): ("linear_mixed_effects.margins",),
 }
 
 

@@ -15,7 +15,7 @@ family name.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import Any
@@ -73,6 +73,12 @@ class EvidenceField:
             raise ValueError(f"evidence field {self.key!r} has unknown kind {self.kind!r}")
 
 
+def _lmm_population_design(run_root, kernel):
+    from ...engine.packs.linear_mixed_effects.postestimation import population_design
+
+    return population_design(run_root, kernel)
+
+
 @dataclass(frozen=True)
 class ResultEnvelopeDeclaration:
     """What one family's result exposes beyond the shared envelope.
@@ -98,6 +104,9 @@ class ResultEnvelopeDeclaration:
     #: family's prediction needs more than the coefficients and the regressors
     #: (an exposure, thresholds, several equations) and is not declared yet.
     inverse_link: str | None = None
+    #: Optional family-owned verification/reconstruction from persisted execution evidence.
+    estimation_design_loader: Callable | None = None
+    marginal_prediction_target: str | None = None
     #: Owner-defined fixed likelihood settings that must match for nested LR.
     likelihood_definition_fields: tuple[str, ...] = ()
     #: What the estimator is (§3.1 of the v1.8.10 design): its outcome, its
@@ -185,7 +194,9 @@ _DECLARATIONS: tuple[ResultEnvelopeDeclaration, ...] = (
     _core("iv_2sls"),
     _core("panel_ols"),
     _core("did"),
-    _core("linear_mixed_effects"),
+    ResultEnvelopeDeclaration(family="linear_mixed_effects", result_shape="coefficient_intervals",
+        inverse_link="identity", estimation_design_loader=_lmm_population_design,
+        marginal_prediction_target="population_fixed_effects"),
     ResultEnvelopeDeclaration(
         family="anova",
         result_shape="anova_table",

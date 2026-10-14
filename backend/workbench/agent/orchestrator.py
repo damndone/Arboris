@@ -823,8 +823,16 @@ class WorkbenchOrchestrator:
         operation_version: str = "v1",
         command_id: str | None = None,
         proposal_id: str | None = None,
+        session_id: str | None = None,
     ) -> ProposalRevision:
-        session_id, _agent = self._chain(chain_id)
+        # Deterministic UI actions need a durable Chain identity, not an LLM.
+        # The session is server-selected and must satisfy the same scope check
+        # used by register_chain before any proposal or event is persisted.
+        if session_id is None:
+            session_id, _agent = self._chain(chain_id)
+        metadata = self.repository.get_metadata(session_id)
+        if metadata.get("role") != "chain" or metadata.get("chain_id") != chain_id:
+            raise ValueError("proposal session must be a matching chain session")
         definition = self.operation_registry.require(operation_id, operation_version)
         definition.validate(target=target, preconditions=preconditions, changes=changes)
         proposal = self.proposal_store.create(
@@ -3261,14 +3269,27 @@ def _record_operation_in_ledger(project_root: Any, record: OperationRecord) -> N
     else:
         steps = (LedgerStep.of(record.operation_id),)
     outputs = record.outputs or {}
+    source = record.operation_id
+    if record.actor_type in {"human_ui", "human_cli"}:
+        try:
+            metadata = JsonlSessionRepository(Path(project_root) / "workbench", create=False).get_metadata(
+                record.agent_session_id
+            )
+        except KeyError:
+            metadata = {}
+        manual_sources = {
+            "manual_operation": "POST /operations/run",
+            "manual_operation_cli": "workbench data (CLI)",
+        }
+        source = manual_sources.get(metadata.get("role"), source)
     record_entry(
         project_root,
         LedgerEntry(
-            # Typed UI data operations run through the same lifecycle as
-            # Agent proposals; their records carry actor_type "human_ui".
-            actor="user" if record.actor_type == "human_ui" else "agent",
+            # Manual UI and CLI operations use the same lifecycle as Agent
+            # proposals; durable adapter provenance identifies the user.
+            actor="user" if record.actor_type in {"human_ui", "human_cli"} else "agent",
             authorized_by="read_only_policy" if record.actor_type == "read_only_policy" else "user",
-            source=record.operation_id,
+            source=source,
             status="completed" if record.status == "completed" else "failed",
             steps=steps,
             run_id=str(record.target.get("run_id") or "") or None,

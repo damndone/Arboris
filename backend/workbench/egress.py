@@ -79,6 +79,7 @@ TOOL_CONTENT_CLASSES: Mapping[str, str] = {
     "inspect_data_schema": "metadata",
     "inspect_project_dataset_schema": "metadata",
     "inspect_node_context": "metadata",
+    "inspect_notebook_state": "workbench_state",
     "inspect_notebook_workflow_results": "aggregate",
     "inspect_project_notebook_workflow_results": "aggregate",
     "inspect_operation_artifact": "aggregate",

@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+from .fit_support import (
+    _formula_term, _ols_formula, _ensure_numeric_y, _ensure_numeric_x,
+    _add_engine, _root_cause_suffix, _attach_average_marginal_effects,
+)
+from ..engine.packs.binary_models.runner import run_logit, run_probit, _raise_if_separated
+from ..engine.packs.count_regression.runner import run_poisson, run_negative_binomial, run_glm
+
 import json
 import os
 from collections.abc import Mapping
@@ -39,56 +46,10 @@ HONEST_SD_SCALE_FLOOR = 1e-8
 HONEST_DID_WORKERS = max(1, min(4, os.cpu_count() or 1))
 
 
-def _formula_term(column: str, categorical: bool = False) -> str:
-    quoted = quote_column(column)
-    if categorical:
-        return f"C({quoted})"
-    return quoted
-
-
-def _ols_formula(y: str, terms: list[str]) -> str:
-    return f"{_formula_term(y)} ~ {' + '.join(terms)}"
-
-
 def _linearmodels_term(column: str) -> str:
     if column.isidentifier():
         return column
     return f"`{column.replace('`', '``')}`"
-
-
-def _ensure_numeric_y(frame: pd.DataFrame, y: str) -> pd.DataFrame:
-    series = frame[y]
-    if pd.api.types.is_numeric_dtype(series):
-        return frame
-    converted = pd.to_numeric(series, errors="coerce")
-    if converted.isna().all():
-        cleaned = series.astype(str).str.replace(r"[$,€£¥\s%]", "", regex=True)
-        converted = pd.to_numeric(cleaned, errors="coerce")
-    if converted.isna().all():
-        raise ValueError(
-            f"Column '{y}' is non-numeric and could not be converted. "
-            f"Check that the correct sheet, column, and transpose setting are selected."
-        )
-    frame[y] = converted
-    return frame
-
-
-def _ensure_numeric_x(frame: pd.DataFrame, x: list[str]) -> pd.DataFrame:
-    for col in x:
-        if col not in frame.columns:
-            continue
-        series = frame[col]
-        if pd.api.types.is_numeric_dtype(series):
-            continue
-        converted = pd.to_numeric(series, errors="coerce")
-        if converted.notna().sum() > 0:
-            frame[col] = converted
-    return frame
-
-
-def _add_engine(result: dict[str, Any], *, engine: str = "statsmodels") -> dict[str, Any]:
-    result["engine"] = engine
-    return result
 
 
 def _normalize_linearmodels_result(
@@ -219,13 +180,6 @@ def _normalize_linearmodels_result(
             }
         )
     return result
-
-
-def _root_cause_suffix(exc: Exception) -> str:
-    message = " ".join(str(exc).split())
-    if not message:
-        message = type(exc).__name__
-    return f" Root cause: {message[:200]}"
 
 
 def _python_scalar(value: Any) -> Any:
@@ -1078,224 +1032,6 @@ def run_ols(
         # standard errors on screen.
         fitted_sink(fitted)
     return _add_engine(result), original
-
-
-
-def _attach_average_marginal_effects(result: dict[str, Any], fitted: Any) -> dict[str, Any]:
-    """Add average marginal effects to a GLM-family result.
-
-    logit, probit and poisson report coefficients on the log-odds or log-rate
-    scale, which nobody interprets directly -- so without this the last step of
-    the analysis was left for the user to do by hand, while ordinal and
-    multinomial runs already carried it.
-
-    The record shape is deliberately identical to the one those two families
-    emit, so a consumer reads marginal effects the same way everywhere rather
-    than learning a second layout.  Failure is non-fatal: a model that cannot
-    produce them still returns its estimates, with the reason recorded.
-    """
-    from .normalize import _public_term
-
-    try:
-        frame = fitted.get_margeff(at="overall").summary_frame()
-        records = frame.reset_index().to_dict(orient="records")
-        for record in records:
-            # statsmodels labels rows with the formula term, `Q('x1')`, while
-            # coefficients are keyed by the plain column. Leaving both shapes in
-            # one payload would make marginal effects impossible to line up with
-            # the estimates they belong to.
-            raw = record.pop("index", None)
-            term = _public_term(raw) if raw is not None else None
-            record["term"] = term
-            record["index"] = term
-        result["marginal_effects"] = records
-        result["marginal_effects_basis"] = "average_marginal_effect"
-    except Exception as exc:  # noqa: BLE001 - reported, not swallowed
-        result["marginal_effects"] = []
-        result["marginal_effects_unavailable_reason"] = type(exc).__name__
-    return result
-
-
-def run_logit(
-    frame: pd.DataFrame, y: str, x: list[str], model_id: str,
-    categorical_x: set[str] | None = None,
-) -> tuple[dict[str, Any], Any]:
-    frame = _ensure_numeric_y(frame, y)
-    frame = _ensure_numeric_x(frame, x)
-    cat = categorical_x or set()
-    formula = _ols_formula(y, [_formula_term(column, column in cat) for column in x])
-    try:
-        fitted = smf.logit(formula=formula, data=frame).fit(disp=False, maxiter=100)
-    except Exception as exc:
-        _raise_if_separated("Logit", model_id, smf.logit(formula=formula, data=frame))
-        raise ValueError(
-            f"Logit model {model_id} failed to fit. "
-            f"Try OLS (Linear Probability Model) instead."
-        ) from exc
-    if not getattr(fitted, "converged", True):
-        _raise_if_separated("Logit", model_id, fitted.model)
-        raise ValueError(
-            f"Logit model {model_id} did not converge. "
-            f"Try OLS (Linear Probability Model) instead."
-        )
-    result = normalize_statsmodels_result(fitted, model_id)
-    result["model_type"] = "logit"
-    _attach_average_marginal_effects(result, fitted)
-    return _add_engine(result), fitted
-
-
-def _raise_if_separated(label: str, model_id: str, model: Any) -> None:
-    """Name separation as the reason a binary fit failed, when it is."""
-    from ..checks.fit_checks import separation_reason
-
-    try:
-        reason = separation_reason(model)
-    except Exception:  # noqa: BLE001 - the original failure message still stands
-        return
-    if reason:
-        raise ValueError(f"{label} model {model_id} cannot be estimated: {reason}.")
-
-
-def run_probit(
-    frame: pd.DataFrame,
-    y: str,
-    x: list[str],
-    model_id: str,
-    categorical_x: set[str] | None = None,
-) -> tuple[dict[str, Any], Any]:
-    frame = _ensure_numeric_y(frame, y)
-    frame = _ensure_numeric_x(frame, x)
-    cat = categorical_x or set()
-    formula = _ols_formula(y, [_formula_term(column, column in cat) for column in x])
-    try:
-        fitted = smf.probit(formula=formula, data=frame).fit(disp=False, maxiter=100)
-    except Exception as exc:
-        _raise_if_separated("Probit", model_id, smf.probit(formula=formula, data=frame))
-        raise ValueError(
-            f"Probit model {model_id} failed to fit. "
-            f"Check binary outcome values and predictors.{_root_cause_suffix(exc)}"
-        ) from exc
-    if not getattr(fitted, "converged", True):
-        _raise_if_separated("Probit", model_id, fitted.model)
-        raise ValueError(f"Probit model {model_id} did not converge.")
-    result = normalize_statsmodels_result(fitted, model_id)
-    result["model_type"] = "probit"
-    _attach_average_marginal_effects(result, fitted)
-    return _add_engine(result), fitted
-
-
-def run_poisson(
-    frame: pd.DataFrame, y: str, x: list[str], model_id: str,
-    exposure_col: str | None = None,
-    categorical_x: set[str] | None = None,
-) -> tuple[dict[str, Any], Any]:
-    frame = _ensure_numeric_y(frame, y)
-    series = frame[y].dropna()
-    if (series < 0).any():
-        raise ValueError(
-            f"Poisson model requires non-negative y, "
-            f"but column '{y}' has negative values."
-        )
-    if not pd.api.types.is_numeric_dtype(series):
-        raise ValueError(
-            f"Poisson model requires numeric y, "
-            f"but column '{y}' is non-numeric."
-        )
-    if not (series == series.astype(int)).all():
-        raise ValueError(
-            f"Poisson model requires integer y (counts), "
-            f"but column '{y}' has non-integer values."
-        )
-
-    cat = categorical_x or set()
-    formula = _ols_formula(y, [_formula_term(column, column in cat) for column in x])
-
-    exposure_actually_used = False
-    if exposure_col is not None and exposure_col in frame.columns:
-        exposure_vals = frame[exposure_col].values
-        if (exposure_vals <= 0).any():
-            import warnings
-            warnings.warn(
-                f"Exposure column '{exposure_col}' contains non-positive values "
-                f"(zeros or negatives). Falling back to standard Poisson "
-                f"without exposure adjustment."
-            )
-            fitted = smf.poisson(formula=formula, data=frame).fit(disp=False, maxiter=100)
-        else:
-            from statsmodels.genmod.families import Poisson
-            fitted = smf.glm(
-                formula=formula, data=frame,
-                family=Poisson(),
-                exposure=exposure_vals,
-            ).fit(disp=False, maxiter=100)
-            exposure_actually_used = True
-    else:
-        fitted = smf.poisson(formula=formula, data=frame).fit(disp=False, maxiter=100)
-
-    if not getattr(fitted, "converged", True):
-        raise ValueError(
-            f"Poisson model {model_id} did not converge."
-        )
-    result = normalize_statsmodels_result(fitted, model_id)
-    if exposure_actually_used:
-        result["model_type"] = "poisson_rate"
-        result["exposure_col"] = exposure_col
-    else:
-        result["model_type"] = "poisson"
-    _attach_average_marginal_effects(result, fitted)
-    return _add_engine(result), fitted
-
-
-def run_negative_binomial(
-    frame: pd.DataFrame,
-    y: str,
-    x: list[str],
-    model_id: str,
-    categorical_x: set[str] | None = None,
-    *,
-    dispersion: str = "mean",
-    alpha: float | None = None,
-) -> tuple[dict[str, Any], Any]:
-    from .count_models import fit_negative_binomial
-
-    frame = _ensure_numeric_y(frame, y)
-    frame = _ensure_numeric_x(frame, x)
-    cat = categorical_x or set()
-    formula = _ols_formula(y, [_formula_term(column, column in cat) for column in x])
-    try:
-        return fit_negative_binomial(frame, formula, model_id, dispersion=dispersion, alpha=alpha, y_column=y)
-    except ValueError:
-        raise
-    except Exception as exc:
-        raise ValueError(
-            f"Negative Binomial model {model_id} failed to fit.{_root_cause_suffix(exc)}"
-        ) from exc
-
-
-def run_glm(
-    frame: pd.DataFrame,
-    y: str,
-    x: list[str],
-    model_id: str,
-    family_name: str,
-    categorical_x: set[str] | None = None,
-    *,
-    alpha: float | None = None,
-) -> tuple[dict[str, Any], Any]:
-    from .count_models import fit_glm
-
-    frame = _ensure_numeric_y(frame, y)
-    frame = _ensure_numeric_x(frame, x)
-    cat = categorical_x or set()
-    formula = _ols_formula(y, [_formula_term(column, column in cat) for column in x])
-    try:
-        return fit_glm(frame, formula, model_id, family_name, alpha=alpha)
-    except ValueError:
-        raise
-    except Exception as exc:
-        raise ValueError(
-            f"GLM model {model_id} failed to fit.{_root_cause_suffix(exc)}"
-        ) from exc
 
 
 def run_fixed_effects(

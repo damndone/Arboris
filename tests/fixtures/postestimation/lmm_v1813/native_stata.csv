@@ -1,0 +1,25 @@
+setting,quantity,value
+random_intercept,loglik_full,  -391.74854751644551
+random_intercept,full_converged,                    1
+random_intercept,nobs,                  360
+random_intercept,x.estimate,    .5494635524662943
+random_intercept,x.std_error,  .035998019200335366
+random_intercept,time.estimate,   .39156183134881051
+random_intercept,time.std_error,  .018544350295248584
+random_intercept,loglik_restricted,  -479.38978162515127
+random_intercept,restricted_converged,                    1
+random_intercept,statistic,   175.28246821741152
+random_intercept,df,                    1
+random_intercept,p_value, 5.19425372335482e-40
+random_slope,loglik_full,  -460.31748610909108
+random_slope,full_converged,                    1
+random_slope,nobs,                  360
+random_slope,x.estimate,   .49961032486977397
+random_slope,x.std_error,  .035255018028869545
+random_slope,time.estimate,   .40138851515675805
+random_slope,time.std_error,  .042460457535437771
+random_slope,loglik_restricted,  -535.15776147083943
+random_slope,restricted_converged,                    1
+random_slope,statistic,   149.68055072349671
+random_slope,df,                    1
+random_slope,p_value, 2.03603022907018e-34

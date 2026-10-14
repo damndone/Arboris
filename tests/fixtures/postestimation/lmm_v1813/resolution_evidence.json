@@ -1,0 +1,42 @@
+{
+  "historical_fail": "owner_results.json (unchanged)",
+  "frozen_tolerances": "tolerances.json (unchanged)",
+  "definition": "Population fixed-effect response derivative: dE[y]/dx; random effects integrated to their zero mean, not conditional empirical-Bayes effects",
+  "derivative": "mean(F_prime(X beta) * (dX/dx beta))",
+  "covariance_gradient": "mean(F_second(X beta)*(dX/dx beta)*X + F_prime(X beta)*dX/dx)",
+  "scope": "Continuous control variables and time, including treatment-by-time interaction; ML and REML, random intercept and random slope",
+  "native_environment": {
+    "R": {
+      "R": "R version 4.6.0 (2026-04-24)",
+      "lme4": "2.0.1"
+    },
+    "Stata": {
+      "app_bundle_version": "18.0.120",
+      "bundle_identifier": "com.stata.stata18",
+      "macOS": "15.1",
+      "architecture": "arm64",
+      "source": "installed executable app Info.plist; batch output provides numerical results"
+    }
+  },
+  "source_sha256": {
+    "tests/fixtures/admission/linear_mixed_effects/data.csv": "f971e489477c8c912580aa09b2f0327334f0e12a2f9d5313a5e95f9ccf333828",
+    "tests/fixtures/postestimation/lmm_v1811/random_slope.csv": "8daaa586b83bf865b08f59e5af9fa2a29dc2d0b6069069cd98e10f9fedea91d3"
+  },
+  "native_files_sha256": {
+    "generate_reml_margins.R": "3f7dac675fe66d7cb2a10e7fb2c98f39569ad1bc917d3e6f2cc26c8304103d6f",
+    "generate_reml_margins.do": "15bc244437657565eaed9640667019f720a166b0a6923b44680736afc40ed17d",
+    "native_reml_margins_r.json": "15ad75d557d496b3c43a97bf561ef532ab43e8b35c45aa07f2fee569104bfce5",
+    "native_reml_margins_stata.csv": "bc476163d839cd2a236e84c2d6269ea454a9c9c26af923a9ef09df2006b696cf"
+  },
+  "verification_completed": {
+    "ML_RI_RS": "live estimates and standard errors agree with original R/Stata references",
+    "REML_RI_RS": "live estimates and standard errors agree with supplementary native R/Stata references",
+    "public_margin_and_seal_tests": "2 passed on host with genuine local_contained canary before final continuous-variable/missing-seal additions",
+    "parent_final_regression": "19 passed in 4.74s: final affected LMM additions, 100k budget, logit, registry coverage, catalog/types/ratchet/layers; reported by parent"
+  },
+  "preserved_errors": [
+    "New synthetic kernel fixture initially omitted required loglik; corrected to None",
+    "Nested tool sandbox blocked existing local_contained canary; unchanged tests passed on host"
+  ],
+  "LR": "CLOSED: core covariance interface refuses LMM; no verified random-structure/group/boundary comparison proof yet. Raw ML LR quantity agreement is not admission."
+}

@@ -11,6 +11,7 @@ from typing import Any
 
 import pandas as pd
 
+from ..contracts.model.presentation import diagnostic_family, result_presentation
 from ..artifacts import write_json
 from ..domain import GuardrailIssue, Severity
 
@@ -21,15 +22,7 @@ _TREATMENT_PROXY_CORRELATION_WARN = 0.7
 
 
 def _diagnostic_family(model_result: dict[str, Any]) -> str:
-    model_type = model_result.get("model_type", "ols")
-    if model_type == "glm":
-        family = model_result.get("glm_family")
-        return str(family) if family else "glm"
-    if model_type == "poisson_rate":
-        return "poisson"
-    if model_type in ("ols", "ols_robust", "ols_hac", "fixed_effects", "panel_ols"):
-        return "ols"
-    return str(model_type)
+    return diagnostic_family(model_result)
 
 
 def _check_model_validity(
@@ -141,7 +134,7 @@ def _check_rare_event(
     issue_dicts: list[dict[str, Any]],
     run_root: Path,
 ) -> dict[str, Any] | None:
-    if model_type not in ("logit",):
+    if not result_presentation(model_type).rare_event_check:
         return None
     if y not in frame.columns:
         return None

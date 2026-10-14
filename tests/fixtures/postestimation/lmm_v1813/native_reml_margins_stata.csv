@@ -1,0 +1,11 @@
+setting,quantity,value
+random_intercept,converged,                    1
+random_intercept,x.estimate,   .54943398144117506
+random_intercept,x.std_error,  .036190113907739796
+random_intercept,time.estimate,   .39156063764771115
+random_intercept,time.std_error,  .018636936852590102
+random_slope,converged,                    1
+random_slope,x.estimate,   .49983561218829359
+random_slope,x.std_error,   .03537108469106337
+random_slope,time.estimate,   .40138539239574256
+random_slope,time.std_error,  .043201139677883492

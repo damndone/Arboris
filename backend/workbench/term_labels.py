@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable, Mapping
 
-from .formula_terms import categorical_level, unquote_column
+from .formula_terms import categorical_level, interaction_factors, unquote_column
 
 _POWER = re.compile(r"^(?P<col>.+)_pow(?P<degree>[2-9])$")
 _PATSY_POWER = re.compile(r"^I\((?P<col>[^*()]+?)\s*\*\*\s*(?P<degree>[2-9])\)$")
@@ -67,12 +67,13 @@ class TermLabeler:
 
     def label(self, term: str) -> str:
         term = str(term)
+        if term in self.variable_labels:
+            return self.variable_labels[term]
+        parts = interaction_factors(term)
+        if len(parts) > 1:
+            return " × ".join(self.label(part) for part in parts)
         categorical = categorical_level(term)
         column = unquote_column(term)
-        if ":" in term and categorical is None and column is None:
-            parts = term.split(":")
-            if all(parts):
-                return " × ".join(self.label(part) for part in parts)
         if categorical is not None:
             return self._level_term(*categorical)
         if column is not None:

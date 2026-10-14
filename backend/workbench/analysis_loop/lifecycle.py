@@ -232,6 +232,7 @@ def create_analysis_loop_proposal(
     orchestrator: Any,
     chain_id: str,
     command_id: str | None = None,
+    session_id: str | None = None,
     **build_kwargs: Any,
 ) -> Any:
     """Adapt the pure spec into the existing ProposalStore lifecycle."""
@@ -241,6 +242,9 @@ def create_analysis_loop_proposal(
         chain_id=chain_id,
         command_id=command_id,
     )
+    if session_id is not None:
+        proposal_kwargs["session_id"] = session_id
+
     from ..agent.proposals import ProposalConfirmationError
 
     try:

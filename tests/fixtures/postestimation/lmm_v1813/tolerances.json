@@ -1,0 +1,7 @@
+{
+  "frozen_before_native_execution": true,
+  "numerical": {"absolute": 1e-7, "relative": 1e-6},
+  "p_value": {"absolute": 1e-10, "relative": 1e-5},
+  "comparisons": ["ML same-sample same-random-structure full versus drop x LR", "fixed-only response derivative x", "fixed-only response derivative time including arm interaction"],
+  "admission": "evaluation only; lr and margins registry remains closed"
+}

@@ -47,6 +47,8 @@ from .http.script_export_routes import router as script_export_router
 from .http.graph_routes import router as graph_router
 from .http.llm_routes import router as llm_router
 from .http.local_request_guard import LocalRequestGuard
+from .http.operation_routes import router as operation_router
+from .http.manual_report_routes import router as manual_report_router
 from .http.responses.system import Health
 from .http.typed_routes import TypedAPIRoute
 from .http.memory_routes import router as memory_router
@@ -358,3 +360,5 @@ app.include_router(notebook_router)
 app.include_router(rerun_router)
 app.include_router(llm_router)
 app.include_router(memory_router)
+app.include_router(operation_router)
+app.include_router(manual_report_router)

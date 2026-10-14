@@ -1,6 +1,8 @@
 import os
 import shutil
 import subprocess
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 
@@ -24,11 +26,20 @@ if [ "${{1:-}}" = "-c" ] && [ "${{2:-}}" = "import pytest" ]; then
 fi
 if [ "${{1:-}}" = "-m" ] && [ "${{2:-}}" = "pytest" ]; then
   printf '%s:%s\\n' '{name}' "$*" >> "$GATE_PYTHON_LOG"
+  for arg in "$@"; do
+    case "$arg" in
+      --junitxml=*) printf '%s' '<testsuites><testsuite><testcase classname="fixture" name="slow" time="0.75"/></testsuite></testsuites>' > "${{arg#--junitxml=}}" ;;
+    esac
+  done
   exit {pytest_exit}
 fi
 if [ "${{1:-}}" = "scripts/devline_control.py" ] && [ "${{2:-}}" = "verify" ] && [ "${{3:-}}" = "--all" ]; then
   printf '%s:%s\\n' '{name}' "$*" >> "$GATE_PYTHON_LOG"
   exit "${{GATE_DEVLINE_CONTROL_EXIT:-0}}"
+fi
+if [ "${{1:-}}" = "scripts/check_dev_env.py" ] && [ -n "${{GATE_READY:-}}" ]; then
+  touch "$GATE_READY"
+  while [ ! -e "$GATE_RELEASE" ]; do sleep 0.02; done
 fi
 exit 0
 """,
@@ -46,6 +57,10 @@ def _run_gate(
     devline_control_exit: int = 0,
     shared_modules: bool = False,
     local_modules: str | None = None,
+    lock_path: Path | None = None,
+    ready: Path | None = None,
+    release: Path | None = None,
+    conflict: str = "",
 ) -> tuple[subprocess.CompletedProcess[str], list[str], dict[str, Path]]:
     worktree = tmp_path / "worktree"
     common_checkout = tmp_path / "common"
@@ -58,6 +73,13 @@ def _run_gate(
     (worktree / "scripts").mkdir(parents=True)
     (worktree / "frontend").mkdir()
     shutil.copy2(GATE_SCRIPT, worktree / "scripts" / "gate.sh")
+    shutil.copy2(GATE_SCRIPT.with_name("gate_metrics.py"), worktree / "scripts" / "gate_metrics.py")
+    helper = GATE_SCRIPT.with_name("gate_lock.py")
+    if helper.exists():
+        # Patch only this isolated fixture copy, never the production entrypoint.
+        source = helper.read_text().replace('Path("/tmp/workbench-gate.lock")',
+                                          f"Path({str(lock_path or tmp_path / 'gate.lock')!r})")
+        (worktree / "scripts/gate_lock.py").write_text(source)
     _write_fake_python(local_python, name="local", has_pytest=local_has_pytest)
     _write_fake_python(common_python, name="common", has_pytest=common_has_pytest)
     if override_has_pytest is not None:
@@ -79,6 +101,7 @@ fi
 exit 0
 """,
     )
+    _write_executable(fake_bin / "pgrep", '#!/usr/bin/env bash\ncase "$*" in *"' + conflict + '"*) ' + ('echo 123; exit 0' if conflict else 'exit 1') + ';; esac\nexit 1\n')
     _write_executable(fake_bin / "npx", "#!/usr/bin/env bash\nexit 0\n")
 
     # The shared-dependency preflight only engages when the common checkout
@@ -95,9 +118,13 @@ exit 0
         local_path.symlink_to(shared_path)
 
     env = os.environ.copy()
+    env["TMPDIR"] = str(tmp_path)
+    if ready is not None:
+        env["GATE_READY"] = str(ready)
+        env["GATE_RELEASE"] = str(release)
     env["PATH"] = f"{fake_bin}:{env['PATH']}"
     env["GATE_PYTHON_LOG"] = str(python_log)
-    env["GATE_CHANGED_FILES"] = "\n".join(changed_files)
+    env["GATE_CHANGED_FILES"] = "\n".join(changed_files) + "\n"
     env["GATE_DEVLINE_CONTROL_EXIT"] = str(devline_control_exit)
     if override_has_pytest is not None:
         env["WORKBENCH_PYTHON"] = str(override_python)
@@ -396,3 +423,63 @@ def test_both_modes_check_the_shared_virtualenv_install(tmp_path: Path) -> None:
     assert source.index(stage) < source.index('if [ "$mode" = "quick" ]; then\n  run_quick')
     result, _, _ = _run_gate(tmp_path, local_has_pytest=True, common_has_pytest=True)
     assert "DEV ENVIRONMENT" in result.stdout
+
+
+def test_gate_entrypoint_excludes_other_checkout_before_stages(tmp_path):
+    ready, release, lock = [tmp_path / name for name in ("ready", "release", "lock")]
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        holder = pool.submit(_run_gate, tmp_path / "one", local_has_pytest=True,
+                             common_has_pytest=True, lock_path=lock, ready=ready, release=release)
+        try:
+            deadline = time.monotonic() + 5
+            while not ready.exists() and not holder.done() and time.monotonic() < deadline:
+                time.sleep(.01)
+            assert ready.exists()
+            result, invocations, _ = _run_gate(tmp_path / "two", local_has_pytest=True,
+                                              common_has_pytest=True, lock_path=lock)
+            assert result.returncode == 3, result.stdout
+            assert invocations == []
+            assert "DEV ENVIRONMENT" not in result.stdout
+            assert "another gate" in result.stderr
+        finally:
+            release.touch()
+        assert holder.result(timeout=5)[0].returncode == 0
+
+
+def test_gate_retains_vite_and_vitest_preflight(tmp_path):
+    for name, pattern in (("vite", "[v]ite"), ("vitest", "[v]itest")):
+        result, invocations, _ = _run_gate(tmp_path / name, local_has_pytest=True,
+                                          common_has_pytest=True, conflict=pattern)
+        assert result.returncode == 3
+        assert name in result.stderr
+        assert invocations == []
+
+
+def test_gate_preserves_stage_logs_machine_timings_and_pytest_slow_items(tmp_path):
+    import json
+    result, invocations, _ = _run_gate(tmp_path, local_has_pytest=True, common_has_pytest=True)
+    assert result.returncode == 0, result.stderr
+    directories = list((tmp_path / "worktree/local/gate").iterdir())
+    assert len(directories) == 1
+    summary = json.loads((directories[0] / "summary.json").read_text())
+    assert summary["schema_version"] == "workbench.gate-timing/v1"
+    assert summary["status"] == "passed" and summary["exit_code"] == 0
+    assert summary["mode"] == "full" and summary["duration_seconds"] >= 0
+    assert len(summary["stages"]) == 5
+    assert all(stage["exit_code"] == 0 and stage["duration_seconds"] >= 0 for stage in summary["stages"])
+    assert all((directories[0] / stage["log"]).is_file() for stage in summary["stages"])
+    assert all((directories[0] / stage["stderr_log"]).is_file() for stage in summary["stages"])
+    assert not list(directories[0].glob("*.pipe"))
+    assert summary["slow_tests"][0]["duration_seconds"] == .75
+    assert all("--durations=25" in item and "--junitxml=" in item for item in invocations if "-m pytest" in item)
+
+
+def test_gate_machine_timing_preserves_a_failed_stage(tmp_path):
+    import json
+    result, _, _ = _run_gate(tmp_path, local_has_pytest=True, common_has_pytest=True,
+        mode="--quick", changed_files=("scripts/devline_control.py",), devline_control_exit=7)
+    assert result.returncode == 1
+    [directory] = (tmp_path / "worktree/local/gate").iterdir()
+    summary = json.loads((directory / "summary.json").read_text())
+    assert summary["status"] == "failed" and summary["exit_code"] == 1
+    assert any(stage["exit_code"] == 7 for stage in summary["stages"])

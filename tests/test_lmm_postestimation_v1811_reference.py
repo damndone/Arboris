@@ -113,7 +113,7 @@ def test_validated_operations_are_offered(operation):
     require_validated("linear_mixed_effects", operation)
 
 
-@pytest.mark.parametrize("operation", ["lr", "margins"])
+@pytest.mark.parametrize("operation", ["lr"])
 def test_unvalidated_operations_stay_refused(operation):
     with pytest.raises(PostestimationRefusal) as caught:
         require_validated("linear_mixed_effects", operation)

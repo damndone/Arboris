@@ -289,3 +289,41 @@ def catalog(model_type: str | None = None) -> dict[str, Any]:
             return entry
     known = ", ".join(entry["key"] for entry in capabilities["model_types"])
     raise CommandError(f"unknown model type {model_type!r}; known: {known}")
+
+
+def _manual_cli_request(project_root: Path, request: Mapping[str, Any]) -> dict[str, Any]:
+    import re
+
+    from .api_errors import WorkbenchAPIError
+    from .services.manual_operations import run_manual_operation
+
+    request_id = request.get("request_id")
+    if not isinstance(request_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", request_id):
+        raise CommandError("request-id must be a safe non-empty identifier of at most 128 characters")
+    try:
+        return run_manual_operation(_project(project_root), request, origin="cli")
+    except WorkbenchAPIError as exc:
+        raise CommandError(f"{exc.code}: {exc.message}") from exc
+
+
+def preview_data_operation(
+    project_root: Path, run_id: str, source_node: str, source_artifact: str,
+    operation_id: str, spec: Mapping[str, Any], *, request_id: str | None = None,
+) -> dict[str, Any]:
+    """Preview the same server-owned plan as POST /operations/run."""
+    from .canonical import sha256_canonical
+
+    semantic = {
+        "target": {"kind": "dataset_node", "run_id": run_id,
+                   "node_id": source_node, "artifact_id": source_artifact},
+        "steps": [{"step_id": "operation", "operation_id": operation_id, "spec": dict(spec)}],
+    }
+    identity = request_id if request_id is not None else "cli-data-" + sha256_canonical(semantic)[:32]
+    return _manual_cli_request(project_root, {"mode": "preview", "request_id": identity, **semantic})
+
+
+def confirm_data_operation(project_root: Path, request_id: str, preview_id: str, fingerprint: str) -> dict[str, Any]:
+    """Confirm only the target and spec previously pinned by the service."""
+    return _manual_cli_request(project_root, {
+        "mode": "confirm", "request_id": request_id, "preview_id": preview_id, "fingerprint": fingerprint,
+    })

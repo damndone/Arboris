@@ -54,6 +54,10 @@ ORACLE_FAMILIES = {
     "linear_mixed_effects": json.loads((FIXTURES / "lmm_v1811" / "gls_reference_r.json").read_text())["random_intercept_reml"],
 }
 
+ORACLE_FAMILIES["linear_mixed_effects"]["margins"] = json.loads(
+    (FIXTURES / "lmm_v1813/native_reml_margins_r.json").read_text()
+)["random_intercept"]["margins"]
+
 # oracle family key -> (model_type, outcome, run arguments, parameter prefix)
 FAMILIES = {
     "ols": ("ols", "y", {"covariance": "unadjusted"}, ""),
@@ -121,7 +125,7 @@ def _request(case: str, prefix: str) -> tuple[str, dict]:
     raise AssertionError(f"no request is defined for oracle result {result}")
 
 
-def _contained_lmm_kernel(root: Path) -> dict:
+def _contained_lmm_kernel(root: Path) -> tuple[dict, Path]:
     """An LMM runs only through the public run service, which seals its
     admission, under the contained local profile (real startup canary)."""
     import time
@@ -154,7 +158,8 @@ def _contained_lmm_kernel(root: Path) -> dict:
             patch.undo()
             profiles._reset_execution_profile_for_test()
     assert status == "completed", status
-    return read_json(project.root / "runs" / run_id / kernel_relative_path("linear_mixed_effects_1"))
+    run_root = project.root / "runs" / run_id
+    return read_json(run_root / kernel_relative_path("linear_mixed_effects_1")), run_root
 
 
 @pytest.fixture(scope="module")
@@ -167,7 +172,7 @@ def fit(tmp_path_factory):
         x = x or FULL_X.get(family, ("x1", "x2", "x3"))
         key = (family, x)
         if key not in cache and family == "linear_mixed_effects":
-            cache[key] = _contained_lmm_kernel(root)
+            cache[key], roots[key] = _contained_lmm_kernel(root)
         if key not in cache:
             model_type, y, extra, _ = FAMILIES[family]
             project = create_project(root, f"{family}-{len(x)}")
@@ -321,3 +326,54 @@ def test_average_marginal_effects_on_100k_rows_stay_within_budget() -> None:
     for at in ("average", "means"):
         marginal_effects(kernel, design, inverse_link="logit", variables=names[1:], at=at)
     assert time.perf_counter() - started < 3.0
+
+
+def test_lmm_public_margins_verify_population_design_and_refuse_changed_seal(fit, monkeypatch):
+    from types import SimpleNamespace
+    from workbench.agent.postestimation_steps import execute_postestimation_step
+    kernel, root = fit("linear_mixed_effects", run_root=True)
+    step = SimpleNamespace(operation_id="postestimation.margins", depends_on=(), spec={
+        "model_ref": f"model:{kernel['model_id']}", "variables": ["time", "x"]})
+    result, _, _ = execute_postestimation_step(root.parent.parent, root.name, step)
+    assert result["prediction_target"] == "population_fixed_effects"
+    expected = ORACLE_FAMILIES["linear_mixed_effects"]["margins"]["average"]
+    for effect in result["effects"]:
+        assert effect["estimate"] == pytest.approx(expected[effect["variable"]]["estimate"], rel=1e-6)
+        assert effect["std_error"] == pytest.approx(expected[effect["variable"]]["std_error"], rel=1e-6)
+    from fastapi.testclient import TestClient
+    from workbench.app import app
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Manual LMM margins must not construct or call a provider")
+
+    monkeypatch.setattr("workbench.llm.config.load_llm_config", forbidden)
+    monkeypatch.setattr("workbench.agent.model.OpenAICompatibleModelAdapter.__init__", forbidden)
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
+    response = client.post("/operations/run", params={"project_root": str(root.parent.parent)}, json={
+        "request_id": "lmm-population-margins", "mode": "execute",
+        "target": {"kind": "model_node", "run_id": root.name, "node_id": f"model:{kernel['model_id']}"},
+        "steps": [{"step_id": "margins", "operation_id": "postestimation.margins", "spec": {"variables": ["time", "x"]}}]})
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "completed", response.json()
+    assert response.json()["steps"][0]["artifact_refs"]
+    verified_design = estimation_design(root, kernel)
+    from workbench.postestimation.margins import marginal_effects
+    with pytest.raises(PostestimationRefusal) as discrete:
+        marginal_effects(kernel, verified_design, inverse_link="identity", variables=[kernel["param_names"][1]])
+    assert discrete.value.code == "CONTINUOUS_VARIABLE_REQUIRED"
+    seal = root / "artifacts/execution/executed_input_v1.json"
+    original = seal.read_bytes()
+    try:
+        seal.write_bytes(b"{}")
+        with pytest.raises(PostestimationRefusal) as caught:
+            estimation_design(root, kernel)
+        assert caught.value.code == "ESTIMATION_DATA_UNAVAILABLE"
+    finally:
+        seal.write_bytes(original)
+    try:
+        seal.unlink()
+        with pytest.raises(PostestimationRefusal) as missing:
+            estimation_design(root, kernel)
+        assert missing.value.code == "ESTIMATION_DATA_UNAVAILABLE"
+    finally:
+        seal.write_bytes(original)

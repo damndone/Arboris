@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .design import DF_CONVENTIONS, LONELY_PSU_POLICIES, REPLICATE_TYPES
+from .declarations import DF_CONVENTIONS, LONELY_PSU_POLICIES, REPLICATE_TYPES
 
 #: Ordered so the published params read the way the form asks for them.
 DESIGN_FIELD_SPECS: tuple[dict[str, Any], ...] = (

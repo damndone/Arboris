@@ -2291,3 +2291,22 @@ def test_a_source_beside_depends_on_is_told_where_it_belongs() -> None:
 
     with pytest.raises(OperationValidationError, match=r"inside `spec`"):
         validate_workflow_steps([_numeric_step("first", "doubled"), misplaced])
+
+
+@pytest.mark.parametrize("model_ref,error", [
+    ("step:missing:base", "unknown step"),
+    ("step:fit:missing", "does not declare model branch"),
+    ("step:recode:base", "does not produce model branches"),
+])
+def test_model_dependencies_reject_unbound_producers(model_ref, error):
+    steps = [
+        {"step_id": "recode", "operation_id": "data.recode", "spec": {
+            "column": "x", "output": "g", "rules": [{"from": "else", "to": 1}]}},
+        {"step_id": "fit", "operation_id": "model.genesis", "spec": {
+            "model_family": "ols", "branches": [{"branch_id": "base", "outcome": "y", "predictors": ["x"]}],
+            "source": {"from_step": "recode", "output": "produced_dataset"}}},
+        {"step_id": "test", "operation_id": "postestimation.wald", "spec": {
+            "model_ref": model_ref, "constraints": [{"terms": {"x": 1}, "value": 0}]}}
+    ]
+    with pytest.raises(OperationValidationError, match=error):
+        validate_workflow_steps(steps)
