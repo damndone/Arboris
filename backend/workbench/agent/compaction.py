@@ -37,6 +37,11 @@ KEEP_RECENT_TOKENS = 20_000
 # least 128 000; a smaller real window is caught by the provider's refusal,
 # which compacts and retries once.
 ASSUMED_WINDOW_TOKENS = 128_000
+# Compact well before a very large window fills: a request near DeepSeek's
+# 1 048 576-token limit took 19 s just to read (measured 2026-10-14), every
+# step pays for all of it, and answers degrade in very long contexts.
+WORKING_BUDGET_TOKENS = 200_000
+WORKING_BUDGET_ENV = "WORKBENCH_AGENT_COMPACT_AT"
 TOOL_RESULT_CHARS = 2_000
 SUMMARY_MAX_TOKENS = 4_096
 
@@ -81,6 +86,15 @@ def estimate_messages_tokens(messages: Sequence[Mapping[str, Any]]) -> int:
     return sum(estimate_message_tokens(message) for message in messages)
 
 
+ONE_MILLION = 1_000_000
+
+
+def declared_window(window_tokens: int | None, supports_1m: bool) -> int | None:
+    """A model's window as configured: the number, else the 1M flag."""
+
+    return window_tokens or (ONE_MILLION if supports_1m else None)
+
+
 @dataclass(frozen=True)
 class CompactionPolicy:
     """When to compact, from the configured model's window."""
@@ -89,6 +103,20 @@ class CompactionPolicy:
     reserve_tokens: int = RESERVE_TOKENS
     keep_recent_tokens: int = KEEP_RECENT_TOKENS
     enabled: bool = True
+    budget_tokens: int = WORKING_BUDGET_TOKENS
+
+    @classmethod
+    def from_config(cls, window_tokens: int | None, *, supports_1m: bool = False) -> "CompactionPolicy":
+        """The policy for a configured model: its declared window, else the
+        1M flag the model carries in Settings (as the context ring reads it),
+        with the working budget from the environment when set (a whole number
+        of tokens, at least 8 000)."""
+
+        import os
+
+        raw = os.environ.get(WORKING_BUDGET_ENV, "").strip().replace("_", "")
+        budget = int(raw) if raw.isdigit() and int(raw) >= 8_000 else WORKING_BUDGET_TOKENS
+        return cls(declared_window(window_tokens, supports_1m), budget_tokens=budget)
 
     @property
     def window(self) -> int:
@@ -109,7 +137,7 @@ class CompactionPolicy:
 
     @property
     def threshold(self) -> int:
-        return self.window - self.reserve
+        return min(self.window - self.reserve, self.budget_tokens)
 
     def should_compact(self, context_tokens: int) -> bool:
         return self.enabled and context_tokens > self.threshold
@@ -120,6 +148,7 @@ class CompactionPolicy:
             "window_declared": self.window_declared,
             "reserve_tokens": self.reserve,
             "keep_recent_tokens": self.keep_recent,
+            "working_budget_tokens": self.budget_tokens,
             "threshold_tokens": self.threshold,
         }
 

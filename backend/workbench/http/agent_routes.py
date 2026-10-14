@@ -826,7 +826,7 @@ def _messages(repository: JsonlSessionRepository, session_id: str) -> list[dict[
 def _context_usage(repository: JsonlSessionRepository, session_id: str, config) -> dict[str, Any]:
     """The next request's size as the server builds it (tools not included)."""
 
-    policy = CompactionPolicy(config.context_window_tokens)
+    policy = CompactionPolicy.from_config(config.context_window_tokens, supports_1m=config.supports_1m)
     try:
         messages = ContextBuilder(repository).build(session_id).messages
     except (KeyError, ValueError):
@@ -2446,7 +2446,7 @@ async def compact_agent_session(
         if not config.is_configured():
             raise WorkbenchAPIError(status_code=503, code="LLM_NOT_CONFIGURED",
                                     message=config.configuration_error_message())
-        policy = CompactionPolicy(config.context_window_tokens)
+        policy = CompactionPolicy.from_config(config.context_window_tokens, supports_1m=config.supports_1m)
         tokens = estimate_messages_tokens(ContextBuilder(repository).build(session_id).messages)
         events.emit(session_id, "compaction_start", {"trigger": "manual", "tokens_before": tokens, **policy.to_dict()})
         try:
@@ -2525,7 +2525,7 @@ async def _run_reserved_agent_turn(
         events,
         OpenAICompatibleModelAdapter(config),
         session_id=session_id,
-        compaction_policy=CompactionPolicy(config.context_window_tokens),
+        compaction_policy=CompactionPolicy.from_config(config.context_window_tokens, supports_1m=config.supports_1m),
         model_name=config.model,
     )
     tool_context: dict[str, Any] | None = None

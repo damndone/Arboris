@@ -26,6 +26,7 @@ def test_an_environment_provider_is_named_by_its_host_not_the_config_id():
 def test_the_context_window_is_stated_only_when_declared():
     assert "does not declare your context window" in identity_text("main", config())
     assert "128,000 tokens" in identity_text("main", config(context_window_tokens=128_000))
+    assert "1,000,000 tokens" in identity_text("main", config(supports_1m=True))
 
 
 def test_memory_and_instructions_are_described_as_they_are():

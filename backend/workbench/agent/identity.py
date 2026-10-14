@@ -49,9 +49,11 @@ def provider_label(config: LLMConfig) -> str:
 
 def identity_text(role: Literal["chain", "global"], config: LLMConfig) -> str:
     agent = "Chain" if role == "chain" else "Global"
+    tokens = config.context_window_tokens or (1_000_000 if config.supports_1m else None)
     window = (
-        f"Your context window is {config.context_window_tokens:,} tokens, as declared in the provider configuration."
-        if config.context_window_tokens
+        f"Your context window is {tokens:,} tokens, as declared in the provider configuration. "
+        "The conversation is summarized well before that (by default at 200,000 tokens) to keep answers fast and focused."
+        if tokens
         else "The provider configuration does not declare your context window; say so rather than guessing a number."
     )
     return "\n".join(

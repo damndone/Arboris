@@ -181,3 +181,29 @@ def test_an_interrupted_event_line_does_not_break_the_log(tmp_path):
     assert second.seq == first.seq + 1
     assert [event.event_type for event in fresh.replay("s")] == ["a", "b"]
     assert json.loads((tmp_path / "agent-events" / "s.jsonl").read_text().splitlines()[-1])["event_type"] == "b"
+
+
+def test_a_large_window_is_worked_within_a_budget(monkeypatch):
+    policy = CompactionPolicy.from_config(1_048_576)
+    assert policy.window == 1_048_576 and policy.threshold == 200_000
+    assert CompactionPolicy.from_config(64_000).threshold == 64_000 - 16_000
+    monkeypatch.setenv("WORKBENCH_AGENT_COMPACT_AT", "400_000")
+    assert CompactionPolicy.from_config(1_048_576).threshold == 400_000
+    monkeypatch.setenv("WORKBENCH_AGENT_COMPACT_AT", "12")
+    assert CompactionPolicy.from_config(1_048_576).threshold == 200_000
+
+
+def test_deepseeks_real_length_refusal_is_recognised():
+    from workbench.llm.client import is_context_overflow
+
+    body = (b'{"error": {"message": "This model\'s maximum context length is 1048576 tokens. However, you requested '
+            b'1155193 tokens (1155177 in the messages, 16 in the completion). Please reduce the length of the messages '
+            b'or completion.", "type": "invalid_request_error"}}')
+    assert is_context_overflow(400, body)
+    assert not is_context_overflow(400, b'{"error": {"message": "Invalid API key"}}')
+
+
+def test_the_1m_flag_from_settings_counts_as_a_declared_window():
+    policy = CompactionPolicy.from_config(None, supports_1m=True)
+    assert policy.window == 1_000_000 and policy.window_declared and policy.threshold == 200_000
+    assert CompactionPolicy.from_config(None).window_declared is False
