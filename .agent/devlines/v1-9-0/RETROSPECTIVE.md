@@ -6,11 +6,11 @@
 
 ## Final status
 
-COMPLETED
+INTEGRATION
 
 ## Metrics
 
-- Failure frequency: 12/58 (20.7%; 20.7 per 100 events)
+- Failure frequency: 12/59 (20.3%; 20.3 per 100 events)
 - Repeat rate: 0/12 (0.0%)
 - Recurrence rate: 0/12 (0.0%)
 - MTTR: median=0 ms (sample=8; unresolved=4)
@@ -170,3 +170,4 @@ COMPLETED
 - #56: `9b2b0167-82f1-442f-a55e-35c3f8e399bb` | 2026-10-14T16:29:42.000Z | GAP/agent_context_compaction_instructions_recall | incident=`5a1c9ed4-77de-471e-bec6-fde6071677e5` | lesson_key=`summaries-are-evidence` | event_sha256=`2226b17dc0cc56b89ddfc3b2209f75684c9594e1e065f33563e6dbf2ffe23d98`
 - #57: `6cc4e1aa-a2c3-4126-97d3-9d4f3fcb6c15` | 2026-10-14T17:03:57.000Z | REVIEW/user_review_5_conversation_management | incident=`a9e482cc-4a64-40ad-bc9c-40df754642be` | lesson_key=`user-objects-need-a-list` | event_sha256=`909da4d6870c3ceb7cf33ce42f88c2cf322c3e6186f54f424db1178105c1f97a`
 - #58: `ab0d3818-0bf6-4478-9138-b12a82604f89` | 2026-10-14T17:52:33.000Z | REVIEW/user_review_6_confirmed_rerun_invisible | incident=`ad5f7817-a58f-47c7-80a2-7b555bdbfa2a` | lesson_key=`say-where-the-result-went` | event_sha256=`9e9979758b33a23ced584e6dbcf01f6590bd4adb23cc522e3513bca82d344702`
+- #59: `459691b3-1fa0-4bc9-b503-7367f407f450` | 2026-10-14T18:36:31.000Z | STATE_CHANGE/reopen_for_user_reviews_and_release | incident=`74a155b4-4832-4311-9a7e-fe484a744e27` | lesson_key=`reopen-when-work-continues` | event_sha256=`4a06d8f545e3b4ec1e7d41e11a824582d45bd1ae887bb1f14f814e2417f75e5b`
