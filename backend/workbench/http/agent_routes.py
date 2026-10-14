@@ -53,6 +53,8 @@ from ..analysis_loop.storage import (
 from ..analysis_loop.validation import ValidationPacket
 from ..agent.compaction import CompactionError, CompactionPolicy, compact as compact_session, estimate_messages_tokens
 from ..agent.context import ContextBuilder
+from ..agent.instructions import INSTRUCTIONS_NAME, compose as compose_instructions
+from ..agent.recall import RECALL_NAME, conversation_index, index_text as recall_index_text
 from ..agent.core import AgentCore
 from ..agent.events import AgentEventStream
 from ..agent.model import OpenAICompatibleModelAdapter
@@ -1125,6 +1127,31 @@ def create_agent_session(
             "metadata": {"protocol_version": "agent/v1"},
         },
     )
+    instruction_text, instruction_record = compose_instructions(root)
+    repository.append(
+        session_id,
+        "custom_message",
+        {
+            "message_type": "agent_instructions",
+            "audience": "model",
+            "name": INSTRUCTIONS_NAME,
+            "content": instruction_text,
+            "metadata": instruction_record,
+        },
+    )
+    earlier = conversation_index(repository, exclude=session_id)
+    if earlier:
+        repository.append(
+            session_id,
+            "custom_message",
+            {
+                "message_type": "agent_recall",
+                "audience": "model",
+                "name": RECALL_NAME,
+                "content": recall_index_text(earlier),
+                "metadata": {"conversations": [item["session_id"] for item in earlier]},
+            },
+        )
     if body.focus is not None:
         repository.append(
             session_id,

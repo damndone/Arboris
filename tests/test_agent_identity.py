@@ -30,7 +30,7 @@ def test_the_context_window_is_stated_only_when_declared():
 
 def test_memory_and_instructions_are_described_as_they_are():
     text = identity_text("chain", config())
-    assert "Workbench Chain Agent" in text and "no long-term memory" in text
+    assert "Workbench Chain Agent" in text and "no automatic long-term memory" in text and "AGENTS.md" in text
     assert "append-only log" in text and "analysis ledger" in text
     assert "not secret" in text and "agent_routes.py" in text
     assert "Workbench Global Agent" in identity_text("main", config())

@@ -66,6 +66,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/agent/instructions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Agent Instructions
+         * @description The built-in guide, the person's and the project's instructions.
+         *
+         *     A new conversation reads them as they are when it starts.
+         */
+        get: operations["get_agent_instructions_agent_instructions_get"];
+        /**
+         * Save Agent Instructions
+         * @description Write the personal or the project AGENTS.md.
+         */
+        put: operations["save_agent_instructions_agent_instructions_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent/instructions/draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Draft Agent Instructions
+         * @description The project template filled with this project's datasets and models; not saved.
+         */
+        get: operations["draft_agent_instructions_agent_instructions_draft_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/agent/navigation/graph": {
         parameters: {
             query?: never;
@@ -2722,6 +2768,56 @@ export interface components {
             source_run_id: string;
             /** Source Session Entry Id */
             source_session_entry_id?: string | null;
+        };
+        /**
+         * AgentInstructionLayer
+         * @description One layer of what the Agent reads at the start of a conversation.
+         */
+        AgentInstructionLayer: {
+            /** Bytes */
+            bytes: number;
+            /** Content */
+            content: string;
+            /** Editable */
+            editable: boolean;
+            /** Exists */
+            exists: boolean;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "guide" | "personal" | "project";
+            /** Path */
+            path: string;
+        };
+        /** AgentInstructions */
+        AgentInstructions: {
+            /** Layers */
+            layers: components["schemas"]["AgentInstructionLayer"][];
+            /** Limit Bytes */
+            limit_bytes: number;
+            /** Templates */
+            templates: {
+                [key: string]: string;
+            };
+        };
+        /**
+         * AgentInstructionsDraft
+         * @description The project template with the project's datasets and models filled in.
+         */
+        AgentInstructionsDraft: {
+            /** Content */
+            content: string;
+        };
+        /** AgentInstructionsSave */
+        AgentInstructionsSave: {
+            /** Content */
+            content: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "personal" | "project";
         };
         /** AgentMessage */
         AgentMessage: {
@@ -10150,6 +10246,103 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ForkProposal"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_agent_instructions_agent_instructions_get: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentInstructions"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_agent_instructions_agent_instructions_put: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentInstructionsSave"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentInstructions"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    draft_agent_instructions_agent_instructions_draft_get: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentInstructionsDraft"];
                 };
             };
             /** @description Validation Error */

@@ -308,3 +308,28 @@ class OperationReconciled(TypedDict):
 
 class AgentEvents(TypedDict):
     events: list[AgentEventView]
+
+
+class AgentInstructionLayer(TypedDict):
+    """One layer of what the Agent reads at the start of a conversation."""
+
+    kind: Literal["guide", "personal", "project"]
+    path: str
+    exists: bool
+    #: The built-in guide is read-only.
+    editable: bool
+    content: str
+    bytes: int
+
+
+class AgentInstructions(TypedDict):
+    #: General to specific; a later layer wins where they disagree.
+    layers: list[AgentInstructionLayer]
+    limit_bytes: int
+    templates: dict[str, str]
+
+
+class AgentInstructionsDraft(TypedDict):
+    """The project template with the project's datasets and models filled in."""
+
+    content: str

@@ -40,6 +40,10 @@ workbench = "workbench.cli:app"
 [tool.setuptools.packages.find]
 where = ["backend"]
 
+[tool.setuptools.package-data]
+# The Agent's built-in analysis guide and instruction templates.
+workbench = ["agent/guides/*.md"]
+
 [tool.pytest.ini_options]
 pythonpath = ["backend", "."]
 testpaths = ["tests"]
