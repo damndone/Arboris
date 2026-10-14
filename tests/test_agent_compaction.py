@@ -181,6 +181,10 @@ def test_an_interrupted_event_line_does_not_break_the_log(tmp_path):
     assert second.seq == first.seq + 1
     assert [event.event_type for event in fresh.replay("s")] == ["a", "b"]
     assert json.loads((tmp_path / "agent-events" / "s.jsonl").read_text().splitlines()[-1])["event_type"] == "b"
+    # Any later reader starts from the top and meets the repaired fragment.
+    third = AgentEventStream(tmp_path).emit("s", "c", {})
+    assert third.seq == second.seq + 1
+    assert [event.event_type for event in AgentEventStream(tmp_path).replay("s")] == ["a", "b", "c"]
 
 
 def test_a_large_window_is_worked_within_a_budget(monkeypatch):

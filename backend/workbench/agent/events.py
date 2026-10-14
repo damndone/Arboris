@@ -130,7 +130,10 @@ class AgentEventStream:
         for raw in complete.splitlines():
             if not raw.strip():
                 continue
-            value = json.loads(raw)
+            try:
+                value = json.loads(raw)
+            except json.JSONDecodeError:
+                continue  # a line cut short by an interrupted write, since repaired
             cached.last_seq = max(cached.last_seq, int(value["seq"]))
             cached.ids.add(str(value["event_id"]))
         cached.size += len(complete)
