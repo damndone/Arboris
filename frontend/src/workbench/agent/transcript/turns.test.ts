@@ -5,6 +5,23 @@ import { buildTurns, chapterTitle, duration, messageTime } from "./turns";
 const at = (seconds: number) => new Date(Date.UTC(2026, 9, 14, 9, 0, seconds)).toISOString();
 
 describe("a conversation as turns", () => {
+  test("a summary of the earlier conversation is a turn of its own", () => {
+    const summary = m({
+      entry_id: "c1", role: "summary", content: "## Analyses and results",
+      compaction: { trigger: "auto", tokens_before: 52000, verified: true, unverified_numbers: [], summarized_messages: 14 },
+    });
+    const turns = buildTurns([
+      m({ entry_id: "u1", role: "user", content: "q1" }),
+      m({ entry_id: "r1", role: "assistant", content: "a1" }),
+      summary,
+      m({ entry_id: "u2", role: "user", content: "q2" }),
+      m({ entry_id: "r2", role: "assistant", content: "a2" }),
+    ]);
+    expect(turns.map((turn) => turn.id)).toEqual(["u1", "c1", "u2"]);
+    expect(turns[1].summary).toBe(summary);
+    expect(turns[2].responses.map((reply) => reply.entry_id)).toEqual(["r2"]);
+  });
+
   test("steps, a withdrawn draft and the reply, with how long it took", () => {
     const reply = "The education coefficient is 2,564 (SE 70.91); experience adds 447 per year.";
     const turns = buildTurns([

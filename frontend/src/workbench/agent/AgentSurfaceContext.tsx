@@ -35,6 +35,7 @@ import {
   pinAgentChapter,
   reconcileAgentOperation,
   rewindAgentSession,
+  compactAgentSession,
   unpinAgentChapter,
   reviseAgentProposal,
   sendAgentTurn,
@@ -194,6 +195,13 @@ export interface AgentSurfaceContextValue {
   contextUsedTokens: number;
   contextWindowTokens: number | null;
   contextPercent: number | null;
+  /** The model declares no window; ``contextWindowTokens`` is the server's assumption. */
+  contextWindowAssumed?: boolean;
+  /** Above this the earlier conversation is summarized before the next step. */
+  compactAtTokens?: number | null;
+  /** Summarize the earlier conversation now (optionally keeping something in particular). */
+  compactConversation?: (focus?: string) => Promise<void>;
+  compacting?: boolean;
   model: string;
   modelOptions: AgentModelOption[];
   setModel: (value: string) => Promise<void>;
@@ -275,6 +283,10 @@ export function AgentSurfaceProvider({
   const [executionPolicy, setExecutionPolicy] = useState<"auto_read_only" | "proposal_only">("proposal_only");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [sessionStatus, setSessionStatus] = useState("idle");
+  // How full the next request is, as the server builds it (tool results and
+  // standing instructions included, earlier summarized parts not).
+  const [serverContext, setServerContext] = useState<AgentSession["context"] | null>(null);
+  const [compacting, setCompacting] = useState(false);
   const [proposals, setProposals] = useState<AgentProposal[]>([]);
   const [confirmationBusyId, setConfirmationBusyId] = useState<string | null>(null);
   const [activeOperation, setActiveOperation] = useState<AgentOperationStatus | null>(null);
@@ -430,6 +442,7 @@ export function AgentSurfaceProvider({
     optimisticMessageCounterRef.current = 0;
     setSessionId(null);
     setMessages([]);
+    setServerContext(null);
     setChapters([]);
     setProposals([]);
     setSessionStatus("idle");
@@ -453,6 +466,7 @@ export function AgentSurfaceProvider({
         if (cancelled) return;
         setSessionId(session.session_id);
         setMessages(session.messages);
+        setServerContext(session.context ?? null);
         setChapters(session.chapters ?? []);
         setProposals(session.proposals ?? []);
         setSessionStatus(session.status ?? "idle");
@@ -545,26 +559,33 @@ export function AgentSurfaceProvider({
       : [];
   }, [activeProvider, llmConfig?.model]);
   const model = llmConfig?.model ?? modelOptions[0]?.request_model ?? "Not configured";
+  // The server's estimate of the next request when there is a session; the
+  // visible messages alone leave out tool results and the standing context.
   const contextUsedTokens = useMemo(
     () => Math.max(
       1,
-      Math.ceil(JSON.stringify(contextPacket).length / 4)
-        + messages.reduce((sum, item) => sum + Math.ceil(item.content.length / 4), 0)
-        + Math.ceil(prompt.length / 4),
+      serverContext
+        ? serverContext.estimated_tokens + Math.ceil(prompt.length / 4)
+        : Math.ceil(JSON.stringify(contextPacket).length / 4)
+          + messages.reduce((sum, item) => sum + Math.ceil(item.content.length / 4), 0)
+          + Math.ceil(prompt.length / 4),
     ),
-    [contextPacket, messages, prompt],
+    [contextPacket, messages, prompt, serverContext],
   );
   // Resolve a real context capacity so the ring is a live gauge, not decoration.
   // Prefer the active model's declared window; otherwise 1,000,000 when the
-  // model advertises the 1M context; otherwise the config-level value. Only when
-  // none of these exist do we honestly report an unknown capacity.
+  // model advertises the 1M context; otherwise the config-level value; then
+  // the window the server assumes for compaction, shown as an assumption.
   const activeModelRecord = modelOptions.find((option) => option.request_model === model);
   const ONE_MILLION = 1_000_000;
-  const contextWindowTokens =
+  const declaredWindow =
     activeModelRecord?.context_window_tokens
     ?? (activeModelRecord?.supports_1m ? ONE_MILLION : null)
     ?? llmConfig?.context_window_tokens
-    ?? (llmConfig?.supports_1m ? ONE_MILLION : null);
+    ?? (llmConfig?.supports_1m ? ONE_MILLION : null)
+    ?? (serverContext?.window_declared ? serverContext.window_tokens : null);
+  const contextWindowAssumed = declaredWindow === null && Boolean(serverContext);
+  const contextWindowTokens = declaredWindow ?? serverContext?.window_tokens ?? null;
   const contextPercent = contextWindowTokens
     ? Math.min(100, (contextUsedTokens / contextWindowTokens) * 100)
     : null;
@@ -658,6 +679,7 @@ export function AgentSurfaceProvider({
       );
       if (activeScopeRef.current !== requestScope) return;
       setMessages(result.session.messages);
+      setServerContext(result.session.context ?? null);
       setChapters(result.session.chapters ?? []);
       setProposals(result.session.proposals ?? []);
       setSessionStatus(result.status ?? "idle");
@@ -868,6 +890,7 @@ export function AgentSurfaceProvider({
   // when they go back before it.
   const showSession = useCallback((session: AgentSession) => {
     setMessages(session.messages);
+    setServerContext(session.context ?? null);
     setChapters(session.chapters ?? []);
     setProposals(session.proposals ?? []);
     setSessionStatus(session.status ?? "idle");
@@ -904,6 +927,15 @@ export function AgentSurfaceProvider({
     if (!sessionId) return;
     showSession(await unpinAgentChapter(projectRoot, sessionId, entryId));
   }, "Could not remove the chapter"), [historyAction, projectRoot, sessionId, showSession]);
+  const compactConversation = useCallback((focus?: string) => historyAction(async () => {
+    if (!sessionId) return;
+    setCompacting(true);
+    try {
+      showSession(await compactAgentSession(projectRoot, sessionId, focus));
+    } finally {
+      setCompacting(false);
+    }
+  }, "Could not summarize the conversation"), [historyAction, projectRoot, sessionId, showSession]);
 
   const value = useMemo<AgentSurfaceContextValue>(() => ({
     messages,
@@ -919,6 +951,10 @@ export function AgentSurfaceProvider({
     contextUsedTokens,
     contextWindowTokens,
     contextPercent,
+    contextWindowAssumed,
+    compactAtTokens: serverContext?.compact_at_tokens ?? null,
+    compactConversation,
+    compacting,
     model,
     modelOptions,
     setModel,
@@ -948,6 +984,10 @@ export function AgentSurfaceProvider({
     contextPercent,
     contextUsedTokens,
     contextWindowTokens,
+    contextWindowAssumed,
+    serverContext,
+    compactConversation,
+    compacting,
     error,
     isSubmitting,
     messages,

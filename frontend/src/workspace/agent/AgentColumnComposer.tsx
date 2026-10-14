@@ -119,6 +119,10 @@ export function AgentColumnComposer() {
             total={contextWindowTokens}
             size={18}
             strokeWidth={2}
+            assumed={agent.contextWindowAssumed}
+            compactAt={agent.compactAtTokens}
+            onCompact={agent.compactConversation && agent.messages.some((message) => message.role === "user") ? () => void agent.compactConversation?.() : undefined}
+            compacting={agent.compacting}
           />
           <label className="ws-composer__model">
             <span className="ws-visually-hidden">Model</span>

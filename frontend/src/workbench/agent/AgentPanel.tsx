@@ -47,6 +47,7 @@ function observableActivity(eventType: string | null): string {
   if (!eventType) return "Preparing the bounded context";
   const normalized = eventType.toLowerCase();
   if (normalized === "provider_retry") return "The provider connection dropped; retrying";
+  if (normalized === "compaction_start") return "Summarizing the earlier conversation to stay within the model's context";
   if (normalized.includes("tool")) return "Checking evidence";
   if (normalized.includes("proposal")) return "Preparing a reviewable proposal";
   if (normalized.includes("message") || normalized.includes("response")) return "Drafting the response";
@@ -166,6 +167,30 @@ export function toolStatusLine(content: string, toolName?: string | null): strin
 }
 
 /** "Worked through 3 steps · rewrote the answer once" */
+/** Where the earlier conversation was summarized: collapsed, with the summary inside. */
+function CompactionMarker({ message }: { message: AgentMessage }) {
+  const info = message.compaction;
+  const trigger = info?.trigger === "manual" ? "on request" : info?.trigger === "overflow" ? "after the model refused a long request" : "near the model's context limit";
+  return (
+    <details className="agt-compaction" data-testid="agent-compaction" data-entry-id={message.entry_id}>
+      <summary>
+        <span>Earlier conversation summarized {trigger}</span>
+        <span className="agt-compaction__meta">
+          {info ? `${info.summarized_messages} messages · ~${info.tokens_before.toLocaleString()} tokens before` : ""}
+          {" · "}{messageTime(message.at)}
+        </span>
+      </summary>
+      {info && !info.verified && (
+        <p className="agt-compaction__warn">
+          Some numbers in this summary ({info.unverified_numbers.join(", ")}) did not match the conversation; the Agent will not cite them without checking again.
+        </p>
+      )}
+      <div className="agt-compaction__body wb-agent-terminal-markdown">{renderMarkdown(message.content)}</div>
+      <p className="agt-compaction__note">The Agent now reads this summary instead of the messages above it; they stay here and in the session log.</p>
+    </details>
+  );
+}
+
 export function workSummary(steps: number, drafts: number): string {
   const parts = [];
   if (steps > 0) parts.push(`Worked through ${steps} ${steps === 1 ? "step" : "steps"}`);
@@ -443,6 +468,7 @@ export function AgentPanel({
           </div>
         ) : turns.map((turn, index) => {
           const live = turnActive && index === turns.length - 1;
+          if (turn.summary) return <CompactionMarker key={turn.id} message={turn.summary} />;
           return (
             <div key={turn.id} className="wb-agent-turn">
               {turn.user && renderTranscriptMessage(turn.user)}

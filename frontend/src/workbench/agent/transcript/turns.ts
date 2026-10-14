@@ -14,6 +14,8 @@ export type Turn = {
   responses: AgentMessage[];
   /** Seconds from your message to the Agent's last entry. */
   seconds: number | null;
+  /** Where the earlier conversation was summarized (a turn of its own). */
+  summary?: AgentMessage;
 };
 
 const normal = (text: string) => text.replace(/\s+/g, " ").trim();
@@ -51,6 +53,12 @@ export function buildTurns(messages: AgentMessage[]): Turn[] {
   };
   messages.forEach((message, index) => {
     if (message.role === "user") return open(message, index);
+    if (message.role === "summary") {
+      if (current) turns.push(finish(current));
+      current = null;
+      turns.push({ id: message.entry_id, user: null, steps: [], drafts: [], responses: [], seconds: null, summary: message });
+      return;
+    }
     if (!current) open(null, index);
     const turn = current!;
     turn.last = message;

@@ -63,6 +63,40 @@ export function forkAgentSession(
   });
 }
 
+/** Summarize the earlier conversation now; the newest part stays verbatim. */
+export function compactAgentSession(
+  projectRoot: string,
+  sessionId: string,
+  focus?: string,
+): Promise<ResponseOf<"/agent/sessions/{session_id}/compact", "post">> {
+  return request(agentPath(projectRoot, sessionPath(sessionId, "/compact")), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(focus ? { focus } : {}),
+  });
+}
+
+/** The built-in guide and the personal and project AGENTS.md. */
+export function getAgentInstructions(projectRoot: string): Promise<ResponseOf<"/agent/instructions", "get">> {
+  return request(agentPath(projectRoot, "/agent/instructions"));
+}
+
+export function saveAgentInstructions(
+  projectRoot: string,
+  body: RequestOf<"/agent/instructions", "put">,
+): Promise<ResponseOf<"/agent/instructions", "put">> {
+  return request(agentPath(projectRoot, "/agent/instructions"), {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+/** The project template filled with this project's datasets and models. */
+export function draftAgentInstructions(projectRoot: string): Promise<ResponseOf<"/agent/instructions/draft", "get">> {
+  return request(agentPath(projectRoot, "/agent/instructions/draft"));
+}
+
 export function pinAgentChapter(
   projectRoot: string,
   sessionId: string,

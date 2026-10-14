@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export interface ContextUsageRingProps {
   used: number;
@@ -7,6 +7,13 @@ export interface ContextUsageRingProps {
   total: number | null;
   size?: number;
   strokeWidth?: number;
+  /** The model declares no window; ``total`` is the Workbench's assumption. */
+  assumed?: boolean;
+  /** Above this the earlier conversation is summarized automatically. */
+  compactAt?: number | null;
+  /** Clicking the ring pins its details with a "summarize now" action. */
+  onCompact?: () => void;
+  compacting?: boolean;
 }
 
 /**
@@ -27,8 +34,26 @@ export function ContextUsageRing({
   total,
   size = 20,
   strokeWidth = 2,
+  assumed = false,
+  compactAt = null,
+  onCompact,
+  compacting = false,
 }: ContextUsageRingProps) {
   const [hover, setHover] = useState(false);
+  const [pinned, setPinned] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!pinned) return undefined;
+    const close = (event: Event) => {
+      if (event instanceof KeyboardEvent ? event.key === "Escape" : !root.current?.contains(event.target as Node)) setPinned(false);
+    };
+    document.addEventListener("pointerdown", close);
+    document.addEventListener("keydown", close);
+    return () => {
+      document.removeEventListener("pointerdown", close);
+      document.removeEventListener("keydown", close);
+    };
+  }, [pinned]);
 
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
@@ -54,12 +79,21 @@ export function ContextUsageRing({
 
   return (
     <div
+      ref={root}
       className="wb-context-ring"
       data-level={level}
       data-testid="agent-context-ring"
-      role="img"
-      aria-label={ariaLabel}
+      role={onCompact ? "button" : "img"}
+      aria-label={onCompact ? `${ariaLabel}. Show details` : ariaLabel}
+      aria-expanded={onCompact ? pinned : undefined}
       tabIndex={0}
+      onClick={onCompact ? () => setPinned((open) => !open) : undefined}
+      onKeyDown={onCompact ? (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          setPinned((open) => !open);
+        }
+      } : undefined}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       onFocus={() => setHover(true)}
@@ -89,8 +123,14 @@ export function ContextUsageRing({
           />
         )}
       </svg>
-      {hover && (
-        <div className="wb-context-ring-tooltip" role="tooltip" data-testid="agent-context-tooltip">
+      {(hover || pinned) && (
+        <div
+          className="wb-context-ring-tooltip"
+          role={pinned ? "dialog" : "tooltip"}
+          aria-label={pinned ? "Context" : undefined}
+          data-testid="agent-context-tooltip"
+          onClick={(event) => event.stopPropagation()}
+        >
           {hasCapacity ? (
             <>
               <div className="wb-context-ring-tooltip-head">
@@ -99,11 +139,35 @@ export function ContextUsageRing({
               <dl>
                 <div><dt>Used</dt><dd>{used.toLocaleString()}</dd></div>
                 <div><dt>Remaining</dt><dd>{remaining.toLocaleString()}</dd></div>
-                <div><dt>Total</dt><dd>{total.toLocaleString()}</dd></div>
+                <div><dt>Total</dt><dd>{total.toLocaleString()}{assumed ? " (assumed)" : ""}</dd></div>
+                {compactAt ? <div><dt>Summarized at</dt><dd>{compactAt.toLocaleString()}</dd></div> : null}
               </dl>
+              {assumed && (
+                <p className="wb-context-ring-note">
+                  The model declares no context window, so this one is assumed. Set the real one for the model in Settings › LLM providers.
+                </p>
+              )}
             </>
           ) : (
             <div className="wb-context-ring-tooltip-head">Context capacity unknown</div>
+          )}
+          {pinned && onCompact && (
+            <button
+              type="button"
+              className="wb-context-ring-action"
+              disabled={compacting}
+              onClick={() => {
+                onCompact();
+                setPinned(false);
+              }}
+            >
+              {compacting ? "Summarizing…" : "Summarize earlier conversation"}
+            </button>
+          )}
+          {pinned && onCompact && (
+            <p className="wb-context-ring-note">
+              Earlier messages are replaced by a checked summary in what the Agent reads; the full conversation stays here.
+            </p>
           )}
         </div>
       )}
