@@ -72,8 +72,8 @@ def conversation_index(repository: JsonlSessionRepository, *, exclude: str | Non
     items: list[dict[str, Any]] = []
     for metadata, passages in _conversations(repository):
         session_id = str(metadata["session_id"])
-        if session_id == exclude:
-            continue
+        if session_id == exclude or metadata.get("archived"):
+            continue  # archived: still searchable, no longer listed
         users = [passage for passage in passages if passage.role == "user" and passage.session_id == session_id] or [
             passage for passage in passages if passage.role == "user"
         ]
@@ -82,7 +82,7 @@ def conversation_index(repository: JsonlSessionRepository, *, exclude: str | Non
             "role": metadata.get("role"),
             "started": str(metadata.get("created_at") or users[0].at)[:10],
             "last_active": passages[-1].at,
-            "title": _line(users[0].text, 80),
+            "title": str(metadata.get("title") or "") or _line(users[0].text, 80),
             "last_question": _line(users[-1].text, 80),
             "messages": len(passages),
             "chapters": [str(chapter.get("title")) for chapter in metadata.get("chapters") or []][:5],

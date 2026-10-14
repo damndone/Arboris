@@ -46,6 +46,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/agent/conversations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Agent Conversations
+         * @description Conversations someone wrote in, most recently active first.
+         */
+        get: operations["list_agent_conversations_agent_conversations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent/conversations/{session_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Agent Conversation
+         * @description Delete a conversation's messages and live event log.
+         *
+         *     The analysis ledger, proposals and operation records stay: they record
+         *     what changed in the data and models, whoever asked for it.
+         */
+        delete: operations["delete_agent_conversation_agent_conversations__session_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Agent Conversation
+         * @description Rename, archive or restore a conversation; its messages are unchanged.
+         */
+        patch: operations["update_agent_conversation_agent_conversations__session_id__patch"];
+        trace?: never;
+    };
     "/agent/fork-proposals": {
         parameters: {
             query?: never;
@@ -2703,6 +2750,67 @@ export interface components {
             window_declared: boolean;
             /** Window Tokens */
             window_tokens: number;
+        };
+        /**
+         * AgentConversation
+         * @description One conversation in the project's list.
+         */
+        AgentConversation: {
+            /** About */
+            about: string;
+            /** Archived */
+            archived: boolean;
+            /** Created At */
+            created_at: string;
+            focus: components["schemas"]["AgentConversationFocus"] | null;
+            /** Forked From */
+            forked_from: string | null;
+            /** Last Active */
+            last_active: string;
+            /** Messages */
+            messages: number;
+            /** Replies */
+            replies: number;
+            /** Role */
+            role: string | null;
+            /** Session Id */
+            session_id: string;
+            /** Status */
+            status: string | null;
+            /** Title */
+            title: string;
+            /** Titled */
+            titled: boolean;
+        };
+        /** AgentConversationDeleted */
+        AgentConversationDeleted: {
+            /** Deleted */
+            deleted: boolean;
+            /** Session Id */
+            session_id: string;
+        };
+        /** AgentConversationFocus */
+        AgentConversationFocus: {
+            /** Id */
+            id?: string;
+            /** Kind */
+            kind?: string;
+            /** Label */
+            label?: string;
+            /** Run Id */
+            run_id?: string | null;
+        };
+        /** AgentConversations */
+        AgentConversations: {
+            /** Conversations */
+            conversations: components["schemas"]["AgentConversation"][];
+        };
+        /** AgentConversationUpdate */
+        AgentConversationUpdate: {
+            /** Archived */
+            archived?: boolean | null;
+            /** Title */
+            title?: string | null;
         };
         /** AgentEntryRequest */
         AgentEntryRequest: {
@@ -10211,6 +10319,108 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentCapabilities"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_agent_conversations_agent_conversations_get: {
+        parameters: {
+            query: {
+                include_archived?: boolean;
+                project_root: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentConversations"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_agent_conversation_agent_conversations__session_id__delete: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentConversationDeleted"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_agent_conversation_agent_conversations__session_id__patch: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentConversationUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentConversation"];
                 };
             };
             /** @description Validation Error */

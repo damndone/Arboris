@@ -143,6 +143,14 @@ class AgentEventStream:
         self._tails[path] = cached
         return cached
 
+    def delete(self, session_id: str) -> None:
+        """Remove a deleted conversation's event log."""
+
+        path = self._path(session_id)
+        with self._lock, _exclusive_jsonl_lock(path):
+            path.unlink(missing_ok=True)
+            self._tails.pop(path, None)
+
     def replay(self, session_id: str, *, after_seq: int = 0) -> list[AgentEvent]:
         with self._lock:
             return [event for event in self._read(session_id) if event.seq > after_seq]

@@ -333,3 +333,41 @@ class AgentInstructionsDraft(TypedDict):
     """The project template with the project's datasets and models filled in."""
 
     content: str
+
+
+class AgentConversationFocus(TypedDict, total=False):
+    kind: str
+    id: str
+    run_id: str | None
+    label: str
+
+
+class AgentConversation(TypedDict):
+    """One conversation in the project's list."""
+
+    session_id: str
+    role: str | None
+    #: The person's title, else the first line of their first message.
+    title: str
+    #: True when the person named it.
+    titled: bool
+    #: What it is about (a node, the data, a report, the project).
+    about: str
+    focus: AgentConversationFocus | None
+    created_at: str
+    last_active: str
+    messages: int
+    replies: int
+    archived: bool
+    status: str | None
+    #: The conversation it branched from, if any.
+    forked_from: str | None
+
+
+class AgentConversations(TypedDict):
+    conversations: list[AgentConversation]
+
+
+class AgentConversationDeleted(TypedDict):
+    session_id: str
+    deleted: bool
