@@ -13,6 +13,7 @@ import pandas as pd
 from ..artifacts import register_artifact, write_json
 from ..cleaning import normalize_column_name
 from ..domain import GuardrailIssue, Severity
+from ..formula_terms import quote_column
 
 
 def _normalized_existing(candidates: tuple[str, ...], frame: pd.DataFrame) -> list[str]:
@@ -262,17 +263,19 @@ def _check_dropped_variables(
         # Multi-equation families (multinomial logit, quantile regression across
         # quantiles) name coefficients "<equation>:<term>".  The term is still
         # estimated, so the equation prefix must not read as a dropped variable.
-        sq = f"C(Q('{var}'))[T."
-        dq = f'C(Q("{var}"))[T.'
+        # The estimator quotes the column with formula_terms.quote_column, which
+        # escapes backslashes and mixed quotes; results written before that
+        # carry the plain single- or double-quoted form.
+        prefixes = {f"C({quote_column(var)})[T.", f"C(Q('{var}'))[T.", f'C(Q("{var}"))[T.'}
         for cterm in coefficients:
             if not isinstance(cterm, str):
                 continue
-            if var in categorical_vars and (sq in cterm or dq in cterm):
+            if var in categorical_vars and any(prefix in cterm for prefix in prefixes):
                 return True
             _, separator, term = cterm.partition(":")
             if separator and term == var:
                 return True
-            if separator and var in categorical_vars and (sq in term or dq in term):
+            if separator and var in categorical_vars and any(prefix in term for prefix in prefixes):
                 return True
         return False
 
