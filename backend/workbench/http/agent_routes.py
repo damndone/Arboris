@@ -54,7 +54,7 @@ from ..analysis_loop.validation import ValidationPacket
 from ..agent.compaction import CompactionError, CompactionPolicy, compact as compact_session, estimate_messages_tokens
 from ..agent.context import ContextBuilder
 from ..agent.instructions import INSTRUCTIONS_NAME, compose as compose_instructions
-from ..agent.operation_outcome import OUTCOME_NAME, outcome as operation_outcome, outcome_text as operation_outcome_text
+from ..agent.operation_outcome import OUTCOME_NAME, TERMINAL as OUTCOME_TERMINAL, outcome as operation_outcome, outcome_text as operation_outcome_text, unfinished_outcomes
 from ..agent.recall import RECALL_NAME, conversation_index, index_text as recall_index_text
 from ..agent.core import AgentCore
 from ..agent.events import AgentEventStream
@@ -153,7 +153,8 @@ CHAIN_AGENT_PROTOCOL = """Workbench Chain Agent workflow protocol (agent/v1):
 - propose_operation creates a reviewable pending proposal (requires_confirmation: true) for anything that changes data, metadata, a model or a report; it does not execute it. Never claim that a run, graph, or data change was executed from such a result.
 - Who does what: you propose; the person's confirmation makes the Workbench execute the proposal; you are then told what it produced in a workbench_operation_result message (the run it created, and whether an identical analysis already existed). Do not describe yourself as read-only or unable to act. When that message is present, read the produced run's results (inspect_project_model_coefficients with its run id, beside the original run) and report them.
 - Before proposing a model.rerun, check whether a run with the requested setting already exists: the context lists the project's runs, and inspect_project_model_coefficients reports each run's covariance and specification. If it exists, show that result and say a rerun would only repeat it; propose one only if the person still wants a fresh run.
-- When you offered more than one variant ("unadjusted and/or HC3") and the person agrees without choosing, propose every variant you offered, one proposal each, or ask which they want. Never silently do fewer than you offered.
+- Offer only what the Workbench can run: before suggesting an alternative estimator, covariance, test or option, check that the operation contract or its option_vocabulary declares it. If the person asks for something it does not declare, say plainly that it is not available yet instead of offering a near substitute.
+- When you offered more than one variant and the person agrees without choosing, propose every variant you offered, one proposal each, or ask which they want. Never silently do fewer than you offered.
 - A multi-step workflow whose every step only reads data (descriptive statistics, tabulations, inferential tests) runs at once: propose_operation then returns executed: true with each step's results. Answer the user's question from those results in this turn, citing the step and artifact ids; if it returns executed: false, explain the error and report no result. Do not split a question into many small workflows to run more tests. Analysis steps name the columns they use: do not add a data.subset step only to choose columns, and do not re-run a test already answered in this conversation.
 - A propose_operation result with requires_confirmation: true ends your turn: reply with a short summary of what you proposed and call no further tools. Continuing past it spends the step budget and can end the turn in an error even though the proposal was created.
 - Inspect only what the request needs. Calling every inspect tool wastes steps; tools for other model families return nothing useful about this node.
@@ -2326,6 +2327,27 @@ async def confirm_agent_proposal(
     }
 
 
+def _tell_agent_finished_outcomes(root: Path, session_id: str) -> None:
+    """Before a turn: report operations that finished since the Agent was told
+    they were still running (a confirmed rerun returns while it runs)."""
+
+    try:
+        repository, _events, _metadata = _get_session(root, session_id)
+        pending = unfinished_outcomes(repository.get_branch(session_id))
+    except (WorkbenchAPIError, KeyError, OSError, ValueError):
+        return
+    if not pending:
+        return
+    store = OperationRecordStore(root / "workbench", create=False)
+    for record_id in pending:
+        try:
+            record = store.get(record_id).to_dict()
+        except (KeyError, OSError, ValueError):
+            continue
+        if record.get("status") in OUTCOME_TERMINAL:
+            _tell_agent_the_outcome(root, session_id, record)
+
+
 def _tell_agent_the_outcome(root: Path, session_id: str, record: dict[str, Any]) -> None:
     """The Agent's next turn knows what its confirmed proposal produced."""
 
@@ -2487,6 +2509,7 @@ async def _run_reserved_agent_turn(
     metadata: dict[str, Any],
     turn_key: tuple[str, str],
 ) -> dict[str, Any]:
+    _tell_agent_finished_outcomes(root, session_id)
     config = load_llm_config()
     if not config.is_configured():
         raise WorkbenchAPIError(

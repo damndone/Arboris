@@ -54,3 +54,33 @@ def test_the_confirm_route_leaves_the_outcome_in_the_conversation(tmp_path):
     entry = repository.get_branch("agent_chain_s")[-1]
     assert entry.payload["name"] == "workbench_operation_result" and entry.payload["audience"] == "model"
     assert "It produced run r3" in entry.payload["content"] and entry.payload["metadata"]["produced_run_id"] == "r3"
+
+
+def test_a_running_operation_is_told_again_when_it_finishes(tmp_path, monkeypatch):
+    """Confirming returns while a rerun still runs (live run on 2026-10-14):
+    the first message says so, the next turn's message carries the result."""
+    from workbench.http import agent_routes
+
+    run(tmp_path, "r2", "h-unadjusted", "unadjusted")
+    run(tmp_path, "r3", "h-unadjusted", "unadjusted")
+    repository = JsonlSessionRepository(tmp_path / "workbench")
+    repository.create_session("agent_chain_s", chain_id="chain:r1", role="chain")
+    running = {**RECORD, "status": "running"}
+    agent_routes._tell_agent_the_outcome(tmp_path, "agent_chain_s", running)
+    first = repository.get_branch("agent_chain_s")[-1].payload["content"]
+    assert "has not finished yet" in first and "already existed" not in first
+
+    class Store:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def get(self, record_id):
+            assert record_id == "oprec_1"
+            return type("R", (), {"to_dict": lambda self: RECORD})()
+
+    monkeypatch.setattr(agent_routes, "OperationRecordStore", Store)
+    agent_routes._tell_agent_finished_outcomes(tmp_path, "agent_chain_s")
+    second = repository.get_branch("agent_chain_s")[-1].payload["content"]
+    assert "status completed" in second and "already existed in run(s) r2" in second
+    agent_routes._tell_agent_finished_outcomes(tmp_path, "agent_chain_s")
+    assert len(repository.get_branch("agent_chain_s")) == 2  # told once

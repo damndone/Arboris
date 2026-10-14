@@ -31,8 +31,12 @@ from .session import JsonlSessionRepository, SessionTreeEntry
 RESERVE_TOKENS = 16_384
 KEEP_RECENT_TOKENS = 20_000
 # Used only when the configured model declares no window; reported as an
-# assumption, never as the model's real window.
-ASSUMED_WINDOW_TOKENS = 64_000
+# assumption, never as the model's real window. 64 000 left ~10 000 tokens for
+# the conversation once the protocol (~21 000) and tools were in, so a live
+# five-turn conversation compacted twice (2026-10-14). Current models take at
+# least 128 000; a smaller real window is caught by the provider's refusal,
+# which compacts and retries once.
+ASSUMED_WINDOW_TOKENS = 128_000
 TOOL_RESULT_CHARS = 2_000
 SUMMARY_MAX_TOKENS = 4_096
 

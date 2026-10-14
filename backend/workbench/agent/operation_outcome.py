@@ -16,6 +16,9 @@ from pathlib import Path
 from typing import Any, Mapping
 
 OUTCOME_NAME = "workbench_operation_result"
+# Statuses after which an operation changes no more. Confirming returns while
+# a rerun still runs; the outcome is told again once it reaches one of these.
+TERMINAL = frozenset({"completed", "failed", "cancelled", "rejected", "stale", "aborted"})
 
 
 def produced_run(record: Mapping[str, Any]) -> str | None:
@@ -98,6 +101,12 @@ def outcome_text(facts: Mapping[str, Any]) -> str:
     if facts.get("error"):
         lines.append(f"It failed: {json.dumps(facts['error'], ensure_ascii=False)[:600]}. Nothing it would have produced exists.")
     run_id = facts.get("produced_run_id")
+    if facts.get("status") not in TERMINAL:
+        lines.append(
+            (f"It is producing run {run_id}. " if run_id else "")
+            + "It has not finished yet: do not report results; you will be told when it finishes."
+        )
+        return "\n".join(lines)
     if run_id:
         lines.append(f"It produced run {run_id}, a new version in the lineage; the run the conversation started from is unchanged.")
         for node, info in (facts.get("model_nodes") or {}).items():
@@ -115,3 +124,17 @@ def outcome_text(facts: Mapping[str, Any]) -> str:
             "(add the original run to compare), and report them. Do not say you could not execute it: confirming executed it."
         )
     return "\n".join(lines)
+
+
+def unfinished_outcomes(branch: Any) -> list[str]:
+    """Operation records whose latest outcome message was not terminal."""
+
+    latest: dict[str, str] = {}
+    for entry in branch:
+        payload = entry.payload
+        if entry.entry_type == "custom_message" and payload.get("name") == OUTCOME_NAME:
+            metadata = payload.get("metadata") or {}
+            record_id = metadata.get("operation_record_id")
+            if isinstance(record_id, str):
+                latest[record_id] = str(metadata.get("status"))
+    return [record_id for record_id, status in latest.items() if status not in TERMINAL]
