@@ -10,10 +10,10 @@ COMPLETED
 
 ## Metrics
 
-- Failure frequency: 6/47 (12.8%; 12.8 per 100 events)
-- Repeat rate: 0/6 (0.0%)
-- Recurrence rate: 0/6 (0.0%)
-- MTTR: median=0 ms (sample=4; unresolved=2)
+- Failure frequency: 7/48 (14.6%; 14.6 per 100 events)
+- Repeat rate: 0/7 (0.0%)
+- Recurrence rate: 0/7 (0.0%)
+- MTTR: median=0 ms (sample=5; unresolved=2)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
@@ -35,6 +35,7 @@ COMPLETED
 
 - #2 2026-10-08T20:11:56.377Z `manual_parity_gap_operations_agent_only`; cause_status: `known`; cause: The Agent workflow declares 109 step operations, but the UI can call only model runs (POST /runs), a few data operations and statistical exploration. There is no HTTP route that executes a workflow step without the Agent; the CLI calls WorkflowExecutor directly. Reports can only be created through the AI report route.; resolution: `open`; lesson: An Agent capability with no direct route is a feature the user cannot reach without a model; give every operation one declared execution path and let both the UI and the Agent call it.
 - #6 2026-10-08T21:13:07.916Z `dev_mode_open_time_cold_compile`; cause_status: `known`; cause: First open-time measurement put the new shell at 1.60x the classic one; it included Vite compiling the new modules on first request. Warm runs measured 1.00x and 0.93x.; resolution: `open`; lesson: Compare page timings only after a warm-up run, and settle budgets on production builds.
+- #48 2026-10-14T11:15:59.000Z `frozen_pack_option_vocabularies_published`; cause_status: `known`; cause: Frozen-pack options with closed vocabularies (alternative, method, missing_policy, trend, ...) were served as free text with nullable, so manual users guessed spellings and explicit null reached the kernel as the string None.; resolution: `resolved`; lesson: A served option vocabulary must be the object the kernel validates against, not a copy of it.
 
 ## All waste
 
@@ -47,6 +48,7 @@ COMPLETED
 - `finish-transitions-before-measuring`: occurrences=1; cause_status: `known`; root cause: The contrast audit ran while the browser pane was hidden; CSS transitions do not advance there, so a theme switch left segmented controls at their light background and the audit reported 1.12 for selected items in dark.; solution: `resolved`
 - `portal-window-overlays`: occurrences=1; cause_status: `known`; root cause: The new top bar uses backdrop-filter; that makes it the containing block for position:fixed descendants, so the create-project dialog opened from the project menu was laid out inside the 48 px bar and clipped.; solution: `resolved`
 - `proposal-only-must-restrict-read-only-autorun`: occurrences=1; cause_status: `known`; root cause: Read-only auto-run policy ignores a turn that requests a reviewable proposal before execution.; solution: `open`
+- `serve-the-kernel-vocabulary-object`: occurrences=1; cause_status: `known`; root cause: Frozen-pack options with closed vocabularies (alternative, method, missing_policy, trend, ...) were served as free text with nullable, so manual users guessed spellings and explicit null reached the kernel as the string None.; solution: `resolved`
 - `user-review-requirements-as-tests`: occurrences=1; cause_status: `known`; root cause: The completion commits removed the top-bar light/Auto/dark switch (74ac598f) and reverted the stage-open rule so the stage covered the map whenever nodes existed, both explicit user review requirements.; solution: `resolved`
 - `warm-up-before-timing-dev-builds`: occurrences=1; cause_status: `known`; root cause: First open-time measurement put the new shell at 1.60x the classic one; it included Vite compiling the new modules on first request. Warm runs measured 1.00x and 0.93x.; solution: `open`
 
@@ -61,11 +63,13 @@ COMPLETED
 - `finish-transitions-before-measuring`: line experience occurrence(s)=1
 - `portal-window-overlays`: line experience occurrence(s)=1
 - `proposal-only-must-restrict-read-only-autorun`: line experience occurrence(s)=1
+- `serve-the-kernel-vocabulary-object`: line experience occurrence(s)=1
 - `user-review-requirements-as-tests`: line experience occurrence(s)=1
 - `warm-up-before-timing-dev-builds`: line experience occurrence(s)=1
 
 ## Future guidance
 
+- A served option vocabulary must be the object the kernel validates against, not a copy of it.
 - A timeout reported by a person is evidence to read from the session log before changing anything; here the log showed a whole-turn budget, not a network failure.
 - An Agent capability with no direct route is a feature the user cannot reach without a model; give every operation one declared execution path and let both the UI and the Agent call it.
 - Before measuring computed colours or sizes in a possibly hidden page, finish running transitions or the readings are their start values.
@@ -127,3 +131,4 @@ COMPLETED
 - #45: `3d033d84-5307-460d-9622-85c9ce09e5ef` | 2026-10-13T19:18:49.000Z | ERROR/user_required_controls_regressed_by_completion | incident=`bf623c9c-4c83-4296-8c07-b7e27d5965a2` | lesson_key=`user-review-requirements-as-tests` | event_sha256=`1248249820ea9e9e2e29228c3486ac2b5338ee6fbb3209a35c2f6321724309fe`
 - #46: `960b3611-ca38-4e24-9207-5828d8196072` | 2026-10-13T19:18:49.000Z | REVIEW/post_completion_review_ux_structure_performance | incident=`bf623c9c-4c83-4296-8c07-b7e27d5965a2` | lesson_key=`operation-words-at-the-declaration` | event_sha256=`84041b49b45838b06a2303d781b4dfd79e0ffc70aa4468e88d320c640d30bf75`
 - #47: `fb19fefa-2711-46c5-946d-e2165eb231ee` | 2026-10-14T06:47:44.000Z | REVIEW/user_review_3_data_topbar_node_report_agent | incident=`0c23c847-b6da-49e6-b4ba-63be99ed3fb2` | lesson_key=`read-the-session-log-before-tuning-timeouts` | event_sha256=`e2e4f5f6a3d8e4fec9edffb6cbb5d697337b8f9e17b8b6df728d2c67a824fd3a`
+- #48: `375a4e86-9ac7-4c0c-a489-326fde93881c` | 2026-10-14T11:15:59.000Z | GAP/frozen_pack_option_vocabularies_published | incident=`7246c31e-1a92-4444-b0bb-7aa383edda74` | lesson_key=`serve-the-kernel-vocabulary-object` | event_sha256=`b37375fb6dbca3eb78e0e3ab544c543cff805c15b7ced4e9492070d4ba74603f`
