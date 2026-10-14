@@ -190,21 +190,6 @@
   color: var(--label-tertiary);
 }
 
-.wb-agent-context-control {
-  position: relative;
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  min-width: 0;
-}
-
-.wb-agent-context-summary {
-  color: var(--label-tertiary);
-  font: 10px/1.2 var(--font-mono, ui-monospace, monospace);
-  white-space: nowrap;
-}
-
 .wb-agent-composer-scope {
   min-width: 0;
   max-width: 180px;
@@ -213,30 +198,6 @@
   font-size: 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.wb-agent-ring {
-  width: 30px;
-  height: 30px;
-  min-width: 30px;
-  min-height: 30px;
-  max-width: 30px;
-  max-height: 30px;
-  aspect-ratio: 1 / 1;
-  flex: 0 0 auto;
-  border-radius: 50%;
-  border: 1px solid color-mix(in oklch, var(--label) 16%, var(--separator));
-  background: conic-gradient(
-    var(--tint) var(--agent-ring-progress, 0%),
-    color-mix(in oklch, var(--label) 12%, transparent) 0
-  );
-  color: var(--label-secondary);
-  cursor: pointer;
-  font-size: 9px;
-  padding: 2px;
-  box-sizing: border-box;
-  display: grid;
-  place-items: center;
 }
 
 .wb-agent-add-context,
@@ -327,20 +288,6 @@
   background: var(--label);
 }
 
-.wb-agent-ring > span {
-  display: grid;
-  place-items: center;
-  width: 100%;
-  height: 100%;
-  border-radius: 50%;
-  background: var(--bg-card);
-}
-
-.wb-agent-ring:focus-visible {
-  outline: 2px solid var(--focus-ring, var(--tint));
-  outline-offset: 2px;
-}
-
 .wb-agent-context-popover {
   position: absolute;
   z-index: 20;
@@ -365,12 +312,6 @@
   font-size: 12px;
 }
 
-.wb-agent-context-popover-model {
-  overflow-wrap: anywhere;
-  color: var(--label-tertiary);
-  font-family: var(--font-mono, ui-monospace, monospace);
-}
-
 .wb-agent-send:active:not(:disabled) {
   transform: scale(0.96);
 }
@@ -380,23 +321,12 @@
   opacity: 0.5;
 }
 
-.wb-agent-composer-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 6px;
-  min-height: 16px;
-  color: var(--label-secondary);
-  font-size: 11px;
-}
-
 .wb-agent-model-control {
   display: inline-flex;
   min-width: 0;
 }
 
-.wb-agent-model-control select,
-.wb-agent-composer-meta select {
+.wb-agent-model-control select {
   max-width: 190px;
   border: 0;
   border-radius: 999px;
@@ -554,7 +484,6 @@
   padding: 10px 12px 12px;
   gap: 8px;
 }
-
 
 .wb-agent-terminal {
   flex: 1;
@@ -821,55 +750,10 @@
   font-size: 12px;
 }
 
-.wb-agent-terminal-input-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex: 0 0 auto;
-  min-width: 0;
-  padding: 5px 8px;
-  border: 1px solid var(--separator);
-  border-radius: 8px;
-  background: var(--bg-canvas);
-  font-family: var(--font-mono, ui-monospace, monospace);
-}
-
 .wb-agent-terminal-input-marker {
   flex: 0 0 auto;
   color: var(--tint);
   user-select: none;
-}
-
-.wb-agent-terminal-input-row input {
-  flex: 1;
-  min-width: 0;
-  width: auto;
-  height: 28px;
-  min-height: 28px;
-  padding: 2px 0;
-  border: 0;
-  border-radius: 0;
-  outline: none;
-  background: transparent;
-  color: var(--label);
-  font: inherit;
-  line-height: 1.4;
-}
-
-.wb-agent-terminal-input-row input::placeholder {
-  color: var(--label-tertiary);
-}
-
-.wb-agent-terminal-input-row:focus-within {
-  border-color: color-mix(in oklch, var(--tint) 45%, var(--separator));
-  box-shadow: 0 0 0 2px color-mix(in oklch, var(--tint) 18%, transparent);
-}
-
-.wb-agent-terminal-input-hint {
-  flex: 0 0 auto;
-  color: var(--label-tertiary);
-  font-size: 10px;
-  white-space: nowrap;
 }
 
 .wb-agent-proposal {

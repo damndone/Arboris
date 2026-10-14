@@ -21,26 +21,6 @@
   padding: 12px 14px;
 }
 
-/* Pill */
-.ln-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 9px;
-  border-radius: 999px;
-  font-size: 11.5px;
-  font-weight: 500;
-  line-height: 1.6;
-}
-.ln-pill--orange {
-  background: var(--orange-bg);
-  color: var(--orange);
-}
-.ln-pill--red {
-  background: var(--status-fails-bg);
-  color: var(--red);
-}
-
 /* Button */
 .ln-btn-primary {
   background: var(--tint-fill);
@@ -73,12 +53,8 @@
   border-radius: 10px;
   padding: 14px 16px;
 }
-.ln-callout--orange { background: var(--orange-bg); }
-.ln-callout--orange .ln-callout-title { color: var(--orange); }
 .ln-callout--red { background: var(--status-fails-bg); }
 .ln-callout--red .ln-callout-title { color: var(--red); }
-.ln-callout--green { background: var(--status-holds-bg); }
-.ln-callout--green .ln-callout-title { color: var(--green); }
 .ln-callout-title { font-weight: 600; font-size: 14px; }
 .ln-callout-body { color: var(--label); font-size: 13.5px; margin-top: 6px; line-height: 1.5; }
 
@@ -525,53 +501,6 @@
   color: var(--badge-neutral-fg);
   background: var(--badge-neutral-bg);
   border-color: var(--badge-neutral-border);
-}
-
-/* Lineage 2-column shell — rail on the left, GraphCanvas (+ Drawer when
- * a node is selected) on the right. Used by GraphWorkbench's outer wrap. */
-.lineage-with-rail {
-  display: flex;
-  flex-direction: row;
-  align-items: stretch;
-  width: 100%;
-  min-height: 0;
-  height: 100%;
-  overflow: hidden;
-}
-.lineage-with-rail__main {
-  flex: 1 1 auto;
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.ln-canvas-view-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 0;
-  background: var(--bg-card-2);
-  border: 1px solid var(--separator);
-  border-radius: 8px;
-  overflow: hidden;
-}
-.ln-canvas-view-actions__button {
-  min-height: 28px;
-  padding: 4px 10px;
-  border: 0;
-  border-right: 1px solid var(--separator);
-  background: transparent;
-  color: var(--label-secondary);
-  font: 11px var(--font-sans);
-  cursor: pointer;
-}
-.ln-canvas-view-actions__button:last-child {
-  border-right: 0;
-}
-.ln-canvas-view-actions__button:hover,
-.ln-canvas-view-actions__button:focus-visible {
-  background: var(--bg-elev);
-  color: var(--label);
 }
 
 .ln-canvas-legend {
