@@ -10,10 +10,10 @@ COMPLETED
 
 ## Metrics
 
-- Failure frequency: 11/55 (20.0%; 20.0 per 100 events)
-- Repeat rate: 0/11 (0.0%)
-- Recurrence rate: 0/11 (0.0%)
-- MTTR: median=0 ms (sample=7; unresolved=4)
+- Failure frequency: 12/56 (21.4%; 21.4 per 100 events)
+- Repeat rate: 0/12 (0.0%)
+- Recurrence rate: 0/12 (0.0%)
+- MTTR: median=0 ms (sample=8; unresolved=4)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
@@ -40,6 +40,7 @@ COMPLETED
 - #52 2026-10-14T12:52:49.000Z `unbounded_oracle_evidence_and_uncollected_test`; cause_status: `known`; cause: Data-oracle script runs wrote a new oracle-* directory per script under tests/fixtures/script_export/local_runs with no pruning (1,048 directories, 169 MB in six days); a categorical result-contract test lived at backend/.../categorical/tests.py, a name pytest never collects.; resolution: `resolved`; lesson: Evidence writers and test files are found by scanning, not by remembering: grep for mkdtemp under tests/fixtures and def test_ under backend/.
 - #53 2026-10-14T12:52:49.000Z `honest_did_time_in_scipy_linprog_wrapper`; cause_status: `known`; cause: Profiled honest_rm (R-matching event test, 61 s): 86,439 linprog calls; HiGHS itself 7.9 s, scipy's per-call wrapper the rest (option validation alone 11.5 s builds a HighsOptionsManager per option). The algorithm is a line-for-line port of R HonestDiD and was not changed.; resolution: `open`; lesson: Profile before optimising a numerically validated port: here the solver is fast and the wrapper is not, so the fix belongs at the call boundary, not in the algorithm.
 - #55 2026-10-14T14:26:21.000Z `agent_conversation_never_compacted`; cause_status: `known`; cause: The Agent context builder reads 'compaction' entries but nothing writes them, so every turn resends the whole conversation; a long enough conversation will exceed the model's context window. The main Agent also has no long-term memory (domain memory is wired to the Notebook only) and no per-project instructions file.; resolution: `open`; lesson: A reader for a record type nothing writes is a feature that does not exist; check for the writer.
+- #56 2026-10-14T16:29:42.000Z `agent_context_compaction_instructions_recall`; cause_status: `known`; cause: The Agent resent its whole conversation every step (nothing wrote compaction entries), had no way to receive standing conventions, forgot earlier conversations of the same project, and wrote/re-read its whole event log for every streamed delta (23 ms each on a 2 MB log).; resolution: `resolved`; lesson: In a statistics agent a compaction summary is evidence for later answers; check its numbers the way replies are checked.
 
 ## All waste
 
@@ -59,6 +60,7 @@ COMPLETED
 - `reachability-from-app-not-tests`: occurrences=1; cause_status: `known`; root cause: Every visit parsed one 1,653 kB chunk (507 kB gzip) including xlsx, the graph engine and every view; RunForm and six other modules plus 41 CSS classes were kept alive only by their own tests since v1.8.6.; solution: `resolved`
 - `scan-for-unmanaged-evidence-and-hidden-tests`: occurrences=1; cause_status: `known`; root cause: Data-oracle script runs wrote a new oracle-* directory per script under tests/fixtures/script_export/local_runs with no pruning (1,048 directories, 169 MB in six days); a categorical result-contract test lived at backend/.../categorical/tests.py, a name pytest never collects.; solution: `resolved`
 - `serve-the-kernel-vocabulary-object`: occurrences=1; cause_status: `known`; root cause: Frozen-pack options with closed vocabularies (alternative, method, missing_policy, trend, ...) were served as free text with nullable, so manual users guessed spellings and explicit null reached the kernel as the string None.; solution: `resolved`
+- `summaries-are-evidence`: occurrences=1; cause_status: `known`; root cause: The Agent resent its whole conversation every step (nothing wrote compaction entries), had no way to receive standing conventions, forgot earlier conversations of the same project, and wrote/re-read its whole event log for every streamed delta (23 ms each on a 2 MB log).; solution: `resolved`
 - `user-review-requirements-as-tests`: occurrences=1; cause_status: `known`; root cause: The completion commits removed the top-bar light/Auto/dark switch (74ac598f) and reverted the stage-open rule so the stage covered the map whenever nodes existed, both explicit user review requirements.; solution: `resolved`
 - `warm-up-before-timing-dev-builds`: occurrences=1; cause_status: `known`; root cause: First open-time measurement put the new shell at 1.60x the classic one; it included Vite compiling the new modules on first request. Warm runs measured 1.00x and 0.93x.; solution: `open`
 
@@ -79,6 +81,7 @@ COMPLETED
 - `reachability-from-app-not-tests`: line experience occurrence(s)=1
 - `scan-for-unmanaged-evidence-and-hidden-tests`: line experience occurrence(s)=1
 - `serve-the-kernel-vocabulary-object`: line experience occurrence(s)=1
+- `summaries-are-evidence`: line experience occurrence(s)=1
 - `user-review-requirements-as-tests`: line experience occurrence(s)=1
 - `warm-up-before-timing-dev-builds`: line experience occurrence(s)=1
 
@@ -93,6 +96,7 @@ COMPLETED
 - Before measuring computed colours or sizes in a possibly hidden page, finish running transitions or the readings are their start values.
 - Compare page timings only after a warm-up run, and settle budgets on production builds.
 - Evidence writers and test files are found by scanning, not by remembering: grep for mkdtemp under tests/fixtures and def test_ under backend/.
+- In a statistics agent a compaction summary is evidence for later answers; check its numbers the way replies are checked.
 - Keep the controls users rely on when moving them; removing one is a regression even if it moved to Settings.
 - Measure input latency with the real run's evidence size; a fixture with three facts hides quadratic renders.
 - Overlays that must cover the window render through a portal; filters, transforms and backdrop-filters on an ancestor capture fixed positioning.
@@ -161,3 +165,4 @@ COMPLETED
 - #53: `88f9418a-e5b9-4cc9-bb4e-2d15919a1bf2` | 2026-10-14T12:52:49.000Z | GAP/honest_did_time_in_scipy_linprog_wrapper | incident=`77bc11ef-b4b3-4efc-b039-43f9a2e16b08` | lesson_key=`profile-validated-ports-at-the-call-boundary` | event_sha256=`71335a462902fd205ced224de4194b9cbdbf3b90dfc3f87082c027ae3f8c0915`
 - #54: `81f8f918-3ea2-44c1-adc6-2f88fa6477be` | 2026-10-14T14:26:21.000Z | REVIEW/user_review_4_topbar_ask_agent_self_description | incident=`2a57ae0c-8dad-4f83-9451-8ef08b32a7b5` | lesson_key=`test-layout-below-design-width` | event_sha256=`462ac1e4f8b849a5587ffe6b238ff5e9d75af7a8209601c3ac6c930dbd401f46`
 - #55: `23472880-887a-422a-892b-7abfc9d73b2e` | 2026-10-14T14:26:21.000Z | GAP/agent_conversation_never_compacted | incident=`5857ce13-413e-47a8-aa08-53f1fe6e56b4` | lesson_key=`check-for-the-writer` | event_sha256=`0ab892637bfedf2bc1a2be00ec1a0e148a8c9d21341d070c9a5f247749b6480f`
+- #56: `9b2b0167-82f1-442f-a55e-35c3f8e399bb` | 2026-10-14T16:29:42.000Z | GAP/agent_context_compaction_instructions_recall | incident=`5a1c9ed4-77de-471e-bec6-fde6071677e5` | lesson_key=`summaries-are-evidence` | event_sha256=`2226b17dc0cc56b89ddfc3b2209f75684c9594e1e065f33563e6dbf2ffe23d98`
