@@ -21,8 +21,8 @@
     {"path": "tests/fixtures/models/time_series_diagnostics/oracle/unsupported-dependency-manifest.json", "sha256": "22b4ef7b100a258bf3af784f6cc60b537fa79e746f548e4b200241272813f236"},
     {"path": "tests/fixtures/models/time_series_diagnostics/oracle/resource-limits.json", "sha256": "3881a12044329722a6fbc9bf50340ab4802bc7f620d56e7c0fe6abe8136a97b3"},
     {"path": "docs/superpowers/contracts/time-series-diagnostics/v1/policy-manifest.json", "sha256": "8883456a6002550da10658d4f6475c161c21d6a5b1d1622e5f65d47dfa68eac8"},
-    {"path": "tests/contracts/test_time_series_diagnostics_evaluation_gates.py", "sha256": "7a3cbafacab574d84a99c972c3ddd7878edc29b5803143d9a88d01c6471928d7"},
+    {"path": "tests/contracts/test_time_series_diagnostics_evaluation_gates.py", "sha256": "0de279db4f061813f3cbf4b08d8ee542c56dcae2bbecdd0fb95c5d1bde50fb49"},
     {"path": "tests/contracts/test_time_series_diagnostics_canonical_packets.py", "sha256": "cb77555be65fea9e3bf87751769878a1c3d3f10b1f94660dd32f5da868e62649"}
   ],
-  "evidence_sha256": "5b18d7c2e59b89f54afdb85b9e6fed34dfd8783032d2bb5efc948b3fb19c6d16"
+  "evidence_sha256": "ace1f088484a029f52f5bd12fa3bc5c72aa6432cc33507de6283e685d2ffa0fc"
 }

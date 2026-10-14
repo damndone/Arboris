@@ -48,7 +48,9 @@ def test_the_draft_fills_in_the_projects_data_without_a_model(tmp_path):
     (run / "staged" / "data_profile.json").write_text(json.dumps({"row_count": 40, "columns": {
         "wage": {"dtype": "float64", "missing_rate": 0.05}, "educ": {"dtype": "int64", "missing_rate": 0.0}}}))
     (run / "staged" / "metadata_registry.json").write_text(json.dumps({"variable_labels": {"wage": "Hourly wage"}}))
-    text = instructions.draft(tmp_path)
+    from workbench.services.instruction_draft import draft
+
+    text = draft(tmp_path)
     assert "`wages.csv` (40 rows, 2 columns)" in text
     assert "wage - Hourly wage - float64, 5.0% missing" in text and "educ - meaning? - int64" in text
     assert "Fitted so far: ols: wage ~ educ" in text and text.startswith("# Project instructions")

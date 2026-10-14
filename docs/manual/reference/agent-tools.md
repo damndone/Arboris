@@ -46,7 +46,9 @@ Every tool the Agent can call, and the class of content its result contains. The
 | `list_project_datasets` | `metadata` |
 | `propose_analysis_loop` | `workbench_state` |
 | `propose_operation` | `workbench_state` |
+| `read_project_conversation` | `workbench_state` |
 | `request_notebook_inspections` | `aggregate` |
+| `search_project_conversations` | `workbench_state` |
 | `show_dataset_rows` | `rows` |
 | `submit_analysis_loop_intent` | `workbench_state` |
 | `submit_notebook_option_batch` | `workbench_state` |

@@ -8,6 +8,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..agent import instructions
+from ..services.instruction_draft import draft as draft_instructions
 from ..api_errors import WorkbenchAPIError
 from .agent_routes import _project_root
 from .responses.agent import AgentInstructions, AgentInstructionsDraft
@@ -58,4 +59,4 @@ def save_agent_instructions(project_root: str, body: AgentInstructionsSave) -> A
 @router.get("/agent/instructions/draft")
 def draft_agent_instructions(project_root: str) -> AgentInstructionsDraft:
     """The project template filled with this project's datasets and models; not saved."""
-    return {"content": instructions.draft(_project_root(project_root))}
+    return {"content": draft_instructions(_project_root(project_root))}
