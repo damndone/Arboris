@@ -10,7 +10,7 @@ COMPLETED
 
 ## Metrics
 
-- Failure frequency: 12/56 (21.4%; 21.4 per 100 events)
+- Failure frequency: 12/57 (21.1%; 21.1 per 100 events)
 - Repeat rate: 0/12 (0.0%)
 - Recurrence rate: 0/12 (0.0%)
 - MTTR: median=0 ms (sample=8; unresolved=4)
@@ -93,6 +93,7 @@ COMPLETED
 - A served option vocabulary must be the object the kernel validates against, not a copy of it.
 - A timeout reported by a person is evidence to read from the session log before changing anything; here the log showed a whole-turn budget, not a network failure.
 - An Agent capability with no direct route is a feature the user cannot reach without a model; give every operation one declared execution path and let both the UI and the Agent call it.
+- Anything a person creates needs a way to find, name and remove it; storage keyed by an internal fingerprint is not a place a person can find.
 - Before measuring computed colours or sizes in a possibly hidden page, finish running transitions or the readings are their start values.
 - Compare page timings only after a warm-up run, and settle budgets on production builds.
 - Evidence writers and test files are found by scanning, not by remembering: grep for mkdtemp under tests/fixtures and def test_ under backend/.
@@ -166,3 +167,4 @@ COMPLETED
 - #54: `81f8f918-3ea2-44c1-adc6-2f88fa6477be` | 2026-10-14T14:26:21.000Z | REVIEW/user_review_4_topbar_ask_agent_self_description | incident=`2a57ae0c-8dad-4f83-9451-8ef08b32a7b5` | lesson_key=`test-layout-below-design-width` | event_sha256=`462ac1e4f8b849a5587ffe6b238ff5e9d75af7a8209601c3ac6c930dbd401f46`
 - #55: `23472880-887a-422a-892b-7abfc9d73b2e` | 2026-10-14T14:26:21.000Z | GAP/agent_conversation_never_compacted | incident=`5857ce13-413e-47a8-aa08-53f1fe6e56b4` | lesson_key=`check-for-the-writer` | event_sha256=`0ab892637bfedf2bc1a2be00ec1a0e148a8c9d21341d070c9a5f247749b6480f`
 - #56: `9b2b0167-82f1-442f-a55e-35c3f8e399bb` | 2026-10-14T16:29:42.000Z | GAP/agent_context_compaction_instructions_recall | incident=`5a1c9ed4-77de-471e-bec6-fde6071677e5` | lesson_key=`summaries-are-evidence` | event_sha256=`2226b17dc0cc56b89ddfc3b2209f75684c9594e1e065f33563e6dbf2ffe23d98`
+- #57: `6cc4e1aa-a2c3-4126-97d3-9d4f3fcb6c15` | 2026-10-14T17:03:57.000Z | REVIEW/user_review_5_conversation_management | incident=`a9e482cc-4a64-40ad-bc9c-40df754642be` | lesson_key=`user-objects-need-a-list` | event_sha256=`909da4d6870c3ceb7cf33ce42f88c2cf322c3e6186f54f424db1178105c1f97a`
