@@ -1073,6 +1073,8 @@ def create_agent_session(
             },
         },
     )
+    from ..agent.identity import identity_text
+
     identity_config = load_llm_config()
     repository.append(
         session_id,
@@ -1081,16 +1083,7 @@ def create_agent_session(
             "message_type": "agent_identity",
             "audience": "model",
             "name": "workbench_agent_identity",
-            "content": (
-                "Agent identity (authoritative): you are the Workbench "
-                + ("Chain" if body.role == "chain" else "Global")
-                + " Agent. You run on the configured provider "
-                + f"'{identity_config.provider_id or 'unknown'}' using model "
-                + f"'{identity_config.model or 'unknown'}'. Answer identity and "
-                + "\"what model are you\" questions with exactly this; do not invent a "
-                + "product, brand, or vendor name and do not deflect to external "
-                + "documentation."
-            ),
+            "content": identity_text("chain" if body.role == "chain" else "global", identity_config),
             "metadata": {"protocol_version": "agent/v1"},
         },
     )

@@ -228,7 +228,9 @@ def environment_provider_from_env() -> ProviderRecord | None:
     # An environment configuration declares one configured model. It is not a
     # capability-discovery protocol: adding vendor-looking alternatives here can
     # make the UI offer a model the credential was never configured to use.
-    models = [ModelRecord(model, model, None, False)]
+    # The context window is not discoverable from the endpoint; it is declared
+    # alongside the model (WORKBENCH_LLM_CONTEXT_WINDOW, in tokens) or unknown.
+    models = [ModelRecord(model, model, _context_window(os.environ.get("WORKBENCH_LLM_CONTEXT_WINDOW", "")), False)]
 
     return ProviderRecord(
         id="environment",
@@ -352,6 +354,15 @@ def _optional_string(raw: Mapping[str, Any], key: str) -> str:
     if not isinstance(value, str):
         raise ValueError(f"{key} must be a string")
     return value
+
+
+def _context_window(value: str) -> int | None:
+    """A declared context window in tokens; anything else counts as undeclared."""
+    try:
+        tokens = int(value.strip().replace("_", ""))
+    except ValueError:
+        return None
+    return tokens if 1_000 <= tokens <= 100_000_000 else None
 
 
 def _timeout_value(value: Any) -> float:
