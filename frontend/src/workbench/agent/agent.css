@@ -555,65 +555,6 @@
   gap: 8px;
 }
 
-.wb-agent-execution-trace {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 12px;
-  padding: 6px 9px;
-  border: 1px solid color-mix(in oklch, var(--separator) 72%, transparent);
-  border-radius: 8px;
-  background: color-mix(in oklch, var(--bg-card-2) 78%, transparent);
-  color: var(--label-secondary);
-  font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 11px;
-}
-
-.wb-agent-execution-trace__step {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  min-width: 0;
-}
-
-.wb-agent-execution-trace__step[data-state="complete"] > span:first-child {
-  color: var(--tint);
-}
-
-.wb-agent-execution-trace__step[data-state="active"] {
-  color: var(--label);
-  font-weight: 600;
-}
-
-.wb-agent-execution-trace__step[data-state="active"] > span:first-child {
-  color: var(--tint);
-  animation: wb-agent-trace-pulse 1.1s ease-in-out infinite;
-}
-
-.wb-agent-live-response {
-  display: grid;
-  gap: 5px;
-  padding: 8px 10px;
-  border: 1px solid color-mix(in oklch, var(--tint) 24%, var(--separator));
-  border-radius: 8px;
-  background: color-mix(in oklch, var(--bg-card-2) 86%, transparent);
-  color: var(--label-secondary);
-  font-size: 12px;
-}
-
-.wb-agent-live-response__label {
-  color: var(--label);
-  font-size: 11px;
-  font-weight: 650;
-}
-
-.wb-agent-live-response__pending {
-  color: var(--label-tertiary);
-}
-
-@keyframes wb-agent-trace-pulse {
-  50% { opacity: 0.38; }
-}
 
 .wb-agent-terminal {
   flex: 1;
@@ -1135,3 +1076,165 @@
 }
 .wb-context-ring-tooltip dt { color: var(--label-secondary); }
 .wb-context-ring-tooltip dd { margin: 0; color: var(--label); font-variant-numeric: tabular-nums; }
+
+/* v1.9.0 — message actions and time under each message (user review 3):
+   quiet until the message is hovered or focused, like Claude's. */
+.wb-agent-terminal-line:has(> .agt-actions) {
+  flex-wrap: wrap;
+}
+
+.agt-actions {
+  display: flex;
+  flex-basis: 100%;
+  align-items: center;
+  gap: 2px;
+  min-height: 24px;
+  padding-left: 20px;
+  color: var(--label-tertiary);
+  font-size: var(--text-caption);
+  opacity: 0;
+  transition: opacity var(--duration-fade) var(--ease-standard);
+}
+
+.wb-agent-terminal-line[data-role="user"] > .agt-actions {
+  justify-content: flex-end;
+  padding-left: 0;
+}
+
+.wb-agent-terminal-line:hover > .agt-actions,
+.agt-actions:focus-within {
+  opacity: 1;
+}
+
+.agt-actions time {
+  margin-right: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.agt-actions button {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--label-tertiary);
+  cursor: pointer;
+}
+
+.agt-actions button:hover:not(:disabled) {
+  background: var(--bg-elev);
+  color: var(--label);
+}
+
+.agt-actions button[aria-pressed="true"] {
+  color: var(--tint);
+}
+
+.agt-actions button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.agt-actions button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 0;
+}
+
+/* Pinned chapters: a row of jumps at the top of the conversation. */
+.agt-chapters {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 0 var(--space-2);
+  padding: 4px 0;
+  overflow-x: auto;
+  background: var(--bg-card);
+  font-size: var(--text-caption);
+}
+
+.agt-chapters > span {
+  flex: none;
+  color: var(--label-tertiary);
+  font-weight: 600;
+  letter-spacing: var(--tracking-key);
+  text-transform: uppercase;
+}
+
+.agt-chapters button {
+  flex: none;
+  max-width: 160px;
+  height: 22px;
+  min-height: 0;
+  padding: 0 8px;
+  overflow: hidden;
+  border: var(--hairline) solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--bg-card);
+  color: var(--label-secondary);
+  font-size: var(--text-caption);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.agt-chapters button:hover {
+  border-color: var(--tint);
+  color: var(--tint);
+}
+
+/* The turn in progress: one status line, the reply growing below it. */
+.agt-working {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0;
+  color: var(--label-secondary);
+  font-size: var(--text-small);
+}
+
+.agt-working__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--tint);
+  animation: agt-pulse 1.2s ease-in-out infinite;
+}
+
+.agt-working__time {
+  color: var(--label-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.agt-working__steps {
+  flex-basis: 100%;
+  padding-left: 13px;
+  color: var(--label-tertiary);
+}
+
+.agt-working__steps summary {
+  cursor: pointer;
+}
+
+.agt-working__steps ul {
+  margin: 4px 0 0;
+  padding-left: 16px;
+}
+
+@keyframes agt-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agt-working__dot {
+    animation: none;
+  }
+}

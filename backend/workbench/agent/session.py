@@ -192,6 +192,43 @@ class JsonlSessionRepository:
             self._atomic_write_json(self._metadata_path(session_id), metadata)
             return entry
 
+    def rewind(self, session_id: str, to_entry: EntryRef) -> dict[str, Any]:
+        """Make an earlier entry of the current branch the session's leaf.
+
+        Nothing is deleted: entries after it stay in the log and the next
+        append branches from here. An entry before a fork point re-anchors
+        the session's inheritance at that entry. Refused while a turn runs.
+        """
+
+        with self._lock, _exclusive_jsonl_lock(self._session_path(session_id)):
+            metadata = self.get_metadata(session_id)
+            if metadata.get("status") == "running":
+                raise ValueError("a turn is running; wait for it or stop it before rewinding")
+            branch = self.get_branch(session_id)
+            if not any(entry.entry_id == to_entry.entry_id and entry.session_id == to_entry.session_id for entry in branch):
+                raise KeyError(f"entry is not on this session's branch: {to_entry.entry_id}")
+            if to_entry.session_id == session_id:
+                metadata["leaf_entry_id"] = to_entry.entry_id
+            else:
+                metadata["leaf_entry_id"] = None
+                metadata["root_entry_id"] = None
+                metadata["inherited_parent_ref"] = to_entry.to_dict()
+            chapters = metadata.get("chapters") or []
+            on_branch = {entry.entry_id for entry in self.get_branch(session_id, leaf_entry_id=metadata["leaf_entry_id"])} \
+                if metadata["leaf_entry_id"] else {to_entry.entry_id}
+            metadata["chapters"] = [chapter for chapter in chapters if chapter.get("entry_id") in on_branch]
+            self._atomic_write_json(self._metadata_path(session_id), metadata)
+            return metadata.copy()
+
+    def set_chapters(self, session_id: str, chapters: list[dict[str, Any]]) -> dict[str, Any]:
+        """Replace the session's pinned chapters (entry id, title, time)."""
+
+        with self._lock, _exclusive_jsonl_lock(self._session_path(session_id)):
+            metadata = self.get_metadata(session_id)
+            metadata["chapters"] = [dict(chapter) for chapter in chapters]
+            self._atomic_write_json(self._metadata_path(session_id), metadata)
+            return metadata.copy()
+
     def get_entry(self, ref: EntryRef) -> SessionTreeEntry:
         with self._lock:
             for entry in self._read_entries(ref.session_id):

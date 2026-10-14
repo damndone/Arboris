@@ -78,6 +78,7 @@ from .responses.agent import (
     AgentOperationProjection,
     AgentProposalList,
     AgentSession,
+    AgentSessionChange,
     AgentTurn,
     AgentTurnCancelling,
     AnalysisLoopContext,
@@ -105,7 +106,14 @@ MAX_QUESTION_CHARS = 4_000
 # behind it. The protocol now also makes a successful proposal terminal, so
 # this is headroom rather than permission to sprawl.
 DEFAULT_MAX_STEPS = 10
-DEFAULT_TIMEOUT_S = 120.0
+# The wall-clock ceiling for a whole turn. 120 s cut off a live DeepSeek turn
+# (2026-10-13, global Agent, "report on both runs"): five tool steps, a long
+# report drafted by 58 s, withdrawn by the numeric check, and the rewrite then
+# stopped at exactly 120 s. Loops are bounded by DEFAULT_MAX_STEPS, a stalled
+# provider by the adapter's 90 s idle timeout, and the person can stop a turn
+# at any time; this ceiling only has to leave room for a long answer and one
+# rewrite.
+DEFAULT_TIMEOUT_S = 300.0
 
 # A live turn is process-local by design: the local Workbench server owns the
 # in-flight provider stream and is the only component able to abort it safely.
@@ -764,6 +772,7 @@ def _messages(repository: JsonlSessionRepository, session_id: str) -> list[dict[
             continue
         message = {
             "entry_id": entry.entry_id,
+            "at": entry.created_at,
             "role": role,
             "content": content,
             # Tool entries carry the tool id in `name`; the panel projects
@@ -814,6 +823,10 @@ def _public_session(
         "context_window_tokens": config.context_window_tokens,
         "messages": _messages(repository, session_id),
         "proposals": _public_proposals(proposal_store, session_id),
+        "chapters": [
+            {"entry_id": str(chapter["entry_id"]), "title": str(chapter["title"]), "at": str(chapter["at"])}
+            for chapter in metadata.get("chapters") or []
+        ],
     }
 
 
@@ -1129,6 +1142,124 @@ def create_agent_session(
         repository.get_metadata(session_id),
         load_llm_config(),
     )
+
+
+class AgentEntryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    entry_id: str = Field(min_length=1, max_length=128)
+
+
+class AgentChapterRequest(AgentEntryRequest):
+    title: str = Field(min_length=1, max_length=120)
+
+
+def _branch_message(repository: JsonlSessionRepository, session_id: str, entry_id: str):
+    """A message entry on the session's current branch, or 404."""
+    for entry in repository.get_branch(session_id):
+        if entry.entry_id == entry_id and entry.entry_type == "message":
+            return entry
+    raise WorkbenchAPIError(
+        status_code=404,
+        code="AGENT_ENTRY_NOT_FOUND",
+        message="That message is not part of this conversation.",
+        details={"session_id": session_id, "entry_id": entry_id},
+    )
+
+
+def _refuse_while_running(metadata: dict[str, Any], action: str) -> None:
+    if metadata.get("status") == "running":
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="AGENT_TURN_RUNNING",
+            message=f"The Agent is still answering; stop it or wait before you {action}.",
+            details={},
+        )
+
+
+def _before(entry) -> EntryRef:
+    if entry.parent_ref is None:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="AGENT_ENTRY_IS_FIRST",
+            message="There is nothing before this message to go back to.",
+            details={"entry_id": entry.entry_id},
+        )
+    return entry.parent_ref
+
+
+@router.post("/agent/sessions/{session_id}/rewind")
+def rewind_agent_session(session_id: str, project_root: str, body: AgentEntryRequest) -> AgentSessionChange:
+    """Go back to just before one of your messages; its text returns to the input.
+
+    The later conversation is kept in the session log (rewinding is recorded,
+    not deleted); the next message continues from here.
+    """
+    root = _project_root(project_root)
+    repository, events, metadata = _get_session(root, session_id)
+    _refuse_while_running(metadata, "rewind")
+    entry = _branch_message(repository, session_id, body.entry_id)
+    if entry.payload.get("role") != "user":
+        raise WorkbenchAPIError(status_code=422, code="AGENT_REWIND_TARGET",
+                                message="Rewind goes back to one of your own messages.", details={})
+    target = _before(entry)
+    try:
+        repository.rewind(session_id, target)
+    except (KeyError, ValueError) as exc:
+        raise WorkbenchAPIError(status_code=409, code="AGENT_REWIND_REFUSED", message=str(exc), details={}) from exc
+    events.emit(session_id, "session_rewound", {"to_entry": target.to_dict(), "undone_entry_id": entry.entry_id})
+    metadata = repository.get_metadata(session_id)
+    return {"session": _public_session(repository, session_id, metadata, load_llm_config()),
+            "restored_prompt": str(entry.payload.get("content") or "")}
+
+
+@router.post("/agent/sessions/{session_id}/fork")
+def fork_agent_session(session_id: str, project_root: str, body: AgentEntryRequest) -> AgentSessionChange:
+    """Start a new conversation that shares this one up to a message.
+
+    From a reply, the new conversation includes that reply; from one of your
+    messages, it stops just before it and the message returns to the input.
+    The original conversation is unchanged.
+    """
+    root = _project_root(project_root)
+    repository, events, metadata = _get_session(root, session_id)
+    _refuse_while_running(metadata, "fork")
+    entry = _branch_message(repository, session_id, body.entry_id)
+    from_user = entry.payload.get("role") == "user"
+    point = _before(entry) if from_user else EntryRef(session_id, entry.entry_id)
+    role = str(metadata.get("role") or "chain")
+    fork_id = f"agent_{role}_{uuid4().hex}"
+    repository.create_session(fork_id, chain_id=str(metadata.get("chain_id")), role=role, inherited_parent_ref=point)
+    events.emit(session_id, "session_forked", {"fork_session_id": fork_id, "at_entry": point.to_dict()})
+    events.emit(fork_id, "session_created", {"role": role, "chain_id": metadata.get("chain_id"),
+                                             "forked_from": {"session_id": session_id, **point.to_dict()}})
+    return {"session": _public_session(repository, fork_id, repository.get_metadata(fork_id), load_llm_config()),
+            "restored_prompt": str(entry.payload.get("content") or "") if from_user else None}
+
+
+@router.post("/agent/sessions/{session_id}/chapters")
+def pin_agent_chapter(session_id: str, project_root: str, body: AgentChapterRequest) -> AgentSession:
+    """Pin a message as a chapter: a named place to jump back to."""
+    root = _project_root(project_root)
+    repository, events, metadata = _get_session(root, session_id)
+    entry = _branch_message(repository, session_id, body.entry_id)
+    chapters = [chapter for chapter in metadata.get("chapters") or [] if chapter.get("entry_id") != entry.entry_id]
+    chapters.append({"entry_id": entry.entry_id, "title": body.title.strip(), "at": entry.created_at})
+    order = {item.entry_id: index for index, item in enumerate(repository.get_branch(session_id))}
+    chapters.sort(key=lambda chapter: order.get(chapter["entry_id"], 0))
+    metadata = repository.set_chapters(session_id, chapters)
+    events.emit(session_id, "chapter_pinned", {"entry_id": entry.entry_id, "title": body.title.strip()})
+    return _public_session(repository, session_id, metadata, load_llm_config())
+
+
+@router.delete("/agent/sessions/{session_id}/chapters/{entry_id}")
+def unpin_agent_chapter(session_id: str, entry_id: str, project_root: str) -> AgentSession:
+    root = _project_root(project_root)
+    repository, events, metadata = _get_session(root, session_id)
+    chapters = [chapter for chapter in metadata.get("chapters") or [] if chapter.get("entry_id") != entry_id]
+    metadata = repository.set_chapters(session_id, chapters)
+    events.emit(session_id, "chapter_unpinned", {"entry_id": entry_id})
+    return _public_session(repository, session_id, metadata, load_llm_config())
 
 
 @router.get("/agent/sessions/{session_id}")

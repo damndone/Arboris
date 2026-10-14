@@ -15,6 +15,7 @@ export type AgentEvent = Schema<"AgentEvent">;
 export type AgentProposal = Schema<"PublicProposal">;
 export type AgentOperationRecord = Schema<"OperationRecordView">;
 export type AgentSession = Schema<"AgentSession">;
+export type AgentChapter = Schema<"AgentChapter">;
 export type AgentModelOption = Schema<"ProviderModel">;
 export type AgentCapability = Schema<"OperationCapability">;
 export type AgentCapabilityBoundaryItem = Schema<"BoundaryItem">;

@@ -403,8 +403,7 @@ describe("AgentPanel", () => {
     );
 
     const reasoning = screen.getByTestId("agent-reasoning-u1");
-    expect(reasoning).toHaveTextContent("Reasoning");
-    expect(reasoning).toHaveTextContent("2 steps");
+    expect(reasoning).toHaveTextContent("Worked through 2 steps");
     expect(reasoning).toHaveTextContent("我会先核对模型和诊断证据。");
     expect(reasoning).toHaveTextContent("inspect_model_result ✓ ok");
     expect(reasoning).not.toContainElement(screen.getByText("模型结果已核对：系数为正。"));
@@ -434,9 +433,10 @@ describe("AgentPanel", () => {
     const reasoning = screen.getByTestId("agent-reasoning-u1");
     expect(reasoning).toContainElement(screen.getByTestId("agent-withdrawn-draft"));
     expect(screen.getByTestId("agent-withdrawn-draft")).toHaveTextContent(
-      "Draft withdrawn by the numeric check: 0.099 matched no result.",
+      "Earlier draft, withdrawn by the number check: 0.099 matched no result",
     );
     expect(reasoning).not.toContainElement(screen.getByText("p 值为 0.098。"));
+    expect(reasoning).toHaveTextContent("Rewrote the answer once after checking its numbers");
   });
 
   it("leaves hierarchy browsing to AI activity so the terminal owns the panel space", () => {

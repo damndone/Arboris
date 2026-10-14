@@ -219,6 +219,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/agent/sessions/{session_id}/chapters": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pin Agent Chapter
+         * @description Pin a message as a chapter: a named place to jump back to.
+         */
+        post: operations["pin_agent_chapter_agent_sessions__session_id__chapters_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent/sessions/{session_id}/chapters/{entry_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Unpin Agent Chapter */
+        delete: operations["unpin_agent_chapter_agent_sessions__session_id__chapters__entry_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/agent/sessions/{session_id}/events": {
         parameters: {
             query?: never;
@@ -230,6 +267,30 @@ export interface paths {
         get: operations["get_agent_events_agent_sessions__session_id__events_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent/sessions/{session_id}/fork": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Fork Agent Session
+         * @description Start a new conversation that shares this one up to a message.
+         *
+         *     From a reply, the new conversation includes that reply; from one of your
+         *     messages, it stops just before it and the message returns to the input.
+         *     The original conversation is unchanged.
+         */
+        post: operations["fork_agent_session_agent_sessions__session_id__fork_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -356,6 +417,29 @@ export interface paths {
         put?: never;
         /** Revise Agent Proposal */
         post: operations["revise_agent_proposal_agent_sessions__session_id__proposals__proposal_id__revise_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent/sessions/{session_id}/rewind": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rewind Agent Session
+         * @description Go back to just before one of your messages; its text returns to the input.
+         *
+         *     The later conversation is kept in the session log (rewinding is recorded,
+         *     not deleted); the next message continues from here.
+         */
+        post: operations["rewind_agent_session_agent_sessions__session_id__rewind_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2500,6 +2584,27 @@ export interface components {
             /** Workers */
             workers: number;
         };
+        /** AgentChapter */
+        AgentChapter: {
+            /** At */
+            at: string;
+            /** Entry Id */
+            entry_id: string;
+            /** Title */
+            title: string;
+        };
+        /** AgentChapterRequest */
+        AgentChapterRequest: {
+            /** Entry Id */
+            entry_id: string;
+            /** Title */
+            title: string;
+        };
+        /** AgentEntryRequest */
+        AgentEntryRequest: {
+            /** Entry Id */
+            entry_id: string;
+        };
         /** AgentEvent */
         AgentEvent: {
             /** Command Id */
@@ -2562,6 +2667,8 @@ export interface components {
         };
         /** AgentMessage */
         AgentMessage: {
+            /** At */
+            at: string;
             /** Content */
             content: string;
             /** Entry Id */
@@ -2647,6 +2754,8 @@ export interface components {
         AgentSession: {
             /** Chain Id */
             chain_id: string | null;
+            /** Chapters */
+            chapters: components["schemas"]["AgentChapter"][];
             /** Context Fingerprint */
             context_fingerprint: string | null;
             /** Context Window Tokens */
@@ -2665,6 +2774,15 @@ export interface components {
             session_id: string;
             /** Status */
             status: string | null;
+        };
+        /**
+         * AgentSessionChange
+         * @description A session after a rewind or fork, and the message to put back in the input.
+         */
+        AgentSessionChange: {
+            /** Restored Prompt */
+            restored_prompt: string | null;
+            session: components["schemas"]["AgentSession"];
         };
         /** AgentSessionCreateRequest */
         AgentSessionCreateRequest: {
@@ -10265,6 +10383,77 @@ export interface operations {
             };
         };
     };
+    pin_agent_chapter_agent_sessions__session_id__chapters_post: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentChapterRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentSession"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    unpin_agent_chapter_agent_sessions__session_id__chapters__entry_id__delete: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path: {
+                entry_id: string;
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentSession"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_agent_events_agent_sessions__session_id__events_get: {
         parameters: {
             query: {
@@ -10286,6 +10475,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentEvents"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    fork_agent_session_agent_sessions__session_id__fork_post: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentEntryRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentSessionChange"];
                 };
             };
             /** @description Validation Error */
@@ -10534,6 +10760,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProposalStatus"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rewind_agent_session_agent_sessions__session_id__rewind_post: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentEntryRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentSessionChange"];
                 };
             };
             /** @description Validation Error */

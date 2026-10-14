@@ -35,6 +35,55 @@ export function getAgentSession(
   );
 }
 
+const sessionPath = (sessionId: string, suffix: string) => `/agent/sessions/${encodeURIComponent(sessionId)}${suffix}`;
+
+/** Go back to just before one of your messages; its text is returned. */
+export function rewindAgentSession(
+  projectRoot: string,
+  sessionId: string,
+  entryId: string,
+): Promise<ResponseOf<"/agent/sessions/{session_id}/rewind", "post">> {
+  return request(agentPath(projectRoot, sessionPath(sessionId, "/rewind")), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ entry_id: entryId }),
+  });
+}
+
+/** A new conversation sharing this one up to a message. */
+export function forkAgentSession(
+  projectRoot: string,
+  sessionId: string,
+  entryId: string,
+): Promise<ResponseOf<"/agent/sessions/{session_id}/fork", "post">> {
+  return request(agentPath(projectRoot, sessionPath(sessionId, "/fork")), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ entry_id: entryId }),
+  });
+}
+
+export function pinAgentChapter(
+  projectRoot: string,
+  sessionId: string,
+  entryId: string,
+  title: string,
+): Promise<ResponseOf<"/agent/sessions/{session_id}/chapters", "post">> {
+  return request(agentPath(projectRoot, sessionPath(sessionId, "/chapters")), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ entry_id: entryId, title }),
+  });
+}
+
+export function unpinAgentChapter(
+  projectRoot: string,
+  sessionId: string,
+  entryId: string,
+): Promise<ResponseOf<"/agent/sessions/{session_id}/chapters/{entry_id}", "delete">> {
+  return request(agentPath(projectRoot, sessionPath(sessionId, `/chapters/${encodeURIComponent(entryId)}`)), { method: "DELETE" });
+}
+
 export function agentAuditExportUrl(
   projectRoot: string,
   sessionId: string,

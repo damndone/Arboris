@@ -77,6 +77,8 @@ class NumericCheckFailed(TypedDict):
 
 class AgentMessage(TypedDict):
     entry_id: str
+    #: When the entry was written (UTC, ISO 8601).
+    at: str
     role: Literal["user", "assistant", "tool"]
     content: str
     name: str | None
@@ -97,6 +99,21 @@ class AgentSession(TypedDict):
     context_window_tokens: int | None
     messages: list[AgentMessage]
     proposals: list[PublicProposal]
+    #: Messages the person pinned as chapters, oldest first.
+    chapters: list[AgentChapter]
+
+
+class AgentChapter(TypedDict):
+    entry_id: str
+    title: str
+    at: str
+
+
+class AgentSessionChange(TypedDict):
+    """A session after a rewind or fork, and the message to put back in the input."""
+
+    session: AgentSession
+    restored_prompt: str | None
 
 
 class AgentTurn(TypedDict):

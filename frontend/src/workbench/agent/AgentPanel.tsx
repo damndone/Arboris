@@ -1,4 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { buildTurns, duration, messageTime } from "./transcript/turns";
+import { MessageActions } from "./transcript/MessageActions";
 import { useAgentSurface } from "./AgentSurfaceContext";
 import { agentAuditExportUrl } from "./agentApi";
 import { AgentComposer } from "./AgentComposer";
@@ -163,32 +165,12 @@ export function toolStatusLine(content: string, toolName?: string | null): strin
   return `${toolId} ✓ ok`;
 }
 
-type TranscriptTurn = {
-  user: AgentMessage | null;
-  reasoning: AgentMessage[];
-  responses: AgentMessage[];
-};
-
-function transcriptTurns(messages: AgentMessage[]): TranscriptTurn[] {
-  const turns: TranscriptTurn[] = [];
-  let current: TranscriptTurn | null = null;
-  for (const message of messages) {
-    if (message.role === "user") {
-      current = { user: message, reasoning: [], responses: [] };
-      turns.push(current);
-      continue;
-    }
-    if (current === null) {
-      current = { user: null, reasoning: [], responses: [] };
-      turns.push(current);
-    }
-    if (message.role === "tool" || message.stop_reason === "tool_calls" || message.stop_reason === "revised") {
-      current.reasoning.push(message);
-    } else {
-      current.responses.push(message);
-    }
-  }
-  return turns;
+/** "Worked through 3 steps · rewrote the answer once" */
+export function workSummary(steps: number, drafts: number): string {
+  const parts = [];
+  if (steps > 0) parts.push(`Worked through ${steps} ${steps === 1 ? "step" : "steps"}`);
+  if (drafts > 0) parts.push(`${steps > 0 ? "rewrote" : "Rewrote"} the answer ${drafts === 1 ? "once" : `${drafts} times`} after checking its numbers`);
+  return parts.join(" · ");
 }
 
 function withdrawnNumbers(message: AgentMessage): string {
@@ -196,10 +178,6 @@ function withdrawnNumbers(message: AgentMessage): string {
   const unverified = check && "unverified" in check ? check.unverified : [];
   const numbers = unverified.map((item) => item.text).filter(Boolean);
   return numbers.length > 0 ? numbers.join(", ") : "some numbers";
-}
-
-function visibleReasoningEntries(messages: AgentMessage[]): AgentMessage[] {
-  return messages.filter((message) => message.role !== "assistant" || message.content.trim().length > 0);
 }
 
 /** One cast entry as the user typed it, e.g. `wage → string`. */
@@ -290,7 +268,8 @@ export function AgentPanel({
     .filter((message) => message.role === "tool")
     .slice(-3)
     .map((message) => toolStatusLine(message.content, message.name));
-  const turns = transcriptTurns(agent.messages);
+  const turns = buildTurns(agent.messages);
+  const pinned = new Set((agent.chapters ?? []).map((chapter) => chapter.entry_id));
   useLayoutEffect(() => {
     const transcript = transcriptRef.current;
     if (!transcript) return;
@@ -312,6 +291,7 @@ export function AgentPanel({
         key={message.entry_id}
         data-testid={`agent-message-${message.role}`}
         data-role={message.role}
+        data-entry-id={message.entry_id}
         className="wb-agent-terminal-line"
       >
         <span className="wb-agent-terminal-marker" title={roleLabel(message.role)}>
@@ -325,7 +305,7 @@ export function AgentPanel({
           <div className="wb-agent-terminal-content wb-agent-terminal-markdown">
             {message.stop_reason === "revised" && (
               <p data-testid="agent-withdrawn-draft" className="wb-agent-withdrawn-draft">
-                Draft withdrawn by the numeric check: {withdrawnNumbers(message)} matched no result. The Agent rewrote the answer.
+                Earlier draft, withdrawn by the number check: {withdrawnNumbers(message)} matched no result, so the Agent rewrote the answer below.
               </p>
             )}
             {renderMarkdown(message.content)}
@@ -353,6 +333,17 @@ export function AgentPanel({
               </button>
             ))}
           </span>
+        )}
+        {message.role !== "tool" && message.stop_reason !== "revised" && message.stop_reason !== "tool_calls" && (
+          <MessageActions
+            message={message}
+            pinned={pinned.has(message.entry_id)}
+            busy={turnActive}
+            onRewind={agent.rewindTo}
+            onFork={agent.forkConversation}
+            onPin={agent.pinChapter}
+            onUnpin={agent.unpinChapter}
+          />
         )}
         {sourceRef && (
           <button
@@ -410,48 +401,6 @@ export function AgentPanel({
           </a>
         )}
       </header>}
-      {turnActive && (
-        <div
-          data-testid="agent-execution-trace"
-          className="wb-agent-execution-trace"
-          aria-label="Agent execution progress"
-          aria-live="polite"
-        >
-          <div className="wb-agent-execution-trace__step" data-state="complete">
-            <span aria-hidden="true">✓</span>
-            <span>Request received</span>
-          </div>
-          {recentToolSteps.map((step, index) => (
-            <div key={`${index}:${step}`} className="wb-agent-execution-trace__step" data-state="complete">
-              <span aria-hidden="true">✓</span>
-              <span>{step}</span>
-            </div>
-          ))}
-          <div className="wb-agent-execution-trace__step" data-state="active">
-            <span aria-hidden="true">●</span>
-            <span>{observableActivity(agent.lastEventType)}</span>
-          </div>
-        </div>
-      )}
-      {turnActive && (
-        <section
-          data-testid="agent-live-response"
-          className="wb-agent-live-response"
-          aria-live="polite"
-          aria-label="Live Agent response"
-        >
-          <span className="wb-agent-live-response__label">Live response</span>
-          {agent.liveResponseText ? (
-            <div className="wb-agent-terminal-markdown">
-              {renderMarkdown(agent.liveResponseText)}
-            </div>
-          ) : (
-            <span className="wb-agent-live-response__pending">
-              Waiting for the Agent's public response…
-            </span>
-          )}
-        </section>
-      )}
       {terminalFailure && (
         <p
           data-testid="agent-turn-error"
@@ -470,29 +419,46 @@ export function AgentPanel({
           shouldFollowTranscriptRef.current = transcriptIsAtBottom(event.currentTarget);
         }}
       >
-        {agent.messages.length === 0 ? (
+        {agent.chapters && agent.chapters.length > 0 && (
+          <nav className="agt-chapters" aria-label="Chapters">
+            <span>Chapters</span>
+            {agent.chapters.map((chapter) => (
+              <button
+                key={chapter.entry_id}
+                type="button"
+                title={`Pinned ${messageTime(chapter.at)}`}
+                onClick={() => transcriptRef.current
+                  ?.querySelector(`[data-entry-id="${CSS.escape(chapter.entry_id)}"]`)
+                  ?.scrollIntoView({ behavior: "smooth", block: "start" })}
+              >
+                {chapter.title}
+              </button>
+            ))}
+          </nav>
+        )}
+        {agent.messages.length === 0 && !turnActive ? (
           <div data-testid="agent-empty" className="wb-agent-terminal-empty">
             <div style={{ fontWeight: 600, marginBottom: 4 }}>Start a task</div>
             <div>Ask about the selected node, active head, or model output.</div>
           </div>
         ) : turns.map((turn, index) => {
-          const reasoning = visibleReasoningEntries(turn.reasoning);
-          const turnId = turn.user?.entry_id ?? `orphan-${index}`;
+          const live = turnActive && index === turns.length - 1;
           return (
-            <div key={turnId} className="wb-agent-turn">
+            <div key={turn.id} className="wb-agent-turn">
               {turn.user && renderTranscriptMessage(turn.user)}
-              {reasoning.length > 0 && (
-                <details data-testid={`agent-reasoning-${turnId}`} className="wb-agent-reasoning">
+              {!live && (turn.steps.length > 0 || turn.drafts.length > 0) && (
+                <details data-testid={`agent-reasoning-${turn.id}`} className="wb-agent-reasoning">
                   <summary>
-                    <span>Reasoning</span>
-                    <span>{reasoning.length} steps</span>
+                    <span>{workSummary(turn.steps.length, turn.drafts.length)}</span>
+                    {turn.seconds !== null && <span>{duration(turn.seconds)}</span>}
                   </summary>
                   <div className="wb-agent-reasoning-content">
-                    {reasoning.map(renderTranscriptMessage)}
+                    {turn.steps.map(renderTranscriptMessage)}
+                    {turn.drafts.map(renderTranscriptMessage)}
                   </div>
                 </details>
               )}
-              {turn.reasoning.map((message) => {
+              {turn.steps.map((message) => {
                 const shown = shownRows(message);
                 return shown ? <AgentRowsTable key={`rows-${message.entry_id}`} shown={shown} /> : null;
               })}
@@ -500,6 +466,39 @@ export function AgentPanel({
             </div>
           );
         })}
+        {turnActive && (
+          /* The turn in progress lives in the conversation, where its reply
+           * will land, instead of in boxes above that push it away. */
+          <div className="wb-agent-turn wb-agent-turn--live">
+            <div
+              data-testid="agent-execution-trace"
+              className="agt-working"
+              aria-label="Agent execution progress"
+              aria-live="polite"
+            >
+              <span className="agt-working__dot" aria-hidden="true" />
+              <span>{observableActivity(agent.lastEventType)}</span>
+              <span className="agt-working__time">{elapsedSeconds} s</span>
+              {recentToolSteps.length > 0 && (
+                <details className="agt-working__steps">
+                  <summary>{recentToolSteps.length} recent {recentToolSteps.length === 1 ? "step" : "steps"}</summary>
+                  <ul>{recentToolSteps.map((step, stepIndex) => <li key={`${stepIndex}:${step}`}>{step}</li>)}</ul>
+                </details>
+              )}
+            </div>
+            {agent.liveResponseText && (
+              <div
+                data-testid="agent-live-response"
+                className="wb-agent-terminal-line"
+                data-role="assistant"
+                aria-label="Live Agent response"
+              >
+                <span className="wb-agent-terminal-marker" aria-hidden="true">{roleMarker("assistant")}</span>
+                <div className="wb-agent-terminal-content wb-agent-terminal-markdown">{renderMarkdown(agent.liveResponseText)}</div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
       {agent.activeOperation && (
         <div

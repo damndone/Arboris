@@ -122,8 +122,3 @@
   font-size: var(--text-body);
 }
 
-.ws-agent__content .wb-agent-execution-trace,
-.ws-agent__content .wb-agent-live-response {
-  font-family: var(--font-sans);
-  border-radius: var(--radius-md);
-}

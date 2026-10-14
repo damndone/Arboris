@@ -204,6 +204,21 @@ describe("AgentSurfaceProvider", () => {
     expect(mocks.getAgentSession).not.toHaveBeenCalledWith("/proj", "old_graph_session");
   });
 
+  it("keeps an unsent message when the view, and with it the Agent's scope, changes", async () => {
+    mocks.workbenchState.agentFocus = null;
+    const tree = () => <MemoryRouter><AgentSurfaceProvider projectRoot="/proj" runId="run-a"><AgentPanel projectRoot="/proj" runId="run-a" /></AgentSurfaceProvider></MemoryRouter>;
+    const view = render(tree());
+    await screen.findByRole("listbox", { name: "Agent model" });
+    fireEvent.change(screen.getByRole("textbox", { name: "Ask Agent" }), { target: { value: "Half-written question" } });
+    mocks.workbenchState.agentFocus = { kind: "report", id: "run-a", runId: "run-a" };
+    view.rerender(tree());
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Ask Agent" })).toHaveValue("Half-written question"));
+    view.unmount();
+    render(tree());
+    expect(await screen.findByRole("textbox", { name: "Ask Agent" })).toHaveValue("Half-written question");
+    sessionStorage.removeItem("workbench:agent-draft:/proj");
+  });
+
   it("shares model selection and a submitted turn across the panel surface", async () => {
     mount();
 

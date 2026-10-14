@@ -31,11 +31,17 @@ import {
   getAgentOperationProjection,
   getAgentSession,
   getAgentSessionProjection,
+  forkAgentSession,
+  pinAgentChapter,
   reconcileAgentOperation,
+  rewindAgentSession,
+  unpinAgentChapter,
   reviseAgentProposal,
   sendAgentTurn,
 } from "./agentApi";
 import type {
+  AgentChapter,
+  AgentSession,
   AgentContextPacket,
   AgentCapabilityCatalog,
   AgentEvent,
@@ -202,6 +208,14 @@ export interface AgentSurfaceContextValue {
     changes: Record<string, unknown>,
   ) => Promise<boolean>;
   forkFromMessage: (entryId: string, sourceRef: AgentNavigationRef) => Promise<boolean>;
+  /** Messages pinned as chapters in this conversation. */
+  chapters?: AgentChapter[];
+  /** Go back to just before one of your messages; its text returns to the input. */
+  rewindTo?: (entryId: string) => Promise<void>;
+  /** Continue in a new conversation sharing this one up to a message. */
+  forkConversation?: (entryId: string) => Promise<void>;
+  pinChapter?: (entryId: string, title: string) => Promise<void>;
+  unpinChapter?: (entryId: string) => Promise<void>;
   openNavigation?: (ref: AgentNavigationRef) => boolean;
   navigationLinks: AgentNavigationRef[];
   hierarchy: AgentHierarchyNode | null;
@@ -240,7 +254,24 @@ export function AgentSurfaceProvider({
   const navigation = useAgentNavigationOptional();
   const [searchParams] = useSearchParams();
   const [messages, setMessages] = useState<AgentMessage[]>([]);
-  const [prompt, setPrompt] = useState("");
+  const [chapters, setChapters] = useState<AgentChapter[]>([]);
+  const draftKey = `workbench:agent-draft:${projectRoot}`;
+  const [prompt, setPromptState] = useState(() => {
+    try {
+      return sessionStorage.getItem(draftKey) ?? "";
+    } catch {
+      return "";
+    }
+  });
+  const setPrompt = useCallback((value: string) => {
+    setPromptState(value);
+    try {
+      if (value) sessionStorage.setItem(draftKey, value);
+      else sessionStorage.removeItem(draftKey);
+    } catch {
+      // Storage may be unavailable; the draft still lives for this page.
+    }
+  }, [draftKey]);
   const [executionPolicy, setExecutionPolicy] = useState<"auto_read_only" | "proposal_only">("proposal_only");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [sessionStatus, setSessionStatus] = useState("idle");
@@ -399,9 +430,11 @@ export function AgentSurfaceProvider({
     optimisticMessageCounterRef.current = 0;
     setSessionId(null);
     setMessages([]);
+    setChapters([]);
     setProposals([]);
     setSessionStatus("idle");
-    setPrompt("");
+    // The unsent draft is the person's, not the session's: it stays when the
+    // view (and with it the Agent's scope) changes (user review 3).
     setError(null);
     setNavigationLinks([]);
     setHierarchy(null);
@@ -420,6 +453,7 @@ export function AgentSurfaceProvider({
         if (cancelled) return;
         setSessionId(session.session_id);
         setMessages(session.messages);
+        setChapters(session.chapters ?? []);
         setProposals(session.proposals ?? []);
         setSessionStatus(session.status ?? "idle");
         await refreshNavigation(session.session_id, sessionScope);
@@ -564,6 +598,7 @@ export function AgentSurfaceProvider({
     optimisticMessageCounterRef.current += 1;
     const optimisticMessage: AgentMessage = {
       entry_id: `local-user-${optimisticMessageCounterRef.current}`,
+      at: new Date().toISOString(),
       role: "user",
       content: question,
       name: null,
@@ -623,6 +658,7 @@ export function AgentSurfaceProvider({
       );
       if (activeScopeRef.current !== requestScope) return;
       setMessages(result.session.messages);
+      setChapters(result.session.chapters ?? []);
       setProposals(result.session.proposals ?? []);
       setSessionStatus(result.status ?? "idle");
       await refreshNavigation(activeSessionId, requestScope);
@@ -826,6 +862,49 @@ export function AgentSurfaceProvider({
     }
   }, [confirmationBusyId, eventCursor, forest, navigation, projectRoot, refreshNavigation, replayEvents, runId, sessionId, sessionScope]);
 
+  // Conversation history: rewind, fork and chapters (user review 3). A
+  // rewind keeps the later turns in the session log; a fork becomes the
+  // conversation this view continues; both put a message back in the input
+  // when they go back before it.
+  const showSession = useCallback((session: AgentSession) => {
+    setMessages(session.messages);
+    setChapters(session.chapters ?? []);
+    setProposals(session.proposals ?? []);
+    setSessionStatus(session.status ?? "idle");
+  }, []);
+  const historyAction = useCallback(async (run: () => Promise<void>, failure: string) => {
+    if (isSubmitting) return;
+    setError(null);
+    try {
+      await run();
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : failure);
+    }
+  }, [isSubmitting]);
+  const rewindTo = useCallback((entryId: string) => historyAction(async () => {
+    if (!sessionId) return;
+    const change = await rewindAgentSession(projectRoot, sessionId, entryId);
+    showSession(change.session);
+    if (change.restored_prompt) setPrompt(change.restored_prompt);
+  }, "Could not rewind the conversation"), [historyAction, projectRoot, sessionId, setPrompt, showSession]);
+  const forkConversation = useCallback((entryId: string) => historyAction(async () => {
+    if (!sessionId) return;
+    const change = await forkAgentSession(projectRoot, sessionId, entryId);
+    setSessionId(change.session.session_id);
+    if (!linkedSessionId) sessionStorage.setItem(storageKey, change.session.session_id);
+    showSession(change.session);
+    if (change.restored_prompt) setPrompt(change.restored_prompt);
+    await refreshNavigation(change.session.session_id, sessionScope);
+  }, "Could not fork the conversation"), [historyAction, linkedSessionId, projectRoot, refreshNavigation, sessionId, sessionScope, setPrompt, showSession, storageKey]);
+  const pinChapter = useCallback((entryId: string, title: string) => historyAction(async () => {
+    if (!sessionId) return;
+    showSession(await pinAgentChapter(projectRoot, sessionId, entryId, title));
+  }, "Could not pin the chapter"), [historyAction, projectRoot, sessionId, showSession]);
+  const unpinChapter = useCallback((entryId: string) => historyAction(async () => {
+    if (!sessionId) return;
+    showSession(await unpinAgentChapter(projectRoot, sessionId, entryId));
+  }, "Could not remove the chapter"), [historyAction, projectRoot, sessionId, showSession]);
+
   const value = useMemo<AgentSurfaceContextValue>(() => ({
     messages,
     prompt,
@@ -850,6 +929,11 @@ export function AgentSurfaceProvider({
     declineProposal,
     reviseProposal,
     forkFromMessage,
+    chapters,
+    rewindTo,
+    forkConversation,
+    pinChapter,
+    unpinChapter,
     openNavigation: navigation ?? undefined,
     navigationLinks,
     hierarchy,
@@ -884,6 +968,11 @@ export function AgentSurfaceProvider({
     declineProposal,
     reviseProposal,
     forkFromMessage,
+    chapters,
+    rewindTo,
+    forkConversation,
+    pinChapter,
+    unpinChapter,
     navigation,
     eventCursor,
     lastEventType,
