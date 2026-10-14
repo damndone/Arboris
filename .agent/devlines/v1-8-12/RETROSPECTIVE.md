@@ -6,53 +6,174 @@
 
 ## Final status
 
-STARTED
+COMPLETED
 
 ## Metrics
 
-- Failure frequency: N/A (sample=0)
-- Repeat rate: N/A (sample=0)
-- Recurrence rate: N/A (sample=0)
-- MTTR: N/A (sample=0; unresolved=0)
+- Failure frequency: 18/38 (47.4%; 47.4 per 100 events)
+- Repeat rate: 1/18 (5.6%)
+- Recurrence rate: 1/17 (5.9%)
+- MTTR: median=0 ms (sample=14; unresolved=4)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: N/A (sample=0)
+- Gate waste rate: 0/9 (0.0%)
 - Same-state retry rate: N/A (sample=0)
-- Token waste: N/A (sample=0)
+- Token waste: N/A (sample=0; coverage=0/1)
 
 ## All failures
 
-- None recorded.
+- #12 2026-10-08T03:19:49.685Z `exploration_operation_sets_diverged`; cause_status: `known`; cause: The statistical exploration HTTP request listed six operations in its own Literal; the engine's OPERATIONS and the UI's Frequencies option used a seventh (tabulate).; resolution: `resolved`; lesson: A value set has one definition; validators, request models and UI read it. Two hand lists drift silently.
+- #19 2026-10-08T09:56:33.423Z `run_inputs_rerun_from_three_shapes`; cause_status: `known`; cause: run_inputs.rerun_from was written in three shapes (context rerun provenance, context-less Agent rerun record, data-operation dataset bridge); script export read every one as a dataset bridge.; resolution: `resolved`; lesson: One key carries one contract; a second meaning gets its own field and a typed reader, or every consumer guesses which shape it got.
 
 ## All errors
 
-- None recorded.
+- #14 2026-10-08T03:19:49.685Z `tightened_type_checked_on_a_subset`; cause_status: `known`; cause: Prediction evidence structure was tightened earlier in step 4 and checked only with a filtered test selection; frequency-weighted runs add provenance.; resolution: `resolved`; lesson: After tightening a response type, run the full contract suite, not a keyword-filtered subset.
+- #24 2026-10-08T11:15:22.101Z `typer_vendored_click_objects`; cause_status: `known`; cause: Generated commands were first built as click.Command objects; typer 0.26 ships its own vendored click, so click.exceptions.Exit raised by --help was not caught by Typer's main loop and --help exited 1.; resolution: `resolved`; lesson: Extend a Typer app only through Typer's public API; its click is private and its exception classes differ from the installed click.
+- #33 2026-10-08T16:34:45.826Z `manova_recorded_formula_changed`; cause_status: `known`; cause: Switching MANOVA's generator to quote_column changed the formula text its result envelope records from JSON double quotes to repr single quotes; two MANOVA tests pin that text as the result contract and failed in the full suite.; resolution: `resolved`; lesson: Before unifying a generator, check whether its output is recorded in a published result; unify the reader instead of the recorded format.
 
 ## All gaps
 
-- None recorded.
+- #3 2026-10-07T16:45:23.677Z `side_effecting_get_routes`; cause_status: `known`; cause: Three GET routes and one lazily created lock wrote to disk on read: notebook options appended a context.compiled trace event per view, unknown agent-session and column-cast record lookups created empty storage directories, and the first preference read created its flock file.; resolution: `resolved`; lesson: Enumerate every registered GET route against a real project and fail on any file created or modified; new routes are then covered automatically.
+- #5 2026-10-07T16:45:23.677Z `preexisting_eval_script_failures`; cause_status: `suspected`; cause: Five cases in tests/eval_v1811 retained evaluation scripts (not in default collection) fail on the baseline 3a96c19a as well as with the step-1 change: three in glm_nb_public_review_first_source/adversarial and two in count_public_review_adversarial; one reports a changed source artifact fingerprint.; resolution: `open`; lesson: Baseline every failure on the unchanged commit before attributing it to the current change.
+- #9 2026-10-07T19:09:24.374Z `preexisting_eval_script_failures_explained`; cause_status: `known`; cause: The five tests/eval_v1811 review cases are pinned to their manifest commits. Re-run at 67088c98 and compared with the recorded outputs: two assert GLM-NB has no live evaluation and two assert GLM-NB post-estimation is closed, both later changed on purpose in v1.8.11; one is the reviewer's first-version snapshot whose recorded first run already failed.; resolution: `resolved`; lesson: Review scripts pinned to a commit must say so in a policy, or a later reader treats their failures as regressions.
+- #13 2026-10-08T03:19:49.685Z `declared_branches_without_producing_tests`; cause_status: `known`; cause: Strict response validation only sees the responses tests produce. No HTTP test returned a non-empty memory retrieval, a figure without its source, or summarize_detail/misstable/corr/grouped explorations.; resolution: `resolved`; lesson: For every declared union branch or optional value, add the HTTP test that produces it; contract coverage is measured per branch, not per route.
+- #15 2026-10-08T03:19:49.685Z `graph_controls_read_only_for_five_kinds`; cause_status: `known`; cause: The graph's control registry listed kinds the backend never sends (radio/slider/textarea) and lacked column/integer/number/object/json, which fell through to a read-only placeholder.; resolution: `accepted`; lesson: UI vocabularies of server kinds must be generated; a hand list hides missing renderers behind a fallback.
+- #16 2026-10-08T03:19:49.685Z `unreachable_or_unproduced_contracts`; cause_status: `known`; cause: Typing every operation exposed contracts with no producer or no reachable caller: notebook authorize-execution refuses bound options while its service requires them; node-level rerun_from is consumed but never produced.; resolution: `open`; lesson: Declaring a type for each operation is also an inventory: an operation no test can reach or a field no producer writes is a decision to make, not a type to write.
+- #18 2026-10-08T09:56:33.423Z `node_level_rerun_from_specified_never_written`; cause_status: `known`; cause: v1.6.3 specified run-level and node-level rerun_from; only run-level was written, so Compare with source relied on a read-time fallback that fails closed for nodes shared by several runs.; resolution: `resolved`; lesson: When a spec names a source of truth and a transitional fallback, track the source of truth to completion; a fallback that works in the common case hides that it was never built.
+- #22 2026-10-08T11:15:22.101Z `cli_bypassed_run_service`; cause_status: `known`; cause: workbench run declared about 40 options by hand and called orchestrator.run_workflow directly, bypassing the run service the HTTP route uses; model_options, the three weights, prediction data structure, statistical tests and by-group were missing, and run inputs and the analysis ledger differed from UI runs.; resolution: `resolved`; lesson: Declare a request once and generate every entry point from it; a second hand-written entry point drifts silently.
+- #23 2026-10-08T11:15:22.101Z `nb1_native_script_export`; cause_status: `known`; cause: The step-5 acceptance runs an NB1 export in Stata, but v1.8.11 validated native export only for estimated-dispersion NB2; NB1 fell back to a result sidecar, so Stata would replay Workbench numbers instead of re-estimating.; resolution: `resolved`; lesson: When an acceptance says a script runs in Stata, require fully_native so a sidecar replay cannot pass for re-estimation.
+- #26 2026-10-08T16:05:58.017Z `lower_layers_imported_agent`; cause_status: `known`; cause: The model-family contract table lived in agent/workflow_contracts.py and the JSONL helpers in agent/storage.py, so the engine (capabilities, estimation), orchestrator, admission, events and exploration_log imported the Agent layer: 12 upward imports, all function-level and therefore invisible to import-time checks.; resolution: `resolved`; lesson: Guard layering statically over the whole AST, including imports inside functions; lazy imports are where upward dependencies hide.
+- #28 2026-10-08T16:05:58.017Z `subprocess_tests_imported_stale_worktree`; cause_status: `known`; cause: The shared virtualenv's editable install named the workbench-v1.8.6 worktree. Tests that started a Python subprocess without their own PYTHONPATH therefore imported v1.8.6 code; after that worktree was archived on 2026-10-07 they could not import workbench and three devline enforcement tests failed.; resolution: `resolved`; lesson: Subprocess tests must pin the import root to the checkout under test; a shared editable install silently tests another version.
+- #30 2026-10-08T16:09:45.583Z `family_literal_regex_counts_node_ids`; cause_status: `known`; cause: The family-literal ratchet regex matches any quoted name ending in _1, so draft node ids such as model_1, table_1, source_1 and input_1 are counted as family names: 45 of the remaining 119.; resolution: `open`; lesson: Do not change a ratchet's measurement in the same change that reports its drop; record the miscount and correct it separately.
+- #32 2026-10-08T16:34:45.825Z `formula_term_quote_readers`; cause_status: `known`; cause: Formulas reference columns as Q(repr(column)), but seven backend readers and one frontend reader undid it by stripping quote characters, handling only the single-quoted form: names with both quotes or a backslash came back escaped, a quoted name containing a colon was split as an interaction, ANOVA built unescaped Q('name') and failed on a single quote, and the egress redactor did not recognise Q("o'brien") so a protected column's category level would be sent.; resolution: `resolved`; lesson: Parse an encoded value with the decoder of the encoding that produced it, in one place; ad hoc quote stripping fails on the first escape.
 
 ## All waste
 
-- None recorded.
+- #29 2026-10-08T16:09:45.582Z `duplicated_family_artifact_table`; cause_status: `known`; cause: agent/notebook/vocabulary.py kept its own table of what each of 20 model families publishes, beside the family contracts that already declare each family's artifacts; a new family had to be added in both places.; resolution: `resolved`; lesson: When a consumer keeps a per-family table, move the fact onto the family contract and derive the table.
 
 ## Root causes and solutions
 
-- None recorded.
+- `contract-coverage-per-branch`: occurrences=1; cause_status: `known`; root cause: Strict response validation only sees the responses tests produce. No HTTP test returned a non-empty memory retrieval, a figure without its source, or summarize_detail/misstable/corr/grouped explorations.; solution: `resolved`
+- `decode-with-the-encoders-inverse`: occurrences=1; cause_status: `known`; root cause: Formulas reference columns as Q(repr(column)), but seven backend readers and one frontend reader undid it by stripping quote characters, handling only the single-quoted form: names with both quotes or a backslash came back escaped, a quoted name containing a colon was split as an interaction, ANOVA built unescaped Q('name') and failed on a single quote, and the egress redactor did not recognise Q("o'brien") so a protected column's category level would be sent.; solution: `resolved`
+- `derive-per-family-tables-from-contracts`: occurrences=1; cause_status: `known`; root cause: agent/notebook/vocabulary.py kept its own table of what each of 20 model families publishes, beside the family contracts that already declare each family's artifacts; a new family had to be added in both places.; solution: `resolved`
+- `finish-the-source-of-truth`: occurrences=1; cause_status: `known`; root cause: v1.6.3 specified run-level and node-level rerun_from; only run-level was written, so Compare with source relied on a read-time fallback that fails closed for nodes shared by several runs.; solution: `resolved`
+- `full-contract-run-after-tightening`: occurrences=1; cause_status: `known`; root cause: Prediction evidence structure was tightened earlier in step 4 and checked only with a filtered test selection; frequency-weighted runs add provenance.; solution: `resolved`
+- `get-routes-never-write`: occurrences=1; cause_status: `known`; root cause: Three GET routes and one lazily created lock wrote to disk on read: notebook options appended a context.compiled trace event per view, unknown agent-session and column-cast record lookups created empty storage directories, and the first preference read created its flock file.; solution: `resolved`
+- `inherited-suite-failures-must-be-baselined`: occurrences=2; cause_status: `suspected`; root cause: Five cases in tests/eval_v1811 retained evaluation scripts (not in default collection) fail on the baseline 3a96c19a as well as with the step-1 change: three in glm_nb_public_review_first_source/adversarial and two in count_public_review_adversarial; one reports a changed source artifact fingerprint.; solution: `open`
+- `native-acceptance-requires-fully-native`: occurrences=1; cause_status: `known`; root cause: The step-5 acceptance runs an NB1 export in Stata, but v1.8.11 validated native export only for estimated-dispersion NB2; NB1 fell back to a result sidecar, so Stata would replay Workbench numbers instead of re-estimating.; solution: `resolved`
+- `one-key-one-contract`: occurrences=1; cause_status: `known`; root cause: run_inputs.rerun_from was written in three shapes (context rerun provenance, context-less Agent rerun record, data-operation dataset bridge); script export read every one as a dataset bridge.; solution: `resolved`
+- `one-request-table-for-api-and-cli`: occurrences=1; cause_status: `known`; root cause: workbench run declared about 40 options by hand and called orchestrator.run_workflow directly, bypassing the run service the HTTP route uses; model_options, the three weights, prediction data structure, statistical tests and by-group were missing, and run inputs and the analysis ledger differed from UI runs.; solution: `resolved`
+- `separate-measurement-fix-from-reported-drop`: occurrences=1; cause_status: `known`; root cause: The family-literal ratchet regex matches any quoted name ending in _1, so draft node ids such as model_1, table_1, source_1 and input_1 are counted as family names: 45 of the remaining 119.; solution: `open`
+- `static-layering-guard-includes-function-imports`: occurrences=1; cause_status: `known`; root cause: The model-family contract table lived in agent/workflow_contracts.py and the JSONL helpers in agent/storage.py, so the engine (capabilities, estimation), orchestrator, admission, events and exploration_log imported the Agent layer: 12 upward imports, all function-level and therefore invisible to import-time checks.; solution: `resolved`
+- `subprocess-tests-pin-import-root`: occurrences=1; cause_status: `known`; root cause: The shared virtualenv's editable install named the workbench-v1.8.6 worktree. Tests that started a Python subprocess without their own PYTHONPATH therefore imported v1.8.6 code; after that worktree was archived on 2026-10-07 they could not import workbench and three devline enforcement tests failed.; solution: `resolved`
+- `typer-commands-via-public-api`: occurrences=1; cause_status: `known`; root cause: Generated commands were first built as click.Command objects; typer 0.26 ships its own vendored click, so click.exceptions.Exit raised by --help was not caught by Typer's main loop and --help exited 1.; solution: `resolved`
+- `typing-is-an-inventory`: occurrences=1; cause_status: `known`; root cause: Typing every operation exposed contracts with no producer or no reachable caller: notebook authorize-execution refuses bound options while its service requires them; node-level rerun_from is consumed but never produced.; solution: `open`
+- `ui-kinds-from-generated-types`: occurrences=1; cause_status: `known`; root cause: The graph's control registry listed kinds the backend never sends (radio/slider/textarea) and lacked column/integer/number/object/json, which fell through to a read-only placeholder.; solution: `accepted`
+- `unify-readers-not-recorded-formats`: occurrences=1; cause_status: `known`; root cause: Switching MANOVA's generator to quote_column changed the formula text its result envelope records from JSON double quotes to repr single quotes; two MANOVA tests pin that text as the result contract and failed in the full suite.; solution: `resolved`
+- `value-sets-have-one-literal`: occurrences=1; cause_status: `known`; root cause: The statistical exploration HTTP request listed six operations in its own Literal; the engine's OPERATIONS and the UI's Frequencies option used a seventh (tabulate).; solution: `resolved`
 
 ## Added tests
 
-- No test evidence recorded.
+- `tests/test_cli_from_catalog.py`
+- `tests/test_domain_memory_routes.py`
+- `tests/test_evidence_retention.py`
+- `tests/test_formula_terms.py`
+- `tests/test_get_routes_are_read_only.py`
+- `tests/test_layering_guard.py`
+- `tests/test_manova_pack.py`
+- `tests/test_node_level_rerun_from.py`
+- `tests/test_notebook_artifacts_from_contracts.py`
+- `tests/test_notebook_routes.py`
+- `tests/test_repo_evidence_budget.py`
+- `tests/test_run_input_lineage_fields.py`
+- `tests/test_script_export_postestimation_oracles.py`
+- `tests/test_statistical_exploration_routes.py`
+- `tests/test_subprocess_imports_this_checkout.py`
 
 ## New rules
 
-- No rule candidate recorded.
+- `contract-coverage-per-branch`: line experience occurrence(s)=1
+- `decode-with-the-encoders-inverse`: line experience occurrence(s)=1
+- `derive-per-family-tables-from-contracts`: line experience occurrence(s)=1
+- `finish-the-source-of-truth`: line experience occurrence(s)=1
+- `full-contract-run-after-tightening`: line experience occurrence(s)=1
+- `get-routes-never-write`: line experience occurrence(s)=1
+- `inherited-suite-failures-must-be-baselined`: line experience occurrence(s)=2
+- `native-acceptance-requires-fully-native`: line experience occurrence(s)=1
+- `one-key-one-contract`: line experience occurrence(s)=1
+- `one-request-table-for-api-and-cli`: line experience occurrence(s)=1
+- `separate-measurement-fix-from-reported-drop`: line experience occurrence(s)=1
+- `static-layering-guard-includes-function-imports`: line experience occurrence(s)=1
+- `subprocess-tests-pin-import-root`: line experience occurrence(s)=1
+- `typer-commands-via-public-api`: line experience occurrence(s)=1
+- `typing-is-an-inventory`: line experience occurrence(s)=1
+- `ui-kinds-from-generated-types`: line experience occurrence(s)=1
+- `unify-readers-not-recorded-formats`: line experience occurrence(s)=1
+- `value-sets-have-one-literal`: line experience occurrence(s)=1
 
 ## Future guidance
 
-- No guidance recorded.
+- A negative assertion (nothing was written) must observe the location the unfixed code actually writes to; confirm it fails before the fix.
+- A value set has one definition; validators, request models and UI read it. Two hand lists drift silently.
+- After tightening a response type, run the full contract suite, not a keyword-filtered subset.
+- Baseline every failure on the unchanged commit before attributing it to the current change.
+- Before unifying a generator, check whether its output is recorded in a published result; unify the reader instead of the recorded format.
+- Declare a request once and generate every entry point from it; a second hand-written entry point drifts silently.
+- Declaring a type for each operation is also an inventory: an operation no test can reach or a field no producer writes is a decision to make, not a type to write.
+- Do not change a ratchet's measurement in the same change that reports its drop; record the miscount and correct it separately.
+- Enumerate every registered GET route against a real project and fail on any file created or modified; new routes are then covered automatically.
+- Extend a Typer app only through Typer's public API; its click is private and its exception classes differ from the installed click.
+- For every declared union branch or optional value, add the HTTP test that produces it; contract coverage is measured per branch, not per route.
+- Guard layering statically over the whole AST, including imports inside functions; lazy imports are where upward dependencies hide.
+- One key carries one contract; a second meaning gets its own field and a typed reader, or every consumer guesses which shape it got.
+- Parse an encoded value with the decoder of the encoding that produced it, in one place; ad hoc quote stripping fails on the first escape.
+- Review scripts pinned to a commit must say so in a policy, or a later reader treats their failures as regressions.
+- Subprocess tests must pin the import root to the checkout under test; a shared editable install silently tests another version.
+- Test every fail-closed branch of a redactor through the real send path; an early return can skip the bookkeeping that decides whether redaction happened.
+- UI vocabularies of server kinds must be generated; a hand list hides missing renderers behind a fallback.
+- When a consumer keeps a per-family table, move the fact onto the family contract and derive the table.
+- When a dev proxy sits in front of a local API, test the hostile page through the proxy as well as directly; the proxy's own CORS policy can turn a write-only defence into a read leak.
+- When a spec names a source of truth and a transitional fallback, track the source of truth to completion; a fallback that works in the common case hides that it was never built.
+- When an acceptance says a script runs in Stata, require fully_native so a sidecar replay cannot pass for re-estimation.
 
 ## Event index
 
 - #1: `73a9c3c9-1204-47ab-82cd-bdfb7d68226d` | 2026-10-07T14:31:22.393Z | STATE_CHANGE/line_started | incident=`9f0cce99-8219-4bc3-a2ab-3ad67053888f` | lesson_key=`frozen-context-before-start` | event_sha256=`36fb27edc12eb5942144e47fc6028ed545eb122e8077d06fa6aaded9822b1f12`
+- #2: `cd9b56fb-67e5-48ea-a89f-986fbeeb45b8` | 2026-10-07T16:12:13.615Z | STATE_CHANGE/scope_owner_table_and_prepush_guard | incident=`5c3f7c28-f51d-416f-801d-d517ce484b2f` | lesson_key=`every-finding-has-an-owner` | event_sha256=`9577c1e9e41bb09e2f0f2de25e25d0dc9bfd20ce9eaac74a55e917be4efd6ccd`
+- #3: `4d4e9117-ddcb-45f5-9a91-a094ef140798` | 2026-10-07T16:45:23.677Z | GAP/side_effecting_get_routes | incident=`4876de5b-7836-4889-b731-a244014523a5` | lesson_key=`get-routes-never-write` | event_sha256=`edabd4d7614e23fe3eb9a89ae7a63d6f30bf13dd0245c6259614e8de9fa66431`
+- #4: `800295bd-2e0b-480a-ad64-9ee8694e6fbf` | 2026-10-07T16:45:23.677Z | REVIEW/origin_check_all_methods | incident=`2733a2d8-6fa6-4e3c-b351-4898cffc6259` | lesson_key=`proxy-cors-requires-origin-check-on-reads` | event_sha256=`1394fb6f5d92ce38cea451966d5c6f0ebcb145a7f4a766e2271724189fdf4ef2`
+- #5: `05b4133e-648e-4eb2-b6e7-f6b74804b4e0` | 2026-10-07T16:45:23.677Z | GAP/preexisting_eval_script_failures | incident=`bbd25258-6835-4c51-9ba3-1dbd572c9e23` | lesson_key=`inherited-suite-failures-must-be-baselined` | event_sha256=`aa85cf806b00d5edd7c54c41456ca0c1fff5d2847b53b5fc9ed2ea468af10ee2`
+- #6: `81331969-5b86-4e44-b8a3-4ce385945a86` | 2026-10-07T16:45:23.677Z | GATE/step1_local_api_security_acceptance | incident=`b42d62ca-48c9-4648-bbfc-32e3a13561f3` | lesson_key=`local-api-hostile-page-acceptance` | event_sha256=`9e8c16a7b7afa29c5b5b89ba5346d6cc43c5905f03cba578847ad7d9bf8688fb`
+- #7: `e3924669-84fc-4e50-8a75-3d8429470025` | 2026-10-07T19:01:16.561Z | REVIEW/vacuous_negative_assertion | incident=`bed52b12-f00e-4112-8362-5d38fd3ff34f` | lesson_key=`negative-assertion-must-watch-the-real-write-target` | event_sha256=`cfe79f24dd5d3fe206ed04ac38d5cf5cf87ee42e154abfde6e4c5ba749838c0c`
+- #8: `f06dff26-388b-45de-8b33-e18d38803ed1` | 2026-10-07T19:01:16.561Z | GATE/step2_local_evidence_retention_acceptance | incident=`fb47a4fb-70f8-48c0-9c6e-68d9128538fc` | lesson_key=`bounded-test-evidence-managed-root` | event_sha256=`3e1ef71cc3f33d3dedeb69f0e5b5a722fe63d654028a603996b7fd6616024dfb`
+- #9: `b6b7746e-4d7a-4ec8-b91f-e87d1a83725a` | 2026-10-07T19:09:24.374Z | GAP/preexisting_eval_script_failures_explained | incident=`6f80f381-a7f7-42c0-aae6-ff8062224a7e` | lesson_key=`inherited-suite-failures-must-be-baselined` | event_sha256=`344aff62660413d8fb75441bee8af42ca164ccc6992130272a999bb87daebfbd`
+- #10: `aa4f15fd-553d-448d-b2fc-97688b6eaf16` | 2026-10-07T19:09:24.374Z | GATE/step3_repo_evidence_policy_acceptance | incident=`dfb8dea7-b33e-4c0c-8170-21b49a0e4986` | lesson_key=`calibrated-repo-size-budget` | event_sha256=`9dbad898e689d245a03bc860ea812a3888e439d87c5b4d01543b3c66b2115ff5`
+- #11: `8626bc9f-7b9c-4a07-b4e6-fca0a8705573` | 2026-10-08T03:19:49.685Z | GATE/step4_openapi_types_acceptance | incident=`f0ff1cc4-24b8-4da9-9891-0cd5db8a694c` | lesson_key=`types-derived-and-enforced-not-copied` | event_sha256=`a808955279ee4a875420682902dfce1ceb590e0cc879f6f52155642416467828`
+- #12: `a536df3a-b89b-440a-b33f-efafc0bae848` | 2026-10-08T03:19:49.685Z | FAILURE/exploration_operation_sets_diverged | incident=`a07e3707-5647-479d-a701-5f15cf8895a0` | lesson_key=`value-sets-have-one-literal` | event_sha256=`6b6ac54a6c82b76aa10dc09bd36c270b2e201246d1eef710b112bab68c038070`
+- #13: `44f69141-1373-49bd-be4d-09ffa3494fbd` | 2026-10-08T03:19:49.685Z | GAP/declared_branches_without_producing_tests | incident=`fd4ece45-c6ff-48c5-9f92-b209e4789864` | lesson_key=`contract-coverage-per-branch` | event_sha256=`0795fa5bf3744d8fe49881484643786f1e57045ec1ae809f48f58a97943e8013`
+- #14: `7f77dec5-c2b3-429a-a503-5c21140456ae` | 2026-10-08T03:19:49.685Z | ERROR/tightened_type_checked_on_a_subset | incident=`70e78cee-9a54-4a67-bf09-f25a759ba2aa` | lesson_key=`full-contract-run-after-tightening` | event_sha256=`de4c1fbd2acf62d5519bd3fc94ece8f3a1b68e37fc92325aaf13411303bdeab4`
+- #15: `fd327b75-5f29-48eb-bae4-ae9bd50ffaa4` | 2026-10-08T03:19:49.685Z | GAP/graph_controls_read_only_for_five_kinds | incident=`eaf04b54-3625-435a-a459-c2aa72f2ae85` | lesson_key=`ui-kinds-from-generated-types` | event_sha256=`3a24f7050beede477d28ac1b96abcf0bc501b2def78c3bef2adc0f332351433d`
+- #16: `5f86f918-24d7-4e5c-a2c2-58eb9e87a23b` | 2026-10-08T03:19:49.685Z | GAP/unreachable_or_unproduced_contracts | incident=`8d0cbdfc-be47-442c-b4eb-29a25635526d` | lesson_key=`typing-is-an-inventory` | event_sha256=`3d553be125ce414fbd1522bc0e6ee7e1179184e502db7f8ca9b59c87f447bda4`
+- #17: `e64dd398-d157-422f-bb8f-064fadf6ccbd` | 2026-10-08T09:56:33.423Z | STATE_CHANGE/user_decisions_on_step4_gaps | incident=`fda09c56-0107-4a35-91c3-7136dcc3533b` | lesson_key=`gap-decisions-carry-intent` | event_sha256=`89999994c7e5ff51ace9ff326fe3cc4f7a0a1e482a91bc97ee0e76a92a7aa4c6`
+- #18: `d6c1d840-aa50-40d3-90f4-376d12f5e3ad` | 2026-10-08T09:56:33.423Z | GAP/node_level_rerun_from_specified_never_written | incident=`4ed4fd90-18fb-4a04-94e0-5990ee383a93` | lesson_key=`finish-the-source-of-truth` | event_sha256=`58254633cf8fa16cdfb570d6cb9b7a243911cc757f4de4e3431ee5a0810f9bff`
+- #19: `21da1dc6-c1ec-4829-ade2-35eede41bd8d` | 2026-10-08T09:56:33.423Z | FAILURE/run_inputs_rerun_from_three_shapes | incident=`0e06cf79-033b-4157-8024-a8c0defdb118` | lesson_key=`one-key-one-contract` | event_sha256=`d9ea77ababcaaa1109f0fcbca10173c24bfecfc7da27c49c3cd8dc00c8527ba5`
+- #20: `fae06627-62e9-4545-aec1-6d89ab8ec1d2` | 2026-10-08T10:21:17.862Z | STATE_CHANGE/generated_types_listed_size_cap | incident=`623e791b-6876-4859-b8ee-fa8ec7e838b1` | lesson_key=`generated-code-named-cap` | event_sha256=`04a1b3a1f640522d8cde07bceffff4d3b8b5093592fdad410f045210480c5795`
+- #21: `1646ec9d-57c1-4566-8249-7d82216da672` | 2026-10-08T10:21:17.862Z | STATE_CHANGE/client_authorization_route_removed | incident=`ac92e167-0d2d-4cf3-9ea2-4c3c3014a287` | lesson_key=`remove-entry-keep-operation` | event_sha256=`dc822d43c9e13a7f123549289ee9680e2dd7a1b50d34921ea88cc58562ff4339`
+- #22: `e5a25cf5-e9f3-43e8-9bcd-a202e8ab8da2` | 2026-10-08T11:15:22.101Z | GAP/cli_bypassed_run_service | incident=`c508e806-fefb-472d-ade0-524060fadcb0` | lesson_key=`one-request-table-for-api-and-cli` | event_sha256=`bba9afe632b06fea1a55567dba25273b0cd331b132b059c8caa83e06a3b91b0a`
+- #23: `6dd7f793-dec0-4453-ac63-d8c40c679e77` | 2026-10-08T11:15:22.101Z | GAP/nb1_native_script_export | incident=`8ddf0b35-90c2-432e-bef4-0ae42f883ebe` | lesson_key=`native-acceptance-requires-fully-native` | event_sha256=`30a731128191cd722deed52c9db66d853a684acadcb6cd4931dcd0f89fe1a54d`
+- #24: `ac659bbb-417e-4d83-a74e-24bfcdf8850b` | 2026-10-08T11:15:22.101Z | ERROR/typer_vendored_click_objects | incident=`6506e6d1-d3cc-4ba6-b59b-b5e88e870e41` | lesson_key=`typer-commands-via-public-api` | event_sha256=`ebdce58edee183ff0f8699fc546b6a00734f10090090c1d3f7bc66595a2dd511`
+- #25: `60530a60-1db8-486a-9d38-f582fa564bab` | 2026-10-08T11:15:22.101Z | GATE/step5_cli_from_catalog_acceptance | incident=`ea38996e-1e0e-4b51-a2af-421adf117f03` | lesson_key=`cli-acceptance-cold-native-run` | event_sha256=`86c39d1f81dff8f9906990c0951e7aa243cccd0e6e4e59a7fa482c0d779d3cdb`
+- #26: `1338df4e-bdce-4cf3-be4e-2abd17527fac` | 2026-10-08T16:05:58.017Z | GAP/lower_layers_imported_agent | incident=`5ea22a9b-2706-438d-a3cc-03b2e5e608c7` | lesson_key=`static-layering-guard-includes-function-imports` | event_sha256=`da0c38afa90eee7c2d65ef8b03128906f7f6b47b482accd825721e11bd983856`
+- #27: `5e6cd15d-6b54-491b-8621-b263b14375a2` | 2026-10-08T16:05:58.017Z | GATE/step6_contract_layering_acceptance | incident=`7d002b2e-b579-4e26-aeb2-f22cefc30f3d` | lesson_key=`full-suite-after-cross-package-move` | event_sha256=`54a20ecf3b0888208f46ce6cdcec1b40282753d655b75f78cffe64f41227d1ab`
+- #28: `68581716-4c18-41f5-b0f7-7e727cadf195` | 2026-10-08T16:05:58.017Z | GAP/subprocess_tests_imported_stale_worktree | incident=`40281ad8-2f63-448f-9cb5-60e723838c83` | lesson_key=`subprocess-tests-pin-import-root` | event_sha256=`bae118b7ec68a82dfc5f447ad5ad6bf91f03cbf104cfcbccc3ea52c2b9ab85cd`
+- #29: `330dadf4-398d-46c2-ba10-e575f6d44be3` | 2026-10-08T16:09:45.582Z | WASTE/duplicated_family_artifact_table | incident=`e2c281df-0e8d-4276-8fa0-63610d43fe49` | lesson_key=`derive-per-family-tables-from-contracts` | event_sha256=`66598ba5efb7ddfd4c73ae2444b048d841225c17de66b664dd5b09ddc8ec8755`
+- #30: `61494df0-d31e-433b-a186-d747fa4330ae` | 2026-10-08T16:09:45.583Z | GAP/family_literal_regex_counts_node_ids | incident=`9704a880-ef12-47b4-a8c0-161249e3b957` | lesson_key=`separate-measurement-fix-from-reported-drop` | event_sha256=`fbcfae1ade8c85ebdbdc5f0f856c39532a0dba6e8102d94e0ec88685d7e563ad`
+- #31: `c75123a6-d0ba-4184-8533-fcfe8249a8c2` | 2026-10-08T16:09:45.583Z | GATE/step7_family_literal_down_acceptance | incident=`5eaaf5ec-b2f5-464b-a9ed-af62c18fee44` | lesson_key=`ratchet-drop-relocation-vs-removal` | event_sha256=`25a11fbea8942acac00e8df1e660fb970c4875604ad2f52c14114b3c24abf2f2`
+- #32: `03bd7fdd-ab4c-435e-b3c0-76bb57c8a4d7` | 2026-10-08T16:34:45.825Z | GAP/formula_term_quote_readers | incident=`66fe93c8-cea0-4551-9e0b-6e90d1f0a93b` | lesson_key=`decode-with-the-encoders-inverse` | event_sha256=`0d051205f32b90ae4f3c823e6bf497b183b1b03d9afb1b0a463c7455937e39e5`
+- #33: `32ddcf9d-f259-42ac-9903-51f643441a21` | 2026-10-08T16:34:45.826Z | ERROR/manova_recorded_formula_changed | incident=`6ce0952c-65ae-4b69-914c-6bc5109d3291` | lesson_key=`unify-readers-not-recorded-formats` | event_sha256=`b237f6569ba7b9a8e512e8ef0929df3bcb8fab50ad8404358bb748e66f710086`
+- #34: `2eee7184-0400-45da-9b7c-695f209b0a01` | 2026-10-08T16:34:45.826Z | GATE/step8_term_quote_acceptance | incident=`81163ae4-f97b-40a2-8a09-b03998e55bcc` | lesson_key=`check-reachability-before-impact` | event_sha256=`7148288dd6d778b56c7c73d4990149fa95fca8b77cbdfd95ee95bebc26a88533`
+- #35: `353a6153-3fbd-4031-8d4a-ab885490ac0f` | 2026-10-08T17:21:03.355Z | REVIEW/pre_release_self_review | incident=`d8b727a5-910e-4624-ad21-43902ed9db47` | lesson_key=`fail-closed-branch-through-real-send` | event_sha256=`27aa1213cfff69bcb5df28b0ee4c5783ca5023693fffae622190a9c96ad0855d`
+- #36: `7a60c1bb-9b11-45de-b0d1-062b014ac3ef` | 2026-10-08T17:21:03.355Z | GATE/host_full_gate_pre_release | incident=`551932dc-f00a-4a30-94b1-0f7fdbaf22b6` | lesson_key=`gate-the-exact-release-commit` | event_sha256=`7b869bf00fcd55689769be60b86a30166acbbacf4912031349d5be9757b19492`
+- #37: `b1cf97fb-93b8-43a2-825e-e23ade7ed623` | 2026-10-08T18:28:24.043Z | STATE_CHANGE/released | incident=`ca7d87db-962d-484b-9861-b7e21420b50e` | lesson_key=`check-shared-install-before-archiving` | event_sha256=`760fcda39ddede55ed369a2a73690a3034d5fdb495612ab37c5174609e9880e4`
+- #38: `0c9f994a-8ead-4a61-9721-f686d3255daa` | 2026-10-08T18:28:57.874Z | STATE_CHANGE/version_closed | incident=`c2716158-5e75-40d9-8269-c2cf164c3759` | lesson_key=`close-line-with-state-transition` | event_sha256=`23785ac2eef5419fe45b6857ccd38a9ddc00e8532050a084fe4809f6d37d5ff3`

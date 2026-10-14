@@ -6,10 +6,18 @@ same checks regardless of environment.
 
 ## Setup (one-time)
 
+In a fresh clone (the main checkout):
+
 ```bash
 python3 -m pip install -e ".[dev]"   # creates .venv
 cd frontend && npm install
 ```
+
+In a worktree, never run `pip install -e` or `npm install`: the virtualenv and
+`node_modules` are shared, and the editable install must keep naming the main
+checkout. Link them instead (`bash scripts/link-shared-deps.sh <worktree>`);
+processes started inside the worktree import its own code
+(`scripts/check_dev_env.py` verifies this).
 
 ## Run the smoke
 
