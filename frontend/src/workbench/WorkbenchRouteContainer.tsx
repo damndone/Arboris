@@ -56,6 +56,7 @@ import { ProjectSwitcher, WorkbenchTopbar } from "./WorkbenchTopbar";
 import { WorkbenchMain } from "./WorkbenchMain";
 import { WorkbenchHomeView } from "./views/WorkbenchHomeView";
 import { ContextMenu } from "./ContextMenu";
+import { SelectionMenu } from "../workspace/SelectionMenu";
 import { useGlobalShortcuts } from "./useGlobalShortcuts";
 import { BottomPanel } from "./BottomPanel";
 import { RunHistoryToggle } from "./RunHistoryToggle";
@@ -1920,6 +1921,7 @@ function WorkbenchShell({
   const overlays = (
     <>
       {state.view !== "home" && <ContextMenu />}
+      <SelectionMenu />
       {(state.view !== "home" || workspaceMode === "new") && <SearchPalette />}
       {(state.view !== "home" || workspaceMode === "new") && <CommandPalette projectRoot={projectRoot} />}
       {state.view !== "home" && <RawJsonModal open={rawJsonOpen} onClose={() => setRawJsonOpen(false)} node={selectedNode} />}

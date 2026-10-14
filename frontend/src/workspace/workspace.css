@@ -615,3 +615,35 @@
   padding: 0;
   justify-content: center;
 }
+
+/* v1.9.0 — right-click menu for selected text (SelectionMenu.tsx). */
+.ws-selection-menu {
+  position: fixed;
+  z-index: 1000;
+  display: grid;
+  gap: 2px;
+  min-width: 190px;
+  padding: 5px;
+  background: var(--panel-bg);
+  border: var(--hairline) solid var(--separator);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-pop);
+}
+
+.ws-selection-menu button {
+  padding: 6px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--label);
+  font: inherit;
+  font-size: var(--text-ui);
+  text-align: left;
+  cursor: pointer;
+}
+
+.ws-selection-menu button:hover,
+.ws-selection-menu button:focus-visible {
+  background: var(--bg-card-2);
+  outline: none;
+}

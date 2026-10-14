@@ -33,6 +33,7 @@ import {
 import { useProjectRootOptional } from "./ProjectRootContext";
 import { useForest } from "./ForestContext";
 import { RunDeletionDialog } from "./RunDeletionDialog";
+import { useAskAgentAboutNode } from "../workspace/agent/askAgent";
 
 type DeletionState = {
   runId: string;
@@ -52,6 +53,7 @@ export function ContextMenu() {
   const forest = useForest();
   const menuRef = useRef<HTMLDivElement | null>(null);
   const [deletion, setDeletion] = useState<DeletionState | null>(null);
+  const askAgent = useAskAgentAboutNode(dispatch.selectByCanvasClick);
 
   // Close on Escape / outside click / scroll.
   useEffect(() => {
@@ -151,6 +153,7 @@ export function ContextMenu() {
           pinTab: dispatch.selectByCanvasClick,
           pinUpstream: dispatch.pinFocus,
           focusUpstream: dispatch.setFocusOnly,
+          askAgent,
         },
       }
     : null;

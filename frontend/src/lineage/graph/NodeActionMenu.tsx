@@ -41,6 +41,7 @@ import {
   getAgentGraphNavigation,
 } from "../../workbench/agent/agentApi";
 import type { AgentNavigationRef } from "../../workbench/agent/agentTypes";
+import { useAskAgentAboutNode } from "../../workspace/agent/askAgent";
 import "../tokens/lineage.css";
 
 export interface NodeActionMenuProps {
@@ -64,6 +65,8 @@ interface PopupCoords {
 }
 
 const GAP_PX = 6;
+
+const NO_SELECT = () => {};
 
 export function NodeActionMenu({
   node,
@@ -135,6 +138,7 @@ export function NodeActionMenu({
   // registry's dispatch-dependent actions (openDetail, pinTab,
   // pinUpstream, focusUpstream) gracefully no-op via the stub
   // dispatch below — V1.5.0/1.5.1 test harnesses keep working.
+  const askAgent = useAskAgentAboutNode(wb?.dispatch.selectByCanvasClick ?? NO_SELECT);
   const ctx: ActionContext = {
     node,
     model,
@@ -147,6 +151,7 @@ export function NodeActionMenu({
       pinUpstream: wb?.dispatch.pinFocus ?? (() => {}),
       // F1: focus-only (see ContextMenu) — don't move selection.
       focusUpstream: wb?.dispatch.setFocusOnly ?? (() => {}),
+      askAgent,
     },
   };
   const registryActions = actionsForSurface("drawer-header-menu", ctx);

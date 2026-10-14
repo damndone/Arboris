@@ -30,6 +30,7 @@ import {
 import { isEditableTarget } from "./keyboard";
 import { useProjectRootOptional } from "./ProjectRootContext";
 import { rootToSlug } from "./projectSlug";
+import { useAskAgentAboutNode } from "../workspace/agent/askAgent";
 
 export interface CommandPaletteProps {
   projectRoot?: string | null;
@@ -62,6 +63,7 @@ export function CommandPalette({ projectRoot = null }: CommandPaletteProps) {
     [model.nodes, selectedKey],
   );
 
+  const askAgent = useAskAgentAboutNode(dispatch.selectByCanvasClick);
   const ctx = useMemo<ActionContext | null>(() => {
     if (node === null) return null;
     return {
@@ -75,9 +77,10 @@ export function CommandPalette({ projectRoot = null }: CommandPaletteProps) {
         pinTab: dispatch.selectByCanvasClick,
         pinUpstream: dispatch.pinFocus,
         focusUpstream: dispatch.setFocusOnly,
+        askAgent,
       },
     };
-  }, [node, model, state, dispatch]);
+  }, [node, model, state, dispatch, askAgent]);
 
   const nodeActions = useMemo<ActionEntry[]>(
     () => (ctx === null ? [] : actionsForSurface("command-palette", ctx)),
