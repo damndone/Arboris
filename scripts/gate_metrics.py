@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import json
+import re
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -41,6 +43,32 @@ def collect_tests(directory: Path) -> tuple[list[dict], list[str]]:
         except (OSError, ValueError, KeyError, TypeError) as exc:
             errors.append(f"{path.name}: {exc}")
     return tests, errors
+
+
+#: Passed gate runs kept in local/gate (the user's evidence rule, 2026-10-07:
+#: keep the last 3 of each kind, always keep a failed one).
+KEEP_PASSED = 3
+_RUN_NAME = re.compile(r"^\d{8}T\d{6}-[A-Za-z0-9_]+$")
+
+
+def prune(parent: Path, keep: int = KEEP_PASSED) -> list[Path]:
+    """Remove passed runs beyond the newest ``keep``. A failed, running or
+    unreadable run, one marked ``.keep``, and anything that is not a run
+    directory directly in ``parent`` are left alone."""
+    passed = []
+    for path in parent.iterdir() if parent.is_dir() else ():
+        if path.is_symlink() or not path.is_dir() or not _RUN_NAME.match(path.name) or (path / ".keep").exists():
+            continue
+        try:
+            status = json.loads((path / "summary.json").read_text()).get("status")
+        except (OSError, ValueError):
+            continue
+        if status == "passed":
+            passed.append(path)
+    removed = sorted(passed, key=lambda path: path.name, reverse=True)[keep:]
+    for path in removed:
+        shutil.rmtree(path)
+    return removed
 
 
 def main(arguments: list[str]) -> None:
@@ -84,6 +112,8 @@ def main(arguments: list[str]) -> None:
     else:
         raise ValueError(f"unknown timing operation: {operation}")
     _write(path, summary)
+    if operation == "finish":
+        prune(directory.parent)
 
 
 if __name__ == "__main__":
