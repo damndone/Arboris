@@ -3,11 +3,11 @@
 // stay read-only and cited. Every save is a new version linked to the one it
 // revises, and exports carry that saved version with its evidence.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { AnalysisDisclosure } from "../report/AnalysisDisclosure";
-import { ReportSources } from "../report/ReportSources";
+import { EvidenceToggle, ReportSources } from "../report/ReportSources";
 import { reportDraft, reportExportUrl, reportHistory, saveReport, type Draft, type Report } from "./manualApi";
-import { ReportReadingView, factLabel, factValue } from "./ReportEvidence";
+import { ReportReadingView, factLabel, factValue, markersIn } from "./ReportEvidence";
 import "./manual.css";
 
 const EXPORTS: Array<{ format: string; label: string }> = [
@@ -33,6 +33,8 @@ export function ManualReportPanel({ projectRoot, runId }: { projectRoot: string;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   // One id per unsaved edit: a retried save is the same save.
+  const [evidenceOpen, setEvidenceOpen] = useState(false);
+  const evidenceId = useId();
   const saveId = useRef(newSaveId());
   const pending = useRef(false);
 
@@ -119,69 +121,99 @@ export function ManualReportPanel({ projectRoot, runId }: { projectRoot: string;
   const limitations = current?.limitations ?? draft?.limitations ?? [];
   const choose = (list: string[], id: string, on: boolean) => (on ? [...list, id] : list.filter((value) => value !== id));
 
+  const markers = markersIn(text, evidence);
   return (
-    <section className="manual-panel" aria-label="Manual report">
-      <header>
-        <h2>Write a report</h2>
-        <button type="button" disabled={busy} onClick={() => void newDraft()}>
-          New draft from current evidence
-        </button>
-      </header>
-      <p>Write locally. Computed evidence stays read-only; each save creates a version.</p>
+    <section className="manual-panel mr" aria-label="Manual report">
       {error && <p role="alert">{error}</p>}
-      {busy && <p role="status">Working…</p>}
-
       <div className="report-document-layout">
-        <fieldset className="report-document" disabled={busy || !draft}>
-          <label className="manual-field">
-            Report title
-            <input
-              aria-label="Report title"
-              maxLength={300}
-              value={title}
-              onChange={(event) => {
-                edited();
-                setTitle(event.target.value);
-              }}
-            />
-          </label>
-          <div role="group" aria-label="Report display">
-            <button type="button" aria-pressed={reading} onClick={() => setReading(true)}>Read</button>
-            <button type="button" aria-pressed={!reading} onClick={() => setReading(false)}>Edit source</button>
+        <fieldset className="report-document mr-doc" disabled={busy || !draft}>
+          <legend className="ws-visually-hidden">Report</legend>
+          <input
+            className="mr-title"
+            aria-label="Report title"
+            maxLength={300}
+            value={title}
+            placeholder="Report title"
+            onChange={(event) => {
+              edited();
+              setTitle(event.target.value);
+            }}
+          />
+          <div className="mr-toolbar">
+            <div className="mr-seg" role="group" aria-label="Report display">
+              <button type="button" aria-pressed={reading} onClick={() => setReading(true)} title="How the report reads, with values filled in">Preview</button>
+              <button type="button" aria-pressed={!reading} onClick={() => setReading(false)} title="Write and change the text">Edit text</button>
+            </div>
+            <span className="mr-status" role="status">
+              {busy ? "Working…" : saved && current ? `Saved · version ${current.revision_number} · author: user` : current ? `Editing version ${current.revision_number}` : "Not saved yet"}
+            </span>
+            <span className="mr-spacer" />
+            <EvidenceToggle className="mr-button mr-evidence" open={evidenceOpen} controls={evidenceId} onToggle={() => setEvidenceOpen(!evidenceOpen)} />
+            <button type="button" className="mr-button" disabled={busy} onClick={() => void newDraft()} title="Start again from the run's current evidence">
+              New draft
+            </button>
+            <button type="button" className="mr-button mr-button--primary" disabled={!title.trim() || !text.trim() || saved} onClick={() => void save()}>
+              {current ? "Save report revision" : "Save manual report"}
+            </button>
           </div>
-          {reading && <ReportReadingView text={text} facts={evidence} />}
-          <label className="manual-field" hidden={reading}>
-            Report text
-            <textarea
-              aria-label="Report text"
-              maxLength={2_000_000}
-              rows={10}
-              value={text}
-              onChange={(event) => {
-                edited();
-                setText(event.target.value);
-              }}
-            />
-          </label>
-          {limitations.map((line, index) => <p key={index}>{line}</p>)}
-          <button type="button" disabled={!title.trim() || !text.trim() || saved} onClick={() => void save()}>
-            {current ? "Save report revision" : "Save manual report"}
-          </button>
+
+          {reading ? (
+            <article className="mr-paper">
+              <ReportReadingView text={text} facts={evidence} />
+            </article>
+          ) : (
+            <div className="mr-editor">
+              <p className="mr-hint">
+                Write freely. Numbers are kept as markers like <code>[[v:f_…]]</code> ({markers.length} here) and are filled from the
+                evidence when the report is shown or exported, so they stay exact; delete a marker to drop its number.
+              </p>
+              <label className="manual-field">
+                <span className="ws-visually-hidden">Report text</span>
+                <textarea
+                  aria-label="Report text"
+                  maxLength={2_000_000}
+                  rows={22}
+                  value={text}
+                  onChange={(event) => {
+                    edited();
+                    setText(event.target.value);
+                  }}
+                />
+              </label>
+              {markers.length > 0 && (
+                <details className="mr-legend">
+                  <summary>What each marker shows ({markers.length})</summary>
+                  <dl>
+                    {markers.map(({ marker, fact }) => (
+                      <div key={marker} data-missing={!fact || undefined}>
+                        <dt><code>{marker}</code></dt>
+                        <dd>{fact ? `${factLabel(fact)}: ${factValue(fact)}` : "Names no single selected fact; it will be refused on save."}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                </details>
+              )}
+            </div>
+          )}
+
+          {limitations.length > 0 && (
+            <details className="mr-limits">
+              <summary>Limits of this evidence ({limitations.length})</summary>
+              <ul>{limitations.map((line, index) => <li key={index}>{line}</li>)}</ul>
+            </details>
+          )}
 
           {saved && current && (
-            <section aria-label="Saved manual report">
-              <p role="status">Saved · version {current.revision_number} · author: user</p>
-              <h3>{current.title}</h3>
-              <ReportReadingView text={current.text} facts={current.facts} />
-              <p>Exports contain the saved version and its computed evidence.</p>
+            <section aria-label="Saved manual report" className="mr-saved">
+              <span>Download version {current.revision_number}:</span>
               {EXPORTS.map(({ format, label }) => (
-                <a key={format} href={reportExportUrl(projectRoot, runId, current.id, format)} download>{label}</a>
+                <a key={format} className="mr-button" href={reportExportUrl(projectRoot, runId, current.id, format)} download>{label}</a>
               ))}
             </section>
           )}
         </fieldset>
 
-        <ReportSources>
+        <ReportSources open={evidenceOpen} id={evidenceId}>
           <fieldset disabled={busy || !draft}>
             <h3>Scope</h3>
             <details>
@@ -227,7 +259,7 @@ export function ManualReportPanel({ projectRoot, runId }: { projectRoot: string;
                 </label>
               ))}
             </details>
-            <h3>Manual report history</h3>
+            <h3>Saved versions</h3>
             {history.length === 0 ? (
               <p>No saved manual reports yet.</p>
             ) : (

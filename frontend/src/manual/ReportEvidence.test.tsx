@@ -15,7 +15,10 @@ it("handles Python float representations in actual generated drafts", () => {
 });
 it("never replaces an edited interpretation or unknown citation with a stored fact", () => {
   render(<ReportReadingView text="- My own interpretation: 0 [[c:f_x]]" facts={[fact]}/>);
-  expect(screen.getByText("- My own interpretation: 0 [[c:f_x]]")).toBeVisible();
+  // The person's words stay; the citation becomes a source marker, and the
+  // stored p-value is not substituted for their "0".
+  expect(screen.getByRole("listitem")).toHaveTextContent(/My own interpretation: 0\s*source/);
+  expect(screen.queryByText("< 0.001")).toBeNull();
 });
 it("distinguishes missing, false and numerical zero", () => {
   expect(factValue({...fact, value: null})).toBe("Not reported");
@@ -34,4 +37,27 @@ it("keeps generated model ownership identifiers out of the reading surface", () 
  const internal = {...fact,field:"post_estimation/lincom/model_run_id",label:"post estimation · model run id",value:"run-internal"};
  render(<ReportReadingView text="- post estimation · model run id: run-internal [[c:f_x]]" facts={[internal]}/>);
  expect(screen.getByText("run-internal")).not.toBeVisible();
+});
+
+it("reads a drafted report: headings, lists and values filled from the evidence", () => {
+  const estimate = { ...fact, id: "f_e", field: "coefficient/x/estimate", label: "coefficient · x · estimate", value: 2564.322 };
+  const text = "# Analysis report\n\n## ols\n\nModel of **wage**.\n\n- **x**: [[v:f_e]] (p [[v:f_x]])\n- gone: [[v:f_missing]]";
+  render(<ReportReadingView text={text} facts={[fact, estimate]} />);
+  expect(screen.getByRole("heading", { name: "Analysis report" })).toBeVisible();
+  expect(screen.getByRole("heading", { name: "ols" })).toBeVisible();
+  const [first, second] = screen.getAllByRole("listitem");
+  expect(first).toHaveTextContent("x: 2,564 (p < 0.001)");
+  expect(screen.getByText("2,564")).toHaveAttribute("title", expect.stringContaining("exact value 2564.322"));
+  expect(second).toHaveTextContent("gone: value unavailable");
+  expect(screen.queryByText(/\[\[v:/)).toBeNull();
+});
+
+it("a marker may name its fact by a unique prefix, never an ambiguous one", async () => {
+  const { resolveFact } = await import("./ReportEvidence");
+  const a = { ...fact, id: "f_abcdef1234aa" };
+  const b = { ...fact, id: "f_abcdef1234bb" };
+  const byId = new Map([[a.id, a], [b.id, b]]);
+  expect(resolveFact("f_abcdef1234a", byId)).toBe(a);
+  expect(resolveFact("f_abcdef12", byId)).toBeUndefined();
+  expect(resolveFact("f_abc", byId)).toBeUndefined();
 });

@@ -266,7 +266,7 @@ describe("ReportView", () => {
     fireEvent.click(await screen.findByRole("button", {name: /generate report/i}));
     expect(await screen.findByTestId("report-body")).toHaveTextContent("Result");
     expect(screen.getAllByTestId("report-body")).toHaveLength(1);
-    expect(screen.getByRole("button", {name: "Sources"})).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("button", {name: "Evidence"})).toHaveAttribute("aria-expanded", "false");
   });
 
   it("generate renders prose with verified chips and flags unknown ids", async () => {

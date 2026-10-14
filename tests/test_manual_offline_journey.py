@@ -176,7 +176,9 @@ def test_http_manual_recode_tests_iv_pca_and_report_without_provider(tmp_path, m
 
     original_model = (model_root / "model_results" / f"{model['model_id']}.json").read_bytes()
     save = {"id": "mrpt_offline_journey", "source_fingerprint": draft["source_fingerprint"],
-            "title": "Offline analysis", "text": "User interpretation of the registered test and PCA evidence.",
+            "title": "Offline analysis",
+            "text": "User interpretation of the registered test and PCA evidence: [[v:%s]]." % next(
+                fact["id"] for fact in selected if isinstance(fact["value"], float)),
             "fact_ids": [fact["id"] for fact in selected], "figure_ids": []}
     saved = client.post(f"/runs/{source_run}/manual-reports", params=params, json=save)
     assert saved.status_code == 200, saved.text
@@ -187,19 +189,22 @@ def test_http_manual_recode_tests_iv_pca_and_report_without_provider(tmp_path, m
     assert history.status_code == 200 and history.json()["reports"] == [record]
     exported = client.get(f"/runs/{source_run}/manual-reports/{save['id']}/export", params={**params, "format": "html"})
     assert exported.status_code == 200, exported.text
-    assert "User interpretation" in exported.text and "Computed evidence" in exported.text
+    assert "User interpretation" in exported.text and "Evidence behind the numbers" in exported.text
     assert any(str(fact["value"]) in exported.text for fact in selected if isinstance(fact["value"], float))
     # A second immutable, run-bound report preserves fitted IV coefficient
     # evidence; cross-run report aggregation is not silently invented here.
     model_snapshot = model_draft.json()
     model_facts = [fact for fact in model_snapshot["facts"] if fact["field"].startswith("coefficient/")]
+    # A report shows only its own run's values; the first report's text
+    # shows a fact of the other run and would be refused here.
     model_save = {**save, "id": "mrpt_offline_model", "source_fingerprint": model_snapshot["source_fingerprint"],
+                  "text": "User interpretation of the IV coefficients.",
                   "fact_ids": [fact["id"] for fact in model_facts]}
     model_saved = client.post(f"/runs/{model_run}/manual-reports", params=params, json=model_save)
     assert model_saved.status_code == 200, model_saved.text
     assert {fact["id"]: fact for fact in model_saved.json()["record"]["facts"]} == {fact["id"]: fact for fact in model_facts}
     model_export = client.get(f"/runs/{model_run}/manual-reports/{model_save['id']}/export", params={**params, "format": "html"})
-    assert model_export.status_code == 200 and "Computed evidence" in model_export.text
+    assert model_export.status_code == 200 and "Evidence behind the numbers" in model_export.text
     assert (model_root / "model_results" / f"{model['model_id']}.json").read_bytes() == original_model
 
 

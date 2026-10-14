@@ -51,9 +51,13 @@ export function ReportView({ projectRoot, focusRequest = 0 }: { projectRoot?: st
   if (mode !== "new") return <AIReportView projectRoot={projectRoot} focusRequest={focusRequest} />;
   return (
     <>
-      <div className="manual-actions" role="group" aria-label="Report writing mode">
-        <button type="button" aria-pressed={writer === "manual"} onClick={() => setWriter("manual")}>Manual report</button>
-        <button type="button" aria-pressed={writer === "ai"} onClick={() => setWriter("ai")}>AI-assisted report</button>
+      <div className="report-writer" role="group" aria-label="Report writing mode">
+        <button type="button" aria-pressed={writer === "manual"} title="Write from the computed evidence; no language model" onClick={() => setWriter("manual")}>
+          Write by hand
+        </button>
+        <button type="button" aria-pressed={writer === "ai"} title="Draft with the Agent from the same evidence" onClick={() => setWriter("ai")}>
+          With AI
+        </button>
       </div>
       {writer === "ai" ? (
         <AIReportView projectRoot={projectRoot} focusRequest={focusRequest} />
