@@ -10,14 +10,14 @@ INTEGRATION
 
 ## Metrics
 
-- Failure frequency: 12/60 (20.0%; 20.0 per 100 events)
+- Failure frequency: 12/61 (19.7%; 19.7 per 100 events)
 - Repeat rate: 0/12 (0.0%)
 - Recurrence rate: 0/12 (0.0%)
 - MTTR: median=0 ms (sample=8; unresolved=4)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: 0/2 (0.0%)
+- Gate waste rate: 0/3 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0; coverage=0/2)
 
@@ -173,3 +173,4 @@ INTEGRATION
 - #58: `ab0d3818-0bf6-4478-9138-b12a82604f89` | 2026-10-14T17:52:33.000Z | REVIEW/user_review_6_confirmed_rerun_invisible | incident=`ad5f7817-a58f-47c7-80a2-7b555bdbfa2a` | lesson_key=`say-where-the-result-went` | event_sha256=`9e9979758b33a23ced584e6dbcf01f6590bd4adb23cc522e3513bca82d344702`
 - #59: `459691b3-1fa0-4bc9-b503-7367f407f450` | 2026-10-14T18:36:31.000Z | STATE_CHANGE/reopen_for_user_reviews_and_release | incident=`74a155b4-4832-4311-9a7e-fe484a744e27` | lesson_key=`reopen-when-work-continues` | event_sha256=`4a06d8f545e3b4ec1e7d41e11a824582d45bd1ae887bb1f14f814e2417f75e5b`
 - #60: `77976ccc-5ac2-49b9-8790-24db5a1a3615` | 2026-10-14T18:45:57.000Z | REVIEW/live_deepseek_agent_paths_before_release | incident=`0d095d45-c3ba-4119-bd4b-ff2f4b9a061e` | lesson_key=`live-runs-find-contract-contradictions` | event_sha256=`b1bf0ed31c9b16778363a9065ffb8ff17585bf13a31541c3dd03ef6c88b01564`
+- #61: `98805722-572a-4af6-9c40-c67ce58e0382` | 2026-10-14T21:31:41.000Z | GATE/release_gate_passed | incident=`14af25b0-f6c6-4fb6-95bc-a314d14ee061` | lesson_key=`search-tests-before-removing-dead-code` | event_sha256=`e6cc8456324ea8809c007952e191e8ddb4a2c80e1b2faa329244de51a1fd2ace`
