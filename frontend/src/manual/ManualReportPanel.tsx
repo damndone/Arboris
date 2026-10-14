@@ -3,7 +3,7 @@
 // stay read-only and cited. Every save is a new version linked to the one it
 // revises, and exports carry that saved version with its evidence.
 
-import { useEffect, useId, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { AnalysisDisclosure } from "../report/AnalysisDisclosure";
 import { EvidenceToggle, ReportSources } from "../report/ReportSources";
 import { reportDraft, reportExportUrl, reportHistory, saveReport, type Draft, type Report } from "./manualApi";
@@ -34,14 +34,16 @@ export function ManualReportPanel({ projectRoot, runId }: { projectRoot: string;
   const [error, setError] = useState("");
   // One id per unsaved edit: a retried save is the same save.
   const [evidenceOpen, setEvidenceOpen] = useState(false);
+  // A run can carry thousands of facts: the list renders only while open.
+  const [factsOpen, setFactsOpen] = useState(false);
   const evidenceId = useId();
   const saveId = useRef(newSaveId());
   const pending = useRef(false);
 
-  const edited = () => {
+  const edited = useCallback(() => {
     setSaved(false);
     saveId.current = newSaveId();
-  };
+  }, []);
   const startFrom = (next: Draft) => {
     setDraft(next);
     setCurrent(null);
@@ -120,6 +122,11 @@ export function ManualReportPanel({ projectRoot, runId }: { projectRoot: string;
   const figureEvidence = current?.figures ?? draft?.figures ?? [];
   const limitations = current?.limitations ?? draft?.limitations ?? [];
   const choose = (list: string[], id: string, on: boolean) => (on ? [...list, id] : list.filter((value) => value !== id));
+  const selectedFacts = useMemo(() => new Set(facts), [facts]);
+  const toggleFact = useCallback((id: string, on: boolean) => {
+    edited();
+    setFacts((old) => choose(old, id, on));
+  }, [edited]);
 
   const markers = markersIn(text, evidence);
   return (
@@ -222,25 +229,9 @@ export function ManualReportPanel({ projectRoot, runId }: { projectRoot: string;
             </details>
             <AnalysisDisclosure projectRoot={projectRoot} runId={runId} />
             {current && <p>Saved evidence is fixed. Start a new draft to choose different evidence.</p>}
-            <details>
+            <details onToggle={(event) => setFactsOpen(event.currentTarget.open)}>
               <summary>Computed evidence ({facts.length} selected)</summary>
-              <div className="manual-facts">
-                {evidence.map((fact) => (
-                  <label key={fact.id}>
-                    <input
-                      type="checkbox"
-                      disabled={current !== null}
-                      checked={facts.includes(fact.id)}
-                      onChange={(event) => {
-                        edited();
-                        setFacts((old) => choose(old, fact.id, event.target.checked));
-                      }}
-                    />
-                    {factLabel(fact)}: {factValue(fact)}
-                    <small title={`Exact value: ${String(fact.value)}`}> · {fact.source.run_id} · {fact.field}</small>
-                  </label>
-                ))}
-              </div>
+              {factsOpen && <FactChecklist evidence={evidence} selected={selectedFacts} locked={current !== null} onToggle={toggleFact} />}
             </details>
             <details>
               <summary>Figures ({figures.length} selected)</summary>
@@ -275,3 +266,36 @@ export function ManualReportPanel({ projectRoot, runId }: { projectRoot: string;
     </section>
   );
 }
+
+type Fact = Draft["facts"][number];
+
+/** The selectable evidence. Memoised so typing in the report does not
+ * re-render one checkbox per computed value. */
+const FactChecklist = memo(function FactChecklist({
+  evidence,
+  selected,
+  locked,
+  onToggle,
+}: {
+  evidence: Fact[];
+  selected: ReadonlySet<string>;
+  locked: boolean;
+  onToggle: (id: string, on: boolean) => void;
+}) {
+  return (
+    <div className="manual-facts">
+      {evidence.map((fact) => (
+        <label key={fact.id}>
+          <input
+            type="checkbox"
+            disabled={locked}
+            checked={selected.has(fact.id)}
+            onChange={(event) => onToggle(fact.id, event.target.checked)}
+          />
+          {factLabel(fact)}: {factValue(fact)}
+          <small title={`Exact value: ${String(fact.value)}`}> · {fact.source.run_id} · {fact.field}</small>
+        </label>
+      ))}
+    </div>
+  );
+});
