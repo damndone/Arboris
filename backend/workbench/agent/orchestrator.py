@@ -2923,14 +2923,26 @@ class WorkbenchOrchestrator:
         precheck = getattr(self.context_provider, "precheck_model_options_patch", None)
         if precheck is None:
             return
+        # The proposal's own model_type is part of the patch: a run fitted
+        # with model_type "auto" needs it, and checking the patch against the
+        # source form alone refused every correct proposal (user review 6).
+        model_type = changes.get("model_type")
+        if isinstance(model_type, dict):
+            model_type = model_type.get("new")
         try:
-            precheck(owner_run_id=owner_run_id, patch=patch)
+            precheck(owner_run_id=owner_run_id, patch=patch,
+                     model_type=model_type if isinstance(model_type, str) and model_type else None)
         except ContractError as exc:
             code = getattr(exc, "code", "MODEL_OPTIONS_REJECTED")
+            hint = (
+                " The source run chose its model automatically: also set changes.model_type to the "
+                "executed family (for example \"ols\") as a plain string."
+                if code == "MODEL_OPTIONS_EXPLICIT_MODEL_REQUIRED" else ""
+            )
             # Visible on purpose: the code and the reason are what let an Agent
             # correct the patch instead of guessing at why it was refused.
             raise ToolVisibleError(
-                f"model_options rejected by the model pack ({code}): {exc}. "
+                f"model_options rejected by the model pack ({code}): {exc}.{hint} "
                 "Fix the patch against the contract's option_vocabulary and "
                 "cross_field_rules, then propose again."
             ) from exc
