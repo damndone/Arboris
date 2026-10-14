@@ -10,16 +10,16 @@ COMPLETED
 
 ## Metrics
 
-- Failure frequency: 7/48 (14.6%; 14.6 per 100 events)
-- Repeat rate: 0/7 (0.0%)
-- Recurrence rate: 0/7 (0.0%)
-- MTTR: median=0 ms (sample=5; unresolved=2)
+- Failure frequency: 10/53 (18.9%; 18.9 per 100 events)
+- Repeat rate: 0/10 (0.0%)
+- Recurrence rate: 0/10 (0.0%)
+- MTTR: median=0 ms (sample=7; unresolved=3)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
 - Gate waste rate: 0/2 (0.0%)
 - Same-state retry rate: N/A (sample=0)
-- Token waste: N/A (sample=0; coverage=0/1)
+- Token waste: N/A (sample=0; coverage=0/2)
 
 ## All failures
 
@@ -36,18 +36,26 @@ COMPLETED
 - #2 2026-10-08T20:11:56.377Z `manual_parity_gap_operations_agent_only`; cause_status: `known`; cause: The Agent workflow declares 109 step operations, but the UI can call only model runs (POST /runs), a few data operations and statistical exploration. There is no HTTP route that executes a workflow step without the Agent; the CLI calls WorkflowExecutor directly. Reports can only be created through the AI report route.; resolution: `open`; lesson: An Agent capability with no direct route is a feature the user cannot reach without a model; give every operation one declared execution path and let both the UI and the Agent call it.
 - #6 2026-10-08T21:13:07.916Z `dev_mode_open_time_cold_compile`; cause_status: `known`; cause: First open-time measurement put the new shell at 1.60x the classic one; it included Vite compiling the new modules on first request. Warm runs measured 1.00x and 0.93x.; resolution: `open`; lesson: Compare page timings only after a warm-up run, and settle budgets on production builds.
 - #48 2026-10-14T11:15:59.000Z `frozen_pack_option_vocabularies_published`; cause_status: `known`; cause: Frozen-pack options with closed vocabularies (alternative, method, missing_policy, trend, ...) were served as free text with nullable, so manual users guessed spellings and explicit null reached the kernel as the string None.; resolution: `resolved`; lesson: A served option vocabulary must be the object the kernel validates against, not a copy of it.
+- #51 2026-10-14T12:52:49.000Z `manual_report_typing_rerendered_all_facts`; cause_status: `known`; cause: The manual report draft carries every computed value (1,862 facts for the step-1 OLS run); each keystroke re-rendered one checkbox per fact with an O(n) includes() inside a collapsed section.; resolution: `resolved`; lesson: Measure input latency with the real run's evidence size; a fixture with three facts hides quadratic renders.
+- #52 2026-10-14T12:52:49.000Z `unbounded_oracle_evidence_and_uncollected_test`; cause_status: `known`; cause: Data-oracle script runs wrote a new oracle-* directory per script under tests/fixtures/script_export/local_runs with no pruning (1,048 directories, 169 MB in six days); a categorical result-contract test lived at backend/.../categorical/tests.py, a name pytest never collects.; resolution: `resolved`; lesson: Evidence writers and test files are found by scanning, not by remembering: grep for mkdtemp under tests/fixtures and def test_ under backend/.
+- #53 2026-10-14T12:52:49.000Z `honest_did_time_in_scipy_linprog_wrapper`; cause_status: `known`; cause: Profiled honest_rm (R-matching event test, 61 s): 86,439 linprog calls; HiGHS itself 7.9 s, scipy's per-call wrapper the rest (option validation alone 11.5 s builds a HighsOptionsManager per option). The algorithm is a line-for-line port of R HonestDiD and was not changed.; resolution: `open`; lesson: Profile before optimising a numerically validated port: here the solver is fast and the wrapper is not, so the fix belongs at the call boundary, not in the algorithm.
 
 ## All waste
 
 - #5 2026-10-08T21:13:07.916Z `hidden_pane_froze_transitions_in_audit`; cause_status: `known`; cause: The contrast audit ran while the browser pane was hidden; CSS transitions do not advance there, so a theme switch left segmented controls at their light background and the audit reported 1.12 for selected items in dark.; resolution: `resolved`; lesson: Before measuring computed colours or sizes in a possibly hidden page, finish running transitions or the readings are their start values.
+- #50 2026-10-14T12:52:49.000Z `monolithic_bundle_and_dead_frontend_modules`; cause_status: `known`; cause: Every visit parsed one 1,653 kB chunk (507 kB gzip) including xlsx, the graph engine and every view; RunForm and six other modules plus 41 CSS classes were kept alive only by their own tests since v1.8.6.; resolution: `resolved`; lesson: A module or style kept alive only by its own test is dead; check reachability from the app, not from the test suite.
 
 ## Root causes and solutions
 
 - `every-agent-operation-has-a-direct-route`: occurrences=1; cause_status: `known`; root cause: The Agent workflow declares 109 step operations, but the UI can call only model runs (POST /runs), a few data operations and statistical exploration. There is no HTTP route that executes a workflow step without the Agent; the CLI calls WorkflowExecutor directly. Reports can only be created through the AI report route.; solution: `open`
 - `explicit-open-events`: occurrences=1; cause_status: `known`; root cause: The search button dispatched a synthetic Cmd+K, and project home did not mount the search palette at all, so the button did nothing there.; solution: `resolved`
 - `finish-transitions-before-measuring`: occurrences=1; cause_status: `known`; root cause: The contrast audit ran while the browser pane was hidden; CSS transitions do not advance there, so a theme switch left segmented controls at their light background and the audit reported 1.12 for selected items in dark.; solution: `resolved`
+- `measure-with-real-evidence-size`: occurrences=1; cause_status: `known`; root cause: The manual report draft carries every computed value (1,862 facts for the step-1 OLS run); each keystroke re-rendered one checkbox per fact with an O(n) includes() inside a collapsed section.; solution: `resolved`
 - `portal-window-overlays`: occurrences=1; cause_status: `known`; root cause: The new top bar uses backdrop-filter; that makes it the containing block for position:fixed descendants, so the create-project dialog opened from the project menu was laid out inside the 48 px bar and clipped.; solution: `resolved`
+- `profile-validated-ports-at-the-call-boundary`: occurrences=1; cause_status: `known`; root cause: Profiled honest_rm (R-matching event test, 61 s): 86,439 linprog calls; HiGHS itself 7.9 s, scipy's per-call wrapper the rest (option validation alone 11.5 s builds a HighsOptionsManager per option). The algorithm is a line-for-line port of R HonestDiD and was not changed.; solution: `open`
 - `proposal-only-must-restrict-read-only-autorun`: occurrences=1; cause_status: `known`; root cause: Read-only auto-run policy ignores a turn that requests a reviewable proposal before execution.; solution: `open`
+- `reachability-from-app-not-tests`: occurrences=1; cause_status: `known`; root cause: Every visit parsed one 1,653 kB chunk (507 kB gzip) including xlsx, the graph engine and every view; RunForm and six other modules plus 41 CSS classes were kept alive only by their own tests since v1.8.6.; solution: `resolved`
+- `scan-for-unmanaged-evidence-and-hidden-tests`: occurrences=1; cause_status: `known`; root cause: Data-oracle script runs wrote a new oracle-* directory per script under tests/fixtures/script_export/local_runs with no pruning (1,048 directories, 169 MB in six days); a categorical result-contract test lived at backend/.../categorical/tests.py, a name pytest never collects.; solution: `resolved`
 - `serve-the-kernel-vocabulary-object`: occurrences=1; cause_status: `known`; root cause: Frozen-pack options with closed vocabularies (alternative, method, missing_policy, trend, ...) were served as free text with nullable, so manual users guessed spellings and explicit null reached the kernel as the string None.; solution: `resolved`
 - `user-review-requirements-as-tests`: occurrences=1; cause_status: `known`; root cause: The completion commits removed the top-bar light/Auto/dark switch (74ac598f) and reverted the stage-open rule so the stage covered the map whenever nodes existed, both explicit user review requirements.; solution: `resolved`
 - `warm-up-before-timing-dev-builds`: occurrences=1; cause_status: `known`; root cause: First open-time measurement put the new shell at 1.60x the classic one; it included Vite compiling the new modules on first request. Warm runs measured 1.00x and 0.93x.; solution: `open`
@@ -61,22 +69,31 @@ COMPLETED
 - `every-agent-operation-has-a-direct-route`: line experience occurrence(s)=1
 - `explicit-open-events`: line experience occurrence(s)=1
 - `finish-transitions-before-measuring`: line experience occurrence(s)=1
+- `measure-with-real-evidence-size`: line experience occurrence(s)=1
 - `portal-window-overlays`: line experience occurrence(s)=1
+- `profile-validated-ports-at-the-call-boundary`: line experience occurrence(s)=1
 - `proposal-only-must-restrict-read-only-autorun`: line experience occurrence(s)=1
+- `reachability-from-app-not-tests`: line experience occurrence(s)=1
+- `scan-for-unmanaged-evidence-and-hidden-tests`: line experience occurrence(s)=1
 - `serve-the-kernel-vocabulary-object`: line experience occurrence(s)=1
 - `user-review-requirements-as-tests`: line experience occurrence(s)=1
 - `warm-up-before-timing-dev-builds`: line experience occurrence(s)=1
 
 ## Future guidance
 
+- A module or style kept alive only by its own test is dead; check reachability from the app, not from the test suite.
+- A ratchet that only fails on increases lets savings silently erode; make it fail on decreases too, so the ceiling follows the count.
 - A served option vocabulary must be the object the kernel validates against, not a copy of it.
 - A timeout reported by a person is evidence to read from the session log before changing anything; here the log showed a whole-turn budget, not a network failure.
 - An Agent capability with no direct route is a feature the user cannot reach without a model; give every operation one declared execution path and let both the UI and the Agent call it.
 - Before measuring computed colours or sizes in a possibly hidden page, finish running transitions or the readings are their start values.
 - Compare page timings only after a warm-up run, and settle budgets on production builds.
+- Evidence writers and test files are found by scanning, not by remembering: grep for mkdtemp under tests/fixtures and def test_ under backend/.
 - Keep the controls users rely on when moving them; removing one is a regression even if it moved to Settings.
+- Measure input latency with the real run's evidence size; a fixture with three facts hides quadratic renders.
 - Overlays that must cover the window render through a portal; filters, transforms and backdrop-filters on an ancestor capture fixed positioning.
 - Placing old pieces into new regions is not a redesign; each region needs content designed for its size (a tree for a 280px map, a result view for the stage) before the user sees it.
+- Profile before optimising a numerically validated port: here the solver is fast and the wrapper is not, so the fix belongs at the call boundary, not in the algorithm.
 - Read-only is an impact classification, not permission to override a requested review boundary. Enforce execution policy independently of model prose.
 - Treat recorded user review requirements as regression tests: each one gets an automated assertion when it is first met.
 - Wire a control to an explicit event or API, and test it on every page it appears on.
@@ -132,3 +149,8 @@ COMPLETED
 - #46: `960b3611-ca38-4e24-9207-5828d8196072` | 2026-10-13T19:18:49.000Z | REVIEW/post_completion_review_ux_structure_performance | incident=`bf623c9c-4c83-4296-8c07-b7e27d5965a2` | lesson_key=`operation-words-at-the-declaration` | event_sha256=`84041b49b45838b06a2303d781b4dfd79e0ffc70aa4468e88d320c640d30bf75`
 - #47: `fb19fefa-2711-46c5-946d-e2165eb231ee` | 2026-10-14T06:47:44.000Z | REVIEW/user_review_3_data_topbar_node_report_agent | incident=`0c23c847-b6da-49e6-b4ba-63be99ed3fb2` | lesson_key=`read-the-session-log-before-tuning-timeouts` | event_sha256=`e2e4f5f6a3d8e4fec9edffb6cbb5d697337b8f9e17b8b6df728d2c67a824fd3a`
 - #48: `375a4e86-9ac7-4c0c-a489-326fde93881c` | 2026-10-14T11:15:59.000Z | GAP/frozen_pack_option_vocabularies_published | incident=`7246c31e-1a92-4444-b0bb-7aa383edda74` | lesson_key=`serve-the-kernel-vocabulary-object` | event_sha256=`b37375fb6dbca3eb78e0e3ab544c543cff805c15b7ced4e9492070d4ba74603f`
+- #49: `6af781ca-e4d3-4fd3-b98e-01b5b5120437` | 2026-10-14T12:53:03.000Z | REVIEW/rereview_of_v162_v1811_evaluations_recommended_items | incident=`238aedab-e8db-407d-9815-a4988e884414` | lesson_key=`ratchets-follow-reductions` | event_sha256=`b60e6c0ecf4b09beecfbab8b953b3221656db607d2a75023023ae9e6c548932b`
+- #50: `39d66574-5254-4e6c-a87f-ef0a5465dce7` | 2026-10-14T12:52:49.000Z | WASTE/monolithic_bundle_and_dead_frontend_modules | incident=`491a4a51-efa2-4bee-ad6e-15506a30e27a` | lesson_key=`reachability-from-app-not-tests` | event_sha256=`2d99990729655e4eb44b0b783ca41c585a98a45bc4f79293bfb5886ffd29f95b`
+- #51: `f9be0336-e6af-4950-aa5e-88fe3511eae7` | 2026-10-14T12:52:49.000Z | GAP/manual_report_typing_rerendered_all_facts | incident=`109170aa-d9ea-49c2-83a3-6a9c437ac987` | lesson_key=`measure-with-real-evidence-size` | event_sha256=`4de331d21989cc55734531bd91b1e2f7bbbd39d8d814dc164c6785b3ec29c96c`
+- #52: `b5b2fab2-8298-4b6b-9be5-22e2d469adcc` | 2026-10-14T12:52:49.000Z | GAP/unbounded_oracle_evidence_and_uncollected_test | incident=`64aa991e-5231-4232-8e46-21d82fa5c3a8` | lesson_key=`scan-for-unmanaged-evidence-and-hidden-tests` | event_sha256=`0748388a715b7b9e03dcce5d97e60cac9d3ef13d2ac73eea7f4b1c77e48ba060`
+- #53: `88f9418a-e5b9-4cc9-bb4e-2d15919a1bf2` | 2026-10-14T12:52:49.000Z | GAP/honest_did_time_in_scipy_linprog_wrapper | incident=`77bc11ef-b4b3-4efc-b039-43f9a2e16b08` | lesson_key=`profile-validated-ports-at-the-call-boundary` | event_sha256=`71335a462902fd205ced224de4194b9cbdbf3b90dfc3f87082c027ae3f8c0915`
