@@ -252,13 +252,23 @@ class JsonlSessionRepository:
 
         branch: list[SessionTreeEntry] = []
         visited: set[EntryRef] = set()
-        while current is not None:
-            if current in visited:
-                raise ValueError("cycle detected in agent session tree")
-            visited.add(current)
-            entry = self.get_entry(current)
-            branch.append(entry)
-            current = entry.parent_ref
+        # Each session file is read once per call, not once per entry: the
+        # branch is rebuilt every model step and grows with the conversation.
+        indexes: dict[str, dict[str, SessionTreeEntry]] = {}
+        with self._lock:
+            while current is not None:
+                if current in visited:
+                    raise ValueError("cycle detected in agent session tree")
+                visited.add(current)
+                index = indexes.get(current.session_id)
+                if index is None:
+                    index = {entry.entry_id: entry for entry in self._read_entries(current.session_id)}
+                    indexes[current.session_id] = index
+                entry = index.get(current.entry_id)
+                if entry is None:
+                    raise KeyError(f"unknown session entry: {current.session_id}/{current.entry_id}")
+                branch.append(entry)
+                current = entry.parent_ref
         branch.reverse()
         return branch
 
