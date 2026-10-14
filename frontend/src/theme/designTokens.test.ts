@@ -12,7 +12,9 @@ import { describe, expect, test } from "vitest";
 
 const SRC = "src";
 const TOKENS = "src/theme/tokens.css";
-const INLINE_STYLE_CEILING = 934;
+// Only goes down (v1.9.0: 934 -> 856). When a change removes inline styles,
+// lower this to the new count so the saving is kept.
+const INLINE_STYLE_CEILING = 856;
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
@@ -220,6 +222,8 @@ describe("colour and inline-style ratchets", () => {
   });
 
   test("inline styles only go down", () => {
-    expect(inlineStyleCount()).toBeLessThanOrEqual(INLINE_STYLE_CEILING);
+    const count = inlineStyleCount();
+    expect(count, "new inline styles: use a class and tokens instead").toBeLessThanOrEqual(INLINE_STYLE_CEILING);
+    expect(count, "inline styles went down: lower INLINE_STYLE_CEILING to this count").toBe(INLINE_STYLE_CEILING);
   });
 });
