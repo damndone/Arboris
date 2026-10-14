@@ -103,7 +103,7 @@ import {
   applyAgentNavigationRef,
 } from "./agent/agentNavigation";
 import { registerBuiltinFeatureViews } from "./agent/builtinFeatureViews";
-import { NotebookRouteView } from "../notebook/NotebookRouteView";
+import { LazyView, NotebookRouteView } from "./lazyViews";
 import type { NotebookMaterializationResponse } from "../notebook/notebookApi";
 
 type PendingFocusTarget = {
@@ -316,8 +316,8 @@ interface WorkbenchRouteContainerProps {
   runId: string;
 }
 
-/** Legacy per-run entry point (runDetail.tsx / LineageRouteContainer.tsx still
- *  pass a required runId). Same component; runId becomes the focus hint. */
+/** Legacy per-run entry point (runDetail.tsx still passes a required runId).
+ *  Same component; runId becomes the focus hint. */
 export function WorkbenchRouteContainer({
   projectRoot,
   runId,
@@ -1017,12 +1017,14 @@ function NotebookOnlyShell({
           Graph
         </button>
       </div>
-      <NotebookRouteView
-        projectRoot={projectRoot}
-        activeRunId={activeRunId}
-        onOpenMemorySettings={onOpenMemorySettings}
-        onMaterializedDraft={onMaterializedDraft}
-      />
+      <LazyView>
+        <NotebookRouteView
+          projectRoot={projectRoot}
+          activeRunId={activeRunId}
+          onOpenMemorySettings={onOpenMemorySettings}
+          onMaterializedDraft={onMaterializedDraft}
+        />
+      </LazyView>
     </div>
   );
 }

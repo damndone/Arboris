@@ -3,7 +3,7 @@
 // V1.5.2 P3 — container + view switcher integration.
 //
 // The container's data-loading path is already covered by
-// `lineage/LineageRouteContainer.test.tsx` (it delegates here). This
+// `WorkbenchRouteContainer.perRun.test.tsx`. This
 // file adds the V1.5.2-specific behaviour:
 //   - topbar renders the three view tabs
 //   - switching view via topbar updates URL `?view=`

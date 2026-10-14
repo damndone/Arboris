@@ -4,7 +4,7 @@
 
 import { useNavigate } from "react-router-dom";
 import type { NotebookMaterializationResponse } from "../notebook/notebookApi";
-import { NotebookRouteView } from "../notebook/NotebookRouteView";
+import { LazyView, NotebookRouteView } from "../workbench/lazyViews";
 import { WorkbenchHomeView } from "../workbench/views/WorkbenchHomeView";
 import { rootToSlug } from "../workbench/projectSlug";
 import type { ViewMode } from "../workbench/state/urlSchema";
@@ -63,12 +63,14 @@ export function WorkspaceProjectStart({
             onOpenProject={(root) => navigate(`/p/${rootToSlug(root)}/graph`)}
           />
         ) : current === "notebook" ? (
-          <NotebookRouteView
-            projectRoot={projectRoot}
-            activeRunId={notebookActiveRunId}
-            onOpenMemorySettings={onOpenSettings}
-            onMaterializedDraft={onMaterializedDraft}
-          />
+          <LazyView>
+            <NotebookRouteView
+              projectRoot={projectRoot}
+              activeRunId={notebookActiveRunId}
+              onOpenMemorySettings={onOpenSettings}
+              onMaterializedDraft={onMaterializedDraft}
+            />
+          </LazyView>
         ) : (
           <section className="ws-start" aria-labelledby="ws-start-title">
             <h1 id="ws-start-title" className="ws-start__title">Start with your data</h1>

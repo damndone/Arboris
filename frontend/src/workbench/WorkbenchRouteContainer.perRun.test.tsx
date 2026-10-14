@@ -1,8 +1,9 @@
-// frontend/src/lineage/LineageRouteContainer.test.tsx
+// frontend/src/workbench/WorkbenchRouteContainer.perRun.test.tsx
+// The per-run entry (runDetail ?tab=lineage) on the classic graph shell.
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { LineageRouteContainer } from "./LineageRouteContainer";
+import { WorkbenchRouteContainer } from "./WorkbenchRouteContainer";
 
 // ────────────────────────────────────────────────────────────────────
 // Fetch mock infra (same shape as useGraphData.test.ts)
@@ -75,7 +76,7 @@ function renderContainer(path = "/") {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <LocationProbe />
-      <LineageRouteContainer projectRoot="/proj" runId="r1" />
+      <WorkbenchRouteContainer projectRoot="/proj" runId="r1" />
     </MemoryRouter>,
   );
 }
@@ -84,7 +85,7 @@ function renderContainer(path = "/") {
 // Tests
 // ────────────────────────────────────────────────────────────────────
 
-describe("LineageRouteContainer", () => {
+describe("WorkbenchRouteContainer per run", () => {
   it("loading branch: shows 'Loading lineage…' before fetch resolves", () => {
     fetchMock.mockImplementation(() => new Promise(() => {})); // never resolves
     renderContainer();

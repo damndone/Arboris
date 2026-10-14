@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import {
   Navigate,
   Outlet,
@@ -10,15 +10,19 @@ import {
   useParams,
   useSearchParams,
 } from "react-router-dom";
-import { RunDetailRoute } from "./runDetail";
 import { ThemeProvider, ThemeToggle } from "./theme";
-import { DraftGraphRoute } from "./pipelineDrafts/DraftGraphRoute";
 import { LauncherRoute } from "./launcher/LauncherRoute";
-import { WorkbenchHome } from "./workbench/WorkbenchRouteContainer";
+import { ViewLoading } from "./workbench/lazyViews";
 import { rootToSlug, slugToRoot } from "./workbench/projectSlug";
 import { useWorkspaceMode } from "./workspace/workspaceMode";
 import "./theme/tokens.css";
 import "./styles.css";
+
+// Each route loads on first visit: the launcher does not parse the workbench,
+// and a project does not parse the legacy run page or the draft graph.
+const WorkbenchHome = lazy(() => import("./workbench/WorkbenchRouteContainer").then((m) => ({ default: m.WorkbenchHome })));
+const RunDetailRoute = lazy(() => import("./runDetail").then((m) => ({ default: m.RunDetailRoute })));
+const DraftGraphRoute = lazy(() => import("./pipelineDrafts/DraftGraphRoute").then((m) => ({ default: m.DraftGraphRoute })));
 
 export function validatePanelPrediction(s: {
   modelType: string;
@@ -323,7 +327,9 @@ function AppShell() {
       )}
 
       <div className="workbench-outlet">
-        <Outlet context={context} />
+        <Suspense fallback={<ViewLoading />}>
+          <Outlet context={context} />
+        </Suspense>
       </div>
     </Root>
   );

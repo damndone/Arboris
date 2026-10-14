@@ -1469,3 +1469,12 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
     grid-template-columns: 1fr;
   }
 }
+
+/* v1.9.0 — a view that loads on first use holds its space while it arrives. */
+.wb-view-loading {
+  flex: 1;
+  min-height: 0;
+  padding: var(--space-6);
+  color: var(--label-secondary);
+  font-size: var(--text-body);
+}

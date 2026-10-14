@@ -1,5 +1,4 @@
 import type { ResponseOf, Schema } from "./apiTypes";
-import * as XLSX from "xlsx";
 import type { GraphResponse } from "./lineage/types";
 import type { HeadSetResponse } from "./lineage/api/graphViewTypes";
 import type { ManualRerunPatch } from "./lineage/detail/sections/manualRerunPatch";
@@ -606,6 +605,9 @@ export async function previewFile(
             reader.onerror = () => reject(reader.error ?? new Error("Failed to read file"));
             reader.readAsArrayBuffer(file);
           });
+    // Loaded on first use: the spreadsheet reader is the largest dependency
+    // in the app and only this preview needs it.
+    const XLSX = await import("xlsx");
     const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
     sheetNames = workbook.SheetNames;
     selectedSheet = sheetName ?? workbook.SheetNames[0];
