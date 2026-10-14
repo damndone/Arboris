@@ -6,11 +6,11 @@
 
 ## Final status
 
-CONTEXT_RESCOPED
+COMPLETED
 
 ## Metrics
 
-- Failure frequency: 6/29 (20.7%; 20.7 per 100 events)
+- Failure frequency: 6/31 (19.4%; 19.4 per 100 events)
 - Repeat rate: 0/6 (0.0%)
 - Recurrence rate: 0/6 (0.0%)
 - MTTR: median=217270 ms (sample=2; unresolved=4)
@@ -104,3 +104,5 @@ CONTEXT_RESCOPED
 - #27: `4010f235-e816-46d0-a791-41f587251b13` | 2026-10-10T23:02:19.862Z | STATE_CHANGE/context_rescope_required | incident=`67e44033-f2ad-4007-8cbc-56872fcbe453` | lesson_key=`context-pack-rescope` | event_sha256=`9c03ae40a14c05a66d137f37c4febfba2f38e0df46415d4bb91cc71815a5fed0`
 - #28: `b2c5786a-0751-408d-a14c-49e8ebf86c17` | 2026-10-10T23:02:19.882Z | STATE_CHANGE/context_rescoped | incident=`9b409f96-ff57-4d4c-83c9-dfa24128b7b9` | lesson_key=`context-pack-rescope` | event_sha256=`a29e3f6452fcccfae796ceaf25e67059a9a9c1e8f5c56f13c2e0eb3dd7097406`
 - #29: `ee488330-ecf2-49af-8cf8-db3f25611108` | 2026-10-10T23:04:56.923Z | GAP/notebook_state_reader | incident=`67280a19-23d3-4f38-afce-1539b436ad44` | lesson_key=`notebook-state-egress-contract` | event_sha256=`b474898af7613bf5bb174edc43da0d2e43772ef66bfab8d68b5d00b45a0d9e87`
+- #30: `e63ee625-f955-4b92-8e97-465252d47ca8` | 2026-10-14T18:34:08.000Z | STATE_CHANGE/released | incident=`c5d383bf-48f7-4615-ba52-e50596fd68a9` | lesson_key=`say-when-a-release-skips-the-gate` | event_sha256=`bd3a42508e4c01cf357730f7f52b1a0d71d7873867e583ec411a657339d03791`
+- #31: `d9cce125-fc8d-4c0f-ab77-e19ba2baa91e` | 2026-10-14T18:34:08.000Z | STATE_CHANGE/version_closed | incident=`d512cc82-a963-45c4-b723-2fa4c8743480` | lesson_key=`close-the-line-with-the-release` | event_sha256=`d6c4f76837aae4e1403a1a5bc2cbd0fea5aea04faa4faaf216a84224b007550c`
