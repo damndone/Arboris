@@ -135,9 +135,10 @@ def test_evidence_writers_use_the_managed_root():
         "test_script_export_public_integrity.py",
         "test_script_export_v1811_statistical_adapters.py",
         "test_admission_oracle_linear_mixed_effects.py",
+        "test_script_export_data_oracles.py",
     ):
         source = (evidence_retention.REPO / "tests" / name).read_text(encoding="utf-8")
-        assert '"local/v1811-' not in source, name
+        assert '"local/v1811-' not in source and "local_runs" not in source, name
         assert "run_dir(" in source, name
 
 

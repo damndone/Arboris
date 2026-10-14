@@ -15,16 +15,18 @@ import pytest
 from workbench.data_operation_registry import data_operation_declarations
 from workbench.script_export.plan import LANGUAGES, ScriptPlan, ScriptSource, ScriptStep
 from test_script_export_render import renderer
+from evidence_retention import run_dir
 import native_runner
 
 NATIVE = ('subset', 'recode', 'rename', 'fill_missing', 'dedupe', 'merge', 'append', 'aggregate', 'reshape', 'lag', 'tsset')
-ROOT = Path(__file__).parent / 'fixtures/script_export/local_runs'
 STATA = Path('/Applications/Stata/StataMP.app/Contents/MacOS/stata-mp')
 
 
 def fresh_directory():
-    ROOT.mkdir(parents=True, exist_ok=True)
-    directory = Path(tempfile.mkdtemp(prefix='oracle-', dir=ROOT))
+    # One script per directory inside this session's managed evidence run
+    # (local/test-evidence/script-data-oracles/<session>, newest 3 kept,
+    # failed ones always).
+    directory = Path(tempfile.mkdtemp(prefix='oracle-', dir=run_dir('script-data-oracles')))
     print(f'Local script output: {directory}')
     return directory
 
