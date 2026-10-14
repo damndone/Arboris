@@ -10,10 +10,10 @@ COMPLETED
 
 ## Metrics
 
-- Failure frequency: 10/53 (18.9%; 18.9 per 100 events)
-- Repeat rate: 0/10 (0.0%)
-- Recurrence rate: 0/10 (0.0%)
-- MTTR: median=0 ms (sample=7; unresolved=3)
+- Failure frequency: 11/55 (20.0%; 20.0 per 100 events)
+- Repeat rate: 0/11 (0.0%)
+- Recurrence rate: 0/11 (0.0%)
+- MTTR: median=0 ms (sample=7; unresolved=4)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
@@ -39,6 +39,7 @@ COMPLETED
 - #51 2026-10-14T12:52:49.000Z `manual_report_typing_rerendered_all_facts`; cause_status: `known`; cause: The manual report draft carries every computed value (1,862 facts for the step-1 OLS run); each keystroke re-rendered one checkbox per fact with an O(n) includes() inside a collapsed section.; resolution: `resolved`; lesson: Measure input latency with the real run's evidence size; a fixture with three facts hides quadratic renders.
 - #52 2026-10-14T12:52:49.000Z `unbounded_oracle_evidence_and_uncollected_test`; cause_status: `known`; cause: Data-oracle script runs wrote a new oracle-* directory per script under tests/fixtures/script_export/local_runs with no pruning (1,048 directories, 169 MB in six days); a categorical result-contract test lived at backend/.../categorical/tests.py, a name pytest never collects.; resolution: `resolved`; lesson: Evidence writers and test files are found by scanning, not by remembering: grep for mkdtemp under tests/fixtures and def test_ under backend/.
 - #53 2026-10-14T12:52:49.000Z `honest_did_time_in_scipy_linprog_wrapper`; cause_status: `known`; cause: Profiled honest_rm (R-matching event test, 61 s): 86,439 linprog calls; HiGHS itself 7.9 s, scipy's per-call wrapper the rest (option validation alone 11.5 s builds a HighsOptionsManager per option). The algorithm is a line-for-line port of R HonestDiD and was not changed.; resolution: `open`; lesson: Profile before optimising a numerically validated port: here the solver is fast and the wrapper is not, so the fix belongs at the call boundary, not in the algorithm.
+- #55 2026-10-14T14:26:21.000Z `agent_conversation_never_compacted`; cause_status: `known`; cause: The Agent context builder reads 'compaction' entries but nothing writes them, so every turn resends the whole conversation; a long enough conversation will exceed the model's context window. The main Agent also has no long-term memory (domain memory is wired to the Notebook only) and no per-project instructions file.; resolution: `open`; lesson: A reader for a record type nothing writes is a feature that does not exist; check for the writer.
 
 ## All waste
 
@@ -47,6 +48,7 @@ COMPLETED
 
 ## Root causes and solutions
 
+- `check-for-the-writer`: occurrences=1; cause_status: `known`; root cause: The Agent context builder reads 'compaction' entries but nothing writes them, so every turn resends the whole conversation; a long enough conversation will exceed the model's context window. The main Agent also has no long-term memory (domain memory is wired to the Notebook only) and no per-project instructions file.; solution: `open`
 - `every-agent-operation-has-a-direct-route`: occurrences=1; cause_status: `known`; root cause: The Agent workflow declares 109 step operations, but the UI can call only model runs (POST /runs), a few data operations and statistical exploration. There is no HTTP route that executes a workflow step without the Agent; the CLI calls WorkflowExecutor directly. Reports can only be created through the AI report route.; solution: `open`
 - `explicit-open-events`: occurrences=1; cause_status: `known`; root cause: The search button dispatched a synthetic Cmd+K, and project home did not mount the search palette at all, so the button did nothing there.; solution: `resolved`
 - `finish-transitions-before-measuring`: occurrences=1; cause_status: `known`; root cause: The contrast audit ran while the browser pane was hidden; CSS transitions do not advance there, so a theme switch left segmented controls at their light background and the audit reported 1.12 for selected items in dark.; solution: `resolved`
@@ -66,6 +68,7 @@ COMPLETED
 
 ## New rules
 
+- `check-for-the-writer`: line experience occurrence(s)=1
 - `every-agent-operation-has-a-direct-route`: line experience occurrence(s)=1
 - `explicit-open-events`: line experience occurrence(s)=1
 - `finish-transitions-before-measuring`: line experience occurrence(s)=1
@@ -83,6 +86,7 @@ COMPLETED
 
 - A module or style kept alive only by its own test is dead; check reachability from the app, not from the test suite.
 - A ratchet that only fails on increases lets savings silently erode; make it fail on decreases too, so the ceiling follows the count.
+- A reader for a record type nothing writes is a feature that does not exist; check for the writer.
 - A served option vocabulary must be the object the kernel validates against, not a copy of it.
 - A timeout reported by a person is evidence to read from the session log before changing anything; here the log showed a whole-turn budget, not a network failure.
 - An Agent capability with no direct route is a feature the user cannot reach without a model; give every operation one declared execution path and let both the UI and the Agent call it.
@@ -95,6 +99,7 @@ COMPLETED
 - Placing old pieces into new regions is not a redesign; each region needs content designed for its size (a tree for a 280px map, a result view for the stage) before the user sees it.
 - Profile before optimising a numerically validated port: here the solver is fast and the wrapper is not, so the fix belongs at the call boundary, not in the algorithm.
 - Read-only is an impact classification, not permission to override a requested review boundary. Enforce execution policy independently of model prose.
+- Test layouts below the design width: 1512 px fit by 3 px, so any narrower window broke the row.
 - Treat recorded user review requirements as regression tests: each one gets an automated assertion when it is first met.
 - Wire a control to an explicit event or API, and test it on every page it appears on.
 - Words a person reads about an operation belong beside its declaration in the backend, with a drift test, so the UI never guesses from ids.
@@ -154,3 +159,5 @@ COMPLETED
 - #51: `f9be0336-e6af-4950-aa5e-88fe3511eae7` | 2026-10-14T12:52:49.000Z | GAP/manual_report_typing_rerendered_all_facts | incident=`109170aa-d9ea-49c2-83a3-6a9c437ac987` | lesson_key=`measure-with-real-evidence-size` | event_sha256=`4de331d21989cc55734531bd91b1e2f7bbbd39d8d814dc164c6785b3ec29c96c`
 - #52: `b5b2fab2-8298-4b6b-9be5-22e2d469adcc` | 2026-10-14T12:52:49.000Z | GAP/unbounded_oracle_evidence_and_uncollected_test | incident=`64aa991e-5231-4232-8e46-21d82fa5c3a8` | lesson_key=`scan-for-unmanaged-evidence-and-hidden-tests` | event_sha256=`0748388a715b7b9e03dcce5d97e60cac9d3ef13d2ac73eea7f4b1c77e48ba060`
 - #53: `88f9418a-e5b9-4cc9-bb4e-2d15919a1bf2` | 2026-10-14T12:52:49.000Z | GAP/honest_did_time_in_scipy_linprog_wrapper | incident=`77bc11ef-b4b3-4efc-b039-43f9a2e16b08` | lesson_key=`profile-validated-ports-at-the-call-boundary` | event_sha256=`71335a462902fd205ced224de4194b9cbdbf3b90dfc3f87082c027ae3f8c0915`
+- #54: `81f8f918-3ea2-44c1-adc6-2f88fa6477be` | 2026-10-14T14:26:21.000Z | REVIEW/user_review_4_topbar_ask_agent_self_description | incident=`2a57ae0c-8dad-4f83-9451-8ef08b32a7b5` | lesson_key=`test-layout-below-design-width` | event_sha256=`462ac1e4f8b849a5587ffe6b238ff5e9d75af7a8209601c3ac6c930dbd401f46`
+- #55: `23472880-887a-422a-892b-7abfc9d73b2e` | 2026-10-14T14:26:21.000Z | GAP/agent_conversation_never_compacted | incident=`5857ce13-413e-47a8-aa08-53f1fe6e56b4` | lesson_key=`check-for-the-writer` | event_sha256=`0ab892637bfedf2bc1a2be00ec1a0e148a8c9d21341d070c9a5f247749b6480f`
