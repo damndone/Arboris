@@ -86,16 +86,21 @@ export function PanelWindowControls({
       >
         <PanelWindowIcon name="pin" filled={pinned} />
       </button>
-      <button
-        type="button"
-        className="panel-window-controls__icon-button"
-        data-icon={collapsed ? "collapse-left" : "collapse-right"}
-        aria-label={`${collapsed ? "Expand" : "Collapse"} ${surface}`}
-        title={`${collapsed ? "Expand" : "Collapse"} ${surface}`}
-        onClick={collapsed ? onExpand : onCollapse}
-      >
-        <PanelWindowIcon name="collapse" direction={collapsed ? "left" : "right"} />
-      </button>
+      {/* Collapsing folds a floating window up to its title bar; a docked
+          panel has nothing to fold (user review 3). */}
+      {floating && (
+        <button
+          type="button"
+          className="panel-window-controls__icon-button"
+          data-icon={collapsed ? "expand" : "collapse"}
+          aria-label={`${collapsed ? "Expand" : "Collapse"} ${surface}`}
+          aria-expanded={!collapsed}
+          title={collapsed ? `Show the ${surface} again` : `Fold the ${surface} to its title bar`}
+          onClick={collapsed ? onExpand : onCollapse}
+        >
+          <PanelWindowIcon name="collapse" direction={collapsed ? "down" : "up"} />
+        </button>
+      )}
     </div>
   );
 }
@@ -107,7 +112,7 @@ function PanelWindowIcon({
 }: {
   name: "float" | "dock" | "pin" | "collapse";
   filled?: boolean;
-  direction?: "left" | "right";
+  direction?: "up" | "down";
 }) {
   if (name === "pin") {
     return (
@@ -126,15 +131,15 @@ function PanelWindowIcon({
 
   if (name === "collapse") {
     return (
-      <svg
-        width="14"
-        height="14"
-        viewBox="0 0 14 14"
-        aria-hidden="true"
-        focusable="false"
-        style={{ transform: direction === "left" ? "rotate(180deg)" : undefined }}
-      >
-        <path d="M4 2.5 10 7l-6 4.5Z" fill="currentColor" />
+      <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+        <path
+          d={direction === "down" ? "M3.5 6 8 10.5 12.5 6" : "M3.5 10 8 5.5l4.5 4.5"}
+          fill="none"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="1.6"
+        />
       </svg>
     );
   }

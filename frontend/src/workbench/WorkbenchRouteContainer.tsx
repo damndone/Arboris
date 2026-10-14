@@ -132,7 +132,10 @@ type PanelPosition = {
   y: number;
 };
 
-type ResizeCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
+// Corners resize both ways; edges resize one way (user review 3: resizing
+// only from four invisible corners was not discoverable).
+type ResizeCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right" | "top" | "right" | "bottom" | "left";
+const RESIZE_HANDLES: ResizeCorner[] = ["top", "right", "bottom", "left", "top-left", "top-right", "bottom-left", "bottom-right"];
 
 type NodePanelResizeState = {
   corner: ResizeCorner;
@@ -1606,14 +1609,14 @@ function WorkbenchShell({
     const deltaY = event.clientY - resize.startY;
     const growsLeft = resize.corner.includes("left");
     const growsTop = resize.corner.includes("top");
-    const width = Math.min(
-      Math.max(360, window.innerWidth - 16),
-      Math.max(360, resize.startWidth + (growsLeft ? -deltaX : deltaX)),
-    );
-    const height = Math.min(
-      Math.max(280, window.innerHeight - 56),
-      Math.max(280, resize.startHeight + (growsTop ? -deltaY : deltaY)),
-    );
+    const changesWidth = resize.corner !== "top" && resize.corner !== "bottom";
+    const changesHeight = resize.corner !== "left" && resize.corner !== "right";
+    const width = changesWidth
+      ? Math.min(Math.max(360, window.innerWidth - 16), Math.max(360, resize.startWidth + (growsLeft ? -deltaX : deltaX)))
+      : resize.startWidth;
+    const height = changesHeight
+      ? Math.min(Math.max(280, window.innerHeight - 56), Math.max(280, resize.startHeight + (growsTop ? -deltaY : deltaY)))
+      : resize.startHeight;
     const left = growsLeft
       ? Math.max(8, resize.startLeft + resize.startWidth - width)
       : resize.startLeft;
@@ -1896,10 +1899,11 @@ function WorkbenchShell({
             </div>
             <div className="node-panel-floating__body">{renderNodePanel(floatingNode)}</div>
           </div>
-          {!nodePanelCollapsed && (['top-left', 'top-right', 'bottom-left', 'bottom-right'] as ResizeCorner[]).map((corner) => (
+          {!nodePanelCollapsed && RESIZE_HANDLES.map((corner) => (
             <button
               key={corner}
               type="button"
+              tabIndex={-1}
               className={`node-panel-floating__resize-handle node-panel-floating__resize-handle--${corner}`}
               aria-label={`Resize node panel from ${corner}`}
               data-resize-corner={corner}

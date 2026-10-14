@@ -42,17 +42,16 @@ test("floating node controls use the Report review header baseline", () => {
   expect(floatingToolbar).toContain("align-items: flex-start !important;");
 });
 
-test("Workbench scroll surfaces use one light-gray scrollbar treatment", () => {
+test("scrollbars share one treatment and stay hidden until something scrolls", () => {
   const tokens = readFileSync("src/theme/tokens.css", "utf8");
+  const scrollbars = readFileSync("src/theme/scrollbars.css", "utf8");
   expect(tokens).toMatch(/--scrollbar-thumb: #C9C8C3;/);
   expect(tokens).toMatch(/--scrollbar-thumb: rgba\(196, 200, 206, 0\.72\);/);
-  expect(lineageStylesheet).toContain(
-    "scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);",
-  );
-  expect(lineageStylesheet).toContain("background: var(--scrollbar-thumb);");
-  expect(lineageStylesheet).toContain(".workbench-route");
-  expect(lineageStylesheet).toContain(".node-panel-floating");
-  expect(lineageStylesheet).toContain(".report-review-floating");
+  expect(scrollbars).toContain("scrollbar-color: transparent transparent;");
+  expect(scrollbars).toContain("[data-scrolling] {");
+  expect(scrollbars).toContain("scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);");
+  // No second, always-visible treatment left behind.
+  expect(lineageStylesheet).not.toContain("scrollbar-color");
 });
 
 test("floating node chrome uses compact square controls and four resize corners", () => {

@@ -411,7 +411,7 @@ describe("WorkbenchRouteContainer", () => {
 
     expect(screen.getByRole("button", { name: "Float node panel" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Pin node panel" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Collapse node panel" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Collapse node panel" })).toBeNull();
     expect(screen.getByRole("button", { name: /node actions/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Close" })).toBeNull();
     expect(screen.getByRole("button", { name: "Close Original OLS tab" })).toBeInTheDocument();

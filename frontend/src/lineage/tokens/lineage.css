@@ -365,19 +365,6 @@
 }
 .detail-drawer {
   color-scheme: inherit;
-  scrollbar-color: var(--label-tertiary) var(--bg-canvas);
-  scrollbar-width: thin;
-}
-.detail-drawer::-webkit-scrollbar {
-  width: 10px;
-}
-.detail-drawer::-webkit-scrollbar-track {
-  background: var(--bg-canvas);
-}
-.detail-drawer::-webkit-scrollbar-thumb {
-  background: var(--label-tertiary);
-  border: 2px solid var(--bg-canvas);
-  border-radius: 999px;
 }
 .run-rail__resizer:hover,
 .run-rail__resizer:focus-visible,
@@ -395,46 +382,7 @@
   flex: none;
 }
 
-/* Keep every Workbench reading surface and floating window on the same
- * restrained light-gray scrollbar. The compact tab strip below deliberately
- * hides its scrollbar and overrides this base treatment. */
-.workbench-route,
-.workbench-route *,
-.node-panel-floating,
-.node-panel-floating *,
-.report-review-floating,
-.report-review-floating * {
-  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
-  scrollbar-width: thin;
-}
-.workbench-route::-webkit-scrollbar,
-.workbench-route *::-webkit-scrollbar,
-.node-panel-floating::-webkit-scrollbar,
-.node-panel-floating *::-webkit-scrollbar,
-.report-review-floating::-webkit-scrollbar,
-.report-review-floating *::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-.workbench-route::-webkit-scrollbar-track,
-.workbench-route *::-webkit-scrollbar-track,
-.node-panel-floating::-webkit-scrollbar-track,
-.node-panel-floating *::-webkit-scrollbar-track,
-.report-review-floating::-webkit-scrollbar-track,
-.report-review-floating *::-webkit-scrollbar-track {
-  background: var(--scrollbar-track);
-}
-.workbench-route::-webkit-scrollbar-thumb,
-.workbench-route *::-webkit-scrollbar-thumb,
-.node-panel-floating::-webkit-scrollbar-thumb,
-.node-panel-floating *::-webkit-scrollbar-thumb,
-.report-review-floating::-webkit-scrollbar-thumb,
-.report-review-floating *::-webkit-scrollbar-thumb {
-  background: var(--scrollbar-thumb);
-  border: 2px solid transparent;
-  border-radius: 999px;
-  background-clip: padding-box;
-}
+/* Scrollbars: one global treatment in theme/scrollbars.css. */
 .run-rail__header {
   display: flex;
   align-items: baseline;

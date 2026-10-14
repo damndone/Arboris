@@ -190,3 +190,57 @@
     min-width: 0;
   }
 }
+
+/* Edges: thin strips along each side, inside the corners. */
+.node-panel-floating__resize-handle--top,
+.node-panel-floating__resize-handle--bottom {
+  left: 14px;
+  right: 14px;
+  width: auto;
+  height: 6px;
+  cursor: ns-resize;
+}
+
+.node-panel-floating__resize-handle--top {
+  top: -3px;
+}
+
+.node-panel-floating__resize-handle--bottom {
+  bottom: -3px;
+}
+
+.node-panel-floating__resize-handle--left,
+.node-panel-floating__resize-handle--right {
+  top: 14px;
+  bottom: 14px;
+  width: 6px;
+  height: auto;
+  cursor: ew-resize;
+}
+
+.node-panel-floating__resize-handle--left {
+  left: -3px;
+}
+
+.node-panel-floating__resize-handle--right {
+  right: -3px;
+}
+
+/* The bottom-right corner shows a grip, so resizing is discoverable. */
+.node-panel-floating__resize-handle--bottom-right::before {
+  content: "";
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid var(--label-tertiary);
+  border-bottom: 2px solid var(--label-tertiary);
+  border-bottom-right-radius: 3px;
+  opacity: 0.7;
+}
+
+.node-panel-floating__resize-handle--bottom-right:hover::before {
+  border-color: var(--tint);
+  opacity: 1;
+}
