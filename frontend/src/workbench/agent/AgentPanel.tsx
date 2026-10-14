@@ -294,6 +294,8 @@ export function AgentPanel({
     .slice(-3)
     .map((message) => toolStatusLine(message.content, message.name));
   const turns = buildTurns(agent.messages);
+  const pendingProposals = agent.proposals.filter((proposal) => proposal.status === "pending");
+  const settledProposals = agent.proposals.filter((proposal) => proposal.status !== "pending");
   const pinned = new Set((agent.chapters ?? []).map((chapter) => chapter.entry_id));
   useLayoutEffect(() => {
     const transcript = transcriptRef.current;
@@ -632,7 +634,25 @@ export function AgentPanel({
           aria-label="Agent actions"
           className="wb-agent-action-rail"
         >
-          {agent.proposals.map((proposal) => {
+          {/* Only what still waits for the person stays above the input;
+              confirmed or declined proposals fold into one line (review 6). */}
+          {settledProposals.length > 0 && (
+            <details className="wb-agent-settled" data-testid="agent-settled-proposals">
+              <summary>
+                {settledProposals.length === 1 ? "1 earlier proposal" : `${settledProposals.length} earlier proposals`}
+                {" · "}{settledProposals.map((proposal) => proposal.status).join(", ")}
+              </summary>
+              <ul>
+                {settledProposals.map((proposal) => (
+                  <li key={proposal.proposal_id} data-testid={`agent-proposal-${proposal.proposal_id}`}>
+                    <strong>{proposal.operation_id}</strong> · {proposal.status}
+                    {(proposal.readable ?? []).length > 0 && <span> · {(proposal.readable ?? []).join("; ")}</span>}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+          {pendingProposals.map((proposal) => {
         const pending = proposal.status === "pending";
         return (
           <article

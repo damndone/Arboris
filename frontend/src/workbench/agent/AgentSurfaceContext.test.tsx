@@ -776,7 +776,9 @@ describe("AgentSurfaceProvider", () => {
       "proposal-1",
       { revision: 1, fingerprint: "fingerprint-1", active_head_run_id: "run-a" },
     ));
-    expect(await screen.findByText("confirmed")).toBeInTheDocument();
+    // A settled proposal folds into one line instead of staying above the input.
+    expect(await screen.findByTestId("agent-settled-proposals")).toHaveTextContent("1 earlier proposal · confirmed");
+    expect(screen.queryByRole("button", { name: "Confirm proposal proposal-1" })).toBeNull();
   });
 
   it("confirms a linked proposal against its bound chain rather than another visible run", async () => {
@@ -807,7 +809,9 @@ describe("AgentSurfaceProvider", () => {
       "proposal-1",
       undefined,
     ));
-    expect(await screen.findByText("declined")).toBeInTheDocument();
+    // A settled proposal folds into one line instead of staying above the input.
+    expect(await screen.findByTestId("agent-settled-proposals")).toHaveTextContent("1 earlier proposal · declined");
+    expect(screen.queryByRole("button", { name: "Confirm proposal proposal-1" })).toBeNull();
   });
 
   it("revises a visible proposal through the scoped Agent API", async () => {

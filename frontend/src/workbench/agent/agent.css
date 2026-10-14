@@ -1192,3 +1192,21 @@
   opacity: 0.6;
   cursor: default;
 }
+
+/* v1.9.0 — confirmed or declined proposals fold into one line (review 6). */
+.wb-agent-settled {
+  color: var(--label-secondary);
+  font-size: var(--text-caption);
+}
+
+.wb-agent-settled > summary {
+  padding: 4px 2px;
+  cursor: pointer;
+}
+
+.wb-agent-settled ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 2px;
+}
