@@ -394,7 +394,14 @@ def _data_group() -> Any:
     return build_data_group(_param, _json_value, _fail)
 
 
+def _analyze_group() -> Any:
+    from .cli_analyze import build_analyze_group
+
+    return build_analyze_group(_json_value, _fail)
+
+
 _GENERATED_COMMANDS: dict[str, Callable[[], Any]] = {
+    "analyze": _analyze_group,
     "data": _data_group,
     "run": _run_command,
     "postestimation": _postestimation_group,

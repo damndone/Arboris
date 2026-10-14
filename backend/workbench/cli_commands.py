@@ -322,6 +322,21 @@ def preview_data_operation(
     return _manual_cli_request(project_root, {"mode": "preview", "request_id": identity, **semantic})
 
 
+def preview_operation(
+    project_root: Path, target: Mapping[str, Any], operation_id: str, spec: Mapping[str, Any],
+    *, request_id: str | None = None,
+) -> dict[str, Any]:
+    """Preview any catalog workflow operation on an explicit dataset or model target."""
+    from .canonical import sha256_canonical
+
+    semantic = {
+        "target": dict(target),
+        "steps": [{"step_id": "operation", "operation_id": operation_id, "spec": dict(spec)}],
+    }
+    identity = request_id if request_id is not None else "cli-analyze-" + sha256_canonical(semantic)[:32]
+    return _manual_cli_request(project_root, {"mode": "preview", "request_id": identity, **semantic})
+
+
 def confirm_data_operation(project_root: Path, request_id: str, preview_id: str, fingerprint: str) -> dict[str, Any]:
     """Confirm only the target and spec previously pinned by the service."""
     return _manual_cli_request(project_root, {
