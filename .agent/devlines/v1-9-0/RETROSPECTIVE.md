@@ -10,7 +10,7 @@ COMPLETED
 
 ## Metrics
 
-- Failure frequency: 6/46 (13.0%; 13.0 per 100 events)
+- Failure frequency: 6/47 (12.8%; 12.8 per 100 events)
 - Repeat rate: 0/6 (0.0%)
 - Recurrence rate: 0/6 (0.0%)
 - MTTR: median=0 ms (sample=4; unresolved=2)
@@ -66,6 +66,7 @@ COMPLETED
 
 ## Future guidance
 
+- A timeout reported by a person is evidence to read from the session log before changing anything; here the log showed a whole-turn budget, not a network failure.
 - An Agent capability with no direct route is a feature the user cannot reach without a model; give every operation one declared execution path and let both the UI and the Agent call it.
 - Before measuring computed colours or sizes in a possibly hidden page, finish running transitions or the readings are their start values.
 - Compare page timings only after a warm-up run, and settle budgets on production builds.
@@ -125,3 +126,4 @@ COMPLETED
 - #44: `b92f5729-ce02-4d61-a473-77cc538e5058` | 2026-10-13T08:19:56.962Z | STATE_CHANGE/agent_parent_bounds_resolved | incident=`c8ec96f8-126d-468d-bea3-0e2338145c12` | lesson_key=`parent-ref-layout-effect-order` | event_sha256=`88c925ffff5eb4ba7cfc5ee851021fef13fcc4c12360ee4669f6da1d4a26fbdd`
 - #45: `3d033d84-5307-460d-9622-85c9ce09e5ef` | 2026-10-13T19:18:49.000Z | ERROR/user_required_controls_regressed_by_completion | incident=`bf623c9c-4c83-4296-8c07-b7e27d5965a2` | lesson_key=`user-review-requirements-as-tests` | event_sha256=`1248249820ea9e9e2e29228c3486ac2b5338ee6fbb3209a35c2f6321724309fe`
 - #46: `960b3611-ca38-4e24-9207-5828d8196072` | 2026-10-13T19:18:49.000Z | REVIEW/post_completion_review_ux_structure_performance | incident=`bf623c9c-4c83-4296-8c07-b7e27d5965a2` | lesson_key=`operation-words-at-the-declaration` | event_sha256=`84041b49b45838b06a2303d781b4dfd79e0ffc70aa4468e88d320c640d30bf75`
+- #47: `fb19fefa-2711-46c5-946d-e2165eb231ee` | 2026-10-14T06:47:44.000Z | REVIEW/user_review_3_data_topbar_node_report_agent | incident=`0c23c847-b6da-49e6-b4ba-63be99ed3fb2` | lesson_key=`read-the-session-log-before-tuning-timeouts` | event_sha256=`e2e4f5f6a3d8e4fec9edffb6cbb5d697337b8f9e17b8b6df728d2c67a824fd3a`
