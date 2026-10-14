@@ -900,3 +900,31 @@ describe("AgentSurfaceProvider", () => {
     );
   }, 10000);
 });
+
+describe("the conversation a view continues", () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+    localStorage.clear();
+    vi.clearAllMocks();
+    mocks.lineageModel.current = { nodes: [] };
+    mocks.workbenchState.selectedKey = null;
+    mocks.workbenchState.agentFocus = null;
+    mocks.forest.current = null;
+    mocks.fetchLlmProviders.mockResolvedValue({ active_provider_id: provider.id, providers: [provider] });
+    mocks.fetchLlmConfig.mockResolvedValue(config);
+    mocks.getAgentEvents.mockResolvedValue({ events: [] });
+  });
+
+  it("is kept when loading fails for a reason other than 404, and forgotten on 404", async () => {
+    const key = "workbench:agent-session:/proj:run-a:project%3Arun-a%3Anone";
+    localStorage.setItem(key, "agent_chain_kept");
+    mocks.getAgentSession.mockRejectedValueOnce(Object.assign(new Error("Failed to fetch"), { status: 0 }));
+    const first = mount();
+    await waitFor(() => expect(mocks.getAgentSession).toHaveBeenCalled());
+    await waitFor(() => expect(localStorage.getItem(key)).toBe("agent_chain_kept"));
+    first.unmount();
+    mocks.getAgentSession.mockRejectedValueOnce(Object.assign(new Error("not found"), { status: 404 }));
+    mount();
+    await waitFor(() => expect(localStorage.getItem(key)).toBeNull());
+  });
+});

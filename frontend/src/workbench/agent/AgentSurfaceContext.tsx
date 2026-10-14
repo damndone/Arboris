@@ -55,6 +55,7 @@ import type {
   AgentRole,
 } from "./agentTypes";
 import type { ForestViewModel } from "../../lineage/api/graphViewTypes";
+import type { ApiError } from "../../api";
 
 /** Terminal operation-record states — reconcile polling stops here. */
 const TERMINAL_OPERATION_STATUSES = new Set([
@@ -527,8 +528,16 @@ export function AgentSurfaceProvider({
           // A session remains usable when its optional event replay is unavailable.
         }
       })
-    .catch(() => {
-        if (!linkedSessionId) writeConversation(storageKey, null);
+    .catch((reason: unknown) => {
+        if (cancelled) return;
+        // Only a conversation the server no longer has is forgotten: a
+        // restarting backend or a dropped connection must not lose the
+        // binding, which now outlives the tab.
+        if ((reason as Partial<ApiError> | null)?.status === 404) {
+          if (!linkedSessionId) writeConversation(storageKey, null);
+          return;
+        }
+        setError("The conversation could not be loaded. It is still saved; reload to try again.");
       });
     return () => { cancelled = true; };
   }, [conversationVersion, linkedDiffFocused, linkedOperationId, linkedSessionId, projectRoot, refreshNavigation, replayEvents, sessionScope, storageKey]);
