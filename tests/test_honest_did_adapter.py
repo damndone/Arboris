@@ -1,3 +1,5 @@
+from functools import lru_cache
+
 import numpy as np
 import pandas as pd
 
@@ -35,11 +37,17 @@ def test_sigma_is_cluster_robust_crve():
     assert max_err < 1e-10, max_err
 
 
-def test_pre_post_mapping():
+@lru_cache(maxsize=1)
+def _unclustered():
+    """The unclustered adapter run (~11 s), computed once and only read."""
     agg, b = _dyn()
-    out = honest_did_from_cs_dynamic(agg, row_cluster=b.aux["row_cluster"],
-                                     n_total=int(b.aux["n_total"]),
-                                     mbar_grid=[0, 1], alpha=0.05, grid_points=150)
+    return honest_did_from_cs_dynamic(agg, row_cluster=b.aux["row_cluster"],
+                                      n_total=int(b.aux["n_total"]),
+                                      mbar_grid=[0, 1], alpha=0.05, grid_points=150)
+
+
+def test_pre_post_mapping():
+    out = _unclustered()
     et = out["_debug_event_times"]
     assert all(abs(e + 1.0) > 1e-9 for e in et)          # reference e=-1 excluded
 
@@ -67,10 +75,7 @@ def test_pre_post_mapping():
 
 
 def test_adapter_nested_rm_and_sd():
-    agg, b = _dyn()
-    out = honest_did_from_cs_dynamic(agg, row_cluster=b.aux["row_cluster"],
-                                     n_total=int(b.aux["n_total"]),
-                                     mbar_grid=[0, 1], alpha=0.05, grid_points=150)
+    out = _unclustered()
     assert "rm" in out and "sd" in out
     assert out["rm"]["status"] == "ok"
     assert out["sd"]["status"] == "ok"

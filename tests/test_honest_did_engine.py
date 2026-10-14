@@ -157,10 +157,8 @@ def test_grid_accept_elementwise_matches_R():
 # ---------------------------------------------------------------------------
 
 
-def test_honest_rm_avg_matches_R():
-    from workbench.engine.honest_did import honest_rm
-
-    out = honest_rm(
+def _avg_kwargs():
+    return dict(
         betahat=np.array(HRM["betahat"]),
         sigma=np.array(HRM["sigma"]),
         num_pre=HRM["numPre"],
@@ -169,6 +167,22 @@ def test_honest_rm_avg_matches_R():
         mbar_grid=HRM["mbar_grid"],
         alpha=0.05,
     )
+
+
+_AVG_RUN: list = []
+
+
+def _avg_run():
+    """The post-average honest_rm run (~11 s), computed once and only read."""
+    if not _AVG_RUN:
+        from workbench.engine.honest_did import honest_rm
+
+        _AVG_RUN.append(honest_rm(**_avg_kwargs()))
+    return _AVG_RUN[0]
+
+
+def test_honest_rm_avg_matches_R():
+    out = _avg_run()
     assert len(out["results"]) == len(HRM["rm_avg"])
     for r_ours, r_ref in zip(out["results"], HRM["rm_avg"]):
         assert abs(r_ours["Mbar"] - r_ref["Mbar"]) < 1e-12
@@ -200,16 +214,8 @@ def test_honest_rm_event_matches_R():
 def test_honest_rm_deterministic():
     from workbench.engine.honest_did import honest_rm
 
-    kw = dict(
-        betahat=np.array(HRM["betahat"]),
-        sigma=np.array(HRM["sigma"]),
-        num_pre=HRM["numPre"],
-        num_post=HRM["numPost"],
-        l_vec=np.array(HRM["l_avg"]),
-        mbar_grid=HRM["mbar_grid"],
-        alpha=0.05,
-    )
-    a, b = honest_rm(**kw), honest_rm(**kw)
+    # Two independent evaluations: the shared run and a fresh one.
+    a, b = _avg_run(), honest_rm(**_avg_kwargs())
     assert [r["lb"] for r in a["results"]] == [r["lb"] for r in b["results"]]
     assert [r["ub"] for r in a["results"]] == [r["ub"] for r in b["results"]]
     assert a["breakdown"] == b["breakdown"]
