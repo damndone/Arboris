@@ -606,17 +606,18 @@ export async function previewFile(
             reader.readAsArrayBuffer(file);
           });
     // Loaded on first use: the spreadsheet reader is the largest dependency
-    // in the app and only this preview needs it.
-    const XLSX = await import("xlsx");
-    const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
+    // in the app and only this preview needs it. Destructured so the bundler
+    // can drop the parts of the library this never calls (the writers).
+    const { read, utils } = await import("xlsx");
+    const workbook = read(buffer, { type: "array", cellDates: true });
     sheetNames = workbook.SheetNames;
     selectedSheet = sheetName ?? workbook.SheetNames[0];
     const sheet = workbook.Sheets[selectedSheet];
-    rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
+    rows = utils.sheet_to_json<Record<string, unknown>>(sheet, {
       defval: null,
       raw: true,
     });
-    headerNames = (XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1 })[0] ?? []).map(String);
+    headerNames = (utils.sheet_to_json<string[]>(sheet, { header: 1 })[0] ?? []).map(String);
   }
   if (transpose && rows.length > 0) {
     const originalKeys = Object.keys(rows[0]);

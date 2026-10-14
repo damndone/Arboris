@@ -1,12 +1,12 @@
-// frontend/src/lineage/GraphWorkbench.test.tsx
+// frontend/src/workbench/views/GraphView.test.tsx
 import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { GraphWorkbench } from "./GraphWorkbench";
-import { LineageContext, type LineageContextValue } from "./LineageContext";
-import { adaptRunGraph } from "./api/graphAdapter";
-import type { GraphResponse, LineageNode } from "./types";
+import { GraphView } from "./GraphView";
+import { LineageContext, type LineageContextValue } from "../../lineage/LineageContext";
+import { adaptRunGraph } from "../../lineage/api/graphAdapter";
+import type { GraphResponse, LineageNode } from "../../lineage/types";
 
 function node(overrides: Partial<LineageNode>): LineageNode {
   return {
@@ -61,13 +61,13 @@ function renderWithCtx(value: LineageContextValue) {
   return render(
     <MemoryRouter>
       <LineageContext.Provider value={value}>
-        <GraphWorkbench />
+        <GraphView />
       </LineageContext.Provider>
     </MemoryRouter>,
   );
 }
 
-describe("GraphWorkbench", () => {
+describe("GraphView", () => {
   it("mounts the canvas when context has a non-legacy model", () => {
     renderWithCtx(makeCtx(rawGraph()));
     expect(screen.getByTestId("graph-workbench")).toBeInTheDocument();
@@ -101,7 +101,7 @@ describe("GraphWorkbench", () => {
     // logs the error to console.error, which we silence so test output
     // stays clean.
     const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    expect(() => render(<GraphWorkbench />)).toThrow(/useLineage/);
+    expect(() => render(<GraphView />)).toThrow(/useLineage/);
     errSpy.mockRestore();
   });
 

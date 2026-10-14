@@ -67,9 +67,8 @@ function tsColourLiterals(): string[] {
 // rather than reading from the theme; a trailing "-" is a prefix completed in code.
 const RUNTIME_VARS = [
   "--node-panel-left", "--node-panel-top",
-  "--report-preview-left", "--report-preview-top",
   "--report-review-left", "--report-review-top",
-  "--role-color", "--node-color", "--agent-ring-progress",
+  "--role-color", "--node-color",
   "--ws-map", "--ws-agent",
   "--role-", "--stage-",
 ];

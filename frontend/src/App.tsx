@@ -24,28 +24,6 @@ const WorkbenchHome = lazy(() => import("./workbench/WorkbenchRouteContainer").t
 const RunDetailRoute = lazy(() => import("./runDetail").then((m) => ({ default: m.RunDetailRoute })));
 const DraftGraphRoute = lazy(() => import("./pipelineDrafts/DraftGraphRoute").then((m) => ({ default: m.DraftGraphRoute })));
 
-export function validatePanelPrediction(s: {
-  modelType: string;
-  entity: string;
-  time: string;
-  isPanelData: boolean;
-  predictionEnabled: boolean;
-  predictionModelType: string;
-}): string | null {
-  if (s.modelType === "panel_ols") {
-    if (s.entity && s.time && s.entity === s.time) {
-      return "The entity and time columns cannot be the same column (entity == time).";
-    }
-    if (!s.entity && !s.time && !s.isPanelData) {
-      return "Panel OLS needs an entity or time column; this dataset was not recognised as panel data.";
-    }
-  }
-  if (s.predictionEnabled && !s.predictionModelType) {
-    return "Prediction is enabled — choose an algorithm.";
-  }
-  return null;
-}
-
 // --- Context ---
 
 type AppContextValue = {

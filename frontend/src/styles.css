@@ -518,10 +518,6 @@ button:focus-visible {
   font-weight: 500;
 }
 
-.inline-error {
-  margin: 8px 0 0;
-}
-
 .folder-picker {
   align-self: end;
 }
@@ -659,16 +655,6 @@ dd {
   margin-bottom: 8px;
 }
 
-.transpose-warning {
-  background: var(--hint-warn-bg);
-  border: 1px solid color-mix(in oklch, var(--orange) 40%, transparent);
-  border-radius: 5px;
-  color: var(--hint-warn-fg);
-  font-size: 0.82rem;
-  margin-top: 8px;
-  padding: 8px 12px;
-}
-
 .preview-table-wrap {
   border: 1px solid var(--border);
   border-radius: 5px;
@@ -704,12 +690,6 @@ dd {
   border-radius: 5px;
   margin-top: 8px;
   overflow-x: auto;
-}
-
-.column-selector {
-  display: grid;
-  gap: 8px;
-  margin-top: 10px;
 }
 
 .column-option {
