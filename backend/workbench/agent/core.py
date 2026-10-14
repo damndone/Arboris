@@ -12,6 +12,7 @@ from numbers import Real
 from typing import Any
 from uuid import uuid4
 
+from .compaction import CompactionPolicy, compact as compact_session, estimate_messages_tokens, estimate_text_tokens
 from .context import ContextBuilder
 from .events import AgentEventStream
 from . import numeric_grounding
@@ -109,6 +110,8 @@ class AgentCore:
         context_builder: ContextBuilder | None = None,
         tools: Iterable[dict[str, Any]] = (),
         tool_runtime: ToolRuntime | None = None,
+        compaction_policy: CompactionPolicy | None = None,
+        model_name: str | None = None,
     ) -> None:
         self.repository = repository
         self.events = events
@@ -136,6 +139,10 @@ class AgentCore:
         self._last_tool_call_fingerprint: str | None = None
         self._consecutive_identical_tool_calls = 0
         self._answered_tool_calls: dict[str, str] = {}
+        # Compaction (agent/compaction.py): None keeps the whole conversation.
+        self.compaction_policy = compaction_policy
+        self.model_name = model_name
+        self._overflow_retried = False
 
     def attach_tools(
         self,
@@ -222,6 +229,7 @@ class AgentCore:
         self._active_command_id = uuid4().hex
         self._budget = budget
         self._steps_used = 0
+        self._overflow_retried = False
         self._final_status = None
         self._last_tool_call_fingerprint = None
         self._consecutive_identical_tool_calls = 0
@@ -420,6 +428,11 @@ class AgentCore:
             )
 
         context = self.context_builder.build(self.session_id)
+        if self.compaction_policy is not None:
+            tokens = self.context_tokens(context.messages)
+            if self.compaction_policy.should_compact(tokens):
+                if await self.compact("auto", tokens_before=tokens, command_id=command_id) is not None:
+                    context = self.context_builder.build(self.session_id)
         self._active_context_fingerprint = context.fingerprint
 
         if (
@@ -487,6 +500,24 @@ class AgentCore:
         if finish_reason == "tool_calls" and tool_calls and self.tool_runtime is None:
             finish_reason = "error"
             error = "tool_runtime_unavailable"
+
+        if (
+            finish_reason == "error"
+            and error is not None
+            and "context_overflow" in error
+            and not chunks
+            and not tool_calls
+            and self.compaction_policy is not None
+            and not self._overflow_retried
+        ):
+            # The provider refused the request as too long: compact once and
+            # resend (pi's overflow recovery). Nothing was said yet.
+            self._overflow_retried = True
+            self._active_request_id = None
+            self._active_message_started = False
+            tokens = self.context_tokens(context.messages)
+            if await self.compact("overflow", tokens_before=tokens, command_id=command_id) is not None:
+                return await self._run_turn(None, append_user=False, tool_context=tool_context)
 
         content = "".join(chunks)
         if finish_reason == "error" and not content.strip() and not tool_calls and error != "tool_runtime_unavailable":
@@ -805,6 +836,65 @@ class AgentCore:
         )
         self._active_turn_started = False
         return content if finish_reason == "stop" else ""
+
+    def context_tokens(self, messages: list[dict[str, Any]]) -> int:
+        """Estimated size of a request: its messages and the tool descriptions."""
+
+        tools = estimate_text_tokens(json.dumps(self.tools, ensure_ascii=False)) if self.tools else 0
+        return estimate_messages_tokens(messages) + tools
+
+    async def compact(
+        self,
+        trigger: str,
+        *,
+        tokens_before: int,
+        command_id: str | None = None,
+        focus: str | None = None,
+    ) -> Any:
+        """Summarize the older conversation; on failure the turn goes on uncompacted."""
+
+        if self.compaction_policy is None:
+            return None
+        self.events.emit(
+            self.session_id,
+            "compaction_start",
+            {"trigger": trigger, "tokens_before": tokens_before, **self.compaction_policy.to_dict()},
+            command_id=command_id,
+        )
+        try:
+            entry = await compact_session(
+                self.repository,
+                self.session_id,
+                self.adapter,
+                self.compaction_policy,
+                trigger=trigger,
+                tokens_before=tokens_before,
+                focus=focus,
+                model=self.model_name,
+            )
+        except Exception as exc:  # A failed summary must not lose the turn.
+            self.events.emit(
+                self.session_id,
+                "compaction_end",
+                {"trigger": trigger, "compacted": False, "error": str(exc) or type(exc).__name__},
+                command_id=command_id,
+            )
+            return None
+        tokens_after = self.context_tokens(self.context_builder.build(self.session_id).messages) if entry else tokens_before
+        self.events.emit(
+            self.session_id,
+            "compaction_end",
+            {
+                "trigger": trigger,
+                "compacted": entry is not None,
+                "entry_id": entry.entry_id if entry else None,
+                "tokens_before": tokens_before,
+                "tokens_after": tokens_after,
+                "verified": entry.payload.get("verified") if entry else None,
+            },
+            command_id=command_id,
+        )
+        return entry
 
     def _has_step_left(self) -> bool:
         return self._budget.max_steps is None or self._steps_used < self._budget.max_steps

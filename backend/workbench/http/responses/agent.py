@@ -75,17 +75,40 @@ class NumericCheckFailed(TypedDict):
     error: str
 
 
+class AgentCompactionView(TypedDict):
+    """Where the earlier conversation was summarized (role ``summary``)."""
+
+    trigger: str
+    tokens_before: int
+    #: The summary's numbers all appear in the messages it replaced.
+    verified: bool
+    unverified_numbers: list[str]
+    summarized_messages: int
+
+
+class AgentContextUsage(TypedDict):
+    """How full the next request is, as the server will send it."""
+
+    estimated_tokens: int
+    window_tokens: int
+    #: False: the model declares no window and ``window_tokens`` is assumed.
+    window_declared: bool
+    #: Above this the older conversation is summarized before the next step.
+    compact_at_tokens: int
+
+
 class AgentMessage(TypedDict):
     entry_id: str
     #: When the entry was written (UTC, ISO 8601).
     at: str
-    role: Literal["user", "assistant", "tool"]
+    role: Literal["user", "assistant", "tool", "summary"]
     content: str
     name: str | None
     stop_reason: str | None
     error: str | None
     numeric_check: NotRequired[NumericCheckUnverified | NumericCheckFailed]
     navigation: list[NavigationRefView]
+    compaction: NotRequired[AgentCompactionView]
 
 
 class AgentSession(TypedDict):
@@ -97,6 +120,7 @@ class AgentSession(TypedDict):
     model: str | None
     provider_id: str | None
     context_window_tokens: int | None
+    context: AgentContextUsage
     messages: list[AgentMessage]
     proposals: list[PublicProposal]
     #: Messages the person pinned as chapters, oldest first.

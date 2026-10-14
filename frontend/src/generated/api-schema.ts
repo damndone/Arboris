@@ -256,6 +256,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/agent/sessions/{session_id}/compact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Compact Agent Session
+         * @description Summarize the earlier conversation now, keeping the latest part verbatim.
+         *
+         *     The same summary the Agent writes on its own when the conversation nears
+         *     the model's window; nothing is deleted from the session log.
+         */
+        post: operations["compact_agent_session_agent_sessions__session_id__compact_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/agent/sessions/{session_id}/events": {
         parameters: {
             query?: never;
@@ -2600,6 +2623,41 @@ export interface components {
             /** Title */
             title: string;
         };
+        /**
+         * AgentCompactionView
+         * @description Where the earlier conversation was summarized (role ``summary``).
+         */
+        AgentCompactionView: {
+            /** Summarized Messages */
+            summarized_messages: number;
+            /** Tokens Before */
+            tokens_before: number;
+            /** Trigger */
+            trigger: string;
+            /** Unverified Numbers */
+            unverified_numbers: string[];
+            /** Verified */
+            verified: boolean;
+        };
+        /** AgentCompactRequest */
+        AgentCompactRequest: {
+            /** Focus */
+            focus?: string | null;
+        };
+        /**
+         * AgentContextUsage
+         * @description How full the next request is, as the server will send it.
+         */
+        AgentContextUsage: {
+            /** Compact At Tokens */
+            compact_at_tokens: number;
+            /** Estimated Tokens */
+            estimated_tokens: number;
+            /** Window Declared */
+            window_declared: boolean;
+            /** Window Tokens */
+            window_tokens: number;
+        };
         /** AgentEntryRequest */
         AgentEntryRequest: {
             /** Entry Id */
@@ -2669,6 +2727,7 @@ export interface components {
         AgentMessage: {
             /** At */
             at: string;
+            compaction?: components["schemas"]["AgentCompactionView"];
             /** Content */
             content: string;
             /** Entry Id */
@@ -2685,7 +2744,7 @@ export interface components {
              * Role
              * @enum {string}
              */
-            role: "user" | "assistant" | "tool";
+            role: "user" | "assistant" | "tool" | "summary";
             /** Stop Reason */
             stop_reason: string | null;
         };
@@ -2756,6 +2815,7 @@ export interface components {
             chain_id: string | null;
             /** Chapters */
             chapters: components["schemas"]["AgentChapter"][];
+            context: components["schemas"]["AgentContextUsage"];
             /** Context Fingerprint */
             context_fingerprint: string | null;
             /** Context Window Tokens */
@@ -10433,6 +10493,43 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentSession"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    compact_agent_session_agent_sessions__session_id__compact_post: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentCompactRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

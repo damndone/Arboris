@@ -51,6 +51,8 @@ from ..analysis_loop.storage import (
     ValidationPacketStore,
 )
 from ..analysis_loop.validation import ValidationPacket
+from ..agent.compaction import CompactionError, CompactionPolicy, compact as compact_session, estimate_messages_tokens
+from ..agent.context import ContextBuilder
 from ..agent.core import AgentCore
 from ..agent.events import AgentEventStream
 from ..agent.model import OpenAICompatibleModelAdapter
@@ -764,6 +766,25 @@ def _messages(repository: JsonlSessionRepository, session_id: str) -> list[dict[
     result: list[dict[str, Any]] = []
     projector = AgentNavigationProjector(repository.root.parent)
     for entry in repository.get_branch(session_id):
+        if entry.entry_type == "compaction" and isinstance(entry.payload.get("summary"), str):
+            result.append({
+                "entry_id": entry.entry_id,
+                "at": entry.created_at,
+                "role": "summary",
+                "content": entry.payload["summary"],
+                "name": "context_compaction",
+                "stop_reason": None,
+                "error": None,
+                "navigation": [],
+                "compaction": {
+                    "trigger": str(entry.payload.get("trigger") or "auto"),
+                    "tokens_before": int(entry.payload.get("tokens_before") or 0),
+                    "verified": entry.payload.get("verified") is not False,
+                    "unverified_numbers": [str(item) for item in entry.payload.get("unverified_numbers") or []],
+                    "summarized_messages": len(entry.payload.get("summarized_entry_ids") or []),
+                },
+            })
+            continue
         if entry.entry_type != "message":
             continue
         role = entry.payload.get("role")
@@ -795,6 +816,22 @@ def _messages(repository: JsonlSessionRepository, session_id: str) -> list[dict[
     return result
 
 
+def _context_usage(repository: JsonlSessionRepository, session_id: str, config) -> dict[str, Any]:
+    """The next request's size as the server builds it (tools not included)."""
+
+    policy = CompactionPolicy(config.context_window_tokens)
+    try:
+        messages = ContextBuilder(repository).build(session_id).messages
+    except (KeyError, ValueError):
+        messages = []
+    return {
+        "estimated_tokens": estimate_messages_tokens(messages),
+        "window_tokens": policy.window,
+        "window_declared": policy.window_declared,
+        "compact_at_tokens": policy.threshold,
+    }
+
+
 def _context_fingerprint(repository: JsonlSessionRepository, session_id: str) -> str | None:
     for entry in repository.get_branch(session_id):
         if entry.entry_type != "custom_message":
@@ -821,6 +858,7 @@ def _public_session(
         "model": config.model or None,
         "provider_id": config.provider_id or None,
         "context_window_tokens": config.context_window_tokens,
+        "context": _context_usage(repository, session_id, config),
         "messages": _messages(repository, session_id),
         "proposals": _public_proposals(proposal_store, session_id),
         "chapters": [
@@ -2300,6 +2338,71 @@ async def reconcile_agent_operation(
     return {"operation": record.to_dict(), "status": record.status}
 
 
+class AgentCompactRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    #: What the summary should keep in particular ("the IV results", "my definitions").
+    focus: str | None = Field(default=None, max_length=1000)
+
+
+@router.post("/agent/sessions/{session_id}/compact")
+async def compact_agent_session(
+    session_id: str,
+    project_root: str,
+    body: AgentCompactRequest,
+) -> AgentSession:
+    """Summarize the earlier conversation now, keeping the latest part verbatim.
+
+    The same summary the Agent writes on its own when the conversation nears
+    the model's window; nothing is deleted from the session log.
+    """
+    root = _project_root(project_root)
+    repository, events, metadata = _get_session(root, session_id)
+    _refuse_while_running(metadata, "compact the conversation")
+    turn_key = _active_turn_key(root, session_id)
+    with _TURN_RESERVATION_LOCK:
+        if turn_key in _ACTIVE_TURNS or turn_key in _RESERVED_TURNS:
+            raise WorkbenchAPIError(
+                status_code=409,
+                code="AGENT_TURN_IN_PROGRESS",
+                message="This Agent session already has a running turn.",
+                details={"session_id": session_id},
+            )
+        _RESERVED_TURNS.add(turn_key)
+    try:
+        config = load_llm_config()
+        if not config.is_configured():
+            raise WorkbenchAPIError(status_code=503, code="LLM_NOT_CONFIGURED",
+                                    message=config.configuration_error_message())
+        policy = CompactionPolicy(config.context_window_tokens)
+        tokens = estimate_messages_tokens(ContextBuilder(repository).build(session_id).messages)
+        events.emit(session_id, "compaction_start", {"trigger": "manual", "tokens_before": tokens, **policy.to_dict()})
+        try:
+            entry = await compact_session(
+                repository, session_id, OpenAICompatibleModelAdapter(config), policy,
+                trigger="manual", tokens_before=tokens, focus=body.focus, model=config.model,
+            )
+        except CompactionError as exc:
+            events.emit(session_id, "compaction_end", {"trigger": "manual", "compacted": False, "error": str(exc)})
+            raise WorkbenchAPIError(status_code=502, code="AGENT_COMPACTION_FAILED",
+                                    message="The summary could not be written; the conversation is unchanged.",
+                                    details={"reason": str(exc)}) from exc
+        if entry is None:
+            events.emit(session_id, "compaction_end", {"trigger": "manual", "compacted": False})
+            raise WorkbenchAPIError(status_code=409, code="AGENT_NOTHING_TO_COMPACT",
+                                    message="There is no earlier part of this conversation to summarize yet.",
+                                    details={})
+        events.emit(session_id, "compaction_end", {
+            "trigger": "manual", "compacted": True, "entry_id": entry.entry_id, "tokens_before": tokens,
+            "tokens_after": estimate_messages_tokens(ContextBuilder(repository).build(session_id).messages),
+            "verified": entry.payload.get("verified"),
+        })
+    finally:
+        with _TURN_RESERVATION_LOCK:
+            _RESERVED_TURNS.discard(turn_key)
+    return _public_session(repository, session_id, repository.get_metadata(session_id), config)
+
+
 @router.post("/agent/sessions/{session_id}/turns")
 async def run_agent_turn(
     session_id: str,
@@ -2349,6 +2452,8 @@ async def _run_reserved_agent_turn(
         events,
         OpenAICompatibleModelAdapter(config),
         session_id=session_id,
+        compaction_policy=CompactionPolicy(config.context_window_tokens),
+        model_name=config.model,
     )
     tool_context: dict[str, Any] | None = None
     if metadata.get("role") == "main":

@@ -32,6 +32,8 @@ from decimal import ROUND_HALF_EVEN, ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any, Literal
 
 CHECK_MESSAGE_NAME = "numeric_check"
+# Written by agent/compaction.py for a summary whose numbers were not all supported.
+UNVERIFIED_SUMMARY_NAME = "context_compaction_unverified"
 CALCULATE_TOOL_ID = "calculate"
 MAX_REPAIRS = 1
 
@@ -180,7 +182,9 @@ def evidence_from_messages(messages: Sequence[Mapping[str, Any]]) -> Evidence:
     values: list[Decimal] = []
     calculations: list[Mapping[str, Any]] = []
     for message in messages:
-        if message.get("role") == "assistant" or message.get("name") == CHECK_MESSAGE_NAME:
+        # An unverified conversation summary kept numbers that the messages it
+        # replaced did not support; it must not certify them later.
+        if message.get("role") == "assistant" or message.get("name") in {CHECK_MESSAGE_NAME, UNVERIFIED_SUMMARY_NAME}:
             continue
         text = _content_text(message.get("content"))
         if message.get("role") == "tool" and message.get("name") == CALCULATE_TOOL_ID:
