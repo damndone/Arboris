@@ -15,7 +15,7 @@ def project(tmp_path):
     events = AgentEventStream(root / "workbench")
     for session_id, question, focus in [
         ("agent_chain_a", "## Is the education effect robust?\nmore", {"kind": "node", "id": "n1", "label": "ols_robust"}),
-        ("agent_main_b", "Summarize the project", None),
+        ("agent_main_b", "Summarize the project", {"kind": "project", "id": "p", "label": "Global Agent · 2 runs · 1 families"}),
     ]:
         repository.create_session(session_id, chain_id="chain:r1", role=session_id.split("_")[1])
         if focus:

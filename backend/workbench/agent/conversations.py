@@ -41,9 +41,11 @@ def summary(repository: JsonlSessionRepository, metadata: dict[str, Any]) -> dic
             if isinstance(value, dict):
                 focus = value
     role = metadata.get("role")
+    # A whole-project conversation is "Project", not the focus's internal label
+    # ("Global Agent · 2 runs · 1 families").
     about = (
-        str(focus.get("label")) if focus and focus.get("label")
-        else "Project" if role == "main"
+        "Project" if (focus and focus.get("kind") == "project") or (role == "main" and not focus)
+        else str(focus.get("label")) if focus and focus.get("label")
         else str(metadata.get("chain_id") or "").removeprefix("chain:") or "Analysis"
     )
     parent = metadata.get("inherited_parent_ref") or None
