@@ -54,6 +54,7 @@ from ..analysis_loop.validation import ValidationPacket
 from ..agent.compaction import CompactionError, CompactionPolicy, compact as compact_session, estimate_messages_tokens
 from ..agent.context import ContextBuilder
 from ..agent.instructions import INSTRUCTIONS_NAME, compose as compose_instructions
+from ..agent.operation_outcome import OUTCOME_NAME, outcome as operation_outcome, outcome_text as operation_outcome_text
 from ..agent.recall import RECALL_NAME, conversation_index, index_text as recall_index_text
 from ..agent.core import AgentCore
 from ..agent.events import AgentEventStream
@@ -150,6 +151,9 @@ CHAIN_AGENT_PROTOCOL = """Workbench Chain Agent workflow protocol (agent/v1):
 - The plan's length, ordering and column choices belong to the request being answered. There is no fixed number of steps.
 - For other registered mutations, you must call propose_operation with a complete structured payload; a JSON or Markdown proposal in ordinary text is not a submitted proposal.
 - propose_operation creates a reviewable pending proposal (requires_confirmation: true) for anything that changes data, metadata, a model or a report; it does not execute it. Never claim that a run, graph, or data change was executed from such a result.
+- Who does what: you propose; the person's confirmation makes the Workbench execute the proposal; you are then told what it produced in a workbench_operation_result message (the run it created, and whether an identical analysis already existed). Do not describe yourself as read-only or unable to act. When that message is present, read the produced run's results (inspect_project_model_coefficients with its run id, beside the original run) and report them.
+- Before proposing a model.rerun, check whether a run with the requested setting already exists: the context lists the project's runs, and inspect_project_model_coefficients reports each run's covariance and specification. If it exists, show that result and say a rerun would only repeat it; propose one only if the person still wants a fresh run.
+- When you offered more than one variant ("unadjusted and/or HC3") and the person agrees without choosing, propose every variant you offered, one proposal each, or ask which they want. Never silently do fewer than you offered.
 - A multi-step workflow whose every step only reads data (descriptive statistics, tabulations, inferential tests) runs at once: propose_operation then returns executed: true with each step's results. Answer the user's question from those results in this turn, citing the step and artifact ids; if it returns executed: false, explain the error and report no result. Do not split a question into many small workflows to run more tests. Analysis steps name the columns they use: do not add a data.subset step only to choose columns, and do not re-run a test already answered in this conversation.
 - A propose_operation result with requires_confirmation: true ends your turn: reply with a short summary of what you proposed and call no further tools. Continuing past it spends the step budget and can end the turn in an error even though the proposal was created.
 - Inspect only what the request needs. Calling every inspect tool wastes steps; tools for other model families return nothing useful about this node.
@@ -2314,11 +2318,30 @@ async def confirm_agent_proposal(
             message="Another confirmed operation is already executing against this Chain head.",
             details={"proposal_id": proposal_id},
         ) from exc
+    _tell_agent_the_outcome(root, session_id, record.to_dict())
     return {
         "proposal": _public_proposal(store, proposal_id),
         "operation": record.to_dict(),
         "status": record.status,
     }
+
+
+def _tell_agent_the_outcome(root: Path, session_id: str, record: dict[str, Any]) -> None:
+    """The Agent's next turn knows what its confirmed proposal produced."""
+
+    facts = operation_outcome(root, record)
+    try:
+        repository, _events, _metadata = _get_session(root, session_id)
+        repository.append(session_id, "custom_message", {
+            "message_type": "agent_operation_result",
+            "audience": "model",
+            "name": OUTCOME_NAME,
+            "content": operation_outcome_text(facts),
+            "metadata": facts,
+        })
+    except (WorkbenchAPIError, KeyError, OSError, ValueError):
+        # The execution is recorded in the ledger either way; the message is a courtesy.
+        return
 
 
 @router.post("/agent/sessions/{session_id}/operations/{record_id}/reconcile")
