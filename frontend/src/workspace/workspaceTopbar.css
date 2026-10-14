@@ -4,7 +4,10 @@
    moving between Home and the other views never shifts them. */
 .ws-topbar__row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  /* Views centred while the actions fit in half the bar; when a view adds
+     actions that need more, the end column keeps them on one line and the
+     start column gives way, so every control stays on the same centre line. */
+  grid-template-columns: minmax(0, 1fr) auto minmax(max-content, 1fr);
   align-items: center;
   gap: var(--space-3);
   min-height: 48px;
@@ -89,6 +92,6 @@
   flex-shrink: 0;
 }
 
-.ws-topbar__end { margin-left: auto; flex-wrap: wrap; }
+.ws-topbar__end { margin-left: auto; flex-wrap: nowrap; }
 .ws-topbar__views { flex-shrink: 0; max-width: 100%; overflow-x: auto; }
 .ws-topbar__start { flex-wrap: nowrap; }
