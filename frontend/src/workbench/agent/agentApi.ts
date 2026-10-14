@@ -63,6 +63,37 @@ export function forkAgentSession(
   });
 }
 
+/** The project's conversations, most recently active first. */
+export function listAgentConversations(
+  projectRoot: string,
+  includeArchived = false,
+): Promise<ResponseOf<"/agent/conversations", "get">> {
+  const query = new URLSearchParams({ project_root: projectRoot });
+  if (includeArchived) query.set("include_archived", "true");
+  return request(apiUrl(`/agent/conversations?${query.toString()}`));
+}
+
+/** Rename, archive or restore a conversation. */
+export function updateAgentConversation(
+  projectRoot: string,
+  sessionId: string,
+  body: RequestOf<"/agent/conversations/{session_id}", "patch">,
+): Promise<ResponseOf<"/agent/conversations/{session_id}", "patch">> {
+  return request(agentPath(projectRoot, `/agent/conversations/${encodeURIComponent(sessionId)}`), {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+/** Delete a conversation's messages; the analysis ledger is kept. */
+export function deleteAgentConversation(
+  projectRoot: string,
+  sessionId: string,
+): Promise<ResponseOf<"/agent/conversations/{session_id}", "delete">> {
+  return request(agentPath(projectRoot, `/agent/conversations/${encodeURIComponent(sessionId)}`), { method: "DELETE" });
+}
+
 /** Summarize the earlier conversation now; the newest part stays verbatim. */
 export function compactAgentSession(
   projectRoot: string,

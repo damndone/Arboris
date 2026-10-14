@@ -34,6 +34,8 @@ import {
   type Point,
 } from "./agentWindowGeometry";
 import { AgentRailIcon, ChevronIcon, DockIcon, FloatIcon, GripIcon, MinimizeIcon } from "./icons";
+import { ConversationMenu } from "./agent/ConversationMenu";
+import { useAgentSurfaceOptional } from "../workbench/agent/AgentSurfaceContext";
 import "./agentWindow.css";
 
 export type { AgentMode };
@@ -122,6 +124,8 @@ export function AgentWindow({
   children: ReactNode;
 }) {
   const bounds = useShellBounds(shellRef);
+  // With an Agent behind the window, its title is the conversation picker.
+  const conversations = Boolean(useAgentSurfaceOptional()?.openConversation);
   const [bubbleAt, setBubbleAt] = useState<Point | null>(null);
   const [windowAt, setWindowAt] = useState<Point | null>(null);
   const [compact, setCompact] = useState(false);
@@ -294,7 +298,7 @@ export function AgentWindow({
               <GripIcon />
             </button>
           )}
-          <span className="ws-agent__title">Agent</span>
+          {conversations ? <ConversationMenu /> : <span className="ws-agent__title">Agent</span>}
           {floating && (
             <button
               type="button"

@@ -202,6 +202,12 @@ export interface AgentSurfaceContextValue {
   /** Summarize the earlier conversation now (optionally keeping something in particular). */
   compactConversation?: (focus?: string) => Promise<void>;
   compacting?: boolean;
+  /** The conversation shown, once it has been started. */
+  sessionId?: string | null;
+  /** Start a new conversation for this view (the current one stays in the list). */
+  newConversation?: () => void;
+  /** Continue another of the project's conversations in this view. */
+  openConversation?: (sessionId: string) => void;
   model: string;
   modelOptions: AgentModelOption[];
   setModel: (value: string) => Promise<void>;
@@ -247,6 +253,34 @@ export function useAgentSurfaceOptional(): AgentSurfaceContextValue | null {
   return useContext(AgentSurfaceContext);
 }
 
+// Which conversation a node or page continues. Kept across browser restarts
+// (it was per-tab sessionStorage, so closing the tab "lost" the conversation);
+// a value left in sessionStorage by an older build is carried over once.
+function readConversation(key: string): string | null {
+  try {
+    const stored = localStorage.getItem(key);
+    if (stored) return stored;
+    const legacy = sessionStorage.getItem(key);
+    if (legacy) {
+      localStorage.setItem(key, legacy);
+      sessionStorage.removeItem(key);
+    }
+    return legacy;
+  } catch {
+    return null;
+  }
+}
+
+function writeConversation(key: string, sessionId: string | null): void {
+  try {
+    if (sessionId) localStorage.setItem(key, sessionId);
+    else localStorage.removeItem(key);
+    sessionStorage.removeItem(key);
+  } catch {
+    // Storage can be unavailable (private windows); the conversation itself is on disk.
+  }
+}
+
 export function AgentSurfaceProvider({
   projectRoot,
   runId,
@@ -260,7 +294,7 @@ export function AgentSurfaceProvider({
   const forest = useForest();
   const workbench = useWorkbench();
   const navigation = useAgentNavigationOptional();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [chapters, setChapters] = useState<AgentChapter[]>([]);
   const draftKey = `workbench:agent-draft:${projectRoot}`;
@@ -287,6 +321,8 @@ export function AgentSurfaceProvider({
   // standing instructions included, earlier summarized parts not).
   const [serverContext, setServerContext] = useState<AgentSession["context"] | null>(null);
   const [compacting, setCompacting] = useState(false);
+  // Bumped to load another conversation (or none) for the same view.
+  const [conversationVersion, setConversationVersion] = useState(0);
   const [proposals, setProposals] = useState<AgentProposal[]>([]);
   const [confirmationBusyId, setConfirmationBusyId] = useState<string | null>(null);
   const [activeOperation, setActiveOperation] = useState<AgentOperationStatus | null>(null);
@@ -459,7 +495,7 @@ export function AgentSurfaceProvider({
     eventCursorRef.current = 0;
     setLastEventType(null);
     setLiveResponseText("");
-    const stored = linkedSessionId ?? sessionStorage.getItem(storageKey);
+    const stored = linkedSessionId ?? readConversation(storageKey);
     if (!stored) return () => { cancelled = true; };
     getAgentSession(projectRoot, stored)
       .then(async (session) => {
@@ -492,10 +528,10 @@ export function AgentSurfaceProvider({
         }
       })
     .catch(() => {
-        if (!linkedSessionId) sessionStorage.removeItem(storageKey);
+        if (!linkedSessionId) writeConversation(storageKey, null);
       });
     return () => { cancelled = true; };
-  }, [linkedDiffFocused, linkedOperationId, linkedSessionId, projectRoot, refreshNavigation, replayEvents, sessionScope, storageKey]);
+  }, [conversationVersion, linkedDiffFocused, linkedOperationId, linkedSessionId, projectRoot, refreshNavigation, replayEvents, sessionScope, storageKey]);
 
   useEffect(() => {
     if (!sessionId || !isSubmitting) return;
@@ -663,7 +699,7 @@ export function AgentSurfaceProvider({
         activeSessionId = created.session_id;
         if (activeScopeRef.current !== requestScope) return;
         setSessionId(activeSessionId);
-        if (!linkedSessionId) sessionStorage.setItem(storageKey, activeSessionId);
+        if (!linkedSessionId) writeConversation(storageKey, activeSessionId);
       }
       if (controller.signal.aborted) return;
       activeTurnSessionIdRef.current = activeSessionId;
@@ -914,7 +950,7 @@ export function AgentSurfaceProvider({
     if (!sessionId) return;
     const change = await forkAgentSession(projectRoot, sessionId, entryId);
     setSessionId(change.session.session_id);
-    if (!linkedSessionId) sessionStorage.setItem(storageKey, change.session.session_id);
+    if (!linkedSessionId) writeConversation(storageKey, change.session.session_id);
     showSession(change.session);
     if (change.restored_prompt) setPrompt(change.restored_prompt);
     await refreshNavigation(change.session.session_id, sessionScope);
@@ -936,6 +972,22 @@ export function AgentSurfaceProvider({
       setCompacting(false);
     }
   }, "Could not summarize the conversation"), [historyAction, projectRoot, sessionId, showSession]);
+  // Conversations as a list: this view continues the one chosen here until
+  // another is chosen or a new one is started.
+  const switchConversation = useCallback((nextSessionId: string | null) => {
+    if (isSubmitting) return;
+    writeConversation(storageKey, nextSessionId);
+    if (searchParams.get("agent_session")) {
+      const next = new URLSearchParams(searchParams);
+      next.delete("agent_session");
+      next.delete("operation");
+      next.delete("diff");
+      setSearchParams(next, { replace: true });
+    }
+    setConversationVersion((version) => version + 1);
+  }, [isSubmitting, searchParams, setSearchParams, storageKey]);
+  const newConversation = useCallback(() => switchConversation(null), [switchConversation]);
+  const openConversation = useCallback((nextSessionId: string) => switchConversation(nextSessionId), [switchConversation]);
 
   const value = useMemo<AgentSurfaceContextValue>(() => ({
     messages,
@@ -955,6 +1007,9 @@ export function AgentSurfaceProvider({
     compactAtTokens: serverContext?.compact_at_tokens ?? null,
     compactConversation,
     compacting,
+    sessionId,
+    newConversation,
+    openConversation,
     model,
     modelOptions,
     setModel,
@@ -988,6 +1043,9 @@ export function AgentSurfaceProvider({
     serverContext,
     compactConversation,
     compacting,
+    sessionId,
+    newConversation,
+    openConversation,
     error,
     isSubmitting,
     messages,

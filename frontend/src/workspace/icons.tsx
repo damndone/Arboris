@@ -198,3 +198,17 @@ export const CloseIcon = () => (
     <path d="M4 4l8 8M12 4l-8 8" />
   </Icon>
 );
+
+/** A new conversation: a page with a pen. */
+export const ComposeIcon = () => (
+  <Icon size={15}>
+    <path d="M7.5 2.75H4.25a1.5 1.5 0 0 0-1.5 1.5v7.5a1.5 1.5 0 0 0 1.5 1.5h7.5a1.5 1.5 0 0 0 1.5-1.5V8.5" />
+    <path d="M11.6 2.4a1.2 1.2 0 0 1 1.7 1.7L8.5 8.9l-2.25.55.55-2.25z" />
+  </Icon>
+);
+
+export const MoreIcon = () => (
+  <Icon size={14}>
+    <path d="M3.5 8h.01M8 8h.01M12.5 8h.01" strokeWidth="2.25" />
+  </Icon>
+);

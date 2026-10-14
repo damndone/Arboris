@@ -140,6 +140,7 @@ function mount() {
 describe("AgentSurfaceProvider", () => {
   beforeEach(() => {
     sessionStorage.clear();
+    localStorage.clear();
     vi.clearAllMocks();
     mocks.lineageModel.current = { nodes: [] };
     mocks.workbenchState.selectedKey = null;
