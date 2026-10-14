@@ -10,7 +10,7 @@ INTEGRATION
 
 ## Metrics
 
-- Failure frequency: 12/59 (20.3%; 20.3 per 100 events)
+- Failure frequency: 12/60 (20.0%; 20.0 per 100 events)
 - Repeat rate: 0/12 (0.0%)
 - Recurrence rate: 0/12 (0.0%)
 - MTTR: median=0 ms (sample=8; unresolved=4)
@@ -100,6 +100,7 @@ INTEGRATION
 - Evidence writers and test files are found by scanning, not by remembering: grep for mkdtemp under tests/fixtures and def test_ under backend/.
 - In a statistics agent a compaction summary is evidence for later answers; check its numbers the way replies are checked.
 - Keep the controls users rely on when moving them; removing one is a regression even if it moved to Settings.
+- Live runs on real data find contract contradictions that unit tests with explicit model types never meet.
 - Measure input latency with the real run's evidence size; a fixture with three facts hides quadratic renders.
 - Overlays that must cover the window render through a portal; filters, transforms and backdrop-filters on an ancestor capture fixed positioning.
 - Placing old pieces into new regions is not a redesign; each region needs content designed for its size (a tree for a 280px map, a result view for the stage) before the user sees it.
@@ -171,3 +172,4 @@ INTEGRATION
 - #57: `6cc4e1aa-a2c3-4126-97d3-9d4f3fcb6c15` | 2026-10-14T17:03:57.000Z | REVIEW/user_review_5_conversation_management | incident=`a9e482cc-4a64-40ad-bc9c-40df754642be` | lesson_key=`user-objects-need-a-list` | event_sha256=`909da4d6870c3ceb7cf33ce42f88c2cf322c3e6186f54f424db1178105c1f97a`
 - #58: `ab0d3818-0bf6-4478-9138-b12a82604f89` | 2026-10-14T17:52:33.000Z | REVIEW/user_review_6_confirmed_rerun_invisible | incident=`ad5f7817-a58f-47c7-80a2-7b555bdbfa2a` | lesson_key=`say-where-the-result-went` | event_sha256=`9e9979758b33a23ced584e6dbcf01f6590bd4adb23cc522e3513bca82d344702`
 - #59: `459691b3-1fa0-4bc9-b503-7367f407f450` | 2026-10-14T18:36:31.000Z | STATE_CHANGE/reopen_for_user_reviews_and_release | incident=`74a155b4-4832-4311-9a7e-fe484a744e27` | lesson_key=`reopen-when-work-continues` | event_sha256=`4a06d8f545e3b4ec1e7d41e11a824582d45bd1ae887bb1f14f814e2417f75e5b`
+- #60: `77976ccc-5ac2-49b9-8790-24db5a1a3615` | 2026-10-14T18:45:57.000Z | REVIEW/live_deepseek_agent_paths_before_release | incident=`0d095d45-c3ba-4119-bd4b-ff2f4b9a061e` | lesson_key=`live-runs-find-contract-contradictions` | event_sha256=`b1bf0ed31c9b16778363a9065ffb8ff17585bf13a31541c3dd03ef6c88b01564`
