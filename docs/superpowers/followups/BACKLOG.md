@@ -15,7 +15,24 @@
 
 ---
 
-## 0.0 最新：v1.8.12 已发布（2026-10-08）
+## 0.0 最新：v1.9.0 已发布（2026-10-14）
+
+**v1.9.0 = 研究工作区重做 + Agent 增强**，已发布（main squash `402d2d3e`，tag `v1.9.0`）；**v1.8.13**（手动能力后端）同日单独发布（`c81fc89f`，未重跑 gate，说明里写明）。
+
+- 发布说明：`docs/releases/v1.9.0-release-notes.md`、`docs/releases/v1.8.13-release-notes.md`；完成报告 `docs/releases/v1.9.0-completion.md`。
+- 下一版开工交接：`handoffs/2026-10-15-next-version-kickoff.md`（候选、开工流程、坑）。
+- 本文件 2026-10-15 快照：`archive/followups/BACKLOG-2026-10-15-v1.9.0-snapshot.md`。
+
+### 0.0.1 v1.9.0 遗留（新增）
+
+| ID | 级别 | 内容 | 现状 / 建议 |
+|---|---|---|---|
+| V190-OLS-HC3 | P | OLS 等线性族只有 HC1 稳健标准误，没有 HC0/HC2/HC3 | 补核心估计、结果信封、三语言脚本导出，并对 R/Stata 数值对照 |
+| V190-COMPACT-SPLIT-TURN | W | 单个回合本身超过窗口且之前无可切分提问时无法压缩 | 参照 pi 拆分回合、两段摘要合并 |
+| V190-AGENT-STEER-UI | U | core 已有 steer/follow_up 队列，界面未接；无执行计划显示 | 接入界面 |
+| V190-REPORT-DRAFT-SIZE | W | 手写报告草稿接口一次 736 kB（证据重复来源） | 改数据格式时一并处理 |
+
+## 0.0（旧）v1.8.12 已发布（2026-10-08）
 
 **v1.8.12 = 基础加固**，**已发布**（2026-10-08，main squash `91550d73`，tag `v1.8.12`）：
 
