@@ -53,6 +53,7 @@
 | `v1.8.11` | 2026-10-07 | 对标 Stata/SPSS：IV/GLM/面板/DID/LMM 后估计、负二项 α、ARMA–GARCH 复现、单阶段 FPC、三语言脚本导出 | [说明](../releases/v1.8.11-release-notes.md) | [Release](https://github.com/damndone/Arboris/releases/tag/v1.8.11) | [代码](https://github.com/damndone/Arboris/tree/v1.8.11) |
 | `v1.8.12` | 2026-10-08 | 基础加固：本地服务安全、生成前端接口类型、命令行由目录生成（NB1 原生导出 Stata/Python）、合同分层、项名引号统一、共享虚拟环境安装修复 | [说明](../releases/v1.8.12-release-notes.md) | [Release](https://github.com/damndone/Arboris/releases/tag/v1.8.12) | [代码](https://github.com/damndone/Arboris/tree/v1.8.12) |
 | `v1.8.13` | 2026-10-14 | 不依赖模型的手动能力后端：操作目录与两步执行、手写报告、数据操作命令行、Agent 上下文工具拆分（未重跑 full gate，见说明） | [说明](../releases/v1.8.13-release-notes.md) | [Release](https://github.com/damndone/Arboris/releases/tag/v1.8.13) | [代码](https://github.com/damndone/Arboris/tree/v1.8.13) |
+| `v1.9.0` | 2026-10-14 | 研究工作区重做（不接模型也能点选完成）；Agent 压缩、项目指令、本项目会话回忆与会话管理；honest-DID 提速 | [说明](../releases/v1.9.0-release-notes.md) | [Release](https://github.com/damndone/Arboris/releases/tag/v1.9.0) | [代码](https://github.com/damndone/Arboris/tree/v1.9.0) |
 
 ## 没有发布 tag 的早期版本（v1.0–v1.4.0）
 

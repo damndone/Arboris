@@ -6,11 +6,11 @@
 
 ## Final status
 
-INTEGRATION
+COMPLETED
 
 ## Metrics
 
-- Failure frequency: 12/61 (19.7%; 19.7 per 100 events)
+- Failure frequency: 12/63 (19.0%; 19.0 per 100 events)
 - Repeat rate: 0/12 (0.0%)
 - Recurrence rate: 0/12 (0.0%)
 - MTTR: median=0 ms (sample=8; unresolved=4)
@@ -174,3 +174,5 @@ INTEGRATION
 - #59: `459691b3-1fa0-4bc9-b503-7367f407f450` | 2026-10-14T18:36:31.000Z | STATE_CHANGE/reopen_for_user_reviews_and_release | incident=`74a155b4-4832-4311-9a7e-fe484a744e27` | lesson_key=`reopen-when-work-continues` | event_sha256=`4a06d8f545e3b4ec1e7d41e11a824582d45bd1ae887bb1f14f814e2417f75e5b`
 - #60: `77976ccc-5ac2-49b9-8790-24db5a1a3615` | 2026-10-14T18:45:57.000Z | REVIEW/live_deepseek_agent_paths_before_release | incident=`0d095d45-c3ba-4119-bd4b-ff2f4b9a061e` | lesson_key=`live-runs-find-contract-contradictions` | event_sha256=`b1bf0ed31c9b16778363a9065ffb8ff17585bf13a31541c3dd03ef6c88b01564`
 - #61: `98805722-572a-4af6-9c40-c67ce58e0382` | 2026-10-14T21:31:41.000Z | GATE/release_gate_passed | incident=`14af25b0-f6c6-4fb6-95bc-a314d14ee061` | lesson_key=`search-tests-before-removing-dead-code` | event_sha256=`e6cc8456324ea8809c007952e191e8ddb4a2c80e1b2faa329244de51a1fd2ace`
+- #62: `2ce782b0-c0d5-472e-bfcf-7956f0726df6` | 2026-10-15T01:45:29.000Z | STATE_CHANGE/released | incident=`f2842507-09fb-4254-90f5-9e7fd699b152` | lesson_key=`release-from-a-passing-gate` | event_sha256=`f2bd5b59d58c88966be6b39cf1c04363e8273e02931a5202f836ee7454da57f5`
+- #63: `45f2998f-46d4-4991-b403-3ecef9fa51b8` | 2026-10-15T01:45:29.000Z | STATE_CHANGE/version_closed | incident=`00cd2aa8-d916-4aea-88fb-ce3675cbc7a2` | lesson_key=`close-the-line-with-the-release` | event_sha256=`2bbbd2f6346af28b80b0371e5ad62b07d448623d76a87bde539271636b17b446`
