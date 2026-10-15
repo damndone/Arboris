@@ -603,6 +603,7 @@ class WorkbenchOrchestrator:
         # Set by the HTTP layer, which owns the context-fingerprint and active
         # head checks a confirmation needs. When absent, every proposal waits
         # for the user (see read_only_policy).
+        self.execution_policy = "auto_read_only"
         self.read_only_runner: Callable[[Any], Awaitable[OperationRecord]] | None = None
         self._lease_owner = f"agent:{uuid4().hex}"
 
@@ -2922,14 +2923,26 @@ class WorkbenchOrchestrator:
         precheck = getattr(self.context_provider, "precheck_model_options_patch", None)
         if precheck is None:
             return
+        # The proposal's own model_type is part of the patch: a run fitted
+        # with model_type "auto" needs it, and checking the patch against the
+        # source form alone refused every correct proposal (user review 6).
+        model_type = changes.get("model_type")
+        if isinstance(model_type, dict):
+            model_type = model_type.get("new")
         try:
-            precheck(owner_run_id=owner_run_id, patch=patch)
+            precheck(owner_run_id=owner_run_id, patch=patch,
+                     model_type=model_type if isinstance(model_type, str) and model_type else None)
         except ContractError as exc:
             code = getattr(exc, "code", "MODEL_OPTIONS_REJECTED")
+            hint = (
+                " The source run chose its model automatically: also set changes.model_type to the "
+                "executed family (for example \"ols\") as a plain string."
+                if code == "MODEL_OPTIONS_EXPLICIT_MODEL_REQUIRED" else ""
+            )
             # Visible on purpose: the code and the reason are what let an Agent
             # correct the patch instead of guessing at why it was refused.
             raise ToolVisibleError(
-                f"model_options rejected by the model pack ({code}): {exc}. "
+                f"model_options rejected by the model pack ({code}): {exc}.{hint} "
                 "Fix the patch against the contract's option_vocabulary and "
                 "cross_field_rules, then propose again."
             ) from exc
@@ -3077,6 +3090,12 @@ class WorkbenchOrchestrator:
         from ..analysis_ledger import inferential_count, read as read_ledger
         from .read_only_policy import ACTOR, decide
 
+        if self.execution_policy != "auto_read_only":
+            return {
+                "requires_confirmation": True,
+                "proposal": proposal.to_dict(),
+                "confirmation_reason": "Review before execution was requested for this turn.",
+            }
         project_root = getattr(self.context_provider, "project_root", None)
         if self.read_only_runner is None or project_root is None:
             return {"requires_confirmation": True, "proposal": proposal.to_dict()}

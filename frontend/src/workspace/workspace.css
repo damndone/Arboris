@@ -1,0 +1,649 @@
+/* frontend/src/workspace/workspace.css — the v1.9.0 workspace shell.
+ * Reads tokens only (theme/tokens.css). The map and Agent column widths are
+ * registered custom properties so the grid animates on the spring curve and a
+ * switch can be reversed mid-flight. */
+
+@property --ws-map {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 280px;
+}
+
+@property --ws-agent {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 380px;
+}
+
+.ws-shell {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--ws-map) minmax(0, 1fr) var(--ws-agent);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg-canvas);
+  color: var(--label);
+  font-family: var(--font-sans);
+  font-size: var(--text-ui);
+  line-height: var(--leading-ui);
+  transition:
+    --ws-map var(--duration-spring) var(--ease-spring),
+    --ws-agent var(--duration-spring) var(--ease-spring);
+}
+
+.ws-shell--dragging {
+  transition: none;
+  cursor: col-resize;
+  user-select: none;
+}
+
+.ws-topbar {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  min-width: 0;
+  z-index: 3;
+  background: var(--material-bar);
+  -webkit-backdrop-filter: var(--material-blur);
+  backdrop-filter: var(--material-blur);
+  border-bottom: var(--hairline) solid var(--separator);
+}
+
+.ws-map {
+  grid-column: 1;
+  grid-row: 2;
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.ws-divider {
+  grid-column: 2;
+  grid-row: 2;
+  justify-self: start;
+  z-index: 2;
+  width: 9px;
+  margin-left: -5px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.ws-divider::after {
+  content: "";
+  display: block;
+  width: 2px;
+  height: 100%;
+  margin-left: 3px;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  transition: background var(--duration-fade) var(--ease-standard);
+}
+
+.ws-divider:hover::after,
+.ws-divider:focus-visible::after,
+.ws-shell--dragging .ws-divider::after {
+  background: var(--tint);
+}
+
+.ws-divider:focus-visible {
+  outline: none;
+}
+
+.ws-stage {
+  grid-column: 2;
+  grid-row: 2;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  padding: var(--space-2) var(--space-2) var(--space-2) 0;
+}
+
+.ws-shell[data-layout="lineage"] .ws-stage {
+  padding: 0;
+}
+
+.ws-stage__surface {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-card);
+  border: var(--hairline) solid var(--separator);
+  border-radius: var(--radius-lg);
+  container-type: inline-size;
+  container-name: stage;
+}
+
+.ws-shell[data-layout="lineage"] .ws-stage__surface {
+  border-width: 0 0 0 var(--hairline);
+  border-radius: 0;
+}
+
+.ws-agent {
+  grid-column: 3;
+  grid-row: 2 / 4;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-card);
+  border-left: var(--hairline) solid var(--separator);
+}
+
+.ws-agent__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.ws-agent__body[hidden] {
+  display: none;
+}
+
+.ws-agent__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 44px;
+  flex: 0 0 auto;
+  padding: 0 var(--space-2) 0 var(--space-5);
+  border-bottom: var(--hairline) solid var(--separator-faint);
+}
+
+.ws-agent__title {
+  flex: 1;
+  margin: 0;
+  font-size: var(--text-ui);
+  font-weight: 600;
+}
+
+.ws-agent__content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.ws-bottom {
+  grid-column: 1 / 3;
+  grid-row: 3;
+  min-width: 0;
+}
+
+/* Shared chrome controls */
+
+.ws-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--control-height);
+  height: var(--control-height);
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--label-secondary);
+  font-weight: 400;
+  cursor: pointer;
+}
+
+.ws-icon-button:hover {
+  background: var(--bg-elev);
+  color: var(--label);
+}
+
+.ws-icon-button:focus-visible,
+.ws-button:focus-visible,
+.ws-segmented__item:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.ws-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: var(--control-height);
+  min-height: 0;
+  padding: 0 10px;
+  border: var(--hairline) solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--label);
+  font-size: var(--text-ui);
+  font-weight: 400;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.ws-button:hover {
+  background: var(--bg-elev);
+}
+
+.ws-button--primary {
+  border-color: var(--tint-fill);
+  background: var(--tint-fill);
+  color: var(--on-tint);
+  font-weight: 500;
+}
+
+.ws-button--primary:hover {
+  background: var(--tint-fill-pressed);
+}
+
+.ws-segmented {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--radius-md);
+  background: var(--bg-pressed);
+}
+
+.ws-segmented__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  min-height: 0;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--label-secondary);
+  font-size: var(--text-ui);
+  font-weight: 400;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--duration-fade) var(--ease-standard);
+}
+
+.ws-segmented__item[aria-selected="true"],
+.ws-segmented__item[aria-pressed="true"] {
+  background: var(--bg-card);
+  color: var(--label);
+  font-weight: 500;
+  box-shadow: var(--shadow-1);
+}
+
+.ws-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Stage host (Analysis view) */
+
+.ws-stage-host {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.ws-stage-host__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: 0 0 auto;
+  padding-right: var(--space-2);
+  border-bottom: var(--hairline) solid var(--separator-faint);
+  background: var(--bg-card-2);
+}
+
+.ws-stage-host__tabs {
+  flex: 1;
+  min-width: 0;
+}
+
+.ws-stage-host__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+
+.ws-stage-host__empty {
+  margin: auto;
+  max-width: 28rem;
+  padding: var(--space-8);
+  text-align: center;
+  color: var(--label-secondary);
+}
+
+.ws-stage-host__empty-title {
+  margin: 0 0 var(--space-1);
+  font-size: var(--text-section);
+  font-weight: 600;
+  color: var(--label);
+}
+
+/* The classic detail tabs carry a negative top margin for the old right
+ * panel; in the stage they sit in their own strip. */
+.ws-stage-host__tabs .detail-tabs {
+  margin: 0;
+}
+
+.ws-stage-host__tabs .detail-tabs__strip {
+  min-height: 42px;
+  padding: 0 var(--space-2);
+}
+
+/* Regions that step aside: a folded map column, a closed stage. */
+.ws-map[hidden],
+.ws-stage[hidden] {
+  display: none;
+}
+
+.ws-map__graph {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.ws-map__graph[hidden] {
+  display: none;
+}
+
+/* Something is open but the stage was folded away: one click brings it back. */
+.ws-map__reopen {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  z-index: 5;
+}
+
+/* Project home in the workspace: the same top bar over a reading column. */
+.ws-page {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+  background: var(--bg-canvas);
+  color: var(--label);
+  font-family: var(--font-sans);
+  font-size: var(--text-ui);
+}
+
+.ws-page__body {
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.ws-segmented__item[aria-disabled="true"] {
+  color: var(--label-tertiary);
+  cursor: not-allowed;
+}
+
+/* Start page: a project with no runs yet. */
+.ws-start {
+  margin: auto;
+  max-width: 34rem;
+  padding: var(--space-10) var(--space-6);
+  text-align: center;
+}
+
+.ws-start__title {
+  margin: 0;
+  font-size: var(--text-title);
+  font-weight: 600;
+  letter-spacing: var(--tracking-tight);
+}
+
+.ws-start__lead {
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-body);
+  line-height: var(--leading-reading);
+  color: var(--label-secondary);
+}
+
+.ws-start__actions {
+  display: flex;
+  justify-content: center;
+  gap: var(--space-3);
+  margin-top: var(--space-6);
+}
+
+.ws-start__primary {
+  height: 34px;
+  padding: 0 var(--space-4);
+}
+
+.ws-start__actions .ws-button {
+  height: 34px;
+}
+
+.ws-start__note {
+  margin: var(--space-6) 0 0;
+  font-size: var(--text-small);
+  color: var(--label-secondary);
+}
+
+.ws-start__path {
+  margin: var(--space-6) 0 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
+  color: var(--label-tertiary);
+  overflow-wrap: anywhere;
+}
+
+/* Stage tabs: quiet chips; the open one is a raised card, not a fill. */
+/* Every tab reads as a tab (user review 3): unselected ones sit recessed
+   with an edge; the open one is raised. */
+.ws-stage-host__tabs .detail-tabs__item {
+  max-width: 240px;
+  border: var(--hairline) solid var(--separator);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card-2);
+}
+
+.ws-stage-host__tabs .detail-tabs__item:hover {
+  background: var(--bg-elev);
+}
+
+.ws-stage-host__tabs .detail-tabs__item[data-active="true"] {
+  background: var(--bg-card);
+  border-color: var(--separator);
+  box-shadow: var(--shadow-1);
+}
+
+.ws-stage-host__tabs .detail-tabs__tab,
+.ws-stage-host__tabs .detail-tabs__close {
+  min-height: 0;
+  background: transparent;
+  color: var(--label-secondary);
+  font-size: var(--text-small);
+  font-weight: 500;
+}
+
+.ws-stage-host__tabs .detail-tabs__item[data-active="true"] .detail-tabs__tab,
+.ws-stage-host__tabs .detail-tabs__item[data-active="true"] .detail-tabs__close {
+  color: var(--label);
+  font-weight: 600;
+}
+
+.ws-stage-host__tabs .detail-tabs__item[data-active="true"] .detail-tabs__tab:hover,
+.ws-stage-host__tabs .detail-tabs__item[data-active="true"] .detail-tabs__close:hover {
+  color: var(--label);
+  background: var(--bg-elev);
+}
+
+.ws-stage-host__tabs .detail-tabs__close {
+  border-left: 0;
+}
+
+.ws-stage-host__tabs .detail-tabs__tab {
+  max-width: 200px;
+}
+
+/* Node details inside the stage: the stage is the card, so the drawer takes
+ * its surface and a reading measure. (Its own inline styles fill a classic
+ * side panel; these win only inside the stage.) */
+.ws-stage-host .detail-drawer {
+  background: var(--bg-card) !important;
+  padding: var(--space-5) var(--space-8) var(--space-10) !important;
+}
+
+.ws-shell[data-layout="lineage"] .ws-stage-host .detail-drawer {
+  padding: var(--space-4) var(--space-5) var(--space-8) !important;
+}
+
+/* Project list (launcher) in the workspace. */
+.ws-topbar__brand--static {
+  cursor: default;
+}
+
+.ws-topbar__brand--static:hover {
+  background: transparent;
+}
+
+.ws-launcher {
+  width: min(64rem, 100%);
+  margin: 0 auto;
+  padding: var(--space-10) var(--space-6);
+  overflow: auto;
+}
+
+.ws-launcher__head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+}
+
+.ws-launcher__title {
+  margin: 0;
+  font-size: var(--text-title);
+  font-weight: 600;
+  letter-spacing: var(--tracking-tight);
+}
+
+.ws-launcher__lead {
+  margin: var(--space-1) 0 0;
+  color: var(--label-secondary);
+}
+
+.ws-launcher [data-testid="recent-projects-panel"] > li.panel {
+  padding: var(--space-4);
+  border: var(--hairline) solid var(--separator);
+  border-radius: var(--radius-lg);
+  background: var(--bg-card);
+  box-shadow: none;
+}
+
+.ws-launcher [data-testid="recent-projects-panel"] > li.panel > button:first-child {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-weight: 400;
+}
+
+.ws-launcher [data-testid="recent-projects-panel"] > li.panel > button:first-child strong {
+  display: block;
+  font-size: var(--text-section);
+  font-weight: 600;
+  color: var(--label);
+}
+
+.ws-launcher [data-testid="recent-projects-panel"] .mono {
+  margin-top: var(--space-1);
+  font-size: var(--text-caption);
+  color: var(--label-tertiary);
+  overflow-wrap: anywhere;
+}
+
+.ws-launcher [data-testid="recent-projects-panel"] .muted {
+  margin-top: var(--space-2);
+  font-size: var(--text-small);
+  color: var(--label-secondary);
+}
+
+.ws-launcher [data-testid^="recent-remove-"] {
+  min-height: 0;
+  height: 26px;
+  padding: 0 var(--space-2);
+  font-size: var(--text-small);
+  color: var(--label-secondary);
+}
+
+/* The outer shell steps aside for the workspace on every page it owns. */
+.workbench-shell.workbench-shell--workspace {
+  padding: 0;
+  width: 100%;
+  max-width: none;
+  height: 100vh;
+  height: 100dvh;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.workbench-shell.workbench-shell--workspace > .workbench-outlet {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.workbench-shell.workbench-shell--workspace > .workbench-outlet > * {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+.ws-segmented--icons .ws-segmented__item {
+  position: relative;
+  width: 32px;
+  padding: 0;
+  justify-content: center;
+}
+
+/* v1.9.0 — right-click menu for selected text (SelectionMenu.tsx). */
+.ws-selection-menu {
+  position: fixed;
+  z-index: 1000;
+  display: grid;
+  gap: 2px;
+  min-width: 190px;
+  padding: 5px;
+  background: var(--panel-bg);
+  border: var(--hairline) solid var(--separator);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-pop);
+}
+
+.ws-selection-menu button {
+  padding: 6px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--label);
+  font: inherit;
+  font-size: var(--text-ui);
+  text-align: left;
+  cursor: pointer;
+}
+
+.ws-selection-menu button:hover,
+.ws-selection-menu button:focus-visible {
+  background: var(--bg-card-2);
+  outline: none;
+}

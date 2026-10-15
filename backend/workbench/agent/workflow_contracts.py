@@ -2546,6 +2546,47 @@ def _schema_value_matches(value: Any, schema: Mapping[str, Any]) -> bool:
     return True
 
 
+def _schema_mismatch(value: Any, schema: Mapping[str, Any], path: str) -> str:
+    """Where a value leaves its closed schema, for the refusal message.
+
+    Only called after ``_schema_value_matches`` has said no; it descends into
+    objects and arrays to the first failing member and names what is allowed.
+    """
+
+    if isinstance(value, Mapping) and isinstance(schema.get("properties"), Mapping):
+        properties = schema["properties"]
+        for name in schema.get("required", []):
+            if name not in value:
+                return f"{path}.{name} is required"
+        additional = schema.get("additionalProperties", True)
+        for key, item in value.items():
+            if key in properties:
+                if not _schema_value_matches(item, properties[key]):
+                    return _schema_mismatch(item, properties[key], f"{path}.{key}")
+            elif additional is False:
+                return f"{path}.{key} is not a field here; allowed: {', '.join(sorted(properties))}"
+            elif isinstance(additional, Mapping) and not _schema_value_matches(item, additional):
+                return _schema_mismatch(item, additional, f"{path}.{key}")
+    if isinstance(value, list) and isinstance(schema.get("items"), Mapping):
+        for index, item in enumerate(value):
+            if not _schema_value_matches(item, schema["items"]):
+                return _schema_mismatch(item, schema["items"], f"{path}[{index}]")
+    if "enum" in schema:
+        return f"{path} must be one of: {', '.join(map(str, schema['enum']))}"
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if "minimum" in schema and value < schema["minimum"]:
+            return f"{path} must be at least {schema['minimum']}"
+        if "exclusiveMinimum" in schema and value <= schema["exclusiveMinimum"]:
+            return f"{path} must be greater than {schema['exclusiveMinimum']}"
+    if isinstance(value, (str, list)) and ("minLength" in schema or "minItems" in schema):
+        return f"{path} is too short"
+    if "const" in schema:
+        return f"{path} must be {schema['const']!r}"
+    if "type" in schema:
+        return f"{path} must be {schema['type']}" + (" or null" if schema.get("nullable") else "")
+    return f"{path} does not match its closed schema"
+
+
 def _validate_data_management_step(operation_id: str, spec: Mapping[str, Any]) -> None:
     """Validate semantic choices that JSON shape alone cannot express."""
 
@@ -2683,7 +2724,8 @@ def _validate_declared_field_types(
             spec[field_name], schema
         ):
             raise OperationValidationError(
-                f"{operation_id} field {field_name} does not match its closed schema"
+                f"{operation_id} field "
+                + _schema_mismatch(spec[field_name], schema, field_name)
             )
 
 

@@ -1,4 +1,6 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { buildTurns, duration, messageTime } from "./transcript/turns";
+import { MessageActions } from "./transcript/MessageActions";
 import { useAgentSurface } from "./AgentSurfaceContext";
 import { agentAuditExportUrl } from "./agentApi";
 import { AgentComposer } from "./AgentComposer";
@@ -6,6 +8,8 @@ import type { AgentMessage } from "./agentTypes";
 import { AgentRowsTable, shownRows } from "./AgentRowsTable";
 import { renderMarkdown } from "../../report/markdown";
 import "./agent.css";
+import { formatPValue } from "../../format/numbers";
+import { ProposalFields } from "./ProposalFields";
 
 function roleMarker(role: string): string {
   if (role === "user") return "❯";
@@ -43,6 +47,7 @@ function observableActivity(eventType: string | null): string {
   if (!eventType) return "Preparing the bounded context";
   const normalized = eventType.toLowerCase();
   if (normalized === "provider_retry") return "The provider connection dropped; retrying";
+  if (normalized === "compaction_start") return "Summarizing the earlier conversation to stay within the model's context";
   if (normalized.includes("tool")) return "Checking evidence";
   if (normalized.includes("proposal")) return "Preparing a reviewable proposal";
   if (normalized.includes("message") || normalized.includes("response")) return "Drafting the response";
@@ -161,32 +166,36 @@ export function toolStatusLine(content: string, toolName?: string | null): strin
   return `${toolId} ✓ ok`;
 }
 
-type TranscriptTurn = {
-  user: AgentMessage | null;
-  reasoning: AgentMessage[];
-  responses: AgentMessage[];
-};
+/** "Worked through 3 steps · rewrote the answer once" */
+/** Where the earlier conversation was summarized: collapsed, with the summary inside. */
+function CompactionMarker({ message }: { message: AgentMessage }) {
+  const info = message.compaction;
+  const trigger = info?.trigger === "manual" ? "on request" : info?.trigger === "overflow" ? "after the model refused a long request" : "near the model's context limit";
+  return (
+    <details className="agt-compaction" data-testid="agent-compaction" data-entry-id={message.entry_id}>
+      <summary>
+        <span>Earlier conversation summarized {trigger}</span>
+        <span className="agt-compaction__meta">
+          {info ? `${info.summarized_messages} messages · ~${info.tokens_before.toLocaleString()} tokens before` : ""}
+          {" · "}{messageTime(message.at)}
+        </span>
+      </summary>
+      {info && !info.verified && (
+        <p className="agt-compaction__warn">
+          Some numbers in this summary ({info.unverified_numbers.join(", ")}) did not match the conversation; the Agent will not cite them without checking again.
+        </p>
+      )}
+      <div className="agt-compaction__body wb-agent-terminal-markdown">{renderMarkdown(message.content)}</div>
+      <p className="agt-compaction__note">The Agent now reads this summary instead of the messages above it; they stay here and in the session log.</p>
+    </details>
+  );
+}
 
-function transcriptTurns(messages: AgentMessage[]): TranscriptTurn[] {
-  const turns: TranscriptTurn[] = [];
-  let current: TranscriptTurn | null = null;
-  for (const message of messages) {
-    if (message.role === "user") {
-      current = { user: message, reasoning: [], responses: [] };
-      turns.push(current);
-      continue;
-    }
-    if (current === null) {
-      current = { user: null, reasoning: [], responses: [] };
-      turns.push(current);
-    }
-    if (message.role === "tool" || message.stop_reason === "tool_calls" || message.stop_reason === "revised") {
-      current.reasoning.push(message);
-    } else {
-      current.responses.push(message);
-    }
-  }
-  return turns;
+export function workSummary(steps: number, drafts: number): string {
+  const parts = [];
+  if (steps > 0) parts.push(`Worked through ${steps} ${steps === 1 ? "step" : "steps"}`);
+  if (drafts > 0) parts.push(`${steps > 0 ? "rewrote" : "Rewrote"} the answer ${drafts === 1 ? "once" : `${drafts} times`} after checking its numbers`);
+  return parts.join(" · ");
 }
 
 function withdrawnNumbers(message: AgentMessage): string {
@@ -194,10 +203,6 @@ function withdrawnNumbers(message: AgentMessage): string {
   const unverified = check && "unverified" in check ? check.unverified : [];
   const numbers = unverified.map((item) => item.text).filter(Boolean);
   return numbers.length > 0 ? numbers.join(", ") : "some numbers";
-}
-
-function visibleReasoningEntries(messages: AgentMessage[]): AgentMessage[] {
-  return messages.filter((message) => message.role !== "assistant" || message.content.trim().length > 0);
 }
 
 /** One cast entry as the user typed it, e.g. `wage → string`. */
@@ -251,10 +256,23 @@ function navigationButtonLabel(ref: {
   return `Open ${relation} ${label}`;
 }
 
-export function AgentPanel({ runId, projectRoot }: { runId: string; projectRoot: string }) {
+export function AgentPanel({
+  runId,
+  projectRoot,
+  composer,
+  compactHeader = false,
+}: {
+  runId: string;
+  projectRoot: string;
+  /** v1.9.0: a host may supply its own composer (the workspace Agent column). */
+  composer?: ReactNode;
+  /** The workspace shows the focus in its composer; it keeps only the audit link here. */
+  compactHeader?: boolean;
+}) {
   const agent = useAgentSurface();
+  const [revisionIssues, setRevisionIssues] = useState<string[]>([]);
   const [editingProposalId, setEditingProposalId] = useState<string | null>(null);
-  const [revisionDraft, setRevisionDraft] = useState("");
+  const [revisionDraft, setRevisionDraft] = useState<Record<string, unknown>>({});
   const [revisionError, setRevisionError] = useState<string | null>(null);
   const transcriptRef = useRef<HTMLDivElement | null>(null);
   const shouldFollowTranscriptRef = useRef(true);
@@ -275,7 +293,10 @@ export function AgentPanel({ runId, projectRoot }: { runId: string; projectRoot:
     .filter((message) => message.role === "tool")
     .slice(-3)
     .map((message) => toolStatusLine(message.content, message.name));
-  const turns = transcriptTurns(agent.messages);
+  const turns = buildTurns(agent.messages);
+  const pendingProposals = agent.proposals.filter((proposal) => proposal.status === "pending");
+  const settledProposals = agent.proposals.filter((proposal) => proposal.status !== "pending");
+  const pinned = new Set((agent.chapters ?? []).map((chapter) => chapter.entry_id));
   useLayoutEffect(() => {
     const transcript = transcriptRef.current;
     if (!transcript) return;
@@ -297,6 +318,7 @@ export function AgentPanel({ runId, projectRoot }: { runId: string; projectRoot:
         key={message.entry_id}
         data-testid={`agent-message-${message.role}`}
         data-role={message.role}
+        data-entry-id={message.entry_id}
         className="wb-agent-terminal-line"
       >
         <span className="wb-agent-terminal-marker" title={roleLabel(message.role)}>
@@ -310,7 +332,7 @@ export function AgentPanel({ runId, projectRoot }: { runId: string; projectRoot:
           <div className="wb-agent-terminal-content wb-agent-terminal-markdown">
             {message.stop_reason === "revised" && (
               <p data-testid="agent-withdrawn-draft" className="wb-agent-withdrawn-draft">
-                Draft withdrawn by the numeric check: {withdrawnNumbers(message)} matched no result. The Agent rewrote the answer.
+                Earlier draft, withdrawn by the number check: {withdrawnNumbers(message)} matched no result, so the Agent rewrote the answer below.
               </p>
             )}
             {renderMarkdown(message.content)}
@@ -339,6 +361,17 @@ export function AgentPanel({ runId, projectRoot }: { runId: string; projectRoot:
             ))}
           </span>
         )}
+        {message.role !== "tool" && message.stop_reason !== "revised" && message.stop_reason !== "tool_calls" && (
+          <MessageActions
+            message={message}
+            pinned={pinned.has(message.entry_id)}
+            busy={turnActive}
+            onRewind={agent.rewindTo}
+            onFork={agent.forkConversation}
+            onPin={agent.pinChapter}
+            onUnpin={agent.unpinChapter}
+          />
+        )}
         {sourceRef && (
           <button
             type="button"
@@ -360,7 +393,8 @@ export function AgentPanel({ runId, projectRoot }: { runId: string; projectRoot:
       aria-label="Agent panel"
       className="wb-agent-panel"
     >
-      <header
+      {(!compactHeader || auditSessionId) && <header
+        className={compactHeader ? "wb-agent-panel__header wb-agent-panel__header--compact" : "wb-agent-panel__header"}
         style={{
           display: "flex",
           alignItems: "center",
@@ -369,20 +403,20 @@ export function AgentPanel({ runId, projectRoot }: { runId: string; projectRoot:
           fontFamily: "var(--font-mono, ui-monospace, monospace)",
         }}
       >
-        <strong style={{ color: "var(--label)" }}>agent</strong>
-        <span style={{ color: "var(--label-secondary)" }}>{agent.scopeLabel}</span>
-        {turnActive && (
+        {!compactHeader && <strong style={{ color: "var(--label)" }}>agent</strong>}
+        {!compactHeader && <span style={{ color: "var(--label-secondary)" }}>{agent.scopeLabel}</span>}
+        {!compactHeader && turnActive && (
           <span data-testid="agent-turn-progress" style={{ color: "var(--label-tertiary)" }} aria-live="polite">
             {`Working · ${elapsedSeconds}s`}
           </span>
         )}
-        <span
+        {!compactHeader && <span
           data-testid="agent-event-cursor"
           title={agent.lastEventType ? `last event: ${agent.lastEventType}` : "No Agent events yet"}
           style={{ color: "var(--label-tertiary)" }}
         >
           events #{agent.eventCursor}
-        </span>
+        </span>}
         {auditSessionId && (
           <a
             href={agentAuditExportUrl(projectRoot, auditSessionId)}
@@ -393,54 +427,12 @@ export function AgentPanel({ runId, projectRoot }: { runId: string; projectRoot:
             Export Agent audit
           </a>
         )}
-      </header>
-      {turnActive && (
-        <div
-          data-testid="agent-execution-trace"
-          className="wb-agent-execution-trace"
-          aria-label="Agent execution progress"
-          aria-live="polite"
-        >
-          <div className="wb-agent-execution-trace__step" data-state="complete">
-            <span aria-hidden="true">✓</span>
-            <span>Request received</span>
-          </div>
-          {recentToolSteps.map((step, index) => (
-            <div key={`${index}:${step}`} className="wb-agent-execution-trace__step" data-state="complete">
-              <span aria-hidden="true">✓</span>
-              <span>{step}</span>
-            </div>
-          ))}
-          <div className="wb-agent-execution-trace__step" data-state="active">
-            <span aria-hidden="true">●</span>
-            <span>{observableActivity(agent.lastEventType)}</span>
-          </div>
-        </div>
-      )}
-      {turnActive && (
-        <section
-          data-testid="agent-live-response"
-          className="wb-agent-live-response"
-          aria-live="polite"
-          aria-label="Live Agent response"
-        >
-          <span className="wb-agent-live-response__label">Live response</span>
-          {agent.liveResponseText ? (
-            <div className="wb-agent-terminal-markdown">
-              {renderMarkdown(agent.liveResponseText)}
-            </div>
-          ) : (
-            <span className="wb-agent-live-response__pending">
-              Waiting for the Agent's public response…
-            </span>
-          )}
-        </section>
-      )}
+      </header>}
       {terminalFailure && (
         <p
           data-testid="agent-turn-error"
           role="status"
-          style={{ margin: "6px 0", color: "var(--danger, #b42318)", fontSize: 12 }}
+          style={{ margin: "6px 0", color: "var(--status-fails-fg)", fontSize: 12 }}
         >
           {terminalFailure}
         </p>
@@ -454,29 +446,47 @@ export function AgentPanel({ runId, projectRoot }: { runId: string; projectRoot:
           shouldFollowTranscriptRef.current = transcriptIsAtBottom(event.currentTarget);
         }}
       >
-        {agent.messages.length === 0 ? (
+        {agent.chapters && agent.chapters.length > 0 && (
+          <nav className="agt-chapters" aria-label="Chapters">
+            <span>Chapters</span>
+            {agent.chapters.map((chapter) => (
+              <button
+                key={chapter.entry_id}
+                type="button"
+                title={`Pinned ${messageTime(chapter.at)}`}
+                onClick={() => transcriptRef.current
+                  ?.querySelector(`[data-entry-id="${CSS.escape(chapter.entry_id)}"]`)
+                  ?.scrollIntoView({ behavior: "smooth", block: "start" })}
+              >
+                {chapter.title}
+              </button>
+            ))}
+          </nav>
+        )}
+        {agent.messages.length === 0 && !turnActive ? (
           <div data-testid="agent-empty" className="wb-agent-terminal-empty">
             <div style={{ fontWeight: 600, marginBottom: 4 }}>Start a task</div>
             <div>Ask about the selected node, active head, or model output.</div>
           </div>
         ) : turns.map((turn, index) => {
-          const reasoning = visibleReasoningEntries(turn.reasoning);
-          const turnId = turn.user?.entry_id ?? `orphan-${index}`;
+          const live = turnActive && index === turns.length - 1;
+          if (turn.summary) return <CompactionMarker key={turn.id} message={turn.summary} />;
           return (
-            <div key={turnId} className="wb-agent-turn">
+            <div key={turn.id} className="wb-agent-turn">
               {turn.user && renderTranscriptMessage(turn.user)}
-              {reasoning.length > 0 && (
-                <details data-testid={`agent-reasoning-${turnId}`} className="wb-agent-reasoning">
+              {!live && (turn.steps.length > 0 || turn.drafts.length > 0) && (
+                <details data-testid={`agent-reasoning-${turn.id}`} className="wb-agent-reasoning">
                   <summary>
-                    <span>Reasoning</span>
-                    <span>{reasoning.length} steps</span>
+                    <span>{workSummary(turn.steps.length, turn.drafts.length)}</span>
+                    {turn.seconds !== null && <span>{duration(turn.seconds)}</span>}
                   </summary>
                   <div className="wb-agent-reasoning-content">
-                    {reasoning.map(renderTranscriptMessage)}
+                    {turn.steps.map(renderTranscriptMessage)}
+                    {turn.drafts.map(renderTranscriptMessage)}
                   </div>
                 </details>
               )}
-              {turn.reasoning.map((message) => {
+              {turn.steps.map((message) => {
                 const shown = shownRows(message);
                 return shown ? <AgentRowsTable key={`rows-${message.entry_id}`} shown={shown} /> : null;
               })}
@@ -484,6 +494,39 @@ export function AgentPanel({ runId, projectRoot }: { runId: string; projectRoot:
             </div>
           );
         })}
+        {turnActive && (
+          /* The turn in progress lives in the conversation, where its reply
+           * will land, instead of in boxes above that push it away. */
+          <div className="wb-agent-turn wb-agent-turn--live">
+            <div
+              data-testid="agent-execution-trace"
+              className="agt-working"
+              aria-label="Agent execution progress"
+              aria-live="polite"
+            >
+              <span className="agt-working__dot" aria-hidden="true" />
+              <span>{observableActivity(agent.lastEventType)}</span>
+              <span className="agt-working__time">{elapsedSeconds} s</span>
+              {recentToolSteps.length > 0 && (
+                <details className="agt-working__steps">
+                  <summary>{recentToolSteps.length} recent {recentToolSteps.length === 1 ? "step" : "steps"}</summary>
+                  <ul>{recentToolSteps.map((step, stepIndex) => <li key={`${stepIndex}:${step}`}>{step}</li>)}</ul>
+                </details>
+              )}
+            </div>
+            {agent.liveResponseText && (
+              <div
+                data-testid="agent-live-response"
+                className="wb-agent-terminal-line"
+                data-role="assistant"
+                aria-label="Live Agent response"
+              >
+                <span className="wb-agent-terminal-marker" aria-hidden="true">{roleMarker("assistant")}</span>
+                <div className="wb-agent-terminal-content wb-agent-terminal-markdown">{renderMarkdown(agent.liveResponseText)}</div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
       {agent.activeOperation && (
         <div
@@ -530,7 +573,7 @@ export function AgentPanel({ runId, projectRoot }: { runId: string; projectRoot:
                 <div style={{ fontVariantNumeric: "tabular-nums" }}>
                   {Object.entries(entry.result)
                     .filter(([key]) => key !== "schema_version")
-                    .map(([key, value]) => `${key.replace(/_/g, " ")}: ${formatAgentResultValue(value)}`)
+                    .map(([key, value]) => `${key.replace(/_/g, " ")}: ${/p_value$/.test(key) && typeof value === "number" ? formatPValue(value) : formatAgentResultValue(value)}`)
                     .join(" · ")}
                 </div>
               </div>
@@ -591,7 +634,25 @@ export function AgentPanel({ runId, projectRoot }: { runId: string; projectRoot:
           aria-label="Agent actions"
           className="wb-agent-action-rail"
         >
-          {agent.proposals.map((proposal) => {
+          {/* Only what still waits for the person stays above the input;
+              confirmed or declined proposals fold into one line (review 6). */}
+          {settledProposals.length > 0 && (
+            <details className="wb-agent-settled" data-testid="agent-settled-proposals">
+              <summary>
+                {settledProposals.length === 1 ? "1 earlier proposal" : `${settledProposals.length} earlier proposals`}
+                {" · "}{settledProposals.map((proposal) => proposal.status).join(", ")}
+              </summary>
+              <ul>
+                {settledProposals.map((proposal) => (
+                  <li key={proposal.proposal_id} data-testid={`agent-proposal-${proposal.proposal_id}`}>
+                    <strong>{proposal.operation_id}</strong> · {proposal.status}
+                    {(proposal.readable ?? []).length > 0 && <span> · {(proposal.readable ?? []).join("; ")}</span>}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+          {pendingProposals.map((proposal) => {
         const pending = proposal.status === "pending";
         return (
           <article
@@ -622,6 +683,7 @@ export function AgentPanel({ runId, projectRoot }: { runId: string; projectRoot:
             ) : (
               <div className="wb-agent-proposal-change">{changeSummary(proposal.changes)}</div>
             )}
+            {proposal.revision > 1 && <p role="note">Parameters were revised. The Agent rationale below describes the original proposal; review the current parameter summary before confirming.</p>}
             {proposal.expected_effect.length > 0 && (
               <div className="wb-agent-proposal-detail">Expected: {proposal.expected_effect.join("; ")}</div>
             )}
@@ -635,7 +697,7 @@ export function AgentPanel({ runId, projectRoot }: { runId: string; projectRoot:
                     type="button"
                     className="wb-agent-proposal-confirm"
                     aria-label={`Confirm proposal ${proposal.proposal_id}`}
-                    disabled={agent.confirmationBusyId !== null}
+                    disabled={agent.confirmationBusyId !== null || editingProposalId === proposal.proposal_id}
                     onClick={() => void agent.confirmProposal(proposal.proposal_id)}
                   >
                     {agent.confirmationBusyId === proposal.proposal_id
@@ -658,7 +720,7 @@ export function AgentPanel({ runId, projectRoot }: { runId: string; projectRoot:
                     disabled={agent.confirmationBusyId !== null}
                     onClick={() => {
                       setEditingProposalId(proposal.proposal_id);
-                      setRevisionDraft(JSON.stringify(proposal.changes, null, 2));
+                      setRevisionDraft(proposal.changes);
                       setRevisionError(null);
                     }}
                   >
@@ -667,22 +729,18 @@ export function AgentPanel({ runId, projectRoot }: { runId: string; projectRoot:
                 </div>
                 {editingProposalId === proposal.proposal_id && (
                   <div className="wb-agent-proposal-editor">
-                    <textarea
-                      aria-label={`Proposal changes ${proposal.proposal_id}`}
-                      value={revisionDraft}
-                      onChange={(event) => setRevisionDraft(event.target.value)}
-                      rows={4}
-                    />
+                    <ProposalFields projectRoot={projectRoot} label={`Proposal changes ${proposal.proposal_id}`} value={revisionDraft} onChange={setRevisionDraft} onIssues={setRevisionIssues} />
+                    {revisionIssues.length > 0 && <p role="status">{revisionIssues.join(" ")}</p>}
                     {revisionError && <div role="alert">{revisionError}</div>}
                     <div className="wb-agent-proposal-actions">
                       <button
                         type="button"
                         className="wb-agent-proposal-confirm"
                         aria-label={`Save revision ${proposal.proposal_id}`}
-                        disabled={agent.confirmationBusyId !== null}
+                        disabled={agent.confirmationBusyId !== null || revisionIssues.length > 0}
                         onClick={async () => {
                           try {
-                            const parsed: unknown = JSON.parse(revisionDraft);
+                            const parsed: unknown = revisionDraft;
                             if (
                               typeof parsed !== "object" ||
                               parsed === null ||
@@ -723,7 +781,7 @@ export function AgentPanel({ runId, projectRoot }: { runId: string; projectRoot:
           })}
         </aside>
       )}
-      <AgentComposer showScope={false} variant="terminal" />
+      {composer ?? <AgentComposer showScope={false} variant="terminal" />}
     </section>
   );
 }

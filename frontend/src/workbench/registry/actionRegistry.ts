@@ -46,6 +46,9 @@ export interface ActionDispatch {
   /** v1.6.11 slice C — switch the main view (e.g. Generate report → "report").
    *  Optional: surfaces built before v1.6.11 may not provide it. */
   setView?(view: "graph" | "table" | "pipeline" | "report"): void;
+  /** v1.9.0 — select the node and put a question about it in the Agent's
+   *  composer. Absent where there is no Agent column (classic shell). */
+  askAgent?(node: GraphViewNode): void;
 }
 
 /** F6: structured keybinding, matched against a KeyboardEvent. Kept
@@ -173,12 +176,12 @@ export const actionRegistry: ActionEntry[] = [
   {
     id: "askAiAboutNode",
     order: 80,
-    label: "Ask AI about this node",
+    label: "Ask Agent about this node",
     surfaces: ["graph-context-menu", "drawer-header-menu", "command-palette"],
     shouldRender: () => true,
-    // v1.6.11 slice A/C: /llm/chat is live — open the node's drawer, whose
-    // Ask AI section carries the question box (flag VITE_WORKBENCH_ASK_AI).
-    invoke: (ctx) => ctx.dispatch.openDetail(ctx.node.nodeKey),
+    // v1.9.0: the Agent column replaced the drawer's Ask AI box. Where there
+    // is no Agent column the node's detail still opens.
+    invoke: (ctx) => (ctx.dispatch.askAgent ? ctx.dispatch.askAgent(ctx.node) : ctx.dispatch.openDetail(ctx.node.nodeKey)),
   },
   {
     id: "rerunFromNode",

@@ -158,7 +158,7 @@ describe("NodeActionMenu", () => {
       "Copy node ID",
       "Copy as JSON",
       "Copy lineage path",
-      "Ask AI about this node",
+      "Ask Agent about this node",
       "Rerun from here",
       "Mark needs review",
     ]);
@@ -215,7 +215,7 @@ describe("NodeActionMenu", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /node actions/i }));
     expect(screen.getByText("Choose operation owner").closest("button")).toBeDisabled();
-    expect(screen.getByText("Ask AI about this node").closest("button")).toBeDisabled();
+    expect(screen.getByText("Ask Agent about this node").closest("button")).toBeDisabled();
     expect(screen.getByText("Rerun from here").closest("button")).toBeDisabled();
   });
 

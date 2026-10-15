@@ -1,0 +1,566 @@
+/* frontend/src/manual/manual.css — manual panels (Analyze, Report) and the
+   schema-generated forms they share. Analyze's own layout is in
+   operations/operations.css. */
+
+.manual-panel {
+  box-sizing: border-box;
+  height: 100%;
+  min-width: 0;
+  overflow: auto;
+  padding: var(--space-5);
+  background: var(--bg-card);
+  color: var(--label);
+}
+
+.manual-panel header,
+.manual-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.manual-panel h2 {
+  flex: 1;
+  margin: 0;
+}
+
+.manual-panel a {
+  margin-right: var(--space-3);
+  color: var(--tint);
+}
+
+.manual-panel pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.manual-panel [role="alert"] {
+  padding: var(--space-2) var(--space-3);
+  border-left: 3px solid var(--label-secondary);
+  color: var(--label);
+  white-space: pre-line;
+}
+
+/* Fields */
+.manual-field {
+  display: grid;
+  gap: 5px;
+  margin: var(--space-2) 0;
+  color: var(--label-secondary);
+  font-size: var(--text-small);
+  font-weight: 500;
+}
+
+.manual-field[hidden] {
+  display: none;
+}
+
+.manual-field small,
+.manual-panel small {
+  color: var(--label-tertiary);
+  font-size: var(--text-caption);
+  font-weight: 400;
+  line-height: 1.4;
+}
+
+.manual-panel input:not([type="checkbox"]):not([type="radio"]),
+.manual-panel select,
+.manual-panel textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 0;
+  height: 30px;
+  padding: 0 10px;
+  border: var(--hairline) solid var(--border);
+  border-radius: var(--radius-sm);
+  background-color: var(--field-bg);
+  color: var(--label);
+  font: inherit;
+  font-size: var(--text-ui);
+  font-weight: 400;
+}
+
+.manual-panel textarea {
+  height: auto;
+  min-height: 90px;
+  padding: var(--space-2) 10px;
+  font-family: inherit;
+}
+
+.manual-panel input:not([type="checkbox"]):not([type="radio"]):focus-visible,
+.manual-panel select:focus-visible,
+.manual-panel textarea:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 0;
+  border-color: transparent;
+}
+
+.manual-panel fieldset,
+.manual-panel article {
+  min-width: 0;
+  margin: var(--space-2) 0;
+  padding: var(--space-2) 0 0;
+  border: 0;
+  border-radius: 0;
+}
+
+.manual-panel legend {
+  padding: 0;
+  color: var(--label);
+  font-size: var(--text-ui);
+  font-weight: 600;
+}
+
+/* Nested fields hang from a quiet rule instead of boxes inside boxes. */
+.manual-field fieldset fieldset {
+  margin: var(--space-2) 0;
+  padding: 0 0 0 var(--space-3);
+  border-left: 2px solid var(--separator-faint);
+}
+
+.manual-field fieldset fieldset > legend {
+  color: var(--label-secondary);
+  font-size: var(--text-small);
+}
+
+.manual-object {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.manual-object-row,
+.manual-array-row {
+  position: relative;
+  margin: var(--space-1) 0;
+}
+
+.manual-array-row > .manual-actions {
+  margin: var(--space-1) 0 var(--space-3);
+}
+
+.manual-panel button:not([class]),
+.manual-remove {
+  min-height: 0;
+  height: 26px;
+  padding: 0 var(--space-3);
+  border: var(--hairline) solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--bg-card);
+  color: var(--label-secondary);
+  font-size: var(--text-small);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.manual-panel button:not([class]):hover:not(:disabled),
+.manual-remove:hover {
+  background: var(--bg-elev);
+  color: var(--label);
+}
+
+.manual-panel button:not([class]):disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.manual-add {
+  max-width: 260px;
+}
+
+.manual-map-add {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.manual-map-add .manual-field {
+  flex: 1;
+  min-width: 140px;
+}
+
+/* Name lists as chips */
+.manual-chips__box {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 30px;
+  margin-top: 5px;
+  padding: 3px var(--space-1);
+  border: var(--hairline) solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--field-bg);
+}
+
+.manual-chips__box:focus-within {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 0;
+}
+
+.manual-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 22px;
+  padding: 0 2px 0 8px;
+  border-radius: var(--radius-pill);
+  background: var(--tint-bg);
+  color: var(--tint-label);
+  font-size: var(--text-small);
+  font-weight: 500;
+}
+
+.manual-panel .manual-chip button {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.manual-panel .manual-chip button:hover {
+  background: color-mix(in oklch, var(--tint) 18%, transparent);
+}
+
+.manual-panel .manual-chips__box input:not([type="checkbox"]) {
+  flex: 1;
+  width: auto;
+  min-width: 120px;
+  height: 22px;
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+}
+
+.manual-panel .manual-chips__box input:focus-visible {
+  outline: none;
+}
+
+.manual-chips__columns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: var(--space-2);
+}
+
+.manual-panel .manual-chips__columns button {
+  height: 22px;
+  min-height: 0;
+  padding: 0 8px;
+  border: var(--hairline) solid var(--border);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--label-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
+  cursor: pointer;
+}
+
+.manual-panel .manual-chips__columns button:hover:not(:disabled) {
+  border-color: var(--tint);
+  color: var(--tint);
+}
+
+.manual-panel .manual-chips__columns button[aria-pressed="true"] {
+  border-color: transparent;
+  background: var(--tint-bg);
+  color: var(--tint-label);
+}
+
+/* Report panel */
+.manual-facts {
+  max-height: 300px;
+  overflow: auto;
+}
+
+.manual-facts label {
+  display: block;
+  padding: 6px;
+}
+
+.manual-reading {
+  max-width: 72ch;
+  padding: var(--space-3) 0;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.manual-reading p {
+  margin: 0 0 var(--space-2);
+  white-space: pre-wrap;
+}
+
+.manual-reading__fact {
+  margin: 4px 0;
+}
+
+.manual-reading__fact summary {
+  cursor: pointer;
+}
+
+.manual-reading__fact small {
+  display: block;
+  padding: 4px var(--space-4);
+  color: var(--label-secondary);
+}
+
+/* Manual report (user review 3): a document with a quiet toolbar. */
+.mr .mr-doc {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+}
+
+.manual-panel input.mr-title:not([type="checkbox"]):not([type="radio"]) {
+  height: auto;
+  padding: var(--space-1) 0;
+  border: 0;
+  border-bottom: var(--hairline) solid transparent;
+  border-radius: 0;
+  background: transparent;
+  font-size: var(--text-title);
+  font-weight: 600;
+  letter-spacing: var(--tracking-tight);
+}
+
+.manual-panel input.mr-title:hover {
+  border-bottom-color: var(--border);
+}
+
+.manual-panel input.mr-title:focus-visible {
+  outline: none;
+  border-bottom-color: var(--tint);
+}
+
+.mr-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 32px;
+}
+
+.mr-spacer {
+  flex: 1;
+}
+
+.mr-status {
+  color: var(--label-tertiary);
+  font-size: var(--text-small);
+}
+
+.mr-seg {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: var(--radius-md);
+  background: var(--bg-elev);
+}
+
+.manual-panel .mr-seg button {
+  height: 26px;
+  min-height: 0;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: calc(var(--radius-md) - 2px);
+  background: transparent;
+  color: var(--label-secondary);
+  font-size: var(--text-ui);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.manual-panel .mr-seg button[aria-pressed="true"] {
+  background: var(--bg-card);
+  color: var(--label);
+  box-shadow: var(--shadow-1);
+}
+
+.manual-panel .mr-button,
+.mr-saved .mr-button {
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  min-height: 0;
+  margin: 0;
+  padding: 0 var(--space-3);
+  border: var(--hairline) solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--bg-card);
+  color: var(--label);
+  font-size: var(--text-ui);
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.manual-panel .mr-button:hover:not(:disabled) {
+  background: var(--bg-elev);
+}
+
+.manual-panel .mr-button--primary {
+  border-color: transparent;
+  background: var(--tint);
+  color: var(--on-tint);
+  font-weight: 600;
+}
+
+.manual-panel .mr-button--primary:hover:not(:disabled) {
+  background: var(--tint-hover);
+}
+
+.manual-panel .mr-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* Preview: the report on a page. */
+.mr-paper {
+  padding: var(--space-6) var(--space-8);
+  border: var(--hairline) solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-1);
+}
+
+.mr-paper .manual-reading {
+  max-width: 68ch;
+  margin: 0 auto;
+  padding: 0;
+  font-family: var(--font-serif);
+  font-size: var(--text-reading);
+  line-height: var(--leading-reading);
+}
+
+.mr-paper .manual-reading h3,
+.mr-paper .manual-reading h4,
+.mr-paper .manual-reading h5 {
+  margin: 1.4em 0 0.5em;
+  font-family: var(--font-sans);
+  letter-spacing: var(--tracking-tight);
+}
+
+.mr-paper .manual-reading h3 {
+  margin-top: 0;
+  font-size: var(--text-title);
+}
+
+.mr-paper .manual-reading h4 {
+  font-size: var(--text-section);
+}
+
+.mr-paper .manual-reading h5 {
+  color: var(--label-secondary);
+  font-size: var(--text-ui);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-key);
+}
+
+.mr-paper .manual-reading ul {
+  margin: 0 0 1em;
+  padding-left: 1.2em;
+}
+
+.mr-paper .manual-reading li {
+  margin: 0.25em 0;
+}
+
+.manual-value {
+  font-variant-numeric: tabular-nums;
+  border-bottom: 1px dotted var(--label-tertiary);
+  cursor: help;
+}
+
+.manual-value--missing {
+  color: var(--status-fails-fg);
+}
+
+.manual-cite {
+  margin-left: 2px;
+  color: var(--tint);
+  font-family: var(--font-sans);
+  font-size: var(--text-caption);
+  cursor: help;
+}
+
+.mr-editor textarea {
+  font-family: var(--font-mono);
+  font-size: var(--text-small);
+  line-height: 1.6;
+}
+
+.mr-hint {
+  margin: 0;
+  color: var(--label-secondary);
+  font-size: var(--text-small);
+}
+
+.mr-hint code {
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
+}
+
+.mr-limits {
+  color: var(--label-secondary);
+  font-size: var(--text-small);
+}
+
+.mr-limits summary {
+  cursor: pointer;
+}
+
+.mr-saved {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--label-secondary);
+  font-size: var(--text-small);
+}
+
+.mr-legend {
+  font-size: var(--text-small);
+  color: var(--label-secondary);
+}
+
+.mr-legend summary {
+  cursor: pointer;
+}
+
+.mr-legend dl {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 2px var(--space-3);
+  max-height: 240px;
+  margin: var(--space-2) 0 0;
+  overflow: auto;
+}
+
+.mr-legend dl > div {
+  display: contents;
+}
+
+.mr-legend dd {
+  margin: 0;
+}
+
+.mr-legend [data-missing] dd {
+  color: var(--status-fails-fg);
+}
+
+.mr-legend dt {
+  font-size: inherit;
+  letter-spacing: normal;
+  text-transform: none;
+}

@@ -1,0 +1,97 @@
+/* frontend/src/workspace/workspaceTopbar.css — v1.9.0 top bar. */
+
+/* Three columns: the view tabs stay centred whatever the sides hold, so
+   moving between Home and the other views never shifts them. */
+.ws-topbar__row {
+  display: grid;
+  /* Views centred while the actions fit in half the bar; when a view adds
+     actions that need more, the end column keeps them on one line and the
+     start column gives way, so every control stays on the same centre line. */
+  grid-template-columns: minmax(0, 1fr) auto minmax(max-content, 1fr);
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 48px;
+  padding: var(--space-2) var(--space-3);
+}
+
+.ws-topbar__start,
+.ws-topbar__end {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.ws-topbar__end {
+  justify-content: flex-end;
+}
+
+.ws-topbar__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: var(--control-height);
+  min-height: 0;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--label);
+  font-size: var(--text-ui);
+  font-weight: 600;
+  letter-spacing: var(--tracking-tight);
+  cursor: pointer;
+}
+
+.ws-topbar__brand:hover {
+  background: var(--bg-elev);
+}
+
+.ws-topbar__brand:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.ws-topbar__rule {
+  width: var(--hairline);
+  height: 18px;
+  background: var(--border);
+}
+
+/* The project switcher is shared with the classic shell; quiet it here. */
+.ws-topbar__start [data-testid="project-switcher"] {
+  min-height: 0;
+  height: var(--control-height);
+  border-color: transparent;
+  font-weight: 500;
+}
+
+.ws-topbar__start [data-testid="project-switcher"]:hover {
+  background: var(--bg-elev);
+}
+
+/* Analysis actions from the shared registry (Rerun) take the button style. */
+.ws-topbar__end [data-testid^="topbar-action-"] {
+  height: var(--control-height);
+  min-height: 0;
+  padding: 0 10px;
+  border: var(--hairline) solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--label);
+  font-size: var(--text-ui);
+  font-weight: 400;
+}
+
+/* The theme switch is shared with the classic shell; size it for this bar. */
+.ws-topbar__end .theme-toggle {
+  flex: 0 0 auto;
+}
+
+.ws-topbar__end > * {
+  flex-shrink: 0;
+}
+
+.ws-topbar__end { margin-left: auto; flex-wrap: nowrap; }
+.ws-topbar__views { flex-shrink: 0; max-width: 100%; overflow-x: auto; }
+.ws-topbar__start { flex-wrap: nowrap; }

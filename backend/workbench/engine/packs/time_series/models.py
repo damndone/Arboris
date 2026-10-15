@@ -15,12 +15,12 @@ from workbench.contracts.model.time_series_pack import make_time_series_result
 from .common import json_native
 from .errors import TimeSeriesPackError
 from .input import prepare_time_series
+from workbench.contracts.model.time_series_pack import ARIMA_TRENDS
 
 
 MAX_FORECAST_HORIZON = 200
 MAX_ORDER_COMPONENT = 12
 MAX_TOTAL_ORDER = 24
-ARIMA_TRENDS = frozenset({"n", "c", "t", "ct"})
 
 
 def _validate_confidence(confidence_level: float) -> None:

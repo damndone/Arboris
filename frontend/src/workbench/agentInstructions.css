@@ -1,0 +1,138 @@
+/* v1.9.0 — Settings › Agent instructions (AgentInstructionsPanel.tsx). */
+.ai-panel {
+  display: grid;
+  gap: var(--space-3);
+  max-width: 880px;
+}
+
+.ai-panel__lead,
+.ai-panel__hint {
+  margin: 0;
+  color: var(--label-secondary);
+  font-size: var(--text-ui);
+  line-height: 1.5;
+}
+
+.ai-panel__tabs {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  justify-self: start;
+  background: var(--bg-card-2);
+  border: var(--hairline) solid var(--separator);
+  border-radius: var(--radius-md);
+}
+
+.ai-panel__tabs button {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: 5px 12px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--label-secondary);
+  font: inherit;
+  font-size: var(--text-ui);
+  cursor: pointer;
+}
+
+.ai-panel__tabs button[aria-selected="true"] {
+  background: var(--bg-card);
+  color: var(--label);
+  box-shadow: var(--shadow-1);
+}
+
+.ai-panel__state {
+  color: var(--label-tertiary);
+  font-size: var(--text-caption);
+}
+
+.ai-panel__path {
+  margin: 0;
+  color: var(--label-tertiary);
+  font-size: var(--text-caption);
+  overflow-wrap: anywhere;
+}
+
+.ai-panel__text {
+  width: 100%;
+  min-height: 320px;
+  padding: var(--space-3);
+  border: var(--hairline) solid var(--separator);
+  border-radius: var(--radius-md);
+  background: var(--field-bg);
+  color: var(--label);
+  font: 13px/1.55 var(--font-mono);
+  resize: vertical;
+}
+
+.ai-panel__text[readonly] {
+  background: var(--bg-card-2);
+  color: var(--label-secondary);
+}
+
+.ai-panel__actions,
+.ai-panel__confirm {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.ai-panel__actions button,
+.ai-panel__confirm button {
+  height: var(--control-height);
+  padding: 0 12px;
+  border: var(--hairline) solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--label);
+  font: inherit;
+  font-size: var(--text-ui);
+  cursor: pointer;
+}
+
+.ai-panel__actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.ai-panel__actions .ai-panel__primary {
+  border-color: transparent;
+  background: var(--tint-fill);
+  color: var(--on-tint);
+}
+
+.ai-panel__spacer {
+  flex: 1;
+}
+
+.ai-panel__size {
+  color: var(--label-tertiary);
+  font-size: var(--text-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+.ai-panel__size--over,
+.ai-panel__error {
+  color: var(--status-fails-fg);
+}
+
+.ai-panel__confirm {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--hint-warn-bg);
+  color: var(--hint-warn-fg);
+  font-size: var(--text-ui);
+}
+
+.ai-panel__status,
+.ai-panel__error {
+  margin: 0;
+  font-size: var(--text-ui);
+}
+
+.ai-panel__status {
+  color: var(--label-secondary);
+}

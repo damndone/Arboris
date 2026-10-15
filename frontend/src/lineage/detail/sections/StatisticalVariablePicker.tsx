@@ -65,7 +65,7 @@ export function StatisticalVariablePicker({
           padding: "7px 9px",
           border: "1px solid var(--separator)",
           borderRadius: 7,
-          background: "var(--control-background, transparent)",
+          background: "var(--bg-elev, transparent)",
           color: "var(--label)",
           cursor: "pointer",
           textAlign: "left",
@@ -88,7 +88,7 @@ export function StatisticalVariablePicker({
             padding: 9,
             border: "1px solid var(--separator)",
             borderRadius: 7,
-            background: "var(--control-background, transparent)",
+            background: "var(--bg-elev, transparent)",
           }}
         >
           <label htmlFor={searchId} style={{ display: "block", fontSize: 11, color: "var(--label-secondary)", marginBottom: 4 }}>
@@ -131,7 +131,7 @@ export function StatisticalVariablePicker({
                   gap: 6,
                   padding: "4px 5px",
                   borderRadius: 5,
-                  background: selectedSet.has(column.name) ? "var(--control-selected, rgba(90, 120, 170, 0.12))" : "transparent",
+                  background: selectedSet.has(column.name) ? "var(--tint-bg)" : "transparent",
                 }}
               >
                 <input
@@ -144,7 +144,7 @@ export function StatisticalVariablePicker({
                     height: 12,
                     margin: 0,
                     flex: "0 0 auto",
-                    accentColor: "var(--accent, #4c8dff)",
+                    accentColor: "var(--tint)",
                   }}
                 />
                 <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--label)", fontSize: 12 }}>{column.name}</span>

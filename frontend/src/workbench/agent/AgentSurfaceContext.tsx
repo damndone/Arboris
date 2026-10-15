@@ -31,11 +31,18 @@ import {
   getAgentOperationProjection,
   getAgentSession,
   getAgentSessionProjection,
+  forkAgentSession,
+  pinAgentChapter,
   reconcileAgentOperation,
+  rewindAgentSession,
+  compactAgentSession,
+  unpinAgentChapter,
   reviseAgentProposal,
   sendAgentTurn,
 } from "./agentApi";
 import type {
+  AgentChapter,
+  AgentSession,
   AgentContextPacket,
   AgentCapabilityCatalog,
   AgentEvent,
@@ -48,6 +55,7 @@ import type {
   AgentRole,
 } from "./agentTypes";
 import type { ForestViewModel } from "../../lineage/api/graphViewTypes";
+import type { ApiError } from "../../api";
 
 /** Terminal operation-record states — reconcile polling stops here. */
 const TERMINAL_OPERATION_STATUSES = new Set([
@@ -178,6 +186,8 @@ export interface AgentSurfaceContextValue {
   messages: AgentMessage[];
   prompt: string;
   setPrompt: (value: string) => void;
+  executionPolicy?: "auto_read_only" | "proposal_only";
+  setExecutionPolicy?: (value: "auto_read_only" | "proposal_only") => void;
   sendPrompt: (value?: string) => Promise<void>;
   abortTurn: () => Promise<void>;
   isSubmitting: boolean;
@@ -186,6 +196,19 @@ export interface AgentSurfaceContextValue {
   contextUsedTokens: number;
   contextWindowTokens: number | null;
   contextPercent: number | null;
+  /** The model declares no window; ``contextWindowTokens`` is the server's assumption. */
+  contextWindowAssumed?: boolean;
+  /** Above this the earlier conversation is summarized before the next step. */
+  compactAtTokens?: number | null;
+  /** Summarize the earlier conversation now (optionally keeping something in particular). */
+  compactConversation?: (focus?: string) => Promise<void>;
+  compacting?: boolean;
+  /** The conversation shown, once it has been started. */
+  sessionId?: string | null;
+  /** Start a new conversation for this view (the current one stays in the list). */
+  newConversation?: () => void;
+  /** Continue another of the project's conversations in this view. */
+  openConversation?: (sessionId: string) => void;
   model: string;
   modelOptions: AgentModelOption[];
   setModel: (value: string) => Promise<void>;
@@ -200,6 +223,14 @@ export interface AgentSurfaceContextValue {
     changes: Record<string, unknown>,
   ) => Promise<boolean>;
   forkFromMessage: (entryId: string, sourceRef: AgentNavigationRef) => Promise<boolean>;
+  /** Messages pinned as chapters in this conversation. */
+  chapters?: AgentChapter[];
+  /** Go back to just before one of your messages; its text returns to the input. */
+  rewindTo?: (entryId: string) => Promise<void>;
+  /** Continue in a new conversation sharing this one up to a message. */
+  forkConversation?: (entryId: string) => Promise<void>;
+  pinChapter?: (entryId: string, title: string) => Promise<void>;
+  unpinChapter?: (entryId: string) => Promise<void>;
   openNavigation?: (ref: AgentNavigationRef) => boolean;
   navigationLinks: AgentNavigationRef[];
   hierarchy: AgentHierarchyNode | null;
@@ -223,6 +254,34 @@ export function useAgentSurfaceOptional(): AgentSurfaceContextValue | null {
   return useContext(AgentSurfaceContext);
 }
 
+// Which conversation a node or page continues. Kept across browser restarts
+// (it was per-tab sessionStorage, so closing the tab "lost" the conversation);
+// a value left in sessionStorage by an older build is carried over once.
+function readConversation(key: string): string | null {
+  try {
+    const stored = localStorage.getItem(key);
+    if (stored) return stored;
+    const legacy = sessionStorage.getItem(key);
+    if (legacy) {
+      localStorage.setItem(key, legacy);
+      sessionStorage.removeItem(key);
+    }
+    return legacy;
+  } catch {
+    return null;
+  }
+}
+
+function writeConversation(key: string, sessionId: string | null): void {
+  try {
+    if (sessionId) localStorage.setItem(key, sessionId);
+    else localStorage.removeItem(key);
+    sessionStorage.removeItem(key);
+  } catch {
+    // Storage can be unavailable (private windows); the conversation itself is on disk.
+  }
+}
+
 export function AgentSurfaceProvider({
   projectRoot,
   runId,
@@ -236,11 +295,35 @@ export function AgentSurfaceProvider({
   const forest = useForest();
   const workbench = useWorkbench();
   const navigation = useAgentNavigationOptional();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [messages, setMessages] = useState<AgentMessage[]>([]);
-  const [prompt, setPrompt] = useState("");
+  const [chapters, setChapters] = useState<AgentChapter[]>([]);
+  const draftKey = `workbench:agent-draft:${projectRoot}`;
+  const [prompt, setPromptState] = useState(() => {
+    try {
+      return sessionStorage.getItem(draftKey) ?? "";
+    } catch {
+      return "";
+    }
+  });
+  const setPrompt = useCallback((value: string) => {
+    setPromptState(value);
+    try {
+      if (value) sessionStorage.setItem(draftKey, value);
+      else sessionStorage.removeItem(draftKey);
+    } catch {
+      // Storage may be unavailable; the draft still lives for this page.
+    }
+  }, [draftKey]);
+  const [executionPolicy, setExecutionPolicy] = useState<"auto_read_only" | "proposal_only">("proposal_only");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [sessionStatus, setSessionStatus] = useState("idle");
+  // How full the next request is, as the server builds it (tool results and
+  // standing instructions included, earlier summarized parts not).
+  const [serverContext, setServerContext] = useState<AgentSession["context"] | null>(null);
+  const [compacting, setCompacting] = useState(false);
+  // Bumped to load another conversation (or none) for the same view.
+  const [conversationVersion, setConversationVersion] = useState(0);
   const [proposals, setProposals] = useState<AgentProposal[]>([]);
   const [confirmationBusyId, setConfirmationBusyId] = useState<string | null>(null);
   const [activeOperation, setActiveOperation] = useState<AgentOperationStatus | null>(null);
@@ -267,9 +350,9 @@ export function AgentSurfaceProvider({
   const declaredFocus = workbench.state.agentFocus;
   // Whichever changed last wins: a node selected after a run switch is the
   // focus even in another run; a run switched after a selection outranks the
-  // leftover detail tab. With no history (first render) the run wins.
+  // leftover detail tab. A restored URL selection is authoritative on first render.
   const activeRunForFocus = forest?.activeRunId ?? runId;
-  const lastFocusChange = useRef<"selection" | "run">("run");
+  const lastFocusChange = useRef<"selection" | "run">(selectedKey ? "selection" : "run");
   const previousSelection = useRef(selectedKey);
   const previousActiveRun = useRef(activeRunForFocus);
   if (previousSelection.current !== selectedKey) {
@@ -319,10 +402,16 @@ export function AgentSurfaceProvider({
     && contextPacket.context_fingerprint
     ? contextPacket.context_fingerprint
     : `${runId}:${selectedKey ?? "none"}`;
-  const storageKey = isGlobalScope
+  const baseStorageKey = isGlobalScope
     ? `workbench:agent-session:${projectRoot}:main:${encodeURIComponent(contextFingerprint)}`
     : `workbench:agent-session:${projectRoot}:${scopeRunId}:${encodeURIComponent(contextFingerprint)}`;
-  const linkedSessionId = searchParams.get("agent_session") || null;
+  // Report and plan context can share a run fingerprint with a graph node.
+  // Keep legacy node history, but never reuse its authoritative focus for a page.
+  const storageKey = ["report", "plan", "dataset"].includes(resolvedFocus.focus.kind)
+    ? `${baseStorageKey}:focus:${resolvedFocus.focus.kind}:${encodeURIComponent(resolvedFocus.focus.id)}`
+    : baseStorageKey;
+  const linkedSessionId = ["report", "plan", "dataset"].includes(resolvedFocus.focus.kind)
+    ? null : searchParams.get("agent_session") || null;
   const linkedOperationId = searchParams.get("operation") || null;
   const linkedDiffFocused = searchParams.get("diff") === "1";
   const sessionScope = linkedSessionId
@@ -390,9 +479,12 @@ export function AgentSurfaceProvider({
     optimisticMessageCounterRef.current = 0;
     setSessionId(null);
     setMessages([]);
+    setServerContext(null);
+    setChapters([]);
     setProposals([]);
     setSessionStatus("idle");
-    setPrompt("");
+    // The unsent draft is the person's, not the session's: it stays when the
+    // view (and with it the Agent's scope) changes (user review 3).
     setError(null);
     setNavigationLinks([]);
     setHierarchy(null);
@@ -404,13 +496,15 @@ export function AgentSurfaceProvider({
     eventCursorRef.current = 0;
     setLastEventType(null);
     setLiveResponseText("");
-    const stored = linkedSessionId ?? sessionStorage.getItem(storageKey);
+    const stored = linkedSessionId ?? readConversation(storageKey);
     if (!stored) return () => { cancelled = true; };
     getAgentSession(projectRoot, stored)
       .then(async (session) => {
         if (cancelled) return;
         setSessionId(session.session_id);
         setMessages(session.messages);
+        setServerContext(session.context ?? null);
+        setChapters(session.chapters ?? []);
         setProposals(session.proposals ?? []);
         setSessionStatus(session.status ?? "idle");
         await refreshNavigation(session.session_id, sessionScope);
@@ -434,11 +528,19 @@ export function AgentSurfaceProvider({
           // A session remains usable when its optional event replay is unavailable.
         }
       })
-    .catch(() => {
-        if (!linkedSessionId) sessionStorage.removeItem(storageKey);
+    .catch((reason: unknown) => {
+        if (cancelled) return;
+        // Only a conversation the server no longer has is forgotten: a
+        // restarting backend or a dropped connection must not lose the
+        // binding, which now outlives the tab.
+        if ((reason as Partial<ApiError> | null)?.status === 404) {
+          if (!linkedSessionId) writeConversation(storageKey, null);
+          return;
+        }
+        setError("The conversation could not be loaded. It is still saved; reload to try again.");
       });
     return () => { cancelled = true; };
-  }, [linkedDiffFocused, linkedOperationId, linkedSessionId, projectRoot, refreshNavigation, replayEvents, sessionScope, storageKey]);
+  }, [conversationVersion, linkedDiffFocused, linkedOperationId, linkedSessionId, projectRoot, refreshNavigation, replayEvents, sessionScope, storageKey]);
 
   useEffect(() => {
     if (!sessionId || !isSubmitting) return;
@@ -502,30 +604,43 @@ export function AgentSurfaceProvider({
       : [];
   }, [activeProvider, llmConfig?.model]);
   const model = llmConfig?.model ?? modelOptions[0]?.request_model ?? "Not configured";
+  // The server's estimate of the next request when there is a session; the
+  // visible messages alone leave out tool results and the standing context.
   const contextUsedTokens = useMemo(
     () => Math.max(
       1,
-      Math.ceil(JSON.stringify(contextPacket).length / 4)
-        + messages.reduce((sum, item) => sum + Math.ceil(item.content.length / 4), 0)
-        + Math.ceil(prompt.length / 4),
+      serverContext
+        ? serverContext.estimated_tokens + Math.ceil(prompt.length / 4)
+        : Math.ceil(JSON.stringify(contextPacket).length / 4)
+          + messages.reduce((sum, item) => sum + Math.ceil(item.content.length / 4), 0)
+          + Math.ceil(prompt.length / 4),
     ),
-    [contextPacket, messages, prompt],
+    [contextPacket, messages, prompt, serverContext],
   );
   // Resolve a real context capacity so the ring is a live gauge, not decoration.
   // Prefer the active model's declared window; otherwise 1,000,000 when the
-  // model advertises the 1M context; otherwise the config-level value. Only when
-  // none of these exist do we honestly report an unknown capacity.
+  // model advertises the 1M context; otherwise the config-level value; then
+  // the window the server assumes for compaction, shown as an assumption.
   const activeModelRecord = modelOptions.find((option) => option.request_model === model);
   const ONE_MILLION = 1_000_000;
-  const contextWindowTokens =
+  const declaredWindow =
     activeModelRecord?.context_window_tokens
     ?? (activeModelRecord?.supports_1m ? ONE_MILLION : null)
     ?? llmConfig?.context_window_tokens
-    ?? (llmConfig?.supports_1m ? ONE_MILLION : null);
+    ?? (llmConfig?.supports_1m ? ONE_MILLION : null)
+    ?? (serverContext?.window_declared ? serverContext.window_tokens : null);
+  const contextWindowAssumed = declaredWindow === null && Boolean(serverContext);
+  const contextWindowTokens = declaredWindow ?? serverContext?.window_tokens ?? null;
   const contextPercent = contextWindowTokens
     ? Math.min(100, (contextUsedTokens / contextWindowTokens) * 100)
     : null;
-  const scopeLabel = isGlobalScope
+  const linkedTarget = linkedSessionId ? proposals[proposals.length - 1]?.target : null;
+  const linkedNode = linkedTarget && forest?.forest.nodes.find(node =>
+    node.opNodeId === linkedTarget.node_ref && node.runs.includes(String(linkedTarget.run_id)),
+  );
+  const scopeLabel = linkedSessionId
+    ? linkedNode ? `Linked chain · ${linkedNode.title}` : "Linked Agent session"
+    : isGlobalScope && resolvedFocus.focus.kind === "project"
     ? `Global Agent · ${forest?.forest.familyRunCount ?? 0} runs · ${forest?.forest.familyCount ?? 0} families`
     : resolvedFocus.label;
 
@@ -549,6 +664,7 @@ export function AgentSurfaceProvider({
     optimisticMessageCounterRef.current += 1;
     const optimisticMessage: AgentMessage = {
       entry_id: `local-user-${optimisticMessageCounterRef.current}`,
+      at: new Date().toISOString(),
       role: "user",
       content: question,
       name: null,
@@ -592,7 +708,7 @@ export function AgentSurfaceProvider({
         activeSessionId = created.session_id;
         if (activeScopeRef.current !== requestScope) return;
         setSessionId(activeSessionId);
-        if (!linkedSessionId) sessionStorage.setItem(storageKey, activeSessionId);
+        if (!linkedSessionId) writeConversation(storageKey, activeSessionId);
       }
       if (controller.signal.aborted) return;
       activeTurnSessionIdRef.current = activeSessionId;
@@ -604,9 +720,12 @@ export function AgentSurfaceProvider({
         question,
         controller.signal,
         isGlobalScope ? (contextPacket as Record<string, unknown>) : undefined,
+        executionPolicy,
       );
       if (activeScopeRef.current !== requestScope) return;
       setMessages(result.session.messages);
+      setServerContext(result.session.context ?? null);
+      setChapters(result.session.chapters ?? []);
       setProposals(result.session.proposals ?? []);
       setSessionStatus(result.status ?? "idle");
       await refreshNavigation(activeSessionId, requestScope);
@@ -633,7 +752,7 @@ export function AgentSurfaceProvider({
         setActiveTurnStartedAt(null);
       }
     }
-  }, [contextPacket, eventCursor, forest, isGlobalScope, isSubmitting, linkedSessionId, projectRoot, prompt, refreshNavigation, replayEvents, resolvedFocus, runId, scopeLabel, scopeRunId, sessionId, sessionScope, storageKey]);
+  }, [contextPacket, eventCursor, executionPolicy, forest, isGlobalScope, isSubmitting, linkedSessionId, projectRoot, prompt, refreshNavigation, replayEvents, resolvedFocus, runId, scopeLabel, scopeRunId, sessionId, sessionScope, storageKey]);
 
   const abortTurn = useCallback(async () => {
     const controller = activeTurnControllerRef.current;
@@ -664,8 +783,10 @@ export function AgentSurfaceProvider({
     const activeHead = ownership && typeof ownership === "object"
       ? (ownership as { active_head_run_id?: unknown }).active_head_run_id
       : undefined;
-    const activeHeadRunId = typeof activeHead === "string" && activeHead
-      ? activeHead
+    const proposalHead = proposal.preconditions.active_head_run_id;
+    const activeHeadRunId = linkedSessionId && typeof proposalHead === "string" && proposalHead
+      ? proposalHead
+      : typeof activeHead === "string" && activeHead ? activeHead
       : forest?.activeRunId ?? runId;
     setConfirmationBusyId(proposalId);
     setError(null);
@@ -703,7 +824,7 @@ export function AgentSurfaceProvider({
     } finally {
       if (activeScopeRef.current === requestScope) setConfirmationBusyId(null);
     }
-  }, [confirmationBusyId, contextPacket, forest?.activeRunId, projectRoot, proposals, refreshNavigation, runId, sessionId, sessionScope]);
+  }, [confirmationBusyId, contextPacket, forest?.activeRunId, linkedSessionId, projectRoot, proposals, refreshNavigation, runId, sessionId, sessionScope]);
 
   const declineProposal = useCallback(async (proposalId: string, reason?: string) => {
     if (!sessionId || confirmationBusyId !== null) return false;
@@ -808,10 +929,81 @@ export function AgentSurfaceProvider({
     }
   }, [confirmationBusyId, eventCursor, forest, navigation, projectRoot, refreshNavigation, replayEvents, runId, sessionId, sessionScope]);
 
+  // Conversation history: rewind, fork and chapters (user review 3). A
+  // rewind keeps the later turns in the session log; a fork becomes the
+  // conversation this view continues; both put a message back in the input
+  // when they go back before it.
+  const showSession = useCallback((session: AgentSession) => {
+    setMessages(session.messages);
+    setServerContext(session.context ?? null);
+    setChapters(session.chapters ?? []);
+    setProposals(session.proposals ?? []);
+    setSessionStatus(session.status ?? "idle");
+  }, []);
+  const historyAction = useCallback(async (run: () => Promise<void>, failure: string) => {
+    if (isSubmitting) return;
+    setError(null);
+    try {
+      await run();
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : failure);
+    }
+  }, [isSubmitting]);
+  const rewindTo = useCallback((entryId: string) => historyAction(async () => {
+    if (!sessionId) return;
+    const change = await rewindAgentSession(projectRoot, sessionId, entryId);
+    showSession(change.session);
+    if (change.restored_prompt) setPrompt(change.restored_prompt);
+  }, "Could not rewind the conversation"), [historyAction, projectRoot, sessionId, setPrompt, showSession]);
+  const forkConversation = useCallback((entryId: string) => historyAction(async () => {
+    if (!sessionId) return;
+    const change = await forkAgentSession(projectRoot, sessionId, entryId);
+    setSessionId(change.session.session_id);
+    if (!linkedSessionId) writeConversation(storageKey, change.session.session_id);
+    showSession(change.session);
+    if (change.restored_prompt) setPrompt(change.restored_prompt);
+    await refreshNavigation(change.session.session_id, sessionScope);
+  }, "Could not fork the conversation"), [historyAction, linkedSessionId, projectRoot, refreshNavigation, sessionId, sessionScope, setPrompt, showSession, storageKey]);
+  const pinChapter = useCallback((entryId: string, title: string) => historyAction(async () => {
+    if (!sessionId) return;
+    showSession(await pinAgentChapter(projectRoot, sessionId, entryId, title));
+  }, "Could not pin the chapter"), [historyAction, projectRoot, sessionId, showSession]);
+  const unpinChapter = useCallback((entryId: string) => historyAction(async () => {
+    if (!sessionId) return;
+    showSession(await unpinAgentChapter(projectRoot, sessionId, entryId));
+  }, "Could not remove the chapter"), [historyAction, projectRoot, sessionId, showSession]);
+  const compactConversation = useCallback((focus?: string) => historyAction(async () => {
+    if (!sessionId) return;
+    setCompacting(true);
+    try {
+      showSession(await compactAgentSession(projectRoot, sessionId, focus));
+    } finally {
+      setCompacting(false);
+    }
+  }, "Could not summarize the conversation"), [historyAction, projectRoot, sessionId, showSession]);
+  // Conversations as a list: this view continues the one chosen here until
+  // another is chosen or a new one is started.
+  const switchConversation = useCallback((nextSessionId: string | null) => {
+    if (isSubmitting) return;
+    writeConversation(storageKey, nextSessionId);
+    if (searchParams.get("agent_session")) {
+      const next = new URLSearchParams(searchParams);
+      next.delete("agent_session");
+      next.delete("operation");
+      next.delete("diff");
+      setSearchParams(next, { replace: true });
+    }
+    setConversationVersion((version) => version + 1);
+  }, [isSubmitting, searchParams, setSearchParams, storageKey]);
+  const newConversation = useCallback(() => switchConversation(null), [switchConversation]);
+  const openConversation = useCallback((nextSessionId: string) => switchConversation(nextSessionId), [switchConversation]);
+
   const value = useMemo<AgentSurfaceContextValue>(() => ({
     messages,
     prompt,
     setPrompt,
+    executionPolicy,
+    setExecutionPolicy,
     sendPrompt,
     abortTurn,
     isSubmitting,
@@ -820,6 +1012,13 @@ export function AgentSurfaceProvider({
     contextUsedTokens,
     contextWindowTokens,
     contextPercent,
+    contextWindowAssumed,
+    compactAtTokens: serverContext?.compact_at_tokens ?? null,
+    compactConversation,
+    compacting,
+    sessionId,
+    newConversation,
+    openConversation,
     model,
     modelOptions,
     setModel,
@@ -830,6 +1029,11 @@ export function AgentSurfaceProvider({
     declineProposal,
     reviseProposal,
     forkFromMessage,
+    chapters,
+    rewindTo,
+    forkConversation,
+    pinChapter,
+    unpinChapter,
     openNavigation: navigation ?? undefined,
     navigationLinks,
     hierarchy,
@@ -844,6 +1048,13 @@ export function AgentSurfaceProvider({
     contextPercent,
     contextUsedTokens,
     contextWindowTokens,
+    contextWindowAssumed,
+    serverContext,
+    compactConversation,
+    compacting,
+    sessionId,
+    newConversation,
+    openConversation,
     error,
     isSubmitting,
     messages,
@@ -852,6 +1063,7 @@ export function AgentSurfaceProvider({
     model,
     modelOptions,
     prompt,
+    executionPolicy,
     scopeLabel,
     sendPrompt,
     abortTurn,
@@ -863,6 +1075,11 @@ export function AgentSurfaceProvider({
     declineProposal,
     reviseProposal,
     forkFromMessage,
+    chapters,
+    rewindTo,
+    forkConversation,
+    pinChapter,
+    unpinChapter,
     navigation,
     eventCursor,
     lastEventType,

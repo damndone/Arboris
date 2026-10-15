@@ -1,0 +1,38 @@
+/* frontend/src/theme/scrollbars.css — one scrollbar treatment for the whole
+   app: thin, invisible while still, shown in --scrollbar-thumb while the
+   element scrolls (scrollActivity.ts marks it). In engines that draw
+   ::-webkit-scrollbar, hovering the thumb also shows it so it can be grabbed.
+   Low specificity on purpose (:where): a strip that hides its scrollbar
+   entirely keeps doing so. */
+
+:where(*) {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+[data-scrolling] {
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+/* Engines that ignore scrollbar-color draw these instead. */
+:where(*)::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+:where(*)::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+
+:where(*)::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  background-clip: padding-box;
+}
+
+[data-scrolling]::-webkit-scrollbar-thumb,
+:where(*)::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb);
+  background-clip: padding-box;
+}

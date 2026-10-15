@@ -378,7 +378,7 @@ export function NotebookSurface(props: NotebookSurfaceProps) {
       <header className="nb-surface-header">
         <div className="nb-surface-header-title">
           <span className="nb-label">Notebook</span>
-          <span>{`${notebook.notebook_id} · ${notebook.run_family_id}`}</span>
+          <details><summary>Source</summary><span>{`${notebook.notebook_id} · ${notebook.run_family_id}`}</span></details>
         </div>
         {props.onStartNewAnalysis ? (
           <div className="nb-notebook-new-analysis" data-testid="notebook-new-analysis-actions">

@@ -129,6 +129,7 @@ def did_input_parameters(frame,form,y):
 
 @dataclass(frozen=True)
 class ScriptResultLayout:
+    intrinsic_covariance: str | None = None
     packet_adapter: Callable | None = None
     artifact_suffix: str = ""
     coefficient_records: Callable | None = None
@@ -145,6 +146,7 @@ class ScriptResultLayout:
 SCRIPT_RESULT_LAYOUTS=MappingProxyType({
     'did':ScriptResultLayout(input_preparer=did_frame,input_parameters=did_input_parameters),
     'linear_mixed_effects':ScriptResultLayout(packet_adapter=lmm_packet,
+        intrinsic_covariance='lmm_gls_conditional',
         artifact_suffix='.result',coefficient_records=lmm_coefficient_records,snapshot_numbers=True,
         numeric_document_roles=('packet',)),
     'quantile_regression':ScriptResultLayout(snapshot_numbers=True,

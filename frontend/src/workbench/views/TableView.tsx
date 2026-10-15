@@ -12,6 +12,8 @@
 // widening that coverage (violin/pairplot/…) is a backend concern (roadmap
 // §3.5 V).
 
+import { ResultTableExport } from "../../workspace/result/ResultTableExport";
+import { CrossRunTable } from "../../workspace/result/CrossRunTable";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   appendAiActivity,
@@ -485,7 +487,7 @@ function PostEstimationResultTable({ entry }: { entry: PostEstimationResult }) {
   );
   return (
     <div style={{ marginBottom: 12 }} data-testid={`post-estimation-${entry.artifact_id}`}>
-      <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
+      <div style={{ fontSize: 13, fontWeight: 600, color: "var(--label)" }}>
         {POST_ESTIMATION_LABELS[entry.operation_id] ?? entry.operation_id}
       </div>
       <div style={{ fontSize: 11, color: "var(--label)", marginBottom: 6 }}>
@@ -548,7 +550,7 @@ function CoefficientTable({
         </div>
       ) : null}
       {describeSuppressedInference(model) ? (
-        <div data-testid="table-view-inference-suppressed" role="note" style={{ fontSize: 12, color: "var(--warning, #b45309)", marginBottom: 6 }}>
+        <div data-testid="table-view-inference-suppressed" role="note" style={{ fontSize: 12, color: "var(--status-caution-fg)", marginBottom: 6 }}>
           {describeSuppressedInference(model)}
         </div>
       ) : null}
@@ -594,7 +596,7 @@ function CoefficientTable({
       {diagnostics.length > 0 && (
         <div
           data-testid="table-view-lmm-diagnostics"
-          style={{ marginTop: 8, fontSize: 11, color: "var(--orange, #b35c00)" }}
+          style={{ marginTop: 8, fontSize: 11, color: "var(--orange)" }}
         >
           Diagnostic: {diagnostics.join(", ")}
         </div>
@@ -696,7 +698,7 @@ function FigureCard({
           height: "auto",
           borderRadius: 6,
           border: "1px solid var(--separator)",
-          background: "var(--surface, #fff)",
+          background: "var(--bg-card)",
         }}
         onContextMenu={(event) => {
           event.preventDefault();
@@ -871,7 +873,7 @@ function FigureAskAi({
         <div
           data-testid={`figure-ask-ai-error-${item.artifact_id}`}
           role="alert"
-          style={{ fontSize: 11, color: "var(--accent-negative, #d33)", marginTop: 4 }}
+          style={{ fontSize: 11, color: "var(--status-fails-fg)", marginTop: 4 }}
         >
           {error}
         </div>
@@ -884,7 +886,7 @@ function FigureAskAi({
             marginTop: 6,
             padding: 8,
             whiteSpace: "pre-wrap",
-            background: "var(--bg-card-2, rgba(0,0,0,0.03))",
+            background: "var(--bg-card-2)",
             borderRadius: 6,
           }}
         >
@@ -961,6 +963,8 @@ export function TableView({ projectRoot: projectRootProp }: { projectRoot?: stri
           ))}
         </nav>
       )}
+      {activeRunId && <ResultTableExport key={`${projectRoot}:${activeRunId}`} projectRoot={projectRoot} runId={activeRunId}/>}
+      <CrossRunTable key={projectRoot} projectRoot={projectRoot} runIds={runIds}/>
       {activeRunId && (
         <RunResultsPanel
           runId={activeRunId}
@@ -1138,7 +1142,7 @@ function RunResultsPanel({
       )}
 
       {error && (
-        <div data-testid="table-view-error" style={{ color: "var(--red, #c00)" }}>
+        <div data-testid="table-view-error" style={{ color: "var(--red)" }}>
           Failed to load results: {error}
         </div>
       )}
@@ -1250,7 +1254,7 @@ function RunResultsPanel({
                   href={artifactDownloadUrl(projectRoot, runId, a.artifact_id)}
                   target="_blank"
                   rel="noreferrer"
-                  style={{ color: "var(--tint, #0a84ff)" }}
+                  style={{ color: "var(--tint)" }}
                 >
                   {a.artifact_id}
                 </a>{" "}

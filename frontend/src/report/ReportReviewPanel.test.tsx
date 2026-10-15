@@ -115,11 +115,7 @@ describe("ReportReviewPanel", () => {
     expect(screen.queryByRole("textbox", { name: "Report revision instruction" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Float report review" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Pin report review" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Collapse report review" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Collapse report review" })).toHaveAttribute(
-      "data-icon",
-      "collapse-right",
-    );
+    expect(screen.queryByRole("button", { name: "Collapse report review" })).toBeNull();
     expect(screen.getByTestId("report-review-provenance-summary")).toHaveTextContent(
       "Evidence inventory: 1 facts",
     );
@@ -163,7 +159,7 @@ describe("ReportReviewPanel", () => {
     );
     expect(screen.getByRole("button", { name: "Expand report review" })).toHaveAttribute(
       "data-icon",
-      "collapse-left",
+      "expand",
     );
   });
 });

@@ -1,0 +1,318 @@
+/* frontend/src/theme/tokens.css — the single source of design tokens (v1.9.0).
+ *
+ * Every colour, type size, space, radius, shadow and motion curve in the app
+ * resolves to a custom property defined here; `designTokens.test.ts` fails on
+ * a colour literal anywhere else and on a var() that is not defined here.
+ *
+ * Structure (the test parses these three blocks):
+ *   :root                              theme-independent scales
+ *   :root, :root[data-theme="light"]   light colours (also the no-attribute default)
+ *   :root[data-theme="dark"]           dark colours — the same names, redefined
+ *
+ * `data-theme` is written before first paint by index.html and kept in sync by
+ * theme/ThemeProvider.tsx. Values follow the design spec §8.5 (light) and the
+ * “Lineage first · dark” artboard (dark). Text pairs are held to 4.5:1 by test.
+ */
+
+:root {
+  /* Type — system UI face; a serif for reading; mono only for identifiers */
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-serif: "New York", ui-serif, "Iowan Old Style", "Source Serif Pro", Georgia, "Songti SC", "Noto Serif CJK SC", serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, "Roboto Mono", monospace;
+
+  --text-caption: 0.6875rem;   /* 11px */
+  --text-small: 0.75rem;       /* 12px */
+  --text-ui: 0.8125rem;        /* 13px — interface */
+  --text-body: 0.875rem;       /* 14px — Agent, reading */
+  --text-section: 0.9375rem;   /* 15px — section titles */
+  --text-reading: 1rem;        /* 16px — report body */
+  --text-title: 1.375rem;      /* 22px — page titles */
+  --text-key: 2.75rem;         /* 44px — the key number */
+  --tracking-tight: -0.01em;
+  --tracking-key: -0.02em;
+  --leading-ui: 1.38;
+  --leading-reading: 1.6;
+
+  /* Space — a 4px grid in rem so it follows the system text size */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 14px;
+  --radius-pill: 999px;
+
+  --hairline: 1px;
+  --icon-stroke: 1.5px;
+  --control-height: 28px;
+  --touch-target: 44px;
+
+  /* Motion — critically damped spring (damping 1.0, response 0.35 s).
+   * Momentum gestures add their own overshoot; nothing else bounces. */
+  --duration-spring: 260ms;
+  --duration-fade: 160ms;
+  --ease-spring: linear(0, 0.040, 0.131, 0.243, 0.358, 0.466, 0.562, 0.645, 0.715, 0.774, 0.821, 0.859, 0.890, 0.914, 0.934, 0.949, 0.960, 0.970, 0.977, 0.982, 1);
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+
+  /* Materials */
+  --material-blur: saturate(180%) blur(20px);
+}
+
+:root,
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  /* Surfaces */
+  --bg-canvas: #F4F4F1;        /* window */
+  --bg-card: #FFFFFF;          /* content surface */
+  --bg-card-2: #FAFAF8;        /* recessed rows, headers */
+  --bg-elev: #F2F2EF;          /* chips, quiet fills */
+  --bg-pressed: #E9E8E4;       /* selected segment track */
+  --separator: #E3E2DE;
+  --separator-faint: #EFEEEA;
+  --border: #DAD9D4;
+  --border-strong: #C9C8C3;
+  --graph-dot: #DCDBD6;
+  --scrollbar-thumb: #C9C8C3;
+  --scrollbar-track: transparent;
+  --material-bar: rgba(247, 247, 244, 0.86);
+  --material-popover: rgba(255, 255, 255, 0.96);
+  --scrim: rgba(28, 28, 30, 0.24);
+
+  /* Text */
+  --label: #1C1C1E;
+  --label-secondary: #48484D;
+  --label-tertiary: #6E6E73;
+
+  /* Accent */
+  --tint: #0A66D8;
+  --tint-hover: #0852AE;
+  --tint-fill: #0A66D8;
+  --tint-fill-pressed: #0852AE;
+  --on-tint: #FFFFFF;
+  --tint-bg: #EEF4FD;
+  --tint-label: #0A5BC4;
+  --ink: var(--tint);
+  --focus-ring: #0A66D8;
+  --highlight: #C47F00;
+  --highlight-glow: rgba(196, 127, 0, 0.35);
+
+  /* Status — text and fill always come as a pair */
+  --status-holds-fg: #1B6B43;
+  --status-holds-bg: #E5F2EA;
+  --status-caution-fg: #8A5300;
+  --status-caution-bg: #FAF0DB;
+  --status-fails-fg: #A1281F;
+  --status-fails-bg: #FBE8E6;
+  --status-argued-fg: #48484D;
+  --status-argued-bg: #EEEEF0;
+
+  /* Shadows */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-2: 0 1px 2px rgba(0, 0, 0, 0.04), 0 6px 16px rgba(0, 0, 0, 0.06);
+  --shadow-pop: 0 2px 6px rgba(0, 0, 0, 0.06), 0 18px 48px rgba(0, 0, 0, 0.14);
+  --shadow-modal: 0 8px 24px rgba(0, 0, 0, 0.18);
+
+  /* Pipeline stages — near-mono with a slight hue rotation */
+  --stage-source: oklch(0.50 0.010 75);
+  --stage-eda: oklch(0.50 0.04 220);
+  --stage-clean: oklch(0.48 0.05 250);
+  --stage-transform: oklch(0.55 0.13 65);
+  --stage-model: oklch(0.50 0.06 200);
+  --stage-diag: oklch(0.48 0.06 280);
+  --stage-viz: oklch(0.52 0.05 320);
+  --stage-report: oklch(0.55 0.08 75);
+
+  /* Variable roles — badges print --on-role on these */
+  --on-role: #FFFFFF;
+  --role-outcome: oklch(0.52 0.16 250);
+  --role-focal: oklch(0.52 0.15 150);
+  --role-treatment: oklch(0.54 0.14 65);
+  --role-covariates: oklch(0.52 0.02 280);
+  --role-explanatory-unspecified: oklch(0.55 0.02 280);
+  --role-instruments: oklch(0.52 0.18 310);
+  --role-exposure: oklch(0.53 0.12 220);
+  --role-unit: oklch(0.54 0.20 10);
+  --role-time: oklch(0.50 0.12 95);
+  --role-cluster: oklch(0.53 0.13 230);
+
+  /* Charts — categorical series and reference lines */
+  --chart-1: #0A66D8;
+  --chart-2: #C46A00;
+  --chart-3: #1B8A5A;
+  --chart-4: #8E44AD;
+  --chart-grid: #DAD9D4;
+  --chart-axis: #8E8E93;
+
+  /* Semantic aliases — each names a role, never a new colour */
+  --green: var(--status-holds-fg);
+  --orange: var(--status-caution-fg);
+  --orange-bg: var(--status-caution-bg);
+  --red: var(--status-fails-fg);
+  --ok: var(--status-holds-fg);
+  --review: var(--status-caution-fg);
+  --caution: var(--status-fails-fg);
+  --blocker: #B3261E;
+  --diff-added: var(--status-holds-fg);
+  --diff-removed: var(--status-caution-fg);
+  --panel-bg: var(--bg-card);
+  --panel-error-bg: var(--status-fails-bg);
+  --panel-error-fg: var(--status-fails-fg);
+  --field-bg: var(--bg-card);
+  --field-invalid-bg: var(--status-fails-bg);
+  --field-error-fg: var(--status-fails-fg);
+  --field-hint-fg: var(--label-tertiary);
+  --hint-warn-fg: var(--status-caution-fg);
+  --hint-warn-bg: var(--status-caution-bg);
+  --badge-ok-fg: var(--status-holds-fg);
+  --badge-ok-bg: var(--status-holds-bg);
+  --badge-ok-border: color-mix(in oklch, var(--status-holds-fg) 35%, transparent);
+  --badge-warn-fg: var(--status-caution-fg);
+  --badge-warn-bg: var(--status-caution-bg);
+  --badge-warn-border: color-mix(in oklch, var(--status-caution-fg) 35%, transparent);
+  --badge-neutral-fg: var(--label-secondary);
+  --badge-neutral-bg: var(--bg-elev);
+  --badge-neutral-border: var(--separator);
+  --table-header-bg: var(--bg-card-2);
+  --table-row-border: var(--separator-faint);
+  --code-bg: var(--bg-card-2);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg-canvas: #141415;
+  --bg-card: #1E1E20;
+  --bg-card-2: #232325;
+  --bg-elev: #2A2A2D;
+  --bg-pressed: #3A3A3D;
+  --separator: #333336;
+  --separator-faint: #2A2A2D;
+  --border: #3A3A3D;
+  --border-strong: #4A4A4E;
+  --graph-dot: #2E2E31;
+  --scrollbar-thumb: rgba(196, 200, 206, 0.72);
+  --scrollbar-track: transparent;
+  --material-bar: rgba(30, 30, 32, 0.86);
+  --material-popover: rgba(42, 42, 45, 0.96);
+  --scrim: rgba(0, 0, 0, 0.5);
+
+  --label: #F2F2F0;
+  --label-secondary: #C4C4C8;
+  --label-tertiary: #9D9DA3;
+
+  --tint: #5AA2FF;
+  --tint-hover: #8ABDFF;
+  --tint-fill: #2B6BD1;
+  --tint-fill-pressed: #2259B0;
+  --on-tint: #FFFFFF;
+  --tint-bg: #17304F;
+  --tint-label: #B9D6FF;
+  --ink: var(--tint);
+  --focus-ring: #5AA2FF;
+  --highlight: #F2B65C;
+  --highlight-glow: rgba(242, 182, 92, 0.4);
+
+  --status-holds-fg: #6CCB94;
+  --status-holds-bg: #173323;
+  --status-caution-fg: #F2B65C;
+  --status-caution-bg: #3A2B12;
+  --status-fails-fg: #FF8E84;
+  --status-fails-bg: #3E1E1B;
+  --status-argued-fg: #C4C4C8;
+  --status-argued-bg: #2C2C2F;
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 16px rgba(0, 0, 0, 0.35);
+  --shadow-pop: 0 2px 6px rgba(0, 0, 0, 0.4), 0 18px 48px rgba(0, 0, 0, 0.55);
+  --shadow-modal: 0 8px 24px rgba(0, 0, 0, 0.55);
+
+  --stage-source: oklch(0.58 0.008 75);
+  --stage-eda: oklch(0.66 0.04 220);
+  --stage-clean: oklch(0.66 0.04 250);
+  --stage-transform: oklch(0.72 0.10 65);
+  --stage-model: oklch(0.70 0.06 200);
+  --stage-diag: oklch(0.62 0.04 280);
+  --stage-viz: oklch(0.66 0.04 320);
+  --stage-report: oklch(0.74 0.06 75);
+
+  --on-role: #141415;
+  --role-outcome: oklch(0.66 0.14 250);
+  --role-focal: oklch(0.72 0.16 150);
+  --role-treatment: oklch(0.74 0.15 65);
+  --role-covariates: oklch(0.66 0.02 280);
+  --role-explanatory-unspecified: oklch(0.70 0.02 280);
+  --role-instruments: oklch(0.66 0.18 310);
+  --role-exposure: oklch(0.74 0.10 220);
+  --role-unit: oklch(0.64 0.20 10);
+  --role-time: oklch(0.80 0.14 95);
+  --role-cluster: oklch(0.74 0.12 230);
+
+  --chart-1: #5AA2FF;
+  --chart-2: #F2A04C;
+  --chart-3: #6CCB94;
+  --chart-4: #C38FE0;
+  --chart-grid: #3A3A3D;
+  --chart-axis: #9D9DA3;
+
+  --green: var(--status-holds-fg);
+  --orange: var(--status-caution-fg);
+  --orange-bg: var(--status-caution-bg);
+  --red: var(--status-fails-fg);
+  --ok: var(--status-holds-fg);
+  --review: var(--status-caution-fg);
+  --caution: var(--status-fails-fg);
+  --blocker: #C0392B;
+  --diff-added: var(--status-holds-fg);
+  --diff-removed: var(--status-caution-fg);
+  --panel-bg: var(--bg-card);
+  --panel-error-bg: var(--status-fails-bg);
+  --panel-error-fg: var(--status-fails-fg);
+  --field-bg: var(--bg-canvas);
+  --field-invalid-bg: var(--status-fails-bg);
+  --field-error-fg: var(--status-fails-fg);
+  --field-hint-fg: var(--label-tertiary);
+  --hint-warn-fg: var(--status-caution-fg);
+  --hint-warn-bg: var(--status-caution-bg);
+  --badge-ok-fg: var(--status-holds-fg);
+  --badge-ok-bg: var(--status-holds-bg);
+  --badge-ok-border: color-mix(in oklch, var(--status-holds-fg) 35%, transparent);
+  --badge-warn-fg: var(--status-caution-fg);
+  --badge-warn-bg: var(--status-caution-bg);
+  --badge-warn-border: color-mix(in oklch, var(--status-caution-fg) 35%, transparent);
+  --badge-neutral-fg: var(--label-secondary);
+  --badge-neutral-bg: var(--bg-elev);
+  --badge-neutral-border: var(--separator);
+  --table-header-bg: var(--bg-card-2);
+  --table-row-border: var(--separator-faint);
+  --code-bg: var(--bg-card-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-spring: 1ms;
+    --ease-spring: linear;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root,
+  :root[data-theme="light"] {
+    --material-bar: #F7F7F4;
+    --material-popover: #FFFFFF;
+    --material-blur: none;
+  }
+  :root[data-theme="dark"] {
+    --material-bar: #1E1E20;
+    --material-popover: #2A2A2D;
+    --material-blur: none;
+  }
+}

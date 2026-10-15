@@ -46,6 +46,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/agent/conversations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Agent Conversations
+         * @description Conversations someone wrote in, most recently active first.
+         */
+        get: operations["list_agent_conversations_agent_conversations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent/conversations/{session_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Agent Conversation
+         * @description Delete a conversation's messages and live event log.
+         *
+         *     The analysis ledger, proposals and operation records stay: they record
+         *     what changed in the data and models, whoever asked for it.
+         */
+        delete: operations["delete_agent_conversation_agent_conversations__session_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Agent Conversation
+         * @description Rename, archive or restore a conversation; its messages are unchanged.
+         */
+        patch: operations["update_agent_conversation_agent_conversations__session_id__patch"];
+        trace?: never;
+    };
     "/agent/fork-proposals": {
         parameters: {
             query?: never;
@@ -60,6 +107,52 @@ export interface paths {
          * @description Create a confirmation-gated graph.fork proposal from verified context.
          */
         post: operations["create_agent_fork_proposal_agent_fork_proposals_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent/instructions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Agent Instructions
+         * @description The built-in guide, the person's and the project's instructions.
+         *
+         *     A new conversation reads them as they are when it starts.
+         */
+        get: operations["get_agent_instructions_agent_instructions_get"];
+        /**
+         * Save Agent Instructions
+         * @description Write the personal or the project AGENTS.md.
+         */
+        put: operations["save_agent_instructions_agent_instructions_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent/instructions/draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Draft Agent Instructions
+         * @description The project template filled with this project's datasets and models; not saved.
+         */
+        get: operations["draft_agent_instructions_agent_instructions_draft_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -219,6 +312,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/agent/sessions/{session_id}/chapters": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pin Agent Chapter
+         * @description Pin a message as a chapter: a named place to jump back to.
+         */
+        post: operations["pin_agent_chapter_agent_sessions__session_id__chapters_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent/sessions/{session_id}/chapters/{entry_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Unpin Agent Chapter */
+        delete: operations["unpin_agent_chapter_agent_sessions__session_id__chapters__entry_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent/sessions/{session_id}/compact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Compact Agent Session
+         * @description Summarize the earlier conversation now, keeping the latest part verbatim.
+         *
+         *     The same summary the Agent writes on its own when the conversation nears
+         *     the model's window; nothing is deleted from the session log.
+         */
+        post: operations["compact_agent_session_agent_sessions__session_id__compact_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/agent/sessions/{session_id}/events": {
         parameters: {
             query?: never;
@@ -230,6 +383,30 @@ export interface paths {
         get: operations["get_agent_events_agent_sessions__session_id__events_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent/sessions/{session_id}/fork": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Fork Agent Session
+         * @description Start a new conversation that shares this one up to a message.
+         *
+         *     From a reply, the new conversation includes that reply; from one of your
+         *     messages, it stops just before it and the message returns to the input.
+         *     The original conversation is unchanged.
+         */
+        post: operations["fork_agent_session_agent_sessions__session_id__fork_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -356,6 +533,29 @@ export interface paths {
         put?: never;
         /** Revise Agent Proposal */
         post: operations["revise_agent_proposal_agent_sessions__session_id__proposals__proposal_id__revise_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent/sessions/{session_id}/rewind": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rewind Agent Session
+         * @description Go back to just before one of your messages; its text returns to the input.
+         *
+         *     The later conversation is kept in the session log (rewinding is recorded,
+         *     not deleted); the next message continues from here.
+         */
+        post: operations["rewind_agent_session_agent_sessions__session_id__rewind_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2500,6 +2700,123 @@ export interface components {
             /** Workers */
             workers: number;
         };
+        /** AgentChapter */
+        AgentChapter: {
+            /** At */
+            at: string;
+            /** Entry Id */
+            entry_id: string;
+            /** Title */
+            title: string;
+        };
+        /** AgentChapterRequest */
+        AgentChapterRequest: {
+            /** Entry Id */
+            entry_id: string;
+            /** Title */
+            title: string;
+        };
+        /**
+         * AgentCompactionView
+         * @description Where the earlier conversation was summarized (role ``summary``).
+         */
+        AgentCompactionView: {
+            /** Summarized Messages */
+            summarized_messages: number;
+            /** Tokens Before */
+            tokens_before: number;
+            /** Trigger */
+            trigger: string;
+            /** Unverified Numbers */
+            unverified_numbers: string[];
+            /** Verified */
+            verified: boolean;
+        };
+        /** AgentCompactRequest */
+        AgentCompactRequest: {
+            /** Focus */
+            focus?: string | null;
+        };
+        /**
+         * AgentContextUsage
+         * @description How full the next request is, as the server will send it.
+         */
+        AgentContextUsage: {
+            /** Compact At Tokens */
+            compact_at_tokens: number;
+            /** Estimated Tokens */
+            estimated_tokens: number;
+            /** Window Declared */
+            window_declared: boolean;
+            /** Window Tokens */
+            window_tokens: number;
+        };
+        /**
+         * AgentConversation
+         * @description One conversation in the project's list.
+         */
+        AgentConversation: {
+            /** About */
+            about: string;
+            /** Archived */
+            archived: boolean;
+            /** Created At */
+            created_at: string;
+            focus: components["schemas"]["AgentConversationFocus"] | null;
+            /** Forked From */
+            forked_from: string | null;
+            /** Last Active */
+            last_active: string;
+            /** Messages */
+            messages: number;
+            /** Replies */
+            replies: number;
+            /** Role */
+            role: string | null;
+            /** Session Id */
+            session_id: string;
+            /** Status */
+            status: string | null;
+            /** Title */
+            title: string;
+            /** Titled */
+            titled: boolean;
+        };
+        /** AgentConversationDeleted */
+        AgentConversationDeleted: {
+            /** Deleted */
+            deleted: boolean;
+            /** Session Id */
+            session_id: string;
+        };
+        /** AgentConversationFocus */
+        AgentConversationFocus: {
+            /** Id */
+            id?: string;
+            /** Kind */
+            kind?: string;
+            /** Label */
+            label?: string;
+            /** Run Id */
+            run_id?: string | null;
+        };
+        /** AgentConversations */
+        AgentConversations: {
+            /** Conversations */
+            conversations: components["schemas"]["AgentConversation"][];
+        };
+        /** AgentConversationUpdate */
+        AgentConversationUpdate: {
+            /** Archived */
+            archived?: boolean | null;
+            /** Title */
+            title?: string | null;
+        };
+        /** AgentEntryRequest */
+        AgentEntryRequest: {
+            /** Entry Id */
+            entry_id: string;
+        };
         /** AgentEvent */
         AgentEvent: {
             /** Command Id */
@@ -2560,8 +2877,61 @@ export interface components {
             /** Source Session Entry Id */
             source_session_entry_id?: string | null;
         };
+        /**
+         * AgentInstructionLayer
+         * @description One layer of what the Agent reads at the start of a conversation.
+         */
+        AgentInstructionLayer: {
+            /** Bytes */
+            bytes: number;
+            /** Content */
+            content: string;
+            /** Editable */
+            editable: boolean;
+            /** Exists */
+            exists: boolean;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "guide" | "personal" | "project";
+            /** Path */
+            path: string;
+        };
+        /** AgentInstructions */
+        AgentInstructions: {
+            /** Layers */
+            layers: components["schemas"]["AgentInstructionLayer"][];
+            /** Limit Bytes */
+            limit_bytes: number;
+            /** Templates */
+            templates: {
+                [key: string]: string;
+            };
+        };
+        /**
+         * AgentInstructionsDraft
+         * @description The project template with the project's datasets and models filled in.
+         */
+        AgentInstructionsDraft: {
+            /** Content */
+            content: string;
+        };
+        /** AgentInstructionsSave */
+        AgentInstructionsSave: {
+            /** Content */
+            content: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "personal" | "project";
+        };
         /** AgentMessage */
         AgentMessage: {
+            /** At */
+            at: string;
+            compaction?: components["schemas"]["AgentCompactionView"];
             /** Content */
             content: string;
             /** Entry Id */
@@ -2578,7 +2948,7 @@ export interface components {
              * Role
              * @enum {string}
              */
-            role: "user" | "assistant" | "tool";
+            role: "user" | "assistant" | "tool" | "summary";
             /** Stop Reason */
             stop_reason: string | null;
         };
@@ -2647,6 +3017,9 @@ export interface components {
         AgentSession: {
             /** Chain Id */
             chain_id: string | null;
+            /** Chapters */
+            chapters: components["schemas"]["AgentChapter"][];
+            context: components["schemas"]["AgentContextUsage"];
             /** Context Fingerprint */
             context_fingerprint: string | null;
             /** Context Window Tokens */
@@ -2665,6 +3038,15 @@ export interface components {
             session_id: string;
             /** Status */
             status: string | null;
+        };
+        /**
+         * AgentSessionChange
+         * @description A session after a rewind or fork, and the message to put back in the input.
+         */
+        AgentSessionChange: {
+            /** Restored Prompt */
+            restored_prompt: string | null;
+            session: components["schemas"]["AgentSession"];
         };
         /** AgentSessionCreateRequest */
         AgentSessionCreateRequest: {
@@ -2707,6 +3089,12 @@ export interface components {
             context_packet?: {
                 [key: string]: unknown;
             } | null;
+            /**
+             * Execution Policy
+             * @default auto_read_only
+             * @enum {string}
+             */
+            execution_policy?: "auto_read_only" | "proposal_only";
             /** Question */
             question: string;
         };
@@ -5027,6 +5415,8 @@ export interface components {
             status: string | null;
             /** Summary */
             summary: string;
+            /** Title */
+            title: string | null;
             /** What */
             what: string;
             /** Who */
@@ -7497,6 +7887,8 @@ export interface components {
         /** OperationCatalogEntry */
         OperationCatalogEntry: {
             availability: components["schemas"]["OperationAvailability"];
+            /** Blurb */
+            blurb: string;
             /** Capability Ids */
             capability_ids: string[];
             /** Category */
@@ -7512,6 +7904,12 @@ export interface components {
             field_hints: {
                 [key: string]: components["schemas"]["OperationFieldHint"];
             };
+            /** Group */
+            group: string;
+            /** Group Label */
+            group_label: string;
+            /** Group Order */
+            group_order: number;
             /** Id */
             id: string;
             /** Name */
@@ -7559,6 +7957,11 @@ export interface components {
             request_schema?: {
                 [key: string]: unknown;
             };
+            /**
+             * Surface
+             * @enum {string}
+             */
+            surface?: "graph" | "data" | "table" | "notebook" | "new_analysis" | "analyze" | "agent";
         };
         /** OperationFieldHint */
         OperationFieldHint: {
@@ -8259,6 +8662,8 @@ export interface components {
             run_id: string;
             /** Source Sha256 */
             source_sha256?: string;
+            /** Title */
+            title?: string | null;
             /** Workflow Id */
             workflow_id: string;
             /** Workflow Step Id */
@@ -9927,6 +10332,108 @@ export interface operations {
             };
         };
     };
+    list_agent_conversations_agent_conversations_get: {
+        parameters: {
+            query: {
+                include_archived?: boolean;
+                project_root: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentConversations"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_agent_conversation_agent_conversations__session_id__delete: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentConversationDeleted"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_agent_conversation_agent_conversations__session_id__patch: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentConversationUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentConversation"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     create_agent_fork_proposal_agent_fork_proposals_post: {
         parameters: {
             query: {
@@ -9949,6 +10456,103 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ForkProposal"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_agent_instructions_agent_instructions_get: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentInstructions"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_agent_instructions_agent_instructions_put: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentInstructionsSave"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentInstructions"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    draft_agent_instructions_agent_instructions_draft_get: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentInstructionsDraft"];
                 };
             };
             /** @description Validation Error */
@@ -10242,6 +10846,114 @@ export interface operations {
             };
         };
     };
+    pin_agent_chapter_agent_sessions__session_id__chapters_post: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentChapterRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentSession"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    unpin_agent_chapter_agent_sessions__session_id__chapters__entry_id__delete: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path: {
+                entry_id: string;
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentSession"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    compact_agent_session_agent_sessions__session_id__compact_post: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentCompactRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentSession"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_agent_events_agent_sessions__session_id__events_get: {
         parameters: {
             query: {
@@ -10263,6 +10975,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentEvents"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    fork_agent_session_agent_sessions__session_id__fork_post: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentEntryRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentSessionChange"];
                 };
             };
             /** @description Validation Error */
@@ -10511,6 +11260,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProposalStatus"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rewind_agent_session_agent_sessions__session_id__rewind_post: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentEntryRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentSessionChange"];
                 };
             };
             /** @description Validation Error */

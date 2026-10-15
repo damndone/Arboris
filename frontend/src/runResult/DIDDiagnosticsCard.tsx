@@ -35,14 +35,14 @@ function EventStudyChart({ es }: { es: DIDDiagnostics["event_study"] }) {
   const pts = pts0.map((p) => `${sx(p.i)},${sy(p.coef)}`).join(" ");
   return (
     <svg width={W} height={H} aria-label="did-event-study-chart">
-      <line x1={pad} y1={sy(0)} x2={W - pad} y2={sy(0)} stroke="#ccc" />
+      <line x1={pad} y1={sy(0)} x2={W - pad} y2={sy(0)} stroke="var(--chart-grid)" />
       {zeroIdx >= 0 && <line x1={sx(zeroIdx)} y1={0} x2={sx(zeroIdx)} y2={H}
-        stroke="#f55" strokeDasharray="4 3" />}
+        stroke="var(--status-fails-fg)" strokeDasharray="4 3" />}
       {pts0.map((p) => (
         <line key={p.i} x1={sx(p.i)} y1={sy(p.lo)} x2={sx(p.i)} y2={sy(p.hi)}
-          stroke="#4a6cf7" opacity={0.5} />
+          stroke="var(--chart-1)" opacity={0.5} />
       ))}
-      <polyline points={pts} fill="none" stroke="#4a6cf7" strokeWidth={2} />
+      <polyline points={pts} fill="none" stroke="var(--chart-1)" strokeWidth={2} />
     </svg>
   );
 }
@@ -55,7 +55,7 @@ export function DIDDiagnosticsCard({ diagnostics }: { diagnostics: DIDDiagnostic
   if (!d) return null;
   const esOk = d.event_study.applicable !== false && d.event_study.event_time.length > 0;
   const baconOk = d.goodman_bacon.applicable !== false;
-  const ptColor = d.parallel_trends.verdict === "not_rejected" ? "#137a3a" : "#c0392b";
+  const ptColor = d.parallel_trends.verdict === "not_rejected" ? "var(--status-holds-fg)" : "var(--status-fails-fg)";
   const ptText = d.parallel_trends.verdict === "not_rejected" ? "not rejected" : "rejected";
   return (
     <section className="ios-card did-diagnostics" aria-label="did-diagnostics">
@@ -122,7 +122,7 @@ export function DIDDiagnosticsCard({ diagnostics }: { diagnostics: DIDDiagnostic
             {d.spec.n_treated_units} · never treated {d.spec.n_never_treated} · staggered
             {d.spec.staggered ? "yes" : "no"}</div>
           {d.interpretation_restriction && (
-            <div role="note" style={{ borderLeft: "3px solid #f0a020", paddingLeft: 8 }}>
+            <div role="note" style={{ borderLeft: "3px solid var(--status-caution-fg)", paddingLeft: 8 }}>
               ⚠ {d.interpretation_restriction}
             </div>
           )}

@@ -1,5 +1,4 @@
 import type { ResponseOf, Schema } from "./apiTypes";
-import * as XLSX from "xlsx";
 import type { GraphResponse } from "./lineage/types";
 import type { HeadSetResponse } from "./lineage/api/graphViewTypes";
 import type { ManualRerunPatch } from "./lineage/detail/sections/manualRerunPatch";
@@ -606,15 +605,19 @@ export async function previewFile(
             reader.onerror = () => reject(reader.error ?? new Error("Failed to read file"));
             reader.readAsArrayBuffer(file);
           });
-    const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
+    // Loaded on first use: the spreadsheet reader is the largest dependency
+    // in the app and only this preview needs it. Destructured so the bundler
+    // can drop the parts of the library this never calls (the writers).
+    const { read, utils } = await import("xlsx");
+    const workbook = read(buffer, { type: "array", cellDates: true });
     sheetNames = workbook.SheetNames;
     selectedSheet = sheetName ?? workbook.SheetNames[0];
     const sheet = workbook.Sheets[selectedSheet];
-    rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
+    rows = utils.sheet_to_json<Record<string, unknown>>(sheet, {
       defval: null,
       raw: true,
     });
-    headerNames = (XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1 })[0] ?? []).map(String);
+    headerNames = (utils.sheet_to_json<string[]>(sheet, { header: 1 })[0] ?? []).map(String);
   }
   if (transpose && rows.length > 0) {
     const originalKeys = Object.keys(rows[0]);
@@ -733,15 +736,27 @@ export async function fetchRuns(projectRoot: string): Promise<RunsListResponse> 
   return readResponse<RunsListResponse>(response);
 }
 
-export async function fetchRunDetail(
+// Several panels open on the same run in one commit (result view, equation,
+// table, report context) and each asks for its detail. Calls made in the same
+// synchronous pass share one response; the share ends at the next microtask,
+// so a refresh after an operation always reads the run again. Callers treat
+// the detail as read-only.
+const runDetailInFlight = new Map<string, Promise<RunDetail>>();
+
+export function fetchRunDetail(
   projectRoot: string,
   runId: string,
 ): Promise<RunDetail> {
   const url = apiUrl(
     `/runs/${encodeURIComponent(runId)}?project_root=${encodeURIComponent(projectRoot)}`,
   );
-  const response = await fetch(url);
-  return readResponse<RunDetail>(response);
+  const shared = runDetailInFlight.get(url);
+  if (shared) return shared;
+  // async: a failure to even start the request still arrives as a rejection.
+  const request = (async () => readResponse<RunDetail>(await fetch(url)))();
+  runDetailInFlight.set(url, request);
+  queueMicrotask(() => runDetailInFlight.delete(url));
+  return request;
 }
 
 export async function previewRunDeletion(

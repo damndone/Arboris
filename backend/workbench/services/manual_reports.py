@@ -27,6 +27,7 @@ from ..artifacts import read_json, register_artifact, sha256_file, write_json
 from ..graph_store import GraphStore, graph_to_json
 from ..lineage.headset import forest_node_key
 from ..predictive_research.schema import default_v1_prediction_registry
+from .manual_report_text import draft_text, render_values, resolved_ids
 from ..report_contract import validate_report_packet, validate_report_response
 from ..report_export import export_report
 from ..report_view_model import build_regression_table
@@ -343,9 +344,9 @@ def build_manual_report_draft(run_root: Path) -> dict:
 
     snapshot = {"run_id": run_root.name, "facts": facts, "figures": _figures(run_root), "limitations": limits}
     fingerprint = _digest({"project": str(run_root.parent.parent.resolve()), **snapshot})
-    text = "# Analysis report\n\n" + "\n".join(f"- {f['label']}: {f['value']} [[c:{f['id']}]]" for f in facts)
-    if not facts:
-        text += "No computed facts are available. Add user-authored notes here."
+    # Reads like a results section; every number is a value marker bound to
+    # its fact, so the prose can be rewritten without touching a number.
+    text = draft_text(facts, limits)
     return {"schema_version": "workbench-manual-report-draft/v1", **snapshot,
             "source_fingerprint": fingerprint, "draft_origin": "deterministic", "title": "Analysis report", "text": text}
 
@@ -416,6 +417,11 @@ def save_manual_report(run_root: Path, request: ManualReportRequest) -> dict:
         # Figure markers are generated during export; user prose may cite only
         # selected fact IDs and may not inject arbitrary image identities.
         validate_report_response(request.text, contract, require_figure_markers=False)
+        _shown, unknown = resolved_ids(request.text, {fact["id"]: fact for fact in selected["facts"]})
+        if unknown:
+            raise _error("MANUAL_REPORT_SELECTION_INVALID",
+                         "The text shows values of facts that are not in the selected evidence, or a marker that "
+                         f"names more than one fact: {', '.join(sorted(set(unknown))[:5])}.")
         record = {"id": request.id, "run_id": run_root.name, "author": "user", "draft_origin": "deterministic",
                   "created_at": datetime.now(timezone.utc).isoformat(), "document_id": parent["document_id"] if parent else request.id,
                   "revision_number": parent["revision_number"] + 1 if parent else 1, "parent_report_id": request.parent_report_id,
@@ -443,8 +449,21 @@ def _register_report(run_root: Path, path: Path, report_id: str) -> None:
 
 def export_manual_report(run_root: Path, report_id: str, format: str) -> tuple[bytes, str, str]:
     record = _read_report(run_root, report_id)["record"]
-    markdown = f"# {record['title']}\n\n{record['text']}\n\n## Computed evidence\n\n"
-    markdown += "\n".join(f"- {f['label']}: {f['value']} ({f['id']}; {f['source']['result_ref']})" for f in record["facts"])
+    by_id = {fact["id"]: fact for fact in record["facts"]}
+    # The text's own heading is the title when it starts with one.
+    body = render_values(record["text"], by_id)
+    markdown = body if body.lstrip().startswith("# ") else f"# {record['title']}\n\n{body}"
+    # The appendix lists the facts the text shows, with their exact stored
+    # values and sources; the rest of the selected evidence is counted.
+    shown_ids, _unknown = resolved_ids(record["text"], by_id)
+    cited = list(dict.fromkeys(shown_ids + [m.group(1) for m in re.finditer(r"\[\[c:([^\]]+)\]\]", record["text"])]))
+    shown = [by_id[fact_id] for fact_id in cited if fact_id in by_id]
+    markdown += "\n\n## Evidence behind the numbers\n\n"
+    markdown += "\n".join(
+        f"- {fact['label']}: {fact['value']!r} ({fact['source']['result_ref']}; {fact['id']})" for fact in shown
+    ) or "- The text shows no computed values."
+    if len(record["facts"]) > len(shown):
+        markdown += f"\n\n{len(record['facts']) - len(shown)} further computed facts were selected as evidence and are kept with this revision."
     markdown += "\n\n" + "\n".join(f"[[fig:{f['artifact_id']}]]" for f in record["figures"])
     markdown += "\n\n## Evidence limits\n\n" + "\n".join(f"- {item}" for item in record["limitations"])
     settings = analysis_disclosure.read_settings(run_root.parent.parent)

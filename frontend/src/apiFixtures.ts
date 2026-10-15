@@ -180,7 +180,7 @@ export function capabilitiesFixture(overrides: Partial<Schema<"Capabilities">> =
 export function agentMessageFixture(
   message: Pick<Schema<"AgentMessage">, "entry_id" | "role" | "content"> & Partial<Schema<"AgentMessage">>,
 ): Schema<"AgentMessage"> {
-  return { name: null, stop_reason: null, error: null, navigation: [], ...message };
+  return { at: "2026-10-14T09:00:00+00:00", name: null, stop_reason: null, error: null, navigation: [], ...message };
 }
 
 /** An Agent proposal revision; `readable` is what the server derives from `changes`. */

@@ -36,9 +36,9 @@ function TabLink({
         padding: "12px 0",
         border: 0,
         background: "transparent",
-        color: isActive ? "var(--tint, #0a84ff)" : "inherit",
+        color: isActive ? "var(--tint)" : "inherit",
         borderBottom: isActive
-          ? "2px solid var(--tint, #0a84ff)"
+          ? "2px solid var(--tint)"
           : "2px solid transparent",
         cursor: "pointer",
         fontSize: 14,
@@ -79,7 +79,7 @@ export function RunDetailRoute() {
         style={{
           display: "flex",
           gap: 16,
-          borderBottom: "1px solid var(--separator, #2e2e30)",
+          borderBottom: "1px solid var(--separator)",
           padding: "0 16px",
         }}
       >

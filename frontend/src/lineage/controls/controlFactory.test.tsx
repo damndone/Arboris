@@ -64,15 +64,30 @@ describe("controlFactory", () => {
     }
   });
 
-  it("edits select, multiselect, columns, text and toggle in place; shows the rest read-only", () => {
-    expect([...ENABLED_CONTROL_KINDS].sort()).toEqual(["columns", "multiselect", "select", "text", "toggle"]);
-    for (const kind of CONTROL_KINDS.filter((item) => !ENABLED_CONTROL_KINDS.has(item))) {
-      const { unmount } = render(<>{renderControl({ kind, key: "k", label: "Tau", value: 0.5 }, vi.fn())}</>);
-      const placeholder = screen.getByTestId(`control-${kind}`);
-      expect(placeholder).toHaveAttribute("aria-disabled", "true");
-      expect(placeholder).toHaveTextContent("Tau: 0.5");
-      unmount();
-    }
+  it("enables every declared kind for manual editing", () => {
+    expect([...ENABLED_CONTROL_KINDS].sort()).toEqual([...CONTROL_KINDS].sort());
+  });
+  it("edits a single column and preserves numeric values", () => {
+    const change = vi.fn();
+    render(<>{renderControl({kind: "column", key: "y", label: "Outcome", options: ["y", "income"], value: "y"}, change)}
+      {renderControl({kind: "integer", key: "reps", label: "Bootstrap repetitions", value: 100}, change)}
+      {renderControl({kind: "number", key: "tau", label: "Quantile", value: 0.5}, change)}</>);
+    fireEvent.change(screen.getByLabelText("Outcome"), {target: {value: "income"}});
+    fireEvent.change(screen.getByLabelText("Bootstrap repetitions"), {target: {value: "200"}});
+    fireEvent.change(screen.getByLabelText("Quantile"), {target: {value: "0.75"}});
+    expect(change).toHaveBeenCalledWith("y", "income");
+    expect(change).toHaveBeenCalledWith("reps", 200);
+    expect(change).toHaveBeenCalledWith("tau", 0.75);
+  });
+  it("edits declared nested model options without JSON syntax", () => {
+    const change = vi.fn();
+    render(<>{renderControl({kind: "json", key: "model_options", label: "Options",
+      value: {quantiles: [0.5], bootstrap_reps: 100}, schema: {type: "object", properties: {
+        quantiles: {type: "array", items: {type: "number"}}, bootstrap_reps: {type: "integer"}
+      }}}, change)}</>);
+    fireEvent.change(screen.getByLabelText("Options.quantiles[1]"), {target: {value: "0.75"}});
+    expect(change).toHaveBeenCalledWith("model_options", {quantiles: [0.75], bootstrap_reps: 100});
+    expect(screen.queryByText(/\[object Object\]/)).toBeNull();
   });
   it("toggle reflects boolean value and flips it on click", () => {
     const onChange = vi.fn();

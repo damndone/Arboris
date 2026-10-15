@@ -33,6 +33,11 @@ function olsResult(): api.ModelResult {
 }
 
 describe("buildEstimatedEquation", () => {
+  it.each([0, 1e-72])("never presents a tiny equation p-value as zero (%s)", p => {
+    const result = olsResult();
+    result.coefficients!.x1 = {estimate: 1, p_value: p, p_value_display: "0"};
+    expect(buildEstimatedEquation(result, "y")!.terms[0].tooltip).toContain("p < 0.001");
+  });
   it("builds intercept + signed terms with tooltips from the coefficient table", () => {
     const eq = buildEstimatedEquation(olsResult(), "y");
     expect(eq).not.toBeNull();

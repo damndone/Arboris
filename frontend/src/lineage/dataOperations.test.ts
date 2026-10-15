@@ -2,6 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import {
   authorizeCodeExecuteRisk,
   confirmDataColumnCast,
+  confirmDataColumnsCast,
+  confirmFeatureRecipe,
+  confirmDataTransform,
   confirmCodeExecute,
   fetchDataColumnCastContext,
   previewDataColumnCast,
@@ -178,4 +181,15 @@ describe("data column cast API", () => {
       expect.objectContaining({ method: "POST" }),
     );
   });
+});
+
+
+it.each([confirmDataColumnCast, confirmDataColumnsCast, confirmFeatureRecipe, confirmDataTransform])("binds every manual data confirmation to its source run", async confirm => {
+  const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response("{}", {status: 200})));
+  vi.stubGlobal("fetch", fetchMock);
+  for (const source_run_id of ["run-a", "run-b", "run-a"]) {
+    await confirm("/project", {source_run_id, preview_fingerprint: "fp"} as never);
+  }
+  const bodies = fetchMock.mock.calls.map(([, request]) => JSON.parse(request.body));
+  expect(bodies.map(body => body.session_id)).toEqual(["agent_data_ui_run-a", "agent_data_ui_run-b", "agent_data_ui_run-a"]);
 });

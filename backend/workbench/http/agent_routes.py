@@ -51,6 +51,11 @@ from ..analysis_loop.storage import (
     ValidationPacketStore,
 )
 from ..analysis_loop.validation import ValidationPacket
+from ..agent.compaction import CompactionError, CompactionPolicy, compact as compact_session, estimate_messages_tokens
+from ..agent.context import ContextBuilder
+from ..agent.instructions import INSTRUCTIONS_NAME, compose as compose_instructions
+from ..agent.operation_outcome import OUTCOME_NAME, TERMINAL as OUTCOME_TERMINAL, outcome as operation_outcome, outcome_text as operation_outcome_text, unfinished_outcomes
+from ..agent.recall import RECALL_NAME, conversation_index, index_text as recall_index_text
 from ..agent.core import AgentCore
 from ..agent.events import AgentEventStream
 from ..agent.model import OpenAICompatibleModelAdapter
@@ -78,6 +83,7 @@ from .responses.agent import (
     AgentOperationProjection,
     AgentProposalList,
     AgentSession,
+    AgentSessionChange,
     AgentTurn,
     AgentTurnCancelling,
     AnalysisLoopContext,
@@ -105,7 +111,14 @@ MAX_QUESTION_CHARS = 4_000
 # behind it. The protocol now also makes a successful proposal terminal, so
 # this is headroom rather than permission to sprawl.
 DEFAULT_MAX_STEPS = 10
-DEFAULT_TIMEOUT_S = 120.0
+# The wall-clock ceiling for a whole turn. 120 s cut off a live DeepSeek turn
+# (2026-10-13, global Agent, "report on both runs"): five tool steps, a long
+# report drafted by 58 s, withdrawn by the numeric check, and the rewrite then
+# stopped at exactly 120 s. Loops are bounded by DEFAULT_MAX_STEPS, a stalled
+# provider by the adapter's 90 s idle timeout, and the person can stop a turn
+# at any time; this ceiling only has to leave room for a long answer and one
+# rewrite.
+DEFAULT_TIMEOUT_S = 300.0
 
 # A live turn is process-local by design: the local Workbench server owns the
 # in-flight provider stream and is the only component able to abort it safely.
@@ -138,6 +151,10 @@ CHAIN_AGENT_PROTOCOL = """Workbench Chain Agent workflow protocol (agent/v1):
 - The plan's length, ordering and column choices belong to the request being answered. There is no fixed number of steps.
 - For other registered mutations, you must call propose_operation with a complete structured payload; a JSON or Markdown proposal in ordinary text is not a submitted proposal.
 - propose_operation creates a reviewable pending proposal (requires_confirmation: true) for anything that changes data, metadata, a model or a report; it does not execute it. Never claim that a run, graph, or data change was executed from such a result.
+- Who does what: you propose; the person's confirmation makes the Workbench execute the proposal; you are then told what it produced in a workbench_operation_result message (the run it created, and whether an identical analysis already existed). Do not describe yourself as read-only or unable to act. When that message is present, read the produced run's results (inspect_project_model_coefficients with its run id, beside the original run) and report them.
+- Before proposing a model.rerun, check whether a run with the requested setting already exists: the context lists the project's runs, and inspect_project_model_coefficients reports each run's covariance and specification. If it exists, show that result and say a rerun would only repeat it; propose one only if the person still wants a fresh run.
+- Offer only what the Workbench can run: before suggesting an alternative estimator, covariance, test or option, check that the operation contract or its option_vocabulary declares it. If the person asks for something it does not declare, say plainly that it is not available yet instead of offering a near substitute.
+- When you offered more than one variant and the person agrees without choosing, propose every variant you offered, one proposal each, or ask which they want. Never silently do fewer than you offered.
 - A multi-step workflow whose every step only reads data (descriptive statistics, tabulations, inferential tests) runs at once: propose_operation then returns executed: true with each step's results. Answer the user's question from those results in this turn, citing the step and artifact ids; if it returns executed: false, explain the error and report no result. Do not split a question into many small workflows to run more tests. Analysis steps name the columns they use: do not add a data.subset step only to choose columns, and do not re-run a test already answered in this conversation.
 - A propose_operation result with requires_confirmation: true ends your turn: reply with a short summary of what you proposed and call no further tools. Continuing past it spends the step budget and can end the turn in an error even though the proposal was created.
 - Inspect only what the request needs. Calling every inspect tool wastes steps; tools for other model families return nothing useful about this node.
@@ -268,6 +285,7 @@ class AgentTurnRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     question: str = Field(min_length=1, max_length=MAX_QUESTION_CHARS)
+    execution_policy: Literal["auto_read_only", "proposal_only"] = "auto_read_only"
     # The panel's current project context. A Main session's overview was
     # written once, at creation, so runs made afterwards (a metadata edit, a
     # rerun) were invisible and the Agent kept reading the old run.
@@ -755,6 +773,25 @@ def _messages(repository: JsonlSessionRepository, session_id: str) -> list[dict[
     result: list[dict[str, Any]] = []
     projector = AgentNavigationProjector(repository.root.parent)
     for entry in repository.get_branch(session_id):
+        if entry.entry_type == "compaction" and isinstance(entry.payload.get("summary"), str):
+            result.append({
+                "entry_id": entry.entry_id,
+                "at": entry.created_at,
+                "role": "summary",
+                "content": entry.payload["summary"],
+                "name": "context_compaction",
+                "stop_reason": None,
+                "error": None,
+                "navigation": [],
+                "compaction": {
+                    "trigger": str(entry.payload.get("trigger") or "auto"),
+                    "tokens_before": int(entry.payload.get("tokens_before") or 0),
+                    "verified": entry.payload.get("verified") is not False,
+                    "unverified_numbers": [str(item) for item in entry.payload.get("unverified_numbers") or []],
+                    "summarized_messages": len(entry.payload.get("summarized_entry_ids") or []),
+                },
+            })
+            continue
         if entry.entry_type != "message":
             continue
         role = entry.payload.get("role")
@@ -763,6 +800,7 @@ def _messages(repository: JsonlSessionRepository, session_id: str) -> list[dict[
             continue
         message = {
             "entry_id": entry.entry_id,
+            "at": entry.created_at,
             "role": role,
             "content": content,
             # Tool entries carry the tool id in `name`; the panel projects
@@ -783,6 +821,22 @@ def _messages(repository: JsonlSessionRepository, session_id: str) -> list[dict[
             message["navigation"] = []
         result.append(message)
     return result
+
+
+def _context_usage(repository: JsonlSessionRepository, session_id: str, config) -> dict[str, Any]:
+    """The next request's size as the server builds it (tools not included)."""
+
+    policy = CompactionPolicy.from_config(config.context_window_tokens, supports_1m=config.supports_1m)
+    try:
+        messages = ContextBuilder(repository).build(session_id).messages
+    except (KeyError, ValueError):
+        messages = []
+    return {
+        "estimated_tokens": estimate_messages_tokens(messages),
+        "window_tokens": policy.window,
+        "window_declared": policy.window_declared,
+        "compact_at_tokens": policy.threshold,
+    }
 
 
 def _context_fingerprint(repository: JsonlSessionRepository, session_id: str) -> str | None:
@@ -811,8 +865,13 @@ def _public_session(
         "model": config.model or None,
         "provider_id": config.provider_id or None,
         "context_window_tokens": config.context_window_tokens,
+        "context": _context_usage(repository, session_id, config),
         "messages": _messages(repository, session_id),
         "proposals": _public_proposals(proposal_store, session_id),
+        "chapters": [
+            {"entry_id": str(chapter["entry_id"]), "title": str(chapter["title"]), "at": str(chapter["at"])}
+            for chapter in metadata.get("chapters") or []
+        ],
     }
 
 
@@ -1059,6 +1118,8 @@ def create_agent_session(
             },
         },
     )
+    from ..agent.identity import identity_text
+
     identity_config = load_llm_config()
     repository.append(
         session_id,
@@ -1067,19 +1128,35 @@ def create_agent_session(
             "message_type": "agent_identity",
             "audience": "model",
             "name": "workbench_agent_identity",
-            "content": (
-                "Agent identity (authoritative): you are the Workbench "
-                + ("Chain" if body.role == "chain" else "Global")
-                + " Agent. You run on the configured provider "
-                + f"'{identity_config.provider_id or 'unknown'}' using model "
-                + f"'{identity_config.model or 'unknown'}'. Answer identity and "
-                + "\"what model are you\" questions with exactly this; do not invent a "
-                + "product, brand, or vendor name and do not deflect to external "
-                + "documentation."
-            ),
+            "content": identity_text("chain" if body.role == "chain" else "global", identity_config),
             "metadata": {"protocol_version": "agent/v1"},
         },
     )
+    instruction_text, instruction_record = compose_instructions(root)
+    repository.append(
+        session_id,
+        "custom_message",
+        {
+            "message_type": "agent_instructions",
+            "audience": "model",
+            "name": INSTRUCTIONS_NAME,
+            "content": instruction_text,
+            "metadata": instruction_record,
+        },
+    )
+    earlier = conversation_index(repository, exclude=session_id)
+    if earlier:
+        repository.append(
+            session_id,
+            "custom_message",
+            {
+                "message_type": "agent_recall",
+                "audience": "model",
+                "name": RECALL_NAME,
+                "content": recall_index_text(earlier),
+                "metadata": {"conversations": [item["session_id"] for item in earlier]},
+            },
+        )
     if body.focus is not None:
         repository.append(
             session_id,
@@ -1128,6 +1205,124 @@ def create_agent_session(
         repository.get_metadata(session_id),
         load_llm_config(),
     )
+
+
+class AgentEntryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    entry_id: str = Field(min_length=1, max_length=128)
+
+
+class AgentChapterRequest(AgentEntryRequest):
+    title: str = Field(min_length=1, max_length=120)
+
+
+def _branch_message(repository: JsonlSessionRepository, session_id: str, entry_id: str):
+    """A message entry on the session's current branch, or 404."""
+    for entry in repository.get_branch(session_id):
+        if entry.entry_id == entry_id and entry.entry_type == "message":
+            return entry
+    raise WorkbenchAPIError(
+        status_code=404,
+        code="AGENT_ENTRY_NOT_FOUND",
+        message="That message is not part of this conversation.",
+        details={"session_id": session_id, "entry_id": entry_id},
+    )
+
+
+def _refuse_while_running(metadata: dict[str, Any], action: str) -> None:
+    if metadata.get("status") == "running":
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="AGENT_TURN_RUNNING",
+            message=f"The Agent is still answering; stop it or wait before you {action}.",
+            details={},
+        )
+
+
+def _before(entry) -> EntryRef:
+    if entry.parent_ref is None:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="AGENT_ENTRY_IS_FIRST",
+            message="There is nothing before this message to go back to.",
+            details={"entry_id": entry.entry_id},
+        )
+    return entry.parent_ref
+
+
+@router.post("/agent/sessions/{session_id}/rewind")
+def rewind_agent_session(session_id: str, project_root: str, body: AgentEntryRequest) -> AgentSessionChange:
+    """Go back to just before one of your messages; its text returns to the input.
+
+    The later conversation is kept in the session log (rewinding is recorded,
+    not deleted); the next message continues from here.
+    """
+    root = _project_root(project_root)
+    repository, events, metadata = _get_session(root, session_id)
+    _refuse_while_running(metadata, "rewind")
+    entry = _branch_message(repository, session_id, body.entry_id)
+    if entry.payload.get("role") != "user":
+        raise WorkbenchAPIError(status_code=422, code="AGENT_REWIND_TARGET",
+                                message="Rewind goes back to one of your own messages.", details={})
+    target = _before(entry)
+    try:
+        repository.rewind(session_id, target)
+    except (KeyError, ValueError) as exc:
+        raise WorkbenchAPIError(status_code=409, code="AGENT_REWIND_REFUSED", message=str(exc), details={}) from exc
+    events.emit(session_id, "session_rewound", {"to_entry": target.to_dict(), "undone_entry_id": entry.entry_id})
+    metadata = repository.get_metadata(session_id)
+    return {"session": _public_session(repository, session_id, metadata, load_llm_config()),
+            "restored_prompt": str(entry.payload.get("content") or "")}
+
+
+@router.post("/agent/sessions/{session_id}/fork")
+def fork_agent_session(session_id: str, project_root: str, body: AgentEntryRequest) -> AgentSessionChange:
+    """Start a new conversation that shares this one up to a message.
+
+    From a reply, the new conversation includes that reply; from one of your
+    messages, it stops just before it and the message returns to the input.
+    The original conversation is unchanged.
+    """
+    root = _project_root(project_root)
+    repository, events, metadata = _get_session(root, session_id)
+    _refuse_while_running(metadata, "fork")
+    entry = _branch_message(repository, session_id, body.entry_id)
+    from_user = entry.payload.get("role") == "user"
+    point = _before(entry) if from_user else EntryRef(session_id, entry.entry_id)
+    role = str(metadata.get("role") or "chain")
+    fork_id = f"agent_{role}_{uuid4().hex}"
+    repository.create_session(fork_id, chain_id=str(metadata.get("chain_id")), role=role, inherited_parent_ref=point)
+    events.emit(session_id, "session_forked", {"fork_session_id": fork_id, "at_entry": point.to_dict()})
+    events.emit(fork_id, "session_created", {"role": role, "chain_id": metadata.get("chain_id"),
+                                             "forked_from": {"session_id": session_id, **point.to_dict()}})
+    return {"session": _public_session(repository, fork_id, repository.get_metadata(fork_id), load_llm_config()),
+            "restored_prompt": str(entry.payload.get("content") or "") if from_user else None}
+
+
+@router.post("/agent/sessions/{session_id}/chapters")
+def pin_agent_chapter(session_id: str, project_root: str, body: AgentChapterRequest) -> AgentSession:
+    """Pin a message as a chapter: a named place to jump back to."""
+    root = _project_root(project_root)
+    repository, events, metadata = _get_session(root, session_id)
+    entry = _branch_message(repository, session_id, body.entry_id)
+    chapters = [chapter for chapter in metadata.get("chapters") or [] if chapter.get("entry_id") != entry.entry_id]
+    chapters.append({"entry_id": entry.entry_id, "title": body.title.strip(), "at": entry.created_at})
+    order = {item.entry_id: index for index, item in enumerate(repository.get_branch(session_id))}
+    chapters.sort(key=lambda chapter: order.get(chapter["entry_id"], 0))
+    metadata = repository.set_chapters(session_id, chapters)
+    events.emit(session_id, "chapter_pinned", {"entry_id": entry.entry_id, "title": body.title.strip()})
+    return _public_session(repository, session_id, metadata, load_llm_config())
+
+
+@router.delete("/agent/sessions/{session_id}/chapters/{entry_id}")
+def unpin_agent_chapter(session_id: str, entry_id: str, project_root: str) -> AgentSession:
+    root = _project_root(project_root)
+    repository, events, metadata = _get_session(root, session_id)
+    chapters = [chapter for chapter in metadata.get("chapters") or [] if chapter.get("entry_id") != entry_id]
+    metadata = repository.set_chapters(session_id, chapters)
+    events.emit(session_id, "chapter_unpinned", {"entry_id": entry_id})
+    return _public_session(repository, session_id, metadata, load_llm_config())
 
 
 @router.get("/agent/sessions/{session_id}")
@@ -1838,6 +2033,8 @@ def create_agent_fork_proposal(
             "view": "agent",
             "session_id": session_id,
             "proposal_id": proposal.proposal_id,
+            "run_id": body.source_run_id,
+            "forest_node_key": snapshot["forest_node_key"],
         },
     )
     return {
@@ -2122,11 +2319,51 @@ async def confirm_agent_proposal(
             message="Another confirmed operation is already executing against this Chain head.",
             details={"proposal_id": proposal_id},
         ) from exc
+    _tell_agent_the_outcome(root, session_id, record.to_dict())
     return {
         "proposal": _public_proposal(store, proposal_id),
         "operation": record.to_dict(),
         "status": record.status,
     }
+
+
+def _tell_agent_finished_outcomes(root: Path, session_id: str) -> None:
+    """Before a turn: report operations that finished since the Agent was told
+    they were still running (a confirmed rerun returns while it runs)."""
+
+    try:
+        repository, _events, _metadata = _get_session(root, session_id)
+        pending = unfinished_outcomes(repository.get_branch(session_id))
+    except (WorkbenchAPIError, KeyError, OSError, ValueError):
+        return
+    if not pending:
+        return
+    store = OperationRecordStore(root / "workbench", create=False)
+    for record_id in pending:
+        try:
+            record = store.get(record_id).to_dict()
+        except (KeyError, OSError, ValueError):
+            continue
+        if record.get("status") in OUTCOME_TERMINAL:
+            _tell_agent_the_outcome(root, session_id, record)
+
+
+def _tell_agent_the_outcome(root: Path, session_id: str, record: dict[str, Any]) -> None:
+    """The Agent's next turn knows what its confirmed proposal produced."""
+
+    facts = operation_outcome(root, record)
+    try:
+        repository, _events, _metadata = _get_session(root, session_id)
+        repository.append(session_id, "custom_message", {
+            "message_type": "agent_operation_result",
+            "audience": "model",
+            "name": OUTCOME_NAME,
+            "content": operation_outcome_text(facts),
+            "metadata": facts,
+        })
+    except (WorkbenchAPIError, KeyError, OSError, ValueError):
+        # The execution is recorded in the ledger either way; the message is a courtesy.
+        return
 
 
 @router.post("/agent/sessions/{session_id}/operations/{record_id}/reconcile")
@@ -2173,6 +2410,71 @@ async def reconcile_agent_operation(
     return {"operation": record.to_dict(), "status": record.status}
 
 
+class AgentCompactRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    #: What the summary should keep in particular ("the IV results", "my definitions").
+    focus: str | None = Field(default=None, max_length=1000)
+
+
+@router.post("/agent/sessions/{session_id}/compact")
+async def compact_agent_session(
+    session_id: str,
+    project_root: str,
+    body: AgentCompactRequest,
+) -> AgentSession:
+    """Summarize the earlier conversation now, keeping the latest part verbatim.
+
+    The same summary the Agent writes on its own when the conversation nears
+    the model's window; nothing is deleted from the session log.
+    """
+    root = _project_root(project_root)
+    repository, events, metadata = _get_session(root, session_id)
+    _refuse_while_running(metadata, "compact the conversation")
+    turn_key = _active_turn_key(root, session_id)
+    with _TURN_RESERVATION_LOCK:
+        if turn_key in _ACTIVE_TURNS or turn_key in _RESERVED_TURNS:
+            raise WorkbenchAPIError(
+                status_code=409,
+                code="AGENT_TURN_IN_PROGRESS",
+                message="This Agent session already has a running turn.",
+                details={"session_id": session_id},
+            )
+        _RESERVED_TURNS.add(turn_key)
+    try:
+        config = load_llm_config()
+        if not config.is_configured():
+            raise WorkbenchAPIError(status_code=503, code="LLM_NOT_CONFIGURED",
+                                    message=config.configuration_error_message())
+        policy = CompactionPolicy.from_config(config.context_window_tokens, supports_1m=config.supports_1m)
+        tokens = estimate_messages_tokens(ContextBuilder(repository).build(session_id).messages)
+        events.emit(session_id, "compaction_start", {"trigger": "manual", "tokens_before": tokens, **policy.to_dict()})
+        try:
+            entry = await compact_session(
+                repository, session_id, OpenAICompatibleModelAdapter(config), policy,
+                trigger="manual", tokens_before=tokens, focus=body.focus, model=config.model,
+            )
+        except CompactionError as exc:
+            events.emit(session_id, "compaction_end", {"trigger": "manual", "compacted": False, "error": str(exc)})
+            raise WorkbenchAPIError(status_code=502, code="AGENT_COMPACTION_FAILED",
+                                    message="The summary could not be written; the conversation is unchanged.",
+                                    details={"reason": str(exc)}) from exc
+        if entry is None:
+            events.emit(session_id, "compaction_end", {"trigger": "manual", "compacted": False})
+            raise WorkbenchAPIError(status_code=409, code="AGENT_NOTHING_TO_COMPACT",
+                                    message="There is no earlier part of this conversation to summarize yet.",
+                                    details={})
+        events.emit(session_id, "compaction_end", {
+            "trigger": "manual", "compacted": True, "entry_id": entry.entry_id, "tokens_before": tokens,
+            "tokens_after": estimate_messages_tokens(ContextBuilder(repository).build(session_id).messages),
+            "verified": entry.payload.get("verified"),
+        })
+    finally:
+        with _TURN_RESERVATION_LOCK:
+            _RESERVED_TURNS.discard(turn_key)
+    return _public_session(repository, session_id, repository.get_metadata(session_id), config)
+
+
 @router.post("/agent/sessions/{session_id}/turns")
 async def run_agent_turn(
     session_id: str,
@@ -2207,6 +2509,7 @@ async def _run_reserved_agent_turn(
     metadata: dict[str, Any],
     turn_key: tuple[str, str],
 ) -> dict[str, Any]:
+    _tell_agent_finished_outcomes(root, session_id)
     config = load_llm_config()
     if not config.is_configured():
         raise WorkbenchAPIError(
@@ -2222,6 +2525,8 @@ async def _run_reserved_agent_turn(
         events,
         OpenAICompatibleModelAdapter(config),
         session_id=session_id,
+        compaction_policy=CompactionPolicy.from_config(config.context_window_tokens, supports_1m=config.supports_1m),
+        model_name=config.model,
     )
     tool_context: dict[str, Any] | None = None
     if metadata.get("role") == "main":
@@ -2242,6 +2547,7 @@ async def _run_reserved_agent_turn(
             operation_registry=operation_registry,
             context_provider=NodeOperationContextProvider(root),
         )
+        orchestrator.execution_policy = body.execution_policy
         orchestrator.register_chain(str(metadata.get("chain_id")), session_id, agent)
         orchestrator.read_only_runner = lambda proposal: _run_read_only_proposal(root, orchestrator, proposal)
         tool_context = {

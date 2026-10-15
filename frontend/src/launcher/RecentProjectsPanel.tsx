@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { formatRelativeTime } from "../lineage/runRail/runFormat";
 import { ApiError, fetchRuns } from "../api";
 import { listRecents, removeRecent, touchRecent } from "./recents";
 import type { RecentProject } from "./recents";
@@ -81,7 +82,7 @@ export function RecentProjectsPanel({ onOpenProject }: RecentProjectsPanelProps)
                   <strong>{projectName(recent.root)}</strong>
                   <span className="mono" style={{ display: "block" }}>{recent.root}</span>
                   <span className="muted" style={{ display: "block" }}>
-                    {probingRoot === recent.root ? "Opening…" : `Last opened ${recent.lastOpened}`}
+                    {probingRoot === recent.root ? "Opening…" : `Last opened ${formatRelativeTime(recent.lastOpened)}`}
                   </span>
                 </button>
                 {/* Removal used to appear only once a project had gone stale,

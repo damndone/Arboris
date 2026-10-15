@@ -107,7 +107,7 @@ describe("GraphNode (T8.3 visual refresh + T8.5 tri-state)", () => {
       } as Partial<GraphViewNode>),
     );
     const badge = screen.getByTestId("node-model-badge");
-    expect(badge).toHaveTextContent("021506");
+    expect(badge).toHaveTextContent("02:15:06");
     expect(badge).toHaveTextContent("bb21b");
     expect(badge).toHaveTextContent("source");
   });

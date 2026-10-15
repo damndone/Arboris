@@ -215,6 +215,8 @@ class PostEstimationResult(TypedDict):
     artifact_id: str
     artifact_type: str
     operation_id: str
+    # The operation's title as Analyze shows it; None for an operation without words.
+    title: NotRequired[str | None]
     run_id: str
     model_run_id: str
     workflow_id: str

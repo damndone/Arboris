@@ -48,7 +48,7 @@ describe("DatasetExportPanel", () => {
     fireEvent.change(screen.getByLabelText("Stata version"), { target: { value: "13" } });
     fireEvent.change(screen.getByLabelText("Value labels"), { target: { value: "strings" } });
     fireEvent.change(screen.getByLabelText("File name"), { target: { value: "wages" } });
-    fireEvent.click(screen.getByRole("button", { name: "Add condition" }));
+    fireEvent.click(screen.getByRole("button", { name: "+ Add a condition" }));
     fireEvent.change(screen.getByLabelText("Row condition 1 variable"), { target: { value: "wage" } });
     fireEvent.change(screen.getByLabelText("Row condition 1 operator"), { target: { value: "ge" } });
     fireEvent.change(screen.getByLabelText("Row condition 1 value"), { target: { value: "20" } });

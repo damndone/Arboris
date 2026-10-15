@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import {
   Navigate,
   Outlet,
@@ -10,35 +10,19 @@ import {
   useParams,
   useSearchParams,
 } from "react-router-dom";
-import { RunDetailRoute } from "./runDetail";
 import { ThemeProvider, ThemeToggle } from "./theme";
-import { DraftGraphRoute } from "./pipelineDrafts/DraftGraphRoute";
 import { LauncherRoute } from "./launcher/LauncherRoute";
-import { WorkbenchHome } from "./workbench/WorkbenchRouteContainer";
+import { ViewLoading } from "./workbench/lazyViews";
 import { rootToSlug, slugToRoot } from "./workbench/projectSlug";
+import { useWorkspaceMode } from "./workspace/workspaceMode";
+import "./theme/tokens.css";
 import "./styles.css";
 
-export function validatePanelPrediction(s: {
-  modelType: string;
-  entity: string;
-  time: string;
-  isPanelData: boolean;
-  predictionEnabled: boolean;
-  predictionModelType: string;
-}): string | null {
-  if (s.modelType === "panel_ols") {
-    if (s.entity && s.time && s.entity === s.time) {
-      return "The entity and time columns cannot be the same column (entity == time).";
-    }
-    if (!s.entity && !s.time && !s.isPanelData) {
-      return "Panel OLS needs an entity or time column; this dataset was not recognised as panel data.";
-    }
-  }
-  if (s.predictionEnabled && !s.predictionModelType) {
-    return "Prediction is enabled — choose an algorithm.";
-  }
-  return null;
-}
+// Each route loads on first visit: the launcher does not parse the workbench,
+// and a project does not parse the legacy run page or the draft graph.
+const WorkbenchHome = lazy(() => import("./workbench/WorkbenchRouteContainer").then((m) => ({ default: m.WorkbenchHome })));
+const RunDetailRoute = lazy(() => import("./runDetail").then((m) => ({ default: m.RunDetailRoute })));
+const DraftGraphRoute = lazy(() => import("./pipelineDrafts/DraftGraphRoute").then((m) => ({ default: m.DraftGraphRoute })));
 
 // --- Context ---
 
@@ -155,6 +139,7 @@ function AppShell() {
   const [searchParams] = useSearchParams();
   const location = useLocation();
   const navigate = useNavigate();
+  const workspaceMode = useWorkspaceMode();
 
   const [projectRoot, setProjectRootState] = useState<string>(() => {
     const fromUrl = searchParams.get("project_root");
@@ -250,10 +235,14 @@ function AppShell() {
   // Workbench canvas. The outer Home/Workbench selection changes navigation
   // state, not the layout contract of the project route.
   const isLineageDarkScope = isProjectGraphRoute;
+  // v1.9.0: the new workspace brings its own top bar (home, settings) and its
+  // own main landmark (the stage), so the outer navigation row steps aside.
+  const workspaceActive = workspaceMode === "new" && (isProjectGraphRoute || isLauncherActive);
+  const Root = workspaceActive ? "div" : "main";
 
   return (
-    <main
-      className={`workbench-shell${isLineageDarkScope ? " workbench-shell--lineage" : ""}`}
+    <Root
+      className={`workbench-shell${isLineageDarkScope ? " workbench-shell--lineage" : ""}${workspaceActive ? " workbench-shell--workspace" : ""}`}
     >
       {errorMessage && (
         <section className="panel panel-error" role="alert">
@@ -262,6 +251,7 @@ function AppShell() {
         </section>
       )}
 
+      {!workspaceActive && (
       <div className="workbench-navigation-row">
         <nav className="tabs" role="tablist" aria-label="workbench views">
           <button
@@ -312,11 +302,14 @@ function AppShell() {
           <ThemeToggle />
         </div>
       </div>
+      )}
 
       <div className="workbench-outlet">
-        <Outlet context={context} />
+        <Suspense fallback={<ViewLoading />}>
+          <Outlet context={context} />
+        </Suspense>
       </div>
-    </main>
+    </Root>
   );
 }
 

@@ -27,6 +27,7 @@ Every tool the Agent can call, and the class of content its result contains. The
 | `inspect_design_advisories` | `aggregate` |
 | `inspect_diagnostics` | `model_result` |
 | `inspect_node_context` | `metadata` |
+| `inspect_notebook_state` | `workbench_state` |
 | `inspect_notebook_workflow_results` | `aggregate` |
 | `inspect_operation_artifact` | `aggregate` |
 | `inspect_operation_contract` | `workbench_state` |
@@ -45,7 +46,9 @@ Every tool the Agent can call, and the class of content its result contains. The
 | `list_project_datasets` | `metadata` |
 | `propose_analysis_loop` | `workbench_state` |
 | `propose_operation` | `workbench_state` |
+| `read_project_conversation` | `workbench_state` |
 | `request_notebook_inspections` | `aggregate` |
+| `search_project_conversations` | `workbench_state` |
 | `show_dataset_rows` | `rows` |
 | `submit_analysis_loop_intent` | `workbench_state` |
 | `submit_notebook_option_batch` | `workbench_state` |

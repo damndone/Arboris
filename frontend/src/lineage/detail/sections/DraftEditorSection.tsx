@@ -29,7 +29,7 @@ export function DraftEditorSection({
   return (
     <section className="draft-editor" aria-label="Draft editor">
       {error && (
-        <div role="alert" style={{ color: "var(--danger, #b00020)", marginBottom: 8 }}>
+        <div role="alert" style={{ color: "var(--status-fails-fg)", marginBottom: 8 }}>
           Draft request failed: {error}
         </div>
       )}

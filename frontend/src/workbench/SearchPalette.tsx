@@ -30,9 +30,12 @@ import { buildRunSnapshot, type SearchItem } from "./RunSnapshotAdapter";
 import { useWorkbench } from "./WorkbenchStateProvider";
 import { isEditableTarget } from "./keyboard";
 
+import { useWorkspaceCommands } from "../workspace/workspaceCommands";
+
 const MAX_RESULTS = 25;
 
 export function SearchPalette() {
+  const commands = useWorkspaceCommands();
   const { model } = useLineage();
   const { state, dispatch } = useWorkbench();
   const [open, setOpen] = useState(false);
@@ -98,8 +101,14 @@ export function SearchPalette() {
         setOpen(false);
       }
     };
+    // v1.9.0: the workspace's search button opens the same palette.
+    const onOpenRequest = () => setOpen(true);
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("workbench:open-search", onOpenRequest);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("workbench:open-search", onOpenRequest);
+    };
   }, [open]);
 
   // When opening, seed input with the current committed query (so the
@@ -149,7 +158,7 @@ export function SearchPalette() {
       style={{
         position: "fixed",
         inset: 0,
-        background: "rgba(0,0,0,0.45)",
+        background: "var(--scrim)",
         display: "flex",
         justifyContent: "center",
         alignItems: "flex-start",
@@ -163,9 +172,9 @@ export function SearchPalette() {
         style={{
           width: "min(640px, 92vw)",
           maxHeight: "60vh",
-          background: "var(--bg-card-2, #1c1c1e)",
+          background: "var(--bg-card-2)",
           borderRadius: 12,
-          boxShadow: "0 24px 60px rgba(0,0,0,0.6)",
+          boxShadow: "var(--shadow-modal)",
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
@@ -197,6 +206,17 @@ export function SearchPalette() {
           data-testid="search-palette-results"
           style={{ overflow: "auto", flex: 1 }}
         >
+          {commands && (
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                commands.analyze(input);
+              }}
+            >
+              Analyze operations{input.trim() ? ` matching “${input}”` : ""}
+            </button>
+          )}
           {results.length === 0 && input.trim() !== "" && (
             <div
               style={{
@@ -236,7 +256,7 @@ export function SearchPalette() {
                 width: "100%",
                 background:
                   i === cursor
-                    ? "var(--tint-bg, rgba(10,132,255,0.15))"
+                    ? "var(--tint-bg)"
                     : "transparent",
                 color: "var(--label)",
                 cursor: "pointer",

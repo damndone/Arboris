@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from . import analysis_ledger
+from .services.operation_presentation import PRESENTATION
 
 Detail = Literal["summary", "full"]
 DEFAULT_SETTINGS: dict[str, Any] = {"include_in_exports": True, "detail": "summary"}
@@ -136,13 +137,21 @@ def _who(entry: Mapping[str, Any]) -> str:
     return "Agent (confirmed by user)" if entry.get("actor") == "agent" else "User"
 
 
+def _title(operation_ids: Sequence[str]) -> str | None:
+    """The operations' own titles, when every one of them has words."""
+    titles = [PRESENTATION[op].title for op in operation_ids if op in PRESENTATION]
+    return ", ".join(titles) if titles and len(titles) == len(operation_ids) else None
+
+
 def _line(entry: Mapping[str, Any]) -> dict[str, Any]:
     steps: Sequence[Mapping[str, Any]] = entry.get("steps") or ()
+    operation_ids = [str(step.get("operation_id")) for step in steps]
     return {
         "at": entry.get("at"),
         "who": _who(entry),
         "status": entry.get("status"),
-        "what": ", ".join(str(step.get("operation_id")) for step in steps) or str(entry.get("source")),
+        "what": ", ".join(operation_ids) or str(entry.get("source")),
+        "title": _title(operation_ids),
         "categories": sorted({str(step.get("category")) for step in steps}),
         "run_id": entry.get("run_id"),
         "produced_run_id": entry.get("produced_run_id"),

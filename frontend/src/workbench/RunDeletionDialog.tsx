@@ -49,7 +49,7 @@ export function RunDeletionDialog({
         display: "grid",
         placeItems: "center",
         padding: 20,
-        background: "rgba(0, 0, 0, 0.48)",
+        background: "var(--scrim)",
       }}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget && !busy) onClose();
@@ -63,24 +63,24 @@ export function RunDeletionDialog({
           width: "min(520px, 100%)",
           borderRadius: 14,
           padding: 22,
-          background: "var(--bg-card, #fff)",
-          color: "var(--label, #1d1d1f)",
-          boxShadow: "0 22px 70px rgba(0, 0, 0, 0.32)",
+          background: "var(--bg-card)",
+          color: "var(--label)",
+          boxShadow: "var(--shadow-modal)",
         }}
       >
         <h2 id="run-deletion-title" style={{ margin: 0, fontSize: 18 }}>
           Delete Run permanently?
         </h2>
-        <p style={{ margin: "10px 0 0", color: "var(--label-secondary, #5f6368)" }}>
+        <p style={{ margin: "10px 0 0", color: "var(--label-secondary)" }}>
           This removes <strong>{preview.run_id}</strong> and its exclusive persisted outputs. It cannot be undone.
         </p>
         {blocked ? (
-          <p role="alert" style={{ margin: "16px 0", color: "var(--danger, #c5221f)" }}>
+          <p role="alert" style={{ margin: "16px 0", color: "var(--status-fails-fg)" }}>
             {blocked}
           </p>
         ) : (
           <>
-            <ul style={{ margin: "16px 0", paddingLeft: 20, color: "var(--label-secondary, #5f6368)" }}>
+            <ul style={{ margin: "16px 0", paddingLeft: 20, color: "var(--label-secondary)" }}>
               <li>{plural(Object.values(preview.artifact_counts).reduce((total, count) => total + count, 0), "artifact")}</li>
               <li>{plural(preview.report_count, "report")}</li>
               <li>{plural(deletedRecords, "exclusive agent/control record")}</li>
@@ -104,14 +104,14 @@ export function RunDeletionDialog({
                 marginTop: 8,
                 padding: "9px 10px",
                 borderRadius: 8,
-                border: "1px solid var(--separator, #d9d9de)",
-                background: "var(--bg-card-2, #fff)",
+                border: "1px solid var(--separator)",
+                background: "var(--bg-card-2)",
                 color: "inherit",
               }}
             />
           </>
         )}
-        {error && <p role="alert" style={{ margin: "14px 0 0", color: "var(--danger, #c5221f)" }}>{error}</p>}
+        {error && <p role="alert" style={{ margin: "14px 0 0", color: "var(--status-fails-fg)" }}>{error}</p>}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 20 }}>
           <button type="button" onClick={onClose} disabled={busy}>
             Close
@@ -125,8 +125,8 @@ export function RunDeletionDialog({
                 border: 0,
                 borderRadius: 8,
                 padding: "8px 12px",
-                background: "var(--danger, #c5221f)",
-                color: "#fff",
+                background: "var(--blocker)",
+                color: "var(--on-tint)",
                 cursor: readyToDelete ? "pointer" : "not-allowed",
                 opacity: readyToDelete ? 1 : 0.5,
               }}

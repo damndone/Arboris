@@ -31,6 +31,7 @@ from ..api_errors import (
 )
 from ..agent.family_evidence import bounded_model_family_evidence
 from ..agent.workflow_runtime import collect_post_estimation_results, count_post_estimation_results
+from ..services.operation_presentation import operation_title
 from ..artifacts import read_json
 from ..config import load_config
 from ..diagnostic_preview import build_diagnostic_summary_preview
@@ -59,7 +60,7 @@ from ..report_quality import validate_report_response_quality
 from ..report_view_model import build_regression_table, regression_table_export_rows
 from ..report_store import AiReportRecordRequest, list_ai_reports, save_ai_report
 from ..services.lmm_result_adapter import VersionedResultReadError
-from ..services.results_service import _model_results, _normalize_issue_stream
+from ..services.results_service import _model_results, _normalize_issue_stream, read_model_coefficient_view
 from ..predictive_research.consumer_projection import (
     read_prediction_evidence_from_run_root,
 )
@@ -461,6 +462,9 @@ def get_run_endpoint(run_id: str, project_root: str) -> RunDetail:
             merged_family_evidence.update(model_family_evidence)
             merged_family_evidence["diagnostics"] = model_family_evidence
         model_family_evidence = merged_family_evidence
+    coefficient_view = read_model_coefficient_view(run_root, model_results)
+    if coefficient_view is not None:
+        model_family_evidence = coefficient_view
     prediction_evidence = None
     if (run_root / "prediction_results").is_dir():
         try:
@@ -480,7 +484,7 @@ def get_run_endpoint(run_id: str, project_root: str) -> RunDetail:
         "statistical_evidence": diagnostic_summary.get("statistical_evidence"),
         "labels": diagnostic_summary.get("labels", {"variable_labels": {}, "value_labels": {}}),
         "term_labels": _term_labels(
-            model_results,
+            [*model_results, model_family_evidence],
             diagnostic_summary.get("labels", {"variable_labels": {}, "value_labels": {}}),
         ),
         "model_family_evidence": model_family_evidence,
@@ -491,9 +495,10 @@ def get_run_endpoint(run_id: str, project_root: str) -> RunDetail:
         # Serve-time projection of already-durable evidence: a declared
         # post-estimation step answers a question, and this is what lets the
         # run surface show that answer instead of leaving it in an artifact.
-        "post_estimation_results": collect_post_estimation_results(
-            run_root.parent.parent, run_id, keep_latest=True
-        ),
+        "post_estimation_results": [
+            {**item, "title": operation_title(item["operation_id"])}
+            for item in collect_post_estimation_results(run_root.parent.parent, run_id, keep_latest=True)
+        ],
         "post_estimation_results_total": count_post_estimation_results(run_root.parent.parent, run_id),
     }
 
@@ -775,8 +780,8 @@ def export_result_table_endpoint(
         )
 
     slug = "-".join(sections)
-    filename = f"result-table-{slug}.xlsx"
-    artifact_id = f"report_result_table_{'_'.join(sections)}_xlsx"
+    filename = f"result-table-{slug}-v2.xlsx"
+    artifact_id = f"report_result_table_{'_'.join(sections)}_xlsx_v2"
     output_path = run_root / "exports" / filename
     if not output_path.is_file() or not _artifact_registered(run_root, artifact_id):
         try:

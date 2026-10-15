@@ -52,15 +52,35 @@ select {
   font: inherit;
 }
 
+/* v1.9.0: a plain button is a quiet, bordered control; the one primary action
+ * on a surface opts in with data-variant="primary". (Before, every unstyled
+ * button was a saturated accent fill, which made every page shout.) */
 button {
-  min-height: 36px;
-  border: 1px solid var(--tint);
-  border-radius: 5px;
-  background: var(--tint);
-  color: oklch(1 0 0);
+  min-height: 32px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--label);
   cursor: pointer;
-  font-weight: 600;
-  padding: 6px 14px;
+  font-weight: 500;
+  padding: 5px 12px;
+  transition: background var(--duration-fade) var(--ease-standard), border-color var(--duration-fade) var(--ease-standard);
+}
+
+button:where(:hover:not(:disabled)) {
+  border-color: var(--border-strong);
+  background: var(--bg-elev);
+}
+
+button[data-variant="primary"] {
+  border-color: var(--tint-fill);
+  background: var(--tint-fill);
+  color: var(--on-tint);
+}
+
+button[data-variant="primary"]:where(:hover:not(:disabled)) {
+  border-color: var(--tint-fill-pressed);
+  background: var(--tint-fill-pressed);
 }
 
 button:disabled {
@@ -118,11 +138,7 @@ button:disabled {
 }
 
 .bottom-panel {
-  background: color-mix(
-    in oklch,
-    var(--bg-canvas) 96%,
-    var(--label) 4%
-  );
+  background: var(--bg-canvas);
 }
 
 .bottom-panel__tabs {
@@ -140,22 +156,6 @@ button:disabled {
 .bottom-panel__collapse {
   height: 31px;
   min-height: 0;
-}
-
-.workbench-header {
-  align-items: center;
-  border-bottom: 1px solid var(--border-strong);
-  display: flex;
-  gap: 16px;
-  justify-content: space-between;
-  margin-bottom: 14px;
-  padding-bottom: 10px;
-}
-
-.workbench-header__right {
-  align-items: center;
-  display: flex;
-  gap: 12px;
 }
 
 /* V1.5.1 T6 — segmented theme toggle. Token-only colours so it adapts
@@ -189,7 +189,7 @@ button:disabled {
   background: var(--panel-bg);
   color: var(--label);
   box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.18),
+    var(--shadow-1),
     inset 0 0 0 1px color-mix(in oklch, var(--tint) 42%, transparent);
 }
 .theme-toggle__btn:focus-visible {
@@ -351,17 +351,17 @@ button.draft-button--secondary {
 }
 
 button.draft-button--primary {
-  border-color: var(--tint);
-  background: var(--tint);
-  color: #fff;
+  border-color: var(--tint-fill);
+  background: var(--tint-fill);
+  color: var(--on-tint);
 }
 
 button.draft-button--danger {
   grid-column: 1 / -1;
   justify-self: end;
-  border-color: color-mix(in oklch, var(--danger) 45%, var(--separator));
+  border-color: color-mix(in oklch, var(--status-fails-fg) 45%, var(--separator));
   background: transparent;
-  color: var(--danger);
+  color: var(--status-fails-fg);
 }
 
 h1,
@@ -396,10 +396,6 @@ h3.subhead {
   font-size: 0.85rem;
 }
 
-.activity-working {
-  color: var(--hint-warn-fg);
-}
-
 .run-progress-line {
   margin: 6px 0 0;
   padding-left: 4px;
@@ -411,7 +407,7 @@ h3.subhead {
 .panel {
   background: var(--panel-bg);
   border: 1px solid var(--border-strong);
-  border-radius: var(--ios-radius);
+  border-radius: var(--radius-xl);
   margin-top: 12px;
   padding: 14px 16px;
 }
@@ -520,10 +516,6 @@ button:focus-visible {
   color: var(--field-hint-fg);
   font-size: 0.74rem;
   font-weight: 500;
-}
-
-.inline-error {
-  margin: 8px 0 0;
 }
 
 .folder-picker {
@@ -653,12 +645,6 @@ dd {
   color: var(--badge-neutral-fg);
 }
 
-.status-hint {
-  color: var(--hint-warn-fg);
-  font-size: 0.78rem;
-  margin-left: 8px;
-}
-
 .preview-panel {
   border-top: 1px solid var(--border);
   margin-top: 14px;
@@ -667,16 +653,6 @@ dd {
 
 .compact-heading {
   margin-bottom: 8px;
-}
-
-.transpose-warning {
-  background: var(--hint-warn-bg);
-  border: 1px solid color-mix(in oklch, var(--orange) 40%, transparent);
-  border-radius: 5px;
-  color: var(--hint-warn-fg);
-  font-size: 0.82rem;
-  margin-top: 8px;
-  padding: 8px 12px;
 }
 
 .preview-table-wrap {
@@ -716,12 +692,6 @@ dd {
   overflow-x: auto;
 }
 
-.column-selector {
-  display: grid;
-  gap: 8px;
-  margin-top: 10px;
-}
-
 .column-option {
   align-items: center;
   border: 1px solid var(--border);
@@ -755,7 +725,6 @@ dd {
 }
 
 @media (max-width: 820px) {
-  .workbench-header,
   .panel-heading {
     align-items: stretch;
     flex-direction: column;
@@ -825,12 +794,6 @@ dd {
   padding: 8px 24px 0;
   overflow: hidden;
 }
-.workbench-shell--lineage .workbench-header {
-  border-bottom: 1px solid var(--separator);
-  flex: 0 0 auto;
-  padding-bottom: 12px;
-  margin-bottom: 10px;
-}
 .workbench-shell--lineage .tabs {
   flex: 0 0 auto;
 }
@@ -848,26 +811,6 @@ dd {
   flex: 1 1 auto;
   min-height: 0;
   min-width: 0;
-}
-
-.runs-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.runs-table th,
-.runs-table td {
-  text-align: left;
-  padding: 0.4rem 0.6rem;
-  border-bottom: 1px solid var(--table-row-border);
-}
-
-.runs-row {
-  cursor: pointer;
-}
-
-.runs-row:hover {
-  background: var(--bg-card-2);
 }
 
 .report-frame {
@@ -895,7 +838,7 @@ dd {
   flex-direction: column;
   gap: 8px;
   padding: 10px;
-  background: var(--bg-card-2, rgba(255, 255, 255, 0.04));
+  background: var(--bg-card-2);
   border-radius: 8px;
   font-size: 12px;
 }
@@ -950,7 +893,7 @@ dd {
   padding: 4px 6px;
   border: 1px solid var(--separator);
   border-radius: 5px;
-  background: var(--control-background, transparent);
+  background: var(--bg-elev, transparent);
   color: var(--label-secondary);
   cursor: pointer;
   font-size: 11px;
@@ -975,26 +918,6 @@ dd {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.pagination {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 1rem;
-  margin-top: 1rem;
-}
-
-.pagination button {
-  min-height: 32px;
-  font-size: 0.82rem;
-  padding: 4px 12px;
-}
-
-.pagination-info {
-  color: var(--label-tertiary);
-  font-size: 0.82rem;
-  font-weight: 600;
 }
 
 .progress-panel {
@@ -1163,80 +1086,65 @@ dd {
 button:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* V1.5.4.1 FailureCard — structured model-fit failure + recovery actions */
-.failure-card { border: 1px solid #fca5a5; background: #fef2f2; border-radius: 8px; padding: 14px 16px; margin-bottom: 12px; }
-.failure-card-title { font-weight: 600; color: #991b1b; font-size: 14px; margin-bottom: 4px; }
-.failure-card-cause { font-family: monospace; font-size: 12px; color: #7f1d1d; background: #fee2e2; padding: 6px 8px; border-radius: 4px; margin: 4px 0 10px; white-space: pre-wrap; }
+.failure-card { border: 1px solid color-mix(in oklch, var(--status-fails-fg) 35%, transparent); background: var(--status-fails-bg); border-radius: 8px; padding: 14px 16px; margin-bottom: 12px; }
+.failure-card-title { font-weight: 600; color: var(--status-fails-fg); font-size: 14px; margin-bottom: 4px; }
+.failure-card-cause { font-family: monospace; font-size: 12px; color: var(--status-fails-fg); background: var(--bg-card); padding: 6px 8px; border-radius: 4px; margin: 4px 0 10px; white-space: pre-wrap; }
 .failure-card-actions { display: flex; gap: 8px; margin-top: 8px; }
 .failure-action { padding: 6px 14px; border-radius: 6px; font-size: 13px; cursor: pointer; }
-.failure-action-primary { background: #dc2626; color: white; border: 0; font-weight: 500; }
-.failure-action-secondary { background: white; color: #374151; border: 1px solid #d1d5db; }
+.failure-action-primary { background: var(--blocker); color: var(--on-tint); border: 0; font-weight: 500; }
+.failure-action-secondary { background: var(--bg-card); color: var(--label); border: 1px solid var(--border); }
 
 /* V1.5.4.1 ImputationControls — capability-driven imputation input */
-.imputation-controls { background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 6px; padding: 10px 12px; margin: 10px 0; }
-.imputation-controls-hint { font-size: 12px; color: #0c4a6e; margin-top: 6px; padding-left: 22px; }
+.imputation-controls { background: var(--tint-bg); border: 1px solid color-mix(in oklch, var(--tint) 30%, transparent); border-radius: 6px; padding: 10px 12px; margin: 10px 0; }
+.imputation-controls-hint { font-size: 12px; color: var(--tint-label); margin-top: 6px; padding-left: 22px; }
 .imputation-controls__toggle { appearance: auto; block-size: 14px; inline-size: 14px; margin: 0 7px 0 0; vertical-align: -2px; }
 
-.statistical-plot-editor-dialog { align-items: center; background: color-mix(in srgb, #0f172a 42%, transparent); display: flex; inset: 0; justify-content: center; padding: 32px; position: fixed; z-index: 70; }
-.statistical-plot-editor-dialog__surface { background: var(--panel-bg, #fff); border: 1px solid var(--separator); border-radius: 12px; box-shadow: 0 24px 80px rgba(0, 0, 0, .24); display: flex; flex-direction: column; gap: 18px; max-height: min(780px, calc(100vh - 64px)); max-width: 900px; overflow: auto; padding: 24px; width: min(900px, 100%); }
+.statistical-plot-editor-dialog { align-items: center; background: var(--scrim); display: flex; inset: 0; justify-content: center; padding: 32px; position: fixed; z-index: 70; }
+.statistical-plot-editor-dialog__surface { background: var(--panel-bg); border: 1px solid var(--separator); border-radius: 12px; box-shadow: var(--shadow-modal); display: flex; flex-direction: column; gap: 18px; max-height: min(780px, calc(100vh - 64px)); max-width: 900px; overflow: auto; padding: 24px; width: min(900px, 100%); }
 .statistical-plot-editor-dialog__header { align-items: center; display: flex; justify-content: space-between; }
 .statistical-plot-editor-dialog__fields { display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .statistical-plot-editor-dialog__fields label { display: grid; gap: 6px; }
 .wb-result-table-scroll { box-sizing: border-box; display: block; inline-size: 100%; max-inline-size: 100%; min-inline-size: 0; overflow-x: auto; overflow-y: hidden; overscroll-behavior-inline: contain; }
 .wb-result-table { inline-size: max-content; min-inline-size: 100%; }
-.wb-run-version-picker { align-items: center; border-bottom: 1px solid var(--separator, #2e2e30); display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 12px; }
+.wb-run-version-picker { align-items: center; border-bottom: 1px solid var(--separator); display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 12px; }
 .wb-run-version-picker__label { color: var(--label-tertiary); flex: 0 0 auto; font-size: 11px; margin-right: 4px; white-space: nowrap; }
-.wb-run-version-picker__button { align-items: center; background: transparent; block-size: 36px; border: 1px solid var(--separator, #2e2e30); border-radius: 6px; box-sizing: border-box; color: var(--label-secondary); cursor: pointer; display: inline-flex; font-family: var(--font-mono, monospace); font-size: 11px; justify-content: center; line-height: 1.2; padding: 4px 9px; }
-.wb-run-version-picker__button[aria-pressed="true"] { background: var(--tint, #0a84ff); border-color: var(--tint, #0a84ff); color: #fff; }
+.wb-run-version-picker__button { align-items: center; background: transparent; block-size: 36px; border: 1px solid var(--separator); border-radius: 6px; box-sizing: border-box; color: var(--label-secondary); cursor: pointer; display: inline-flex; font-family: var(--font-mono, monospace); font-size: 11px; justify-content: center; line-height: 1.2; padding: 4px 9px; }
+.wb-run-version-picker__button[aria-pressed="true"] { background: var(--tint-fill); border-color: var(--tint-fill); color: var(--on-tint); }
 .wb-result-artifact-scroll { box-sizing: border-box; display: block; inline-size: 100%; max-inline-size: 100%; min-inline-size: 0; overflow-x: auto; overflow-y: hidden; overscroll-behavior-inline: contain; }
 .wb-result-artifact-scroll__content { inline-size: max-content; min-inline-size: 100%; }
-.wb-chart-context-menu { background: var(--panel-bg, #fff); border: 1px solid var(--separator); border-radius: 8px; box-shadow: 0 12px 30px rgba(0, 0, 0, .18); display: grid; gap: 2px; min-width: 145px; padding: 5px; position: absolute; z-index: 20; }
+.wb-chart-context-menu { background: var(--panel-bg); border: 1px solid var(--separator); border-radius: 8px; box-shadow: var(--shadow-pop); display: grid; gap: 2px; min-width: 145px; padding: 5px; position: absolute; z-index: 20; }
 .wb-chart-context-menu a, .wb-chart-context-menu button { background: transparent; border: 0; border-radius: 5px; color: var(--label); cursor: pointer; font: inherit; padding: 6px 8px; text-align: left; text-decoration: none; }
 .wb-chart-context-menu a:hover, .wb-chart-context-menu button:hover { background: var(--bg-card-2); }
 
 /* V1.5.4.1 ImputationSummary — post-run imputation provenance panel */
-.imputation-summary { border: 1px solid #bae6fd; background: #f0f9ff; border-radius: 6px; padding: 10px 12px; margin-bottom: 14px; }
-.imputation-summary-title { font-weight: 600; font-size: 13px; color: #0c4a6e; margin-bottom: 4px; }
-.imputation-summary-list { margin: 0; padding-left: 24px; font-size: 12px; color: #0c4a6e; line-height: 1.6; }
-.imputation-summary code { background: #e0f2fe; padding: 1px 4px; border-radius: 3px; }
-.imputation-summary .hint { color: #94a3b8; }
+.imputation-summary { border: 1px solid color-mix(in oklch, var(--tint) 30%, transparent); background: var(--tint-bg); border-radius: 6px; padding: 10px 12px; margin-bottom: 14px; }
+.imputation-summary-title { font-weight: 600; font-size: 13px; color: var(--tint-label); margin-bottom: 4px; }
+.imputation-summary-list { margin: 0; padding-left: 24px; font-size: 12px; color: var(--tint-label); line-height: 1.6; }
+.imputation-summary code { background: var(--bg-card); padding: 1px 4px; border-radius: 3px; }
+.imputation-summary .hint { color: var(--label-tertiary); }
 
-/* ===== V1.5.4.2 iOS design tokens =====
- * New --ios-* tokens (added, not clobbering existing theme tokens). These are
- * hardcoded light-appearance values, consistent with the other V1.5.4.x
- * hardcoded surfaces (failure-card, imputation-controls). Used by the new
- * PanelControls / PredictionControls / PredictionResultCard components. */
-:root {
-  --ios-bg: #f2f2f7;
-  --ios-card: #ffffff;
-  --ios-radius: 14px;
-  --ios-blue: #007aff;
-  --ios-green: #34c759;
-  --ios-sep: rgba(60, 60, 67, 0.12);
-  --ios-secondary: #8e8e93;
-  --ios-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
-}
-
+/* ===== V1.5.4.2 iOS-style groups — read the theme tokens (v1.9.0) ===== */
 .ios-group {
-  background: var(--ios-card);
-  border-radius: var(--ios-radius);
+  background: var(--bg-card);
+  border-radius: var(--radius-xl);
   padding: 12px 14px;
   margin: 12px 0;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
-  font-family: var(--ios-font);
+  box-shadow: var(--shadow-1);
+  font-family: var(--font-sans);
 }
-.ios-group-label { font-size: 13px; color: var(--ios-secondary); margin-bottom: 8px; }
+.ios-group-label { font-size: 13px; color: var(--label-secondary); margin-bottom: 8px; }
 .ios-row, .ios-field {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 8px 0; border-bottom: 0.5px solid var(--ios-sep); gap: 12px;
+  padding: 8px 0; border-bottom: 0.5px solid var(--separator); gap: 12px;
 }
 .ios-row:last-child, .ios-field:last-child { border-bottom: none; }
 .ios-field { flex-direction: column; align-items: stretch; }
-.ios-field > span { font-size: 13px; color: var(--ios-secondary); margin-bottom: 4px; }
+.ios-field > span { font-size: 13px; color: var(--label-secondary); margin-bottom: 4px; }
 .ios-field select, .ios-field input { width: 100%; }
 .ios-row-pair { display: flex; gap: 12px; }
 .ios-row-pair .ios-field { flex: 1; border-bottom: none; }
-.ios-hint { font-size: 12px; color: var(--ios-secondary); margin-top: 6px; }
-.ios-switch { width: 44px; height: 26px; accent-color: var(--ios-green); }
+.ios-hint { font-size: 12px; color: var(--label-secondary); margin-top: 6px; }
+.ios-switch { width: 44px; height: 26px; accent-color: var(--status-holds-fg); }
 
 /* A checkbox sitting on the same line as its label.
    Introduced with the v1.8.7 ANOVA factor list, which used this class before it
@@ -1264,21 +1172,21 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .genesis-wizard .ios-field > span { margin-bottom: 3px; }
 .genesis-wizard .ios-hint { margin-top: 4px; }
 .genesis-wizard fieldset.ios-field { padding: 6px 0 4px; }
-.genesis-wizard fieldset.ios-field > legend { font-size: 13px; color: var(--ios-secondary); }
+.genesis-wizard fieldset.ios-field > legend { font-size: 13px; color: var(--label-secondary); }
 .ios-card {
-  background: var(--ios-card); border-radius: var(--ios-radius);
-  padding: 14px; margin: 12px 0; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
-  font-family: var(--ios-font);
+  background: var(--bg-card); border-radius: var(--radius-xl);
+  padding: 14px; margin: 12px 0; box-shadow: var(--shadow-1);
+  font-family: var(--font-sans);
 }
 .ios-card-title { font-weight: 600; margin-bottom: 8px; }
 .ios-metric-list { list-style: none; padding: 0; margin: 0; }
 .ios-metric-list li {
   display: flex; justify-content: space-between; padding: 6px 0;
-  border-bottom: 0.5px solid var(--ios-sep);
+  border-bottom: 0.5px solid var(--separator);
 }
 .ios-metric-list li:last-child { border-bottom: none; }
 .ios-warning {
-  font-size: 13px; color: #8a6d00; background: rgba(255, 204, 0, 0.12);
+  font-size: 13px; color: var(--status-caution-fg); background: var(--status-caution-bg);
   border-radius: 10px; padding: 8px 10px; margin-top: 8px;
 }
 
@@ -1291,8 +1199,8 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 }
 
 .run-result-tabs button {
-  background: var(--ios-bg);
-  border: 1px solid var(--ios-sep);
+  background: var(--bg-canvas);
+  border: 1px solid var(--separator);
   border-radius: 999px;
   color: var(--label-secondary);
   cursor: pointer;
@@ -1302,33 +1210,33 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 }
 
 .run-result-tabs button[aria-selected="true"] {
-  background: var(--ios-blue);
-  border-color: var(--ios-blue);
-  color: #fff;
+  background: var(--tint-fill);
+  border-color: var(--tint-fill);
+  color: var(--on-tint);
 }
 
 /* IV diagnostics card — verdict-coded pills anchored to the --ios-* palette. */
 .iv-diagnostics .iv-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .iv-diagnostics .iv-message {
-  font-size: 12px; color: var(--ios-secondary); padding-top: 4px;
+  font-size: 12px; color: var(--label-secondary); padding-top: 4px;
 }
 .iv-badge {
   display: inline-block; margin-left: 8px;
   font-size: 12px; font-weight: 600; line-height: 1;
   padding: 4px 8px; border-radius: 10px; white-space: nowrap;
-  color: var(--ios-secondary); background: rgba(60, 60, 67, 0.08);
+  color: var(--label-secondary); background: var(--bg-elev);
 }
 /* Positive verdicts — green */
 .iv-wi-strong, .iv-endo-exogenous, .iv-overid-not_rejected {
-  color: #1d7a36; background: rgba(52, 199, 89, 0.14);
+  color: var(--status-holds-fg); background: var(--status-holds-bg);
 }
 /* Caution verdicts — amber (mirrors .ios-warning) */
 .iv-wi-weak, .iv-endo-endogenous, .iv-overid-suspect {
-  color: #8a6d00; background: rgba(255, 204, 0, 0.16);
+  color: var(--status-caution-fg); background: var(--status-caution-bg);
 }
 /* Identification: under = caution/red, just/over = neutral-blue */
-.iv-id-under { color: #b3261e; background: rgba(255, 59, 48, 0.14); }
-.iv-id-just, .iv-id-over { color: var(--ios-blue); background: rgba(0, 122, 255, 0.12); }
+.iv-id-under { color: var(--status-fails-fg); background: var(--status-fails-bg); }
+.iv-id-just, .iv-id-over { color: var(--tint-label); background: var(--tint-bg); }
 
 /* ── v1.6.5 (P7): Draft Graph partitioned layout + node cards ───────── */
 .draft-layout {
@@ -1342,12 +1250,12 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   gap: 12px;
   flex-wrap: wrap;
   padding-bottom: 10px;
-  border-bottom: 1px solid var(--border, rgba(0, 0, 0, 0.1));
+  border-bottom: 1px solid var(--border);
 }
 .draft-back-link {
-  border: 1px solid var(--border, rgba(0, 0, 0, 0.15));
+  border: 1px solid var(--border);
   background: transparent;
-  color: var(--tint, #0a84ff);
+  color: var(--tint);
   border-radius: 6px;
   padding: 4px 10px;
   cursor: pointer;
@@ -1369,22 +1277,22 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .draft-toolbar__source {
   font-family: var(--font-mono, monospace);
   font-size: 11px;
-  color: var(--label-tertiary, #888);
+  color: var(--label-tertiary);
 }
 .draft-toolbar__state {
   font-family: var(--font-mono, monospace);
   font-size: 11px;
   padding: 2px 8px;
   border-radius: 10px;
-  border: 1px solid var(--border, rgba(0, 0, 0, 0.15));
-  color: var(--label-secondary, #666);
+  border: 1px solid var(--border);
+  color: var(--label-secondary);
 }
 .draft-toolbar__state[data-state="Unsaved"] {
-  color: var(--orange, #c47f00);
-  border-color: var(--orange, #c47f00);
+  color: var(--orange);
+  border-color: var(--orange);
 }
 .draft-toolbar__state[data-state="Validation stale"] {
-  color: var(--orange, #c47f00);
+  color: var(--orange);
 }
 .draft-toolbar__actions {
   display: flex;
@@ -1399,9 +1307,9 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 }
 .draft-canvas-region {
   min-height: 220px;
-  border: 1px solid var(--border, rgba(0, 0, 0, 0.1));
+  border: 1px solid var(--border);
   border-radius: 12px;
-  background: var(--bg-card-2, rgba(120, 120, 128, 0.05));
+  background: var(--bg-card-2);
   padding: 24px;
 }
 .draft-graph {
@@ -1419,33 +1327,33 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   min-width: 160px;
   padding: 12px 14px;
   border-radius: 10px;
-  border: 1px solid var(--border, rgba(0, 0, 0, 0.15));
-  background: var(--panel-bg, #fff);
+  border: 1px solid var(--border);
+  background: var(--panel-bg);
   cursor: pointer;
 }
 .draft-node--selected {
-  border-color: var(--tint, #0a84ff);
-  box-shadow: 0 0 0 2px color-mix(in oklch, var(--tint, #0a84ff) 30%, transparent);
+  border-color: var(--tint);
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--tint) 30%, transparent);
 }
 .draft-node__kind {
   font-family: var(--font-mono, monospace);
   font-size: 10px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--label-tertiary, #888);
+  color: var(--label-tertiary);
 }
 .draft-node__title {
   font-size: 14px;
   font-weight: 600;
-  color: var(--label, #111);
+  color: var(--label);
 }
 .draft-node__meta {
   font-size: 11px;
-  color: var(--label-secondary, #666);
+  color: var(--label-secondary);
 }
 .draft-edge {
   font-size: 22px;
-  color: var(--label-tertiary, #888);
+  color: var(--label-tertiary);
 }
 .draft-side {
   display: flex;
@@ -1454,17 +1362,26 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 }
 .draft-inspector,
 .draft-validation {
-  border: 1px solid var(--border, rgba(0, 0, 0, 0.1));
+  border: 1px solid var(--border);
   border-radius: 12px;
   padding: 14px;
-  background: var(--panel-bg, #fff);
+  background: var(--panel-bg);
 }
 .draft-validation__ok {
-  color: var(--green, #2a9d3a);
+  color: var(--green);
   font-size: 13px;
 }
 @media (max-width: 860px) {
   .draft-body {
     grid-template-columns: 1fr;
   }
+}
+
+/* v1.9.0 — a view that loads on first use holds its space while it arrives. */
+.wb-view-loading {
+  flex: 1;
+  min-height: 0;
+  padding: var(--space-6);
+  color: var(--label-secondary);
+  font-size: var(--text-body);
 }

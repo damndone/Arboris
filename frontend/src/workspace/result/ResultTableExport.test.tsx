@@ -1,0 +1,21 @@
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { expect, it, vi } from "vitest";
+import { ResultTableExport } from "./ResultTableExport";
+const exportTable=vi.hoisted(()=>vi.fn());
+vi.mock("../../report/reportClient",()=>({exportResultTable:exportTable}));
+it("exports immutable run tables without an AI report or provider",async()=>{
+ exportTable.mockResolvedValue(new Blob(['xlsx']));
+ const create=vi.fn(()=>"blob:test"), revoke=vi.fn();
+ vi.stubGlobal("URL",{createObjectURL:create,revokeObjectURL:revoke});
+ const timer=vi.spyOn(globalThis,"setTimeout");
+ const click=vi.spyOn(HTMLAnchorElement.prototype,"click").mockImplementation(()=>{});
+ render(<ResultTableExport projectRoot="/project" runId="run-1"/>);
+ fireEvent.click(screen.getByRole('button',{name:'Export result tables (XLSX)'}));
+ await waitFor(()=>expect(click).toHaveBeenCalledOnce());
+ expect(exportTable).toHaveBeenCalledWith({projectRoot:'/project',runId:'run-1'});
+ const release=timer.mock.calls.filter(call=>call[1]===1000).slice(-1)[0]?.[0];
+ expect(release).toBeTypeOf("function");
+ if(typeof release === "function") release();
+ expect(revoke).toHaveBeenCalledWith("blob:test");
+ timer.mockRestore();click.mockRestore();vi.unstubAllGlobals();
+});

@@ -12,6 +12,7 @@ from ..context_compiler import resolve_registered_artifact
 from ..operations import OperationRecord
 from ..bounds import _bounded_label, _bounded_labels, _bounded_numeric_fields, _public_positive_int, _public_stat_number
 from ..family_evidence import bounded_model_family_evidence as _bounded_model_family_evidence
+from ..operation_outcome import produced_run
 
 def _read_manifest(run_root: Path) -> dict[str, Any]:
     try:
@@ -721,12 +722,16 @@ def _bounded_completed_operation(record: OperationRecord) -> dict[str, Any]:
                     },
                 }
             )
+    produced = produced_run(record.to_dict())
     return {
         "operation_record_id": record.record_id,
         "operation_id": record.operation_id,
         "operation_version": record.operation_version,
         "status": record.status,
         "artifact_ids": _operation_artifact_ids(record)[:16],
+        # A rerun's result is a new run, not artifacts of this node: read it
+        # with inspect_project_model_coefficients(run_ids=[produced_run_id]).
+        **({"produced_run_id": produced} if produced else {}),
         "workflow": {
             "workflow_id": (
                 workflow_state.get("workflow_id")

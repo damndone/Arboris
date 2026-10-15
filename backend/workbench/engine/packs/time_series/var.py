@@ -19,13 +19,10 @@ from .common import json_native
 from .errors import TimeSeriesPackError
 from .input import PreparedTimeSeries, prepare_time_series
 from .models import MAX_FORECAST_HORIZON, _validate_confidence
+from workbench.contracts.model.time_series_pack import VAR_TRENDS, GRANGER_TESTS, STABILITY_POLICIES, IRF_CI_METHODS
 
 
 MAX_VAR_LAGS = 50
-VAR_TRENDS = frozenset({"n", "c", "ct", "ctt"})
-GRANGER_TESTS = frozenset({"ssr_ftest", "ssr_chi2test", "lrtest", "params_ftest"})
-STABILITY_POLICIES = frozenset({"reject_unstable", "report_only"})
-IRF_CI_METHODS = frozenset({"asymptotic_normal"})
 
 
 def _validate_var_options(

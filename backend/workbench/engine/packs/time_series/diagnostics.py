@@ -15,13 +15,10 @@ from workbench.contracts.model.time_series_pack import make_time_series_result
 from .errors import TimeSeriesPackError
 from .common import json_native
 from .input import prepare_time_series
+from workbench.contracts.model.time_series_pack import PACF_METHODS, ADF_REGRESSIONS, ADF_AUTOLAGS, KPSS_REGRESSIONS
 
 
 MAX_LAGS = 200
-PACF_METHODS = frozenset({"ywm"})
-ADF_REGRESSIONS = frozenset({"c", "ct", "ctt", "n"})
-ADF_AUTOLAGS = frozenset({"aic", "bic", "t_stat", "none"})
-KPSS_REGRESSIONS = frozenset({"c", "ct"})
 KPSS_NLAGS = frozenset({"auto", "legacy"})
 
 

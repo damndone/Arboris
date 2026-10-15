@@ -8,6 +8,7 @@ anything raised from here.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import AsyncIterator, Mapping
 from typing import Any, Callable
 from urllib.parse import urlparse
@@ -39,10 +40,28 @@ class LLMUpstreamError(Exception):
         upstream_status: int | None = None,
         *,
         retryable: bool = False,
+        context_overflow: bool = False,
     ) -> None:
         super().__init__(message)
         self.upstream_status = upstream_status
         self.retryable = retryable
+        # The provider said the request is longer than the model accepts; the
+        # Agent compacts its conversation and tries once more.
+        self.context_overflow = context_overflow
+
+
+# How OpenAI-compatible providers word a request that exceeds the model's
+# context ("maximum context length is 65536 tokens", "context_length_exceeded",
+# "prompt is too long", "超过最大长度"). Only the classification is kept.
+_CONTEXT_OVERFLOW = re.compile(
+    r"context[ _-]?(?:length|window)|maximum (?:context|prompt)|too many tokens|prompt is too long"
+    r"|exceeds? (?:the )?(?:model'?s? )?(?:maximum|max|context|token)|上下文|超过最大长度",
+    re.IGNORECASE,
+)
+
+
+def is_context_overflow(status: int, body: bytes) -> bool:
+    return status in {400, 413, 422} and bool(_CONTEXT_OVERFLOW.search(body[:4000].decode("utf-8", "replace")))
 
 
 class LLMToolCallArgumentsError(LLMUpstreamError):
@@ -242,10 +261,12 @@ async def async_stream_chat_completion(
                 timeout=_stream_timeout(config),
             ) as response:
                 if response.status_code < 200 or response.status_code >= 300:
+                    body = await response.aread() if response.status_code in {400, 413, 422} else b""
                     raise LLMUpstreamError(
                         "LLM provider returned an error: "
                         f"{response.status_code}",
                         upstream_status=response.status_code,
+                        context_overflow=is_context_overflow(response.status_code, body),
                     )
                 async for line in response.aiter_lines():
                     if not line or line.startswith(":"):

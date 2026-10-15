@@ -1,0 +1,146 @@
+/* frontend/src/workspace/mapTree.css — the map as a column. */
+
+.ws-map-tree {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-3) var(--space-6);
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1;
+}
+
+.ws-map-tree__heading {
+  margin: 0 0 var(--space-2) var(--space-1);
+  font-size: var(--text-small);
+  font-weight: 600;
+  color: var(--label-tertiary);
+}
+
+.ws-map-tree__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.ws-map-tree li {
+  --depth: 0;
+  position: relative;
+  padding-left: calc(var(--depth) * 18px);
+}
+
+.ws-map-tree li[data-depth="1"] { --depth: 1; }
+.ws-map-tree li[data-depth="2"] { --depth: 2; }
+.ws-map-tree li[data-depth="3"] { --depth: 3; }
+.ws-map-tree li[data-depth="4"] { --depth: 4; }
+.ws-map-tree li[data-depth="5"] { --depth: 5; }
+.ws-map-tree li[data-depth="6"] { --depth: 6; }
+
+.ws-map-tree li + li::before {
+  content: "";
+  position: absolute;
+  left: calc(var(--depth) * 18px + 18px);
+  top: calc(-1 * var(--space-2));
+  height: var(--space-2);
+  width: var(--hairline);
+  background: var(--border-strong);
+}
+
+.ws-map-tree__card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 48px;
+  padding: 7px 10px 7px 12px;
+  border: var(--hairline) solid var(--separator);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  color: var(--label);
+  text-align: left;
+  font-weight: 400;
+  cursor: pointer;
+  transition: border-color var(--duration-fade) var(--ease-standard), background var(--duration-fade) var(--ease-standard);
+}
+
+.ws-map-tree__card:hover {
+  border-color: var(--border-strong);
+}
+
+.ws-map-tree__card:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.ws-map-tree__card[aria-current="true"] {
+  border-color: var(--tint);
+  background: var(--tint-bg);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--tint) 14%, transparent);
+}
+
+.ws-map-tree__card[data-draft="true"] {
+  border-style: dashed;
+  background: transparent;
+}
+
+.ws-map-tree__glyph {
+  display: inline-flex;
+  color: var(--label-tertiary);
+}
+
+.ws-map-tree__card[data-stage="model"] .ws-map-tree__glyph,
+.ws-map-tree__card[aria-current="true"] .ws-map-tree__glyph {
+  color: var(--tint);
+}
+
+.ws-map-tree__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ws-map-tree__title {
+  font-size: var(--text-ui);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ws-map-tree__card[aria-current="true"] .ws-map-tree__title {
+  color: var(--tint-label);
+}
+
+.ws-map-tree__detail {
+  font-size: var(--text-small);
+  color: var(--label-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+.ws-map-tree__flag {
+  font-size: var(--text-caption);
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: var(--radius-pill);
+  background: var(--status-caution-bg);
+  color: var(--status-caution-fg);
+  white-space: nowrap;
+}
+
+.ws-map-tree__flag[data-trust="blocker"],
+.ws-map-tree__flag[data-trust="caution"] {
+  background: var(--status-fails-bg);
+  color: var(--status-fails-fg);
+}
+
+.ws-map-tree__empty {
+  margin: var(--space-4);
+  color: var(--label-secondary);
+}

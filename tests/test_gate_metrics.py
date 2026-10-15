@@ -48,3 +48,27 @@ def test_malformed_timing_reports_are_visible(tmp_path):
     cases, errors = module.collect_tests(tmp_path)
     assert cases == []
     assert len(errors) == 2
+
+
+def test_finished_gates_keep_the_newest_passed_runs_and_every_failed_one(tmp_path):
+    spec = importlib.util.spec_from_file_location("gate_metrics", HELPER)
+    metrics = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(metrics)
+
+    def run(name, status, keep=False):
+        path = tmp_path / name
+        path.mkdir()
+        (path / "summary.json").write_text(json.dumps({"status": status}))
+        if keep:
+            (path / ".keep").write_text("")
+        return path
+
+    passed = [run(f"2026100{day}T120000-p{day}", "passed") for day in range(1, 6)]
+    failed = run("20261001T090000-f1", "failed")
+    running = run("20261002T090000-r1", "running")
+    pinned = run("20261001T080000-k1", "passed", keep=True)
+    other = tmp_path / "notes"
+    other.mkdir()
+    removed = metrics.prune(tmp_path)
+    assert sorted(path.name for path in removed) == [passed[0].name, passed[1].name]
+    assert all(path.exists() for path in (*passed[2:], failed, running, pinned, other))

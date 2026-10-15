@@ -1,11 +1,7 @@
-.report-page {
-  --report-panel-radius: 14px;
-}
-
 .report-composer {
   position: relative;
   margin-bottom: 10px;
-  border-radius: var(--report-panel-radius);
+  border-radius: var(--radius-xl);
 }
 
 .report-composer__input-row {
@@ -148,7 +144,7 @@
 }
 
 .report-scope-summary__warning {
-  color: var(--diff-removed, #b35900);
+  color: var(--diff-removed);
 }
 
 .report-scope-divider {
@@ -200,7 +196,7 @@
   border: 1px solid var(--separator);
   border-radius: 8px;
   background: var(--bg-card-2);
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.2);
+  box-shadow: var(--shadow-pop);
 }
 
 .report-action-bar__menu button {
@@ -357,164 +353,16 @@
   vertical-align: middle;
 }
 
-.report-preview-panel {
-  box-sizing: border-box;
-  z-index: 30;
-  border: 1px solid color-mix(in oklch, var(--separator) 86%, transparent);
-  border-radius: var(--report-panel-radius);
-  background: color-mix(in oklch, var(--bg-card-2) 96%, transparent);
-  color: var(--label);
-  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.05);
-  overflow: hidden;
-}
-
-.report-preview-panel--docked {
-  position: sticky;
-  top: 12px;
-  width: min(860px, 100%);
-  max-height: calc(100vh - 116px);
-  margin: 18px 0 20px auto;
-}
-
-.report-preview-panel--floating {
-  position: fixed;
-  left: var(--report-preview-left, 36px);
-  top: var(--report-preview-top, 116px);
-  width: min(680px, calc(100vw - 32px));
-  height: min(720px, calc(100vh - 148px));
-  min-width: 360px;
-  min-height: 280px;
-  resize: both;
-  overflow: auto;
-}
-
-.report-preview-panel--pinned {
-  position: fixed;
-  right: auto;
-  left: var(--report-preview-left, calc(100vw - 736px));
-  top: var(--report-preview-top, 96px);
-  width: min(720px, calc(100vw - 32px));
-  max-height: calc(100vh - 116px);
-}
-
-.report-preview-panel--dragging {
-  user-select: none;
-}
-
-.report-preview-panel__header {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  min-height: 42px;
-  padding: 7px 9px 7px 6px;
-  border-bottom: 1px solid color-mix(in oklch, var(--separator) 76%, transparent);
-}
-
-.report-preview-panel__drag-handle {
-  width: 25px;
-  height: 28px;
-  padding: 0;
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--label-tertiary);
-  cursor: grab;
-  font-size: 14px;
-  letter-spacing: -3px;
-}
-
-.report-preview-panel__drag-handle:active {
-  cursor: grabbing;
-}
-
-.report-preview-panel__drag-handle:hover,
-.report-preview-panel__drag-handle:focus-visible {
-  background: color-mix(in oklch, var(--label) 8%, transparent);
-  color: var(--label);
-  outline: none;
-}
-
-.report-preview-panel__title {
-  min-width: 0;
-  display: grid;
-  gap: 2px;
-}
-
-.report-preview-panel__title strong {
-  font-size: 13px;
-}
-
-.report-preview-panel__title span {
-  color: var(--label-tertiary);
-  font-size: 10px;
-}
-
-.report-preview-panel__controls {
-  display: flex;
-  gap: 4px;
-  margin-left: auto;
-}
-
-.report-preview-panel__controls button {
-  min-height: 26px;
-  padding: 2px 7px;
-  border: 1px solid color-mix(in oklch, var(--separator) 72%, transparent);
-  border-radius: 7px;
-  background: transparent;
-  color: var(--label-secondary);
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.report-preview-panel__controls button:hover,
-.report-preview-panel__controls button:focus-visible {
-  border-color: color-mix(in oklch, var(--tint) 45%, var(--separator));
-  color: var(--label);
-  outline: none;
-}
-
-.report-preview-panel__controls button:disabled {
-  cursor: not-allowed;
-  opacity: 0.45;
-}
-
-.report-preview-panel__content {
-  box-sizing: border-box;
-  max-height: min(520px, calc(100vh - 310px));
-  padding: 16px 18px;
-  overflow: auto;
-}
-
-.report-preview-panel__content > [data-testid="report-body"] {
-  max-width: none !important;
-}
-
-.report-preview-panel__footer {
-  padding: 8px 10px 10px;
-  border-top: 1px solid color-mix(in oklch, var(--separator) 76%, transparent);
-}
-
-.report-preview-panel__guardrail {
-  margin: 0 2px 7px;
-  color: var(--label-tertiary);
-  font-size: 11px;
-}
-
-.report-preview-panel__footer .report-composer {
-  margin-bottom: 0;
-  box-shadow: none;
-}
-
 .report-review-panel {
   box-sizing: border-box;
   width: min(860px, 100%);
   max-height: calc(100vh - 116px);
   overflow: auto;
   border: 1px solid color-mix(in oklch, var(--separator) 86%, transparent);
-  border-radius: var(--report-panel-radius);
+  border-radius: var(--radius-xl);
   background: color-mix(in oklch, var(--bg-card-2) 96%, transparent);
   color: var(--label);
-  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  box-shadow: var(--shadow-pop);
 }
 
 .report-review-panel__header {
@@ -584,7 +432,7 @@
 }
 
 .report-review-floating--pinned {
-  box-shadow: 0 20px 52px rgba(0, 0, 0, 0.28), 0 0 0 1px color-mix(in oklch, var(--tint) 24%, transparent);
+  box-shadow: var(--shadow-pop), 0 0 0 1px color-mix(in oklch, var(--tint) 24%, transparent);
 }
 
 .report-review-floating--dragging,
@@ -617,15 +465,15 @@
 }
 
 .report-review-panel__status strong {
-  color: var(--diff-removed, #b35900);
+  color: var(--diff-removed);
 }
 
 .report-review-panel__load-warning {
   margin: 10px 14px 0;
   padding: 8px 10px;
-  border: 1px solid color-mix(in oklch, var(--diff-removed, #b35900) 38%, var(--separator));
+  border: 1px solid color-mix(in oklch, var(--diff-removed) 38%, var(--separator));
   border-radius: 8px;
-  color: var(--diff-removed, #b35900);
+  color: var(--diff-removed);
   font-size: 11px;
 }
 
@@ -707,21 +555,6 @@
     gap: 3px;
   }
 
-  .report-preview-panel--docked,
-  .report-preview-panel--pinned {
-    width: 100%;
-  }
-
-  .report-preview-panel--floating {
-    left: var(--report-preview-left, 8px);
-    width: calc(100vw - 16px);
-    min-width: 0;
-  }
-
-  .report-preview-panel__controls button {
-    padding-inline: 5px;
-  }
-
   .report-review-panel__header {
     display: grid;
   }
@@ -740,4 +573,68 @@
     width: calc(100vw - 16px);
     min-width: 0;
   }
+}
+
+.report-document-layout { display: flex; align-items: flex-start; gap: 16px; min-width: 0; container-type: inline-size; }
+.report-document { flex: 1; min-width: 0; max-width: 860px; margin-inline: auto; }
+.report-sources { flex: 0 1 auto; min-width: 0; position: sticky; top: 0; }
+.report-sources[data-open="true"] { flex-basis: 320px; max-width: 42%; }
+.report-sources__body { max-height: 70vh; overflow: auto; overflow-wrap: anywhere; padding: 12px; border: 1px solid var(--separator); border-radius: 8px; background: var(--bg-card-2); }
+@container (max-width: 650px) { .report-sources[data-open="true"] { max-width: 48%; } }
+.report-document-layout { max-width: 1220px; margin-inline: auto; }
+.manual-panel .report-document { margin-inline: auto; }
+.report-sources .report-scope-summary__heading,
+.report-sources .report-scope-summary__heading > div { display: grid; gap: 6px; }
+.report-sources .report-scope-summary__hint { text-align: start; }
+.report-sources label { flex-wrap: wrap; }
+
+/* Writing mode: a segmented control (user review 3). */
+.report-writer {
+  display: inline-flex;
+  align-self: flex-start;
+  margin: var(--space-3) var(--space-5) 0;
+  padding: 2px;
+  border-radius: var(--radius-md);
+  background: var(--bg-elev);
+}
+
+.report-writer button {
+  height: 28px;
+  min-height: 0;
+  padding: 0 var(--space-4);
+  border: 0;
+  border-radius: calc(var(--radius-md) - 2px);
+  background: transparent;
+  color: var(--label-secondary);
+  font-size: var(--text-ui);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.report-writer button[aria-pressed="true"] {
+  background: var(--bg-card);
+  color: var(--label);
+  box-shadow: var(--shadow-1);
+}
+
+/* The evidence toggle lines up with the document toolbar. */
+.report-sources__toggle,
+.manual-panel .mr-evidence {
+  height: 30px;
+  min-height: 0;
+  padding: 0 var(--space-3);
+  border: var(--hairline) solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--bg-card);
+  color: var(--label);
+  font-size: var(--text-ui);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.report-sources__toggle[aria-expanded="true"],
+.manual-panel .mr-evidence[aria-expanded="true"] {
+  border-color: transparent;
+  background: var(--tint-bg);
+  color: var(--tint-label);
 }

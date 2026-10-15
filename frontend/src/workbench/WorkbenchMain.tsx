@@ -9,12 +9,8 @@
 
 import { useWorkbench } from "./WorkbenchStateProvider";
 import { GraphView } from "./views/GraphView";
-import { TableView } from "./views/TableView";
-import { DataView } from "../dataView/DataView";
-import { PipelineView } from "./views/PipelineView";
-import { ReportView } from "../report/ReportView";
 import { WorkbenchHomeView } from "./views/WorkbenchHomeView";
-import { NotebookRouteView } from "../notebook/NotebookRouteView";
+import { DataView, LazyView, NotebookRouteView, PipelineView, ReportView, TableView } from "./lazyViews";
 import { useForest } from "./ForestContext";
 
 export function WorkbenchMain({
@@ -56,17 +52,19 @@ export function WorkbenchMain({
         />
       )}
       {state.view === "graph" && <GraphView />}
-      {state.view === "data" && <DataView projectRoot={projectRoot} />}
-      {state.view === "table" && <TableView projectRoot={projectRoot} />}
-      {state.view === "pipeline" && <PipelineView />}
-      {state.view === "report" && <ReportView projectRoot={projectRoot} focusRequest={reportFocusRequest} />}
-      {state.view === "notebook" && (
-        <NotebookRouteView
-          projectRoot={projectRoot}
-          activeRunId={notebookActiveRunId}
-          onOpenMemorySettings={onOpenSettings}
-        />
-      )}
+      <LazyView>
+        {state.view === "data" && <DataView projectRoot={projectRoot} />}
+        {state.view === "table" && <TableView projectRoot={projectRoot} />}
+        {state.view === "pipeline" && <PipelineView />}
+        {state.view === "report" && <ReportView projectRoot={projectRoot} focusRequest={reportFocusRequest} />}
+        {state.view === "notebook" && (
+          <NotebookRouteView
+            projectRoot={projectRoot}
+            activeRunId={notebookActiveRunId}
+            onOpenMemorySettings={onOpenSettings}
+          />
+        )}
+      </LazyView>
     </div>
   );
 }

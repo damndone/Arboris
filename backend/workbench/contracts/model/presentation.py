@@ -32,6 +32,13 @@ def _rate_summary(result, decision, exposure, n):
     return f"Poisson rate (exposure={exposure}, n={n})" if exposure else f"Poisson (n={n})"
 
 
+def _lmm_coefficient_view(run_root, model_id):
+    from ...services.lmm_coefficients import _lmm_published_results
+
+    return next((view for view in _lmm_published_results(run_root)
+                 if view.get("model_id") == model_id), None)
+
+
 @dataclass(frozen=True)
 class ResultPresentation:
     label: str | None = None
@@ -42,9 +49,11 @@ class ResultPresentation:
     summary: SummaryBuilder | None = None
     overdispersion_artifact: str | None = None
     uses_exposure: bool = False
+    coefficient_view: Callable | None = None
 
 
 RESULT_PRESENTATIONS = {
+    "linear_mixed_effects": ResultPresentation(coefficient_view=_lmm_coefficient_view),
     "ols": ResultPresentation("OLS", "ols", summary=_ols_summary),
     "ols_robust": ResultPresentation("OLS (robust SE)", "ols", summary=_ols_summary),
     "ols_hac": ResultPresentation("OLS (Newey-West SE)", "ols", summary=_ols_summary),

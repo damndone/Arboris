@@ -1,6 +1,6 @@
 // frontend/src/lineage/statusViews.tsx
 //
-// Inline UI fragments rendered by LineageRouteContainer for loading and
+// Inline UI fragments rendered by WorkbenchRouteContainer for loading and
 // error branches (Step 5, T5.4). Pulled out of the container so the
 // container file stays under the plan §8 T5.4 LOC budget. Copy preserves
 // V1.4.1 LineageTab.tsx wording for the existing three error kinds, plus

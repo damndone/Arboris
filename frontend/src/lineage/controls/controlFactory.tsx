@@ -8,11 +8,12 @@
 //     Consumers (OperationSection) call `renderControl(...)` and stay kind-agnostic.
 //   - Every EditableControl kind is registered, so a new backend kind can't crash the UI.
 //   - `visible_when` is preserved on the descriptor (forward-compat) but NOT enforced.
-//   - v1.8.12: the kinds are the backend's (generated). column/integer/number/
-//     object/json render as read-only placeholders, as they always did here.
+//   - Scalar and structured values share the manual operation schema renderer.
 
 import type { ReactElement } from "react";
 import type { EditableControl } from "../api/graphViewTypes";
+import { SchemaField } from "../../manual/SchemaFields";
+import { validateValue, type JsonSchema } from "../../manual/schemaModel";
 
 export type ControlChange = (key: string, value: unknown) => void;
 
@@ -37,15 +38,33 @@ export const CONTROL_KINDS: readonly ControlKind[] = [
   "json",
 ] as const;
 
-/** Kinds edited in place. The rest (a single column, numbers, structured
- *  values) are shown read-only here; the run form edits them. */
-export const ENABLED_CONTROL_KINDS: ReadonlySet<ControlKind> = new Set<ControlKind>([
-  "select",
-  "multiselect",
-  "columns",
-  "text",
-  "toggle",
-]);
+/** Every declared kind is editable; unknown kinds remain read-only. */
+export const ENABLED_CONTROL_KINDS: ReadonlySet<ControlKind> = new Set(CONTROL_KINDS);
+
+export function controlSchema(control: EditableControl): JsonSchema {
+  const types: Record<string, string> = {integer: "integer", number: "number", object: "object"};
+  const fields = (control.kind === "object" || control.kind === "json") && control.options?.length
+    ? {type: "object", properties: Object.fromEntries(control.options.map(option =>
+      [typeof option === "string" ? option : String(option.value), {}])), additionalProperties: false}
+    : {};
+  return {...(types[control.kind] ? {type: types[control.kind]} : {}), ...fields, ...control.schema} as JsonSchema;
+}
+export function controlErrors(control: EditableControl): string[] {
+  return validateValue(controlSchema(control), control.value, controlSchema(control), control.label, control.required ?? false);
+}
+function SchemaControl({control, onChange}: ControlProps): ReactElement {
+  return <div data-testid={`control-${control.kind}`}>
+    <SchemaField schema={controlSchema(control)} value={control.value} label={control.label}
+      required={control.required} onChange={value => onChange(control.key, value)}/>
+  </div>;
+}
+function ColumnControl({control, onChange}: ControlProps): ReactElement {
+  return <select data-testid="control-column" aria-label={control.label} value={String(control.value ?? "")}
+    onChange={e => onChange(control.key, e.target.value || undefined)}>
+    <option value="">Choose a column…</option>
+    {normalizeOptions(control).map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+  </select>;
+}
 
 // ── option normalisation ───────────────────────────────────────
 interface NormOption {
@@ -199,7 +218,7 @@ function makePlaceholder(kind: ControlKind) {
     return (
       <span data-testid={`control-${kind}`} data-control-kind={kind} aria-disabled="true">
         {control.label}
-        {control.value !== undefined ? `: ${String(control.value)}` : ""}
+        {control.value !== undefined ? `: ${typeof control.value === "object" ? JSON.stringify(control.value) : String(control.value)}` : ""}
       </span>
     );
   }
@@ -215,14 +234,14 @@ export const CONTROL_REGISTRY: Record<
 > = {
   select: SelectControl,
   multiselect: MultiselectControl,
-  column: makePlaceholder("column"),
+  column: ColumnControl,
   columns: ColumnsControl,
   text: TextControl,
-  integer: makePlaceholder("integer"),
-  number: makePlaceholder("number"),
+  integer: SchemaControl,
+  number: SchemaControl,
   toggle: ToggleControl,
-  object: makePlaceholder("object"),
-  json: makePlaceholder("json"),
+  object: SchemaControl,
+  json: SchemaControl,
 };
 
 /** The single render entry point. Looks up the registry by kind — never switches. */

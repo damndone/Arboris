@@ -22,6 +22,7 @@ from workbench.contracts.model.glm_extensions import (
 from workbench.contracts.model.iv_gmm import validate_iv_gmm_result
 from workbench.contracts.model.matching import validate_matching_result
 from workbench.contracts.model.meta_analysis import MetaAnalysisResultEnvelope
+from workbench.contracts.model.power_analysis import POWER_ANALYSIS_SOLVE_TARGETS
 from workbench.contracts.model.missing_data import validate_missing_data_result
 from workbench.contracts.model.model_diagnostics import ModelDiagnosticsResultEnvelope
 from workbench.contracts.model.multiple_comparisons import validate_multiple_comparisons_result
@@ -1880,7 +1881,7 @@ def _power_parameters(options: Mapping[str, object]) -> dict[str, object]:
         }
     )
     solve_for = str(_option(options, "solve_for"))
-    if solve_for not in {"power", "sample_size", "effect_size", "alpha"}:
+    if solve_for not in POWER_ANALYSIS_SOLVE_TARGETS:
         raise P7PackAdapterError(f"power solve_for is not declared: {solve_for}")
     values["design"] = design
     values["solve_for"] = solve_for

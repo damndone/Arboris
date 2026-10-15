@@ -215,6 +215,8 @@ def _error_label(exc: LLMUpstreamError) -> str:
     label = type(exc).__name__
     if exc.upstream_status is not None:
         label += f":upstream_{exc.upstream_status}"
+    if getattr(exc, "context_overflow", False):
+        label += ":context_overflow"
     return label
 
 

@@ -75,15 +75,40 @@ class NumericCheckFailed(TypedDict):
     error: str
 
 
+class AgentCompactionView(TypedDict):
+    """Where the earlier conversation was summarized (role ``summary``)."""
+
+    trigger: str
+    tokens_before: int
+    #: The summary's numbers all appear in the messages it replaced.
+    verified: bool
+    unverified_numbers: list[str]
+    summarized_messages: int
+
+
+class AgentContextUsage(TypedDict):
+    """How full the next request is, as the server will send it."""
+
+    estimated_tokens: int
+    window_tokens: int
+    #: False: the model declares no window and ``window_tokens`` is assumed.
+    window_declared: bool
+    #: Above this the older conversation is summarized before the next step.
+    compact_at_tokens: int
+
+
 class AgentMessage(TypedDict):
     entry_id: str
-    role: Literal["user", "assistant", "tool"]
+    #: When the entry was written (UTC, ISO 8601).
+    at: str
+    role: Literal["user", "assistant", "tool", "summary"]
     content: str
     name: str | None
     stop_reason: str | None
     error: str | None
     numeric_check: NotRequired[NumericCheckUnverified | NumericCheckFailed]
     navigation: list[NavigationRefView]
+    compaction: NotRequired[AgentCompactionView]
 
 
 class AgentSession(TypedDict):
@@ -95,8 +120,24 @@ class AgentSession(TypedDict):
     model: str | None
     provider_id: str | None
     context_window_tokens: int | None
+    context: AgentContextUsage
     messages: list[AgentMessage]
     proposals: list[PublicProposal]
+    #: Messages the person pinned as chapters, oldest first.
+    chapters: list[AgentChapter]
+
+
+class AgentChapter(TypedDict):
+    entry_id: str
+    title: str
+    at: str
+
+
+class AgentSessionChange(TypedDict):
+    """A session after a rewind or fork, and the message to put back in the input."""
+
+    session: AgentSession
+    restored_prompt: str | None
 
 
 class AgentTurn(TypedDict):
@@ -267,3 +308,66 @@ class OperationReconciled(TypedDict):
 
 class AgentEvents(TypedDict):
     events: list[AgentEventView]
+
+
+class AgentInstructionLayer(TypedDict):
+    """One layer of what the Agent reads at the start of a conversation."""
+
+    kind: Literal["guide", "personal", "project"]
+    path: str
+    exists: bool
+    #: The built-in guide is read-only.
+    editable: bool
+    content: str
+    bytes: int
+
+
+class AgentInstructions(TypedDict):
+    #: General to specific; a later layer wins where they disagree.
+    layers: list[AgentInstructionLayer]
+    limit_bytes: int
+    templates: dict[str, str]
+
+
+class AgentInstructionsDraft(TypedDict):
+    """The project template with the project's datasets and models filled in."""
+
+    content: str
+
+
+class AgentConversationFocus(TypedDict, total=False):
+    kind: str
+    id: str
+    run_id: str | None
+    label: str
+
+
+class AgentConversation(TypedDict):
+    """One conversation in the project's list."""
+
+    session_id: str
+    role: str | None
+    #: The person's title, else the first line of their first message.
+    title: str
+    #: True when the person named it.
+    titled: bool
+    #: What it is about (a node, the data, a report, the project).
+    about: str
+    focus: AgentConversationFocus | None
+    created_at: str
+    last_active: str
+    messages: int
+    replies: int
+    archived: bool
+    status: str | None
+    #: The conversation it branched from, if any.
+    forked_from: str | None
+
+
+class AgentConversations(TypedDict):
+    conversations: list[AgentConversation]
+
+
+class AgentConversationDeleted(TypedDict):
+    session_id: str
+    deleted: bool

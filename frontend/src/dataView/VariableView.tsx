@@ -152,56 +152,57 @@ export function VariableView({
     }
   }
 
-  const cell = { padding: "2px 6px", verticalAlign: "top" } as const;
   return (
-    <div data-testid="variable-view">
-      <div style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, marginBottom: 6 }}>
-        <span style={{ color: "var(--label-secondary)" }}>
-          {variables.length} variables · {totalRows} rows · values as "1 = Low; 2 = High", missing as "-99, 900..999"
+    <div data-testid="variable-view" className="dv-grid">
+      <div className="dv-grid-bar">
+        <span>
+          {variables.length} variables · {totalRows.toLocaleString("en")} rows · edit any cell; saving makes a new run
         </span>
+        <span className="dv-spacer" />
         <button
           type="button"
+          className={`dv-button${pending.changes.length ? " dv-button--primary" : ""}`}
           disabled={pending.changes.length === 0 || pending.problem !== null || saving}
           onClick={() => setReviewing(true)}
         >
           Review changes ({pending.changes.length})
         </button>
       </div>
-      {pending.problem && (
-        <div role="alert" style={{ color: "var(--red, #c00)", fontSize: 12, marginBottom: 6 }}>
-          {pending.problem}
-        </div>
-      )}
+      {pending.problem && <p role="alert" className="dv-alert">{pending.problem}</p>}
       {reviewing && pending.changes.length > 0 && (
-        <div data-testid="variable-view-review" style={{ fontSize: 12, border: "1px solid var(--separator)", padding: 8, marginBottom: 8 }}>
-          <div style={{ marginBottom: 4 }}>
-            Saving records these changes as a new run in the lineage. Missing-value changes change
-            which rows the models use.
-          </div>
-          <ul style={{ margin: "0 0 6px", paddingLeft: 18 }}>
+        <section data-testid="variable-view-review" className="dv-sheet" aria-label="Review changes">
+          <header className="dv-sheet__head">
+            <div>
+              <h3>Review changes</h3>
+              <p>Saving records these changes as a new run in the lineage. Missing-value changes change which rows the models use.</p>
+            </div>
+          </header>
+          <ul className="dv-changes">
             {pending.changes.map((change) => (
               <li key={`${change.column}-${change.field}`}>
                 <strong>{change.column}</strong> · {change.field}: {change.from || "—"} → {change.to || "—"}
               </li>
             ))}
           </ul>
-          <button type="button" disabled={saving} onClick={() => void save()}>
-            {saving ? "Saving…" : "Save as new run"}
-          </button>{" "}
-          <button type="button" disabled={saving} onClick={() => setReviewing(false)}>
-            Keep editing
-          </button>
-        </div>
+          <div className="dv-actions">
+            <button type="button" className="dv-button dv-button--primary" disabled={saving} onClick={() => void save()}>
+              {saving ? "Saving…" : "Save as new run"}
+            </button>
+            <button type="button" className="dv-button" disabled={saving} onClick={() => setReviewing(false)}>
+              Keep editing
+            </button>
+          </div>
+        </section>
       )}
-      {error && (
-        <div role="alert" style={{ color: "var(--red, #c00)", fontSize: 12, marginBottom: 6 }}>{error}</div>
-      )}
-      <div className="wb-result-table-scroll" tabIndex={0} aria-label="Variables" style={{ maxHeight: "60vh", overflowY: "auto" }}>
-        <table className="wb-result-table" style={{ borderCollapse: "collapse", fontSize: 12 }}>
+      {error && <p role="alert" className="dv-alert">{error}</p>}
+      <div className="dv-table-wrap" tabIndex={0} aria-label="Variables">
+        <table className="dv-table dv-table--edit">
           <thead>
-            <tr style={{ textAlign: "left", color: "var(--label-secondary)" }}>
-              {["Name", "Type", "Label", "Values", "Measure", "Missing", "Sharing", "Summary"].map((heading) => (
-                <th key={heading} style={cell} title={heading === "Sharing" ? SHARING_HELP : undefined}>{heading}</th>
+            <tr>
+              {["Variable", "Label", "Value labels", "Measure", "Missing codes", "Sharing"].map((heading) => (
+                <th key={heading} scope="col" title={heading === "Sharing" ? SHARING_HELP : undefined}>
+                  <span className="dv-table__head">{heading}</span>
+                </th>
               ))}
             </tr>
           </thead>
@@ -209,32 +210,35 @@ export function VariableView({
             {variables.map((variable) => {
               const draft = drafts[variable.name] ?? draftOf(variable);
               const summary = [
+                variable.type,
                 `${variable.missing} blank`,
                 variable.declared_missing_matches ? `${variable.declared_missing_matches} coded missing` : null,
                 `${variable.unique} distinct`,
                 variable.type === "numeric" && variable.min != null ? `${variable.min} to ${variable.max}` : null,
               ].filter(Boolean).join(" · ");
               return (
-                <tr key={variable.name} style={{ borderTop: "1px solid var(--separator)" }}>
-                  <td style={{ ...cell, fontFamily: "var(--font-mono, monospace)" }}>{variable.name}</td>
-                  <td style={cell}>{variable.type}</td>
-                  <td style={cell}>
-                    <input aria-label={`Label of ${variable.name}`} value={draft.label} onChange={(event) => update(variable.name, "label", event.target.value)} />
+                <tr key={variable.name}>
+                  <td className="dv-var">
+                    <span className="dv-var__name">{variable.name}</span>
+                    <span className="dv-var__summary">{summary}</span>
                   </td>
-                  <td style={cell}>
-                    <input aria-label={`Value labels of ${variable.name}`} value={draft.values} onChange={(event) => update(variable.name, "values", event.target.value)} size={24} />
+                  <td>
+                    <input aria-label={`Label of ${variable.name}`} placeholder="Add a label" value={draft.label} onChange={(event) => update(variable.name, "label", event.target.value)} />
                   </td>
-                  <td style={cell}>
+                  <td>
+                    <input aria-label={`Value labels of ${variable.name}`} placeholder="1 = Low; 2 = High" value={draft.values} onChange={(event) => update(variable.name, "values", event.target.value)} />
+                  </td>
+                  <td>
                     <select aria-label={`Measure of ${variable.name}`} value={draft.level} onChange={(event) => update(variable.name, "level", event.target.value)}>
                       {LEVELS.map((level) => (
                         <option key={level} value={level}>{level || "—"}</option>
                       ))}
                     </select>
                   </td>
-                  <td style={cell}>
-                    <input aria-label={`Missing codes of ${variable.name}`} value={draft.missing} onChange={(event) => update(variable.name, "missing", event.target.value)} size={12} />
+                  <td>
+                    <input aria-label={`Missing codes of ${variable.name}`} placeholder="-99, 900..999" value={draft.missing} onChange={(event) => update(variable.name, "missing", event.target.value)} />
                   </td>
-                  <td style={cell}>
+                  <td>
                     {variable.sensitivity_suggested ? (
                       <select
                         aria-label={`Sharing of ${variable.name}`}
@@ -251,7 +255,6 @@ export function VariableView({
                       "—"
                     )}
                   </td>
-                  <td style={{ ...cell, color: "var(--label-secondary)", whiteSpace: "nowrap" }}>{summary}</td>
                 </tr>
               );
             })}

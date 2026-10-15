@@ -88,7 +88,7 @@ function ResultSummary({ preview }: { preview: StatisticalExplorationPreview }) 
       {result.missing_policy && <div>Missing policy: {result.missing_policy}</div>}
       {groups.length > 0 && <div>{groups.length} {groups.length === 1 ? "group" : "groups"} · {groups.reduce((total, group) => total + (typeof group.filtered_row_count === "number" ? group.filtered_row_count : 0), 0)} grouped rows</div>}
       {emptyGroups.length > 0 && (
-        <div data-testid="statistical-exploration-empty-groups" style={{ color: "var(--warning, #b06a00)" }}>
+        <div data-testid="statistical-exploration-empty-groups" style={{ color: "var(--status-caution-fg)" }}>
           No rows matched: {emptyGroups.map((value) => String(value)).join(", ")} — check the group values.
         </div>
       )}

@@ -8,10 +8,12 @@ step receives one registry entry and the generic runtime invokes that entry.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Literal, TypeAlias
 
 import pandas as pd
+
+from workbench.agent.p7_option_vocabularies import OPTION_VOCABULARIES
 
 from workbench.contracts.model.categorical import (
     CATEGORICAL_CONTRACT,
@@ -24,9 +26,7 @@ from workbench.contracts.model.glm_extensions import (
 from workbench.contracts.model.iv_gmm import IV_GMM_CONTRACT, IV_GMM_OPERATION_IDS
 from workbench.contracts.model.matching import MATCHING_CONTRACT, MATCHING_OPERATION_IDS
 from workbench.contracts.model.meta_analysis import (
-    META_ANALYSIS_COMBINE_METHODS,
     META_ANALYSIS_CONTRACT,
-    META_ANALYSIS_EFFECT_MEASURES,
     META_ANALYSIS_OPERATION_IDS,
 )
 from workbench.contracts.model.missing_data import (
@@ -290,10 +290,14 @@ class P7RequestSchema:
                 "properties": {
                     name: {
                         **self._option_schema(shape),
+                        # Leaving an optional field out means the kernel's
+                        # default. A closed-vocabulary option is not
+                        # nullable: null is not one of its values.
                         **(
                             {"nullable": True}
                             if name not in self.required_options
                             and shape != "nullable_string"
+                            and name not in self.option_enums
                             else {}
                         ),
                         **(
@@ -531,7 +535,15 @@ def _register_request_schema(
             raise P7PackRegistryError(
                 f"duplicate P7 request schema declaration: {operation_id}"
             )
-        P7_REQUEST_SCHEMAS[operation_id] = schema
+        # The allowed values of closed-vocabulary options come from one table
+        # (p7_option_vocabularies), itself built from the contracts' sets.
+        vocabulary = OPTION_VOCABULARIES.get(operation_id, {})
+        undeclared = set(vocabulary) - set(schema.option_shapes)
+        if undeclared:
+            raise P7PackRegistryError(
+                f"{operation_id}: vocabulary for undeclared option(s): " + ", ".join(sorted(undeclared))
+            )
+        P7_REQUEST_SCHEMAS[operation_id] = replace(schema, option_enums={**schema.option_enums, **vocabulary})
 
 
 _register_request_schema(
@@ -624,12 +636,6 @@ _register_request_schema(
             "balance_threshold": "number",
             "missing_policy": "string",
         },
-        option_enums={
-            "matching_geometry_policy": ("standardized_covariate_euclidean_v1",),
-            "support_distance_policy": ("absolute_logit_difference",),
-            "common_support_policy": ("reject_disjoint_no_trim_v1",),
-            "missing_policy": ("reject",),
-        },
     ),
 )
 _register_request_schema(
@@ -647,7 +653,6 @@ _register_request_schema(
             "missing_policy": "string",
             "matched_pairs": "array",
         },
-        option_enums={"missing_policy": ("reject",)},
     ),
 )
 _register_request_schema(
@@ -666,10 +671,6 @@ _register_request_schema(
             "continuity_correction": "number",
             "zero_correction": "number",
         },
-        option_enums={
-            "effect_measure": tuple(sorted(META_ANALYSIS_EFFECT_MEASURES)),
-            "method": tuple(sorted(META_ANALYSIS_COMBINE_METHODS)),
-        },
     ),
 )
 _register_request_schema(
@@ -682,9 +683,6 @@ _register_request_schema(
             "alpha": "number",
             "continuity_correction": "number",
             "zero_correction": "number",
-        },
-        option_enums={
-            "effect_measure": tuple(sorted(META_ANALYSIS_EFFECT_MEASURES)),
         },
     ),
 )
@@ -989,10 +987,6 @@ _register_request_schema(
     _request_schema(
         required_options=("design", "solve_for"),
         option_shapes={"design": "string", "solve_for": "string"},
-        option_enums={
-            "design": ("independent_t", "one_way_anova", "two_proportion_z"),
-            "solve_for": ("power", "sample_size", "effect_size", "alpha"),
-        },
     ),
 )
 _register_request_schema(
@@ -1000,10 +994,6 @@ _register_request_schema(
     _request_schema(
         required_options=("design", "solve_for", "axes"),
         option_shapes={"design": "string", "solve_for": "string", "axes": "object"},
-        option_enums={
-            "design": ("independent_t", "one_way_anova", "two_proportion_z"),
-            "solve_for": ("power", "sample_size", "effect_size", "alpha"),
-        },
     ),
 )
 _register_request_schema(
@@ -1434,10 +1424,10 @@ def p7_workflow_step_contracts() -> dict[str, object]:
                         "Registry-declared adapter input mode; it is not inferred from the data."
                     ),
                     "column_bindings": (
-                        "Server-resolved source column bindings declared by this operation."
+                        "Which columns of the dataset play which role."
                     ),
                     "options": (
-                        "Operation policy and estimator options validated by the frozen pack contract."
+                        "Settings for this method; each is checked against the method's contract."
                     ),
                 },
                 required=("input_mode", "column_bindings", "options"),

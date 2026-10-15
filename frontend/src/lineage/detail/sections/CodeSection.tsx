@@ -49,7 +49,7 @@ export function CodeSection({ node }: { node: GraphViewNode }) {
         style={{
           margin: 0,
           padding: 12,
-          background: "var(--bg-code, rgba(0,0,0,0.25))",
+          background: "var(--code-bg)",
           borderRadius: 8,
           fontSize: 12,
           fontFamily: "var(--font-mono, monospace)",

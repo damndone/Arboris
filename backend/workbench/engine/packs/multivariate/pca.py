@@ -11,12 +11,9 @@ import pandas as pd
 from workbench.contracts.model.multivariate import make_result_envelope
 
 from .common import MultivariatePackError, json_native, prepare_numeric_frame
+from workbench.contracts.model.multivariate import PCA_MATRICES, PCA_COMPONENT_SELECTIONS
 
 
-PCA_MATRICES = frozenset({"correlation", "covariance"})
-PCA_COMPONENT_SELECTIONS = frozenset(
-    {"all", "fixed", "kaiser", "cumulative_variance"}
-)
 
 
 def _validate_choice(value: object, allowed: frozenset[str], field_name: str) -> str:

@@ -10,6 +10,7 @@
 // backdrop click closes.
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { ApiError, createProject } from "../api";
 
 export const CREATE_PROJECT_TITLE_ID = "create-project-title";
@@ -103,7 +104,9 @@ export function CreateProjectModal({
     );
   }
 
-  return (
+  // Portalled to <body>: a translucent top bar (backdrop-filter) would
+  // otherwise become the containing block of this fixed overlay and clip it.
+  return createPortal(
     <div
       role="dialog"
       aria-labelledby={CREATE_PROJECT_TITLE_ID}
@@ -115,7 +118,7 @@ export function CreateProjectModal({
       style={{
         position: "fixed",
         inset: 0,
-        background: "rgba(0,0,0,0.4)",
+        background: "var(--scrim)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -206,6 +209,7 @@ export function CreateProjectModal({
           )}
         </div>
       </section>
-    </div>
+    </div>,
+    document.body,
   );
 }

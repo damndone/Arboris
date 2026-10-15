@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import {
   fetchEgress,
@@ -8,6 +8,7 @@ import {
   type EgressAuditRecord,
   type EgressView,
 } from "./dataViewApi";
+import { ToolSheet } from "./ToolSheet";
 
 const CLASS_LABELS: Record<ContentClass, string> = {
   workbench_state: "Workbench state (operations, lineage, contracts)",
@@ -24,7 +25,7 @@ function sameSet(left: string[], right: string[]): boolean {
 }
 
 /** What the project lets the AI provider see, and a record of what was sent. */
-export function SharingPanel({ projectRoot }: { projectRoot: string }) {
+export function SharingPanel({ projectRoot, onClose }: { projectRoot: string; onClose?: () => void }) {
   const [view, setView] = useState<EgressView | null>(null);
   const [audit, setAudit] = useState<EgressAuditRecord[]>([]);
   const [draft, setDraft] = useState<ContentClass[]>([]);
@@ -48,8 +49,18 @@ export function SharingPanel({ projectRoot }: { projectRoot: string }) {
     };
   }, [projectRoot]);
 
-  if (error) return <div role="alert" style={{ color: "var(--red, #c00)", fontSize: 12 }}>{error}</div>;
-  if (!view) return <div style={{ fontSize: 12, color: "var(--label-secondary)" }}>Loading sharing policy…</div>;
+  const sheet = (body: ReactNode) => (
+    <ToolSheet
+      title="AI sharing"
+      description="What the AI provider may receive from this project, and a record of what was sent. Analyses here never need it."
+      onClose={onClose}
+      testId="sharing-panel"
+    >
+      {body}
+    </ToolSheet>
+  );
+  if (error && !view) return sheet(<p role="alert" className="dv-alert">{error}</p>);
+  if (!view) return sheet(<p className="dv-note">Loading sharing policy…</p>);
 
   const provider = view.active_provider;
   const providerKey = provider ? provider.provider_id || provider.locality : "";
@@ -77,23 +88,23 @@ export function SharingPanel({ projectRoot }: { projectRoot: string }) {
   const protectedColumns = Object.entries(view.policy.columns).filter(
     ([, level]) => level === "sensitive" || level === "restricted",
   );
-  const cell = { padding: "2px 6px", textAlign: "left" as const };
-  return (
-    <div data-testid="sharing-panel" style={{ fontSize: 12, border: "1px solid var(--separator)", padding: 8, marginBottom: 8 }}>
+  const timeFormat = new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" });
+  return sheet(
+    <>
+      {error && <p role="alert" className="dv-alert">{error}</p>}
       {provider === null ? (
-        <div>No AI provider is configured; nothing is sent.</div>
+        <p className="dv-note">No AI provider is configured; nothing is sent.</p>
       ) : (
-        <>
-          <div style={{ marginBottom: 4 }}>
-            <strong>{provider.provider_name || provider.provider_id}</strong> ({provider.locality === "local" ? "runs on this computer" : "remote service"}){" "}
-            {overridden ? "· this project's setting" : "· default"} may receive:
-          </div>
-          <div style={{ display: "grid", gap: 2, marginBottom: 6 }}>
+        <div className="dv-sheet__section">
+          <h4>
+            <span>{provider.provider_name || provider.provider_id}</span> · {provider.locality === "local" ? "runs on this computer" : "remote service"} ·{" "}
+            {overridden ? "this project's setting" : "default"}
+          </h4>
+          <div className="dv-checklist">
             {view.content_classes.map((contentClass) => (
-              <label key={contentClass} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <label key={contentClass}>
                 <input
                   type="checkbox"
-                  style={{ width: "auto", margin: 0 }}
                   aria-label={`Send ${CLASS_LABELS[contentClass]}`}
                   checked={draft.includes(contentClass)}
                   onChange={(event) =>
@@ -106,53 +117,57 @@ export function SharingPanel({ projectRoot }: { projectRoot: string }) {
               </label>
             ))}
           </div>
-          <button type="button" disabled={saving || sameSet(draft, provider.allowed_classes)} onClick={() => void save(draft)}>
-            Save for this project
-          </button>{" "}
-          <button type="button" disabled={saving || !overridden} onClick={() => void save(null)}>
-            Use default ({defaults.length} kinds)
-          </button>
-        </>
+          <div className="dv-actions">
+            <button type="button" className="dv-button dv-button--primary" disabled={saving || sameSet(draft, provider.allowed_classes)} onClick={() => void save(draft)}>
+              Save for this project
+            </button>
+            <button type="button" className="dv-button" disabled={saving || !overridden} onClick={() => void save(null)}>
+              Use default ({defaults.length} kinds)
+            </button>
+          </div>
+        </div>
       )}
-      <div style={{ marginTop: 6, color: "var(--label-secondary)" }}>
+      <p className="dv-note">
         {protectedColumns.length
           ? `Values withheld for: ${protectedColumns.map(([column, level]) => `${column} (${level})`).join(", ")}. `
           : "No column is marked sensitive by this project. "}
         Personal columns such as name, phone or email are withheld from remote providers unless marked public. Change a
         column in Variable View → Sharing.
-      </div>
-      <div style={{ marginTop: 8, fontWeight: 600 }}>Recent sends</div>
-      {audit.length === 0 ? (
-        <div style={{ color: "var(--label-secondary)" }}>Nothing has been sent from this project yet.</div>
-      ) : (
-        <table data-testid="sharing-audit" style={{ borderCollapse: "collapse" }}>
-          <thead>
-            <tr style={{ color: "var(--label-secondary)" }}>
-              {["Time", "Provider", "Messages", "Withheld", "Values withheld for"].map((heading) => (
-                <th key={heading} style={cell}>{heading}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {audit.map((record) => (
-              <tr key={`${record.at}-${record.payload_bytes}`} style={{ borderTop: "1px solid var(--separator)" }}>
-                <td style={cell}>{new Date(record.at).toLocaleString()}</td>
-                <td style={cell}>{record.provider_host}</td>
-                <td style={cell}>{record.message_count}</td>
-                <td style={cell}>
-                  {record.withheld_count
-                    ? record.decisions
-                        .filter((decision) => decision.decision.startsWith("withheld"))
-                        .map((decision) => decision.tool_id ?? decision.withheld_protocols?.join(", ") ?? decision.role)
-                        .join(", ")
-                    : "—"}
-                </td>
-                <td style={cell}>{record.redacted_columns.join(", ") || "—"}</td>
+      </p>
+      <div className="dv-sheet__section">
+        <h4>Recent sends</h4>
+        {audit.length === 0 ? (
+          <p className="dv-note">Nothing has been sent from this project yet.</p>
+        ) : (
+          <table data-testid="sharing-audit" className="dv-mini-table">
+            <thead>
+              <tr>
+                {["Time", "Provider", "Messages", "Withheld", "Values withheld for"].map((heading) => (
+                  <th key={heading} scope="col">{heading}</th>
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-    </div>
+            </thead>
+            <tbody>
+              {audit.map((record) => (
+                <tr key={`${record.at}-${record.payload_bytes}`}>
+                  <td>{timeFormat.format(new Date(record.at))}</td>
+                  <td>{record.provider_host}</td>
+                  <td>{record.message_count}</td>
+                  <td>
+                    {record.withheld_count
+                      ? record.decisions
+                          .filter((decision) => decision.decision.startsWith("withheld"))
+                          .map((decision) => decision.tool_id ?? decision.withheld_protocols?.join(", ") ?? decision.role)
+                          .join(", ")
+                      : "—"}
+                  </td>
+                  <td>{record.redacted_columns.join(", ") || "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </>,
   );
 }

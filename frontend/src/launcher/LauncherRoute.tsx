@@ -7,6 +7,8 @@
 // into a dead graph.
 
 import { useState } from "react";
+import { useWorkspaceMode } from "../workspace/workspaceMode";
+import { WorkspaceLauncherBar } from "../workspace/WorkspaceLauncherBar";
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { rootToSlug } from "../workbench/projectSlug";
 import { CreateProjectModal } from "./CreateProjectModal";
@@ -19,6 +21,7 @@ export function LauncherRoute() {
   const [searchParams] = useSearchParams();
   const [modalOpen, setModalOpen] = useState(false);
   const recents = listRecents();
+  const workspaceMode = useWorkspaceMode();
 
   // v1.6.12 (V10): `/` jumps straight into the last project and `?home=1`
   // aliases the in-workbench Home view. Fresh users (no recents) still land
@@ -39,6 +42,40 @@ export function LauncherRoute() {
     });
   }
 
+  const createModal = (
+    <CreateProjectModal
+      open={modalOpen}
+      onClose={() => setModalOpen(false)}
+      onCreated={(projectRoot) => {
+        setModalOpen(false);
+        goToProject(projectRoot, { openGenesis: true });
+      }}
+    />
+  );
+
+  if (workspaceMode === "new") {
+    return (
+      <div className="ws-page" data-testid="workspace-launcher">
+        <header className="ws-topbar" role="banner">
+          <WorkspaceLauncherBar />
+        </header>
+        <main className="ws-launcher" aria-labelledby="launcher-heading">
+          <div className="ws-launcher__head">
+            <div>
+              <h1 id="launcher-heading" className="ws-launcher__title">Projects</h1>
+              <p className="ws-launcher__lead">Open a recent project, or start a new one with its own folder.</p>
+            </div>
+            <button type="button" data-variant="primary" onClick={() => setModalOpen(true)}>
+              New project
+            </button>
+          </div>
+          <RecentProjectsPanel onOpenProject={goToProject} />
+        </main>
+        {createModal}
+      </div>
+    );
+  }
+
   return (
     <section className="panel" aria-labelledby="launcher-heading">
       <div className="panel-heading">
@@ -49,14 +86,7 @@ export function LauncherRoute() {
         New project
       </button>
       <RecentProjectsPanel onOpenProject={goToProject} />
-      <CreateProjectModal
-        open={modalOpen}
-        onClose={() => setModalOpen(false)}
-        onCreated={(projectRoot) => {
-          setModalOpen(false);
-          goToProject(projectRoot, { openGenesis: true });
-        }}
-      />
+      {createModal}
     </section>
   );
 }

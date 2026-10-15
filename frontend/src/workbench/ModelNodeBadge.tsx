@@ -1,12 +1,6 @@
 // frontend/src/workbench/ModelNodeBadge.tsx
 //
-// V1.6.5 — Problem 6: distinguish same-named model nodes across the forest
-// (Plan §8 / Phase F1). Two reruns both labelled "ols_robust (primary)" are
-// otherwise indistinguishable. This badge stamps each forest model node with a
-// stable identity: `…<run-short> · #<hash-short> · <role>` where
-//   - run-short  = the HHMMSS segment of the run id (stable, human-skimmable)
-//   - hash-short = first 5 chars of the node hash (content identity)
-//   - role       = "source" for the originating run, "rerun" for children.
+// Show a readable run time; keep exact provenance in an expandable Source.
 
 /** Extract the HHMMSS time segment from a run id like
  *  "20260630_021506_881210_d5cbd8a7". Falls back to the whole id when the
@@ -30,7 +24,7 @@ export function ModelNodeBadge({
   role: "source" | "rerun";
 }) {
   return (
-    <span
+    <div
       data-testid="model-node-badge"
       data-role={role}
       style={{
@@ -42,11 +36,10 @@ export function ModelNodeBadge({
         color: "var(--label-tertiary)",
       }}
     >
-      <span>…{runShort(runId)}</span>
-      <span aria-hidden>·</span>
-      <span>#{hashShort(nodeHash)}</span>
+      <span>{/^\d{6}$/.test(runShort(runId)) ? runShort(runId).replace(/(..)(..)(..)/, "$1:$2:$3") : "Model version"}</span>
       <span aria-hidden>·</span>
       <span>{role}</span>
-    </span>
+      <details onClick={event => event.stopPropagation()}><summary>Source</summary><div>Run: {runId}</div><div>Content: {nodeHash}</div></details>
+    </div>
   );
 }

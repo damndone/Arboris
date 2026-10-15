@@ -30,9 +30,9 @@ from .common import (
     numeric_sample,
     two_sample_statistic,
 )
+from workbench.contracts.model.resampling import PERMUTATION_ALTERNATIVES
 
 
-PERMUTATION_ALTERNATIVES = frozenset({"two-sided", "greater", "less"})
 
 
 def _reject(reason_code: str, message: str) -> None:

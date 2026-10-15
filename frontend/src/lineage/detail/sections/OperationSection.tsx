@@ -18,7 +18,7 @@ import type {
   EditableControl,
   GraphViewNode,
 } from "../../api/graphViewTypes";
-import { renderControl } from "../../controls/controlFactory";
+import { renderControl, controlErrors } from "../../controls/controlFactory";
 import { ResolverFailureState } from "../ResolverFailureState";
 import { useResolvedNodeOperationContext } from "../NodeOperationContextProvider";
 import { useRerun } from "../RerunContext";
@@ -30,12 +30,7 @@ import {
 } from "./manualRerunPatch";
 
 export function OperationSection({ node }: { node: GraphViewNode }) {
-  // Object-valued params have no scalar control and would render as
-  // "[object Object]" -- observed in the browser once v1.8.7 published `labels`
-  // for every family. They are edited through their own forms, not here.
-  const schema = node.editableSchema?.filter(
-    (control) => String(control.kind) !== "object",
-  );
+  const schema = node.editableSchema;
   const rerun = useRerun();
   const resolved = useResolvedNodeOperationContext();
   if (!schema || schema.length === 0) return null;
@@ -92,6 +87,7 @@ function EditableOperation({
   }, [values, initial]);
 
   const dirty = Object.keys(overrides).length > 0;
+  const validationErrors = schema.flatMap(control => controlErrors({...control, value: values[control.key]}));
 
   const onChange = (key: string, value: unknown) => {
     setPreviewPatch(null);
@@ -99,6 +95,7 @@ function EditableOperation({
   };
 
   const onSubmit = async () => {
+    if (validationErrors.length) return;
     if (!previewPatch) {
       const patch = buildManualRerunPatch({
         patchId: buildManualRerunPatchId(
@@ -149,7 +146,7 @@ function EditableOperation({
           flexDirection: "column",
           gap: 8,
           padding: 10,
-          background: "var(--bg-card-2, rgba(255,255,255,0.04))",
+          background: "var(--bg-card-2)",
           borderRadius: 8,
           fontSize: 12,
         }}
@@ -176,7 +173,7 @@ function EditableOperation({
           The current run stays unchanged. Confirming creates a new child run.
         </div>
         {schema.map((control) => (
-          <label
+          <div
             key={control.key}
             data-testid={`operation-control-${control.key}`}
             style={{ display: "flex", gap: 8, alignItems: "center" }}
@@ -185,13 +182,13 @@ function EditableOperation({
               {control.label}
             </span>
             {renderControl({ ...control, value: values[control.key] }, onChange)}
-          </label>
+          </div>
         ))}
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 4 }}>
           <button
             type="button"
             data-testid="operation-rerun-submit"
-            disabled={!dirty || status === "submitting"}
+            disabled={!dirty || validationErrors.length > 0 || status === "submitting"}
             onClick={onSubmit}
           >
             {status === "submitting"
@@ -201,16 +198,17 @@ function EditableOperation({
                 : "Preview source changes"}
           </button>
           {status === "done" && (
-            <span data-testid="operation-rerun-done" style={{ color: "var(--accent-positive, #4caf50)" }}>
+            <span data-testid="operation-rerun-done" style={{ color: "var(--status-holds-fg)" }}>
               {error ?? "Branch created"}
             </span>
           )}
           {status === "error" && (
-            <span data-testid="operation-rerun-error" style={{ color: "var(--accent-negative, #e57373)" }}>
+            <span data-testid="operation-rerun-error" style={{ color: "var(--status-fails-fg)" }}>
               {error}
             </span>
           )}
         </div>
+        {validationErrors.map(message => <p role="alert" key={message}>{message}</p>)}
         {previewPatch && (
           <div
             data-testid="manual-patch-preview"
@@ -218,8 +216,8 @@ function EditableOperation({
           >
             {previewPatch.changes.map((change) => (
               <div key={change.field_id}>
-                <strong>{change.field_id}</strong>: {String(change.old_value)} -&gt;{" "}
-                {String(change.new_value)}
+                <strong>{change.field_id}</strong>: {JSON.stringify(change.old_value)} -&gt;{" "}
+                {JSON.stringify(change.new_value)}
               </div>
             ))}
           </div>
@@ -260,7 +258,7 @@ function ReadOnlyOperation({
           flexDirection: "column",
           gap: 4,
           padding: 10,
-          background: "var(--bg-card-2, rgba(255,255,255,0.04))",
+          background: "var(--bg-card-2)",
           borderRadius: 8,
           fontSize: 12,
         }}

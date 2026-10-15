@@ -90,6 +90,19 @@ def read_model_results(run_root: Path) -> list[dict]:
     return results
 
 
+def read_model_coefficient_view(run_root: Path, results: list[dict]) -> dict | None:
+    """Use a family-owned read-time projection without changing its packet."""
+    from ..contracts.model.presentation import result_presentation
+
+    for result in results:
+        reader = result_presentation(result.get("model_type", "")).coefficient_view
+        if reader is not None:
+            view = reader(run_root, result.get("model_id"))
+            if view is not None:
+                return view
+    return None
+
+
 def _model_results(run_root: Path) -> list[dict]:
     """Compatibility wrapper for the existing HTTP route import."""
 

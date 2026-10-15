@@ -7,7 +7,8 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from .session import JsonlSessionRepository
+from .compaction import SUMMARY_NAME, UNVERIFIED_SUMMARY_NAME, is_standing, latest_compaction, live_start
+from .session import JsonlSessionRepository, SessionTreeEntry
 
 
 @dataclass(frozen=True)
@@ -51,7 +52,8 @@ class ContextBuilder:
     ) -> ContextSnapshot:
         messages: list[dict[str, Any]] = []
         source_entry_ids: list[str] = []
-        for entry in self.repository.get_branch(session_id, leaf_entry_id=leaf_entry_id):
+        branch = self.repository.get_branch(session_id, leaf_entry_id=leaf_entry_id)
+        for entry in _project(branch):
             payload = dict(entry.payload)
             if entry.entry_type == "message":
                 role = payload.get("role")
@@ -85,7 +87,20 @@ class ContextBuilder:
             elif entry.entry_type == "compaction":
                 summary = payload.get("summary")
                 if isinstance(summary, str):
-                    messages.append({"role": "system", "content": summary, "name": "context_compaction"})
+                    verified = payload.get("verified", True) is not False
+                    messages.append({
+                        "role": "system",
+                        "content": (
+                            "Summary of the earlier part of this conversation (the messages it replaces "
+                            "are still on record; inspect results again by id when you need detail):\n"
+                            + summary
+                            if verified
+                            else "Summary of the earlier part of this conversation. Some numbers in it could "
+                            "not be matched to the conversation, so do not cite numbers from it: inspect "
+                            "them again by id.\n" + summary
+                        ),
+                        "name": SUMMARY_NAME if verified else UNVERIFIED_SUMMARY_NAME,
+                    })
                     source_entry_ids.append(entry.entry_id)
 
         if workbench_context:
@@ -99,3 +114,34 @@ class ContextBuilder:
         serialized = json.dumps(messages, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         fingerprint = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
         return ContextSnapshot(messages=messages, fingerprint=fingerprint, source_entry_ids=source_entry_ids)
+
+
+def _project(branch: list[SessionTreeEntry]) -> list[SessionTreeEntry]:
+    """The branch as the model sees it after the latest compaction.
+
+    Without one, every entry (unchanged behaviour). With one: the latest copy
+    of each standing message that precedes the kept part, then the summary,
+    then everything from the first kept entry on. Older conversation and
+    earlier summaries are on record but not resent.
+    """
+
+    found = latest_compaction(branch)
+    if found is None:
+        return branch
+    _, compaction_entry = found
+    start = live_start(branch)
+    latest_standing: dict[str, SessionTreeEntry] = {}
+    for entry in branch:
+        if is_standing(entry):
+            latest_standing[str(entry.payload.get("name"))] = entry
+    position = {entry.entry_id: index for index, entry in enumerate(branch)}
+    head = sorted(
+        (entry for entry in latest_standing.values() if position[entry.entry_id] < start),
+        key=lambda entry: position[entry.entry_id],
+    )
+    tail = [
+        entry for entry in branch[start:]
+        if entry.entry_type != "compaction"
+        and not (is_standing(entry) and latest_standing.get(str(entry.payload.get("name"))) is not entry)
+    ]
+    return [*head, compaction_entry, *tail]

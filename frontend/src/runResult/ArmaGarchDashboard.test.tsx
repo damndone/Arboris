@@ -135,3 +135,11 @@ test("classical results expose full estimation scope and retrospective evaluatio
   expect(screen.getByText("120")).toBeTruthy();
   expect(screen.getByText(/retrospective.*independent/i)).toBeTruthy();
 });
+
+
+test("never rounds a small diagnostic p-value to zero", () => {
+  const input = artifacts();
+  input.diagnostics = {normality: {p_value: 1e-20}, arch_lm: {p_value: 1e-72}};
+  render(<ArmaGarchDashboard artifacts={input}/>);
+  expect(screen.getAllByText("< 0.001")).toHaveLength(2);
+});

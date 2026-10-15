@@ -107,6 +107,7 @@ describe("AgentPanel — declared post-estimation results", () => {
           column: "experience",
           stationary_point: 211.59338521178753,
           stationary_point_within_observed_range: false,
+          p_value: 9.1e-74,
         },
       },
     ],
@@ -125,6 +126,8 @@ describe("AgentPanel — declared post-estimation results", () => {
     const results = screen.getByTestId("agent-operation-post-estimation");
     expect(results).toHaveTextContent("Quadratic stationary point");
     expect(results).toHaveTextContent("stationary point: 211.5934");
+    expect(results).toHaveTextContent("p value: < 0.001");
+    expect(results).not.toHaveTextContent("p value: 0.0000");
     // The out-of-range flag is what separates a number from a claim.
     expect(results).toHaveTextContent("stationary point within observed range: no");
     expect(results).not.toHaveTextContent("workbench.model.quadratic");
@@ -400,8 +403,7 @@ describe("AgentPanel", () => {
     );
 
     const reasoning = screen.getByTestId("agent-reasoning-u1");
-    expect(reasoning).toHaveTextContent("Reasoning");
-    expect(reasoning).toHaveTextContent("2 steps");
+    expect(reasoning).toHaveTextContent("Worked through 2 steps");
     expect(reasoning).toHaveTextContent("我会先核对模型和诊断证据。");
     expect(reasoning).toHaveTextContent("inspect_model_result ✓ ok");
     expect(reasoning).not.toContainElement(screen.getByText("模型结果已核对：系数为正。"));
@@ -431,9 +433,10 @@ describe("AgentPanel", () => {
     const reasoning = screen.getByTestId("agent-reasoning-u1");
     expect(reasoning).toContainElement(screen.getByTestId("agent-withdrawn-draft"));
     expect(screen.getByTestId("agent-withdrawn-draft")).toHaveTextContent(
-      "Draft withdrawn by the numeric check: 0.099 matched no result.",
+      "Earlier draft, withdrawn by the number check: 0.099 matched no result",
     );
     expect(reasoning).not.toContainElement(screen.getByText("p 值为 0.098。"));
+    expect(reasoning).toHaveTextContent("Rewrote the answer once after checking its numbers");
   });
 
   it("leaves hierarchy browsing to AI activity so the terminal owns the panel space", () => {
@@ -844,10 +847,11 @@ describe("AgentPanel", () => {
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Revise proposal proposal-1" }));
     });
-    const editor = screen.getByRole("textbox", { name: "Proposal changes proposal-1" });
+    expect(screen.getByRole("button", { name: "Confirm proposal proposal-1" })).toBeDisabled();
+    const editor = screen.getByLabelText("Proposal changes proposal-1.covariance.new");
     await act(async () => {
       fireEvent.change(editor, {
-        target: { value: '{"covariance":{"old":"nonrobust","new":"unadjusted"}}' },
+        target: { value: "unadjusted" },
       });
       fireEvent.click(screen.getByRole("button", { name: "Save revision proposal-1" }));
     });

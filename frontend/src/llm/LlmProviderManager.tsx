@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
+import { AppearanceSettings } from "../workspace/AppearanceSettings";
 import { LlmProviderEditor } from "./LlmProviderEditor";
 import { MemorySettingsPanel } from "../workbench/MemorySettingsPanel";
+import { AgentInstructionsPanel } from "../workbench/AgentInstructionsPanel";
 import {
   activateLlmProvider,
   deleteLlmProvider,
@@ -33,25 +35,25 @@ const shellStyle: React.CSSProperties = {
   width: "100%",
   boxSizing: "border-box",
   padding: "28px clamp(20px, 5vw, 72px)",
-  background: "var(--bg-canvas, #101012)",
-  color: "var(--label, #f5f5f7)",
+  background: "var(--bg-canvas)",
+  color: "var(--label)",
 };
 
 const buttonStyle: React.CSSProperties = {
-  border: "1px solid var(--separator, #3a3a3c)",
+  border: "1px solid var(--separator)",
   borderRadius: 8,
   padding: "7px 12px",
-  background: "var(--bg-card-2, rgba(255,255,255,0.06))",
-  color: "var(--label, #f5f5f7)",
+  background: "var(--bg-card-2)",
+  color: "var(--label)",
   cursor: "pointer",
 };
 
 const settingsSectionButtonStyle = (active: boolean): React.CSSProperties => ({
   ...buttonStyle,
-  background: active ? "var(--accent, #0a84ff)" : "var(--bg-card-2, rgba(255,255,255,0.06))",
-  borderColor: active ? "var(--accent, #0a84ff)" : "var(--separator, #3a3a3c)",
-  color: active ? "#fff" : "var(--label, #f5f5f7)",
-  boxShadow: active ? "0 1px 2px rgba(10,132,255,0.22)" : "none",
+  background: active ? "var(--tint-fill)" : "var(--bg-card-2)",
+  borderColor: active ? "var(--tint-fill)" : "var(--separator)",
+  color: active ? "var(--on-tint)" : "var(--label)",
+  boxShadow: active ? "var(--shadow-1)" : "none",
 });
 
 export function LlmProviderManager({ onBack, projectRoot }: LlmProviderManagerProps) {
@@ -64,7 +66,7 @@ export function LlmProviderManager({ onBack, projectRoot }: LlmProviderManagerPr
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [probeStates, setProbeStates] = useState<Record<string, ProbeState>>({});
-  const [settingsSection, setSettingsSection] = useState<"providers" | "memory">("providers");
+  const [settingsSection, setSettingsSection] = useState<"providers" | "instructions" | "memory" | "appearance">("providers");
 
   async function refreshProviders() {
     setLoading(true);
@@ -210,15 +212,17 @@ export function LlmProviderManager({ onBack, projectRoot }: LlmProviderManagerPr
 
       <nav aria-label="Settings sections" style={{ display: "flex", gap: 8, margin: "0 0 20px" }}>
         <button type="button" aria-pressed={settingsSection === "providers"} onClick={() => setSettingsSection("providers")} style={settingsSectionButtonStyle(settingsSection === "providers")}>LLM providers</button>
+        {projectRoot ? <button type="button" aria-pressed={settingsSection === "instructions"} onClick={() => setSettingsSection("instructions")} style={settingsSectionButtonStyle(settingsSection === "instructions")}>Agent instructions</button> : null}
         {projectRoot ? <button type="button" aria-pressed={settingsSection === "memory"} onClick={() => setSettingsSection("memory")} style={settingsSectionButtonStyle(settingsSection === "memory")}>Memory</button> : null}
+        <button type="button" aria-pressed={settingsSection === "appearance"} onClick={() => setSettingsSection("appearance")} style={settingsSectionButtonStyle(settingsSection === "appearance")}>Appearance</button>
       </nav>
 
-      {settingsSection === "memory" && projectRoot ? <MemorySettingsPanel projectRoot={projectRoot} /> : <>
+      {settingsSection === "instructions" && projectRoot ? <AgentInstructionsPanel projectRoot={projectRoot} /> : settingsSection === "memory" && projectRoot ? <MemorySettingsPanel projectRoot={projectRoot} /> : settingsSection === "appearance" ? <AppearanceSettings /> : <>
 
-      {error && <div role="alert" data-testid="llm-provider-manager-error" style={{ color: "var(--danger, #ff453a)", marginBottom: 14 }}>{error}</div>}
-      {status && <div aria-live="polite" data-testid="llm-provider-manager-status" style={{ color: "var(--green, #30d158)", marginBottom: 14 }}>{status}</div>}
+      {error && <div role="alert" data-testid="llm-provider-manager-error" style={{ color: "var(--status-fails-fg)", marginBottom: 14 }}>{error}</div>}
+      {status && <div aria-live="polite" data-testid="llm-provider-manager-status" style={{ color: "var(--green)", marginBottom: 14 }}>{status}</div>}
       {loading && <div aria-live="polite">Loading providers…</div>}
-      {!loading && providers.length === 0 && <div style={{ color: "var(--label-secondary, #98989d)" }}>No providers configured.</div>}
+      {!loading && providers.length === 0 && <div style={{ color: "var(--label-secondary)" }}>No providers configured.</div>}
 
       <div data-testid="llm-provider-list" style={{ display: "grid", gap: 12 }}>
         {providers.map((provider) => {
@@ -237,13 +241,13 @@ export function LlmProviderManager({ onBack, projectRoot }: LlmProviderManagerPr
                 ...provider.models,
               ];
           return (
-            <article key={provider.id} style={{ border: "1px solid var(--separator, #3a3a3c)", borderRadius: 12, padding: 16, background: "var(--bg-card-2, rgba(255,255,255,0.04))" }}>
+            <article key={provider.id} style={{ border: "1px solid var(--separator)", borderRadius: 12, padding: 16, background: "var(--bg-card-2)" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                 <strong>{provider.name}</strong>
-                <span data-testid={`llm-provider-active-${provider.id}`} style={{ color: isActive ? "var(--green, #30d158)" : "var(--label-tertiary, #8e8e93)" }}>
+                <span data-testid={`llm-provider-active-${provider.id}`} style={{ color: isActive ? "var(--green)" : "var(--label-tertiary)" }}>
                   {isActive ? "Active" : "Available"}
                 </span>
-                <span style={{ color: "var(--label-secondary, #98989d)" }}>{provider.key_present ? "API key configured" : "API key missing"}</span>
+                <span style={{ color: "var(--label-secondary)" }}>{provider.key_present ? "API key configured" : "API key missing"}</span>
                 {modelOptions.length > 0 ? (
                   <select
                     aria-label={`Model for ${provider.name}`}
@@ -252,11 +256,11 @@ export function LlmProviderManager({ onBack, projectRoot }: LlmProviderManagerPr
                     onChange={(event) => void changeModel(provider.id, event.target.value)}
                     style={{
                       maxWidth: 240,
-                      border: "1px solid var(--separator, #3a3a3c)",
+                      border: "1px solid var(--separator)",
                       borderRadius: 6,
                       padding: "3px 6px",
-                      background: "var(--bg-card-2, rgba(255,255,255,0.06))",
-                      color: "var(--label, #f5f5f7)",
+                      background: "var(--bg-card-2)",
+                      color: "var(--label)",
                       fontFamily: "var(--font-mono, monospace)",
                       fontSize: 12,
                     }}
@@ -268,12 +272,12 @@ export function LlmProviderManager({ onBack, projectRoot }: LlmProviderManagerPr
                     ))}
                   </select>
                 ) : (
-                  <span style={{ color: "var(--label-secondary, #98989d)", fontFamily: "var(--font-mono, monospace)" }}>
+                  <span style={{ color: "var(--label-secondary)", fontFamily: "var(--font-mono, monospace)" }}>
                     {provider.model || "No default model"}
                   </span>
                 )}
               </div>
-              <div style={{ marginTop: 8, color: "var(--label-secondary, #98989d)", fontSize: 12 }}>Base URL: {provider.base_url || "—"}</div>
+              <div style={{ marginTop: 8, color: "var(--label-secondary)", fontSize: 12 }}>Base URL: {provider.base_url || "—"}</div>
               <div
                 data-testid={`llm-provider-models-${provider.id}`}
                 style={{
@@ -281,7 +285,7 @@ export function LlmProviderManager({ onBack, projectRoot }: LlmProviderManagerPr
                   flexWrap: "wrap",
                   gap: "5px 10px",
                   marginTop: 8,
-                  color: "var(--label-secondary, #98989d)",
+                  color: "var(--label-secondary)",
                   fontSize: 12,
                   fontFamily: "var(--font-mono, monospace)",
                 }}
@@ -295,7 +299,7 @@ export function LlmProviderManager({ onBack, projectRoot }: LlmProviderManagerPr
                   : <span>No mapped models</span>}
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
-                <span style={{ color: probeState === "success" ? "var(--green, #30d158)" : probeState === "error" ? "var(--danger, #ff453a)" : "var(--label-tertiary, #8e8e93)" }}>Probe: {probeLabel}</span>
+                <span style={{ color: probeState === "success" ? "var(--green)" : probeState === "error" ? "var(--status-fails-fg)" : "var(--label-tertiary)" }}>Probe: {probeLabel}</span>
                 {!isActive && <button type="button" data-testid={`llm-provider-activate-${provider.id}`} disabled={busyId === provider.id} onClick={() => void activate(provider.id)} style={buttonStyle}>Use</button>}
                 {isActive && <button type="button" data-testid={`llm-provider-activate-${provider.id}`} disabled style={buttonStyle}>Active</button>}
                 <button type="button" onClick={() => void probe(provider.id)} disabled={probeState === "loading"} style={buttonStyle}>Test connection</button>
@@ -303,7 +307,7 @@ export function LlmProviderManager({ onBack, projectRoot }: LlmProviderManagerPr
                 <button type="button" data-testid={`llm-provider-edit-${provider.id}`} onClick={() => setEditingProvider(provider)} style={buttonStyle}>Edit</button>
                 <button type="button" data-testid={`llm-provider-configure-${provider.id}`} onClick={() => setEditingProvider(provider)} style={buttonStyle}>Configure</button>
                 <button type="button" data-testid={`llm-provider-copy-${provider.id}`} onClick={() => copy(provider)} style={buttonStyle}>Copy</button>
-                <button type="button" data-testid={`llm-provider-delete-${provider.id}`} disabled={busyId === provider.id} onClick={() => void remove(provider)} style={{ ...buttonStyle, color: "var(--danger, #ff453a)" }}>Delete</button>
+                <button type="button" data-testid={`llm-provider-delete-${provider.id}`} disabled={busyId === provider.id} onClick={() => void remove(provider)} style={{ ...buttonStyle, color: "var(--status-fails-fg)" }}>Delete</button>
               </div>
             </article>
           );

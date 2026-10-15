@@ -68,6 +68,16 @@ def _propensity(value: Mapping[str, Any]) -> dict[str, Any]:
     return {"model": "logit", "solver": "newton", "max_iter": value["max_iter"], "tolerance": tolerance, "min_probability": minimum, "max_probability": maximum}
 
 
+# The policies this matching contract implements; each has one declared value.
+# The workflow registry publishes them as the options' allowed values.
+MATCHING_GEOMETRY_POLICIES = ("standardized_covariate_euclidean_v1",)
+MATCHING_SUPPORT_DISTANCE_POLICIES = ("absolute_logit_difference",)
+MATCHING_TIE_POLICIES = ("stable_first",)
+MATCHING_COMMON_SUPPORT_POLICIES = ("reject_disjoint_no_trim_v1",)
+MATCHING_UNMATCHED_POLICIES = ("reject",)
+MATCHING_MISSING_POLICIES = ("reject",)
+
+
 @dataclass(frozen=True)
 class MatchingInput:
     operation_id: str
@@ -105,11 +115,11 @@ class MatchingInput:
         if not isinstance(self.propensity_policy, Mapping):
             raise ContractError("propensity_policy must be explicit")
         policy = _propensity(self.propensity_policy)
-        if self.matching_geometry_policy != "standardized_covariate_euclidean_v1":
+        if self.matching_geometry_policy not in MATCHING_GEOMETRY_POLICIES:
             raise ContractError(
                 "matching_geometry_policy must be standardized_covariate_euclidean_v1"
             )
-        if self.support_distance_policy != "absolute_logit_difference":
+        if self.support_distance_policy not in MATCHING_SUPPORT_DISTANCE_POLICIES:
             raise ContractError(
                 "support_distance_policy must be absolute_logit_difference"
             )
@@ -119,17 +129,17 @@ class MatchingInput:
             _finite(self.caliper, "caliper", minimum=0.0)
         if type(self.replacement) is not bool:
             raise ContractError("replacement must be boolean")
-        if self.tie_policy != "stable_first":
+        if self.tie_policy not in MATCHING_TIE_POLICIES:
             raise ContractError("tie_policy must be stable_first")
-        if self.common_support_policy != "reject_disjoint_no_trim_v1":
+        if self.common_support_policy not in MATCHING_COMMON_SUPPORT_POLICIES:
             raise ContractError(
                 "common_support_policy must be reject_disjoint_no_trim_v1"
             )
-        if self.unmatched_policy != "reject":
+        if self.unmatched_policy not in MATCHING_UNMATCHED_POLICIES:
             raise ContractError("unmatched_policy must be reject")
         if self.balance_threshold is not None:
             _finite(self.balance_threshold, "balance_threshold", minimum=0.0)
-        if self.missing_policy != "reject":
+        if self.missing_policy not in MATCHING_MISSING_POLICIES:
             raise ContractError("missing_policy must be reject")
         object.__setattr__(self, "treatment_column", treatment)
         object.__setattr__(self, "outcome_column", outcome)
@@ -232,4 +242,5 @@ def make_matching_result(*, operation_id: str, status: str, reason_code: str, n_
     return payload
 
 
-__all__ = ["MATCHING_CONTRACT", "MATCHING_CONTRACT_VERSION", "MATCHING_OPERATION_IDS", "MatchingInput", "make_matching_result", "validate_matching_result"]
+__all__ = ["MATCHING_COMMON_SUPPORT_POLICIES", "MATCHING_GEOMETRY_POLICIES", "MATCHING_MISSING_POLICIES",
+           "MATCHING_SUPPORT_DISTANCE_POLICIES", "MATCHING_TIE_POLICIES", "MATCHING_UNMATCHED_POLICIES", "MATCHING_CONTRACT", "MATCHING_CONTRACT_VERSION", "MATCHING_OPERATION_IDS", "MatchingInput", "make_matching_result", "validate_matching_result"]

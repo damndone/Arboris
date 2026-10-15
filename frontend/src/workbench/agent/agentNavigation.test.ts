@@ -45,6 +45,16 @@ const diffRef: AgentNavigationRef = {
 };
 
 describe("applyAgentNavigationRef", () => {
+  it("opens the verified proposal source when invoked from another page", () => {
+    const out = applyAgentNavigationRef(new URLSearchParams("view=data&tabs=old&active=old"), {
+      ...operationRef,
+      href: {...operationRef.href, forest_node_key: "source-model"},
+    });
+    expect(out.get("active")).toBe("source-model");
+    expect(out.get("focus")).toBe("source-model");
+    expect(out.get("tabs")).toBe("old,source-model");
+    expect(out.get("view")).toBeNull();
+  });
   it("opens a graph target without losing unrelated query params", () => {
     const out = applyAgentNavigationRef(
       new URLSearchParams("project_root=/foo&tab=lineage"),
@@ -80,11 +90,12 @@ describe("applyAgentNavigationRef", () => {
 
   it("focuses an operation in the Agent panel", () => {
     const out = applyAgentNavigationRef(
-      new URLSearchParams("run=run-source"),
+      new URLSearchParams("run=run-source&view=data"),
       operationRef,
     );
 
     expect(out.get("run")).toBe("run-child");
+    expect(out.get("view")).toBeNull(); // graph is the default URL view
     expect(out.get("panel")).toBe("agent");
     expect(out.get("agent_session")).toBe("agent_chain_child");
     expect(out.get("operation")).toBe("oprec-9");

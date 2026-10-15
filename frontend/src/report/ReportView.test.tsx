@@ -83,6 +83,8 @@ function seedForest() {
 describe("ReportView", () => {
   beforeEach(() => {
     window.localStorage.clear();
+    // This harness supplies the separate review host used by classic mode.
+    localStorage.setItem("workbench:workspace", "classic");
     const seed = seedForest();
     mockForest.current = { forest: seed.forest, activeRunId: "run_c", setActiveRunId: vi.fn() };
     mockWb.current = {
@@ -255,6 +257,16 @@ describe("ReportView", () => {
     expect(familyEvidence).toHaveTextContent("2.15");
     expect(familyEvidence).toHaveTextContent(/parallel-lines/i);
     expect(screen.getByTestId("regression-evidence")).toHaveTextContent("0.76");
+  });
+
+  it("the default workspace owns exactly one report document and collapsed sources", async () => {
+    localStorage.removeItem("workbench:workspace");
+    mockGenerate.current = vi.fn().mockResolvedValue({text: "Result [[c:c1]]", model: "test-model"});
+    render(<ReportWorkspaceProvider><ReportViewContent /></ReportWorkspaceProvider>);
+    fireEvent.click(await screen.findByRole("button", {name: /generate report/i}));
+    expect(await screen.findByTestId("report-body")).toHaveTextContent("Result");
+    expect(screen.getAllByTestId("report-body")).toHaveLength(1);
+    expect(screen.getByRole("button", {name: "Evidence"})).toHaveAttribute("aria-expanded", "false");
   });
 
   it("generate renders prose with verified chips and flags unknown ids", async () => {
@@ -761,6 +773,8 @@ describe("ReportView", () => {
 describe("ReportView curation & history (C-3)", () => {
   beforeEach(() => {
     window.localStorage.clear();
+    // This harness supplies the separate review host used by classic mode.
+    localStorage.setItem("workbench:workspace", "classic");
     const seed = seedForest();
     mockForest.current = { forest: seed.forest, activeRunId: "run_c", setActiveRunId: vi.fn() };
     mockWb.current = {

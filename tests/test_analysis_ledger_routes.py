@@ -27,6 +27,16 @@ EXEMPT: dict[tuple[str, str], str] = {
     ("POST", "/agent/sessions/{session_id}/operations/{record_id}/reconcile"): LIFECYCLE,
     ("POST", "/agent/sessions/{session_id}/turns"): "read-only workflows it runs are recorded by the lifecycle",
     ("POST", "/agent/sessions/{session_id}/abort"): NO_ANALYSIS,
+    # Conversation management (v1.9.0): the conversation log and its display
+    # metadata only; no data, model or result changes.
+    ("POST", "/agent/sessions/{session_id}/rewind"): "moves the conversation's leaf; the log keeps every entry",
+    ("POST", "/agent/sessions/{session_id}/fork"): "starts a conversation sharing this one's start",
+    ("POST", "/agent/sessions/{session_id}/chapters"): "pins a message as a chapter",
+    ("DELETE", "/agent/sessions/{session_id}/chapters/{entry_id}"): "unpins a chapter",
+    ("POST", "/agent/sessions/{session_id}/compact"): "summarizes the earlier conversation; the log keeps every entry",
+    ("PATCH", "/agent/conversations/{session_id}"): "renames, archives or restores a conversation",
+    ("DELETE", "/agent/conversations/{session_id}"): "deletes a conversation log; ledger, proposals and records stay",
+    ("PUT", "/agent/instructions"): "writes the person's or the project's AGENTS.md",
     # Manual execution shares the same recorded operation lifecycle.
     ("POST", "/operations/run"): LIFECYCLE,
     # Typed UI data operations that run through the operation lifecycle.

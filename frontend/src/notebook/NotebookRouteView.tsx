@@ -487,6 +487,12 @@ export function NotebookRouteView({
   );
   const [routeChoices, setRouteChoices] = useState<NotebookRecord[] | null>(null);
   const [view, setView] = useState<NotebookView>({ status: "loading" });
+  const setAgentFocus = workbench?.dispatch.setAgentFocus;
+  useEffect(() => {
+    if (!setAgentFocus || !notebookId) return;
+    setAgentFocus({ kind: "plan", id: notebookId, ...(activeRunId ? { runId: activeRunId } : {}) });
+    return () => setAgentFocus(null);
+  }, [notebookId, activeRunId, setAgentFocus]);
   const [busy, setBusy] = useState(false);
   const [planning, setPlanning] = useState(false);
   // Server-published total planning budget, kept so the planning surface can

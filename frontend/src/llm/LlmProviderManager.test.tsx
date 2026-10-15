@@ -151,7 +151,7 @@ describe("LlmProviderManager", () => {
     expect(screen.queryByTestId("llm-provider-list")).not.toBeInTheDocument();
     expect(providersSection).toHaveAttribute("aria-pressed", "false");
     expect(memorySection).toHaveAttribute("aria-pressed", "true");
-    expect(memorySection).toHaveStyle({ background: "var(--accent, #0a84ff)", color: "#fff" });
+    expect(memorySection).toHaveStyle({ background: "var(--tint-fill)", color: "var(--on-tint)" });
   });
 
   it("backs out and opens the editor for add and edit", async () => {

@@ -24,7 +24,7 @@ const mocks = vi.hoisted(() => ({
   fetchLlmConfig: vi.fn(),
   updateLlmProvider: vi.fn(),
   lineageModel: { current: { nodes: [] } as Record<string, unknown> },
-  workbenchState: { selectedKey: null as string | null },
+  workbenchState: { selectedKey: null as string | null, agentFocus: null as null | { kind: "report" | "plan"; id: string; runId?: string } },
   forest: { current: null as unknown },
 }));
 
@@ -140,9 +140,11 @@ function mount() {
 describe("AgentSurfaceProvider", () => {
   beforeEach(() => {
     sessionStorage.clear();
+    localStorage.clear();
     vi.clearAllMocks();
     mocks.lineageModel.current = { nodes: [] };
     mocks.workbenchState.selectedKey = null;
+    mocks.workbenchState.agentFocus = null;
     mocks.forest.current = null;
     mocks.fetchLlmProviders.mockResolvedValue({ active_provider_id: provider.id, providers: [provider] });
     mocks.fetchLlmConfig.mockResolvedValue(config);
@@ -190,6 +192,32 @@ describe("AgentSurfaceProvider", () => {
       proposal: { ...pendingProposal, revision: 2, status: "pending" },
       status: "pending",
     });
+  });
+
+  it.each(["report", "plan"] as const)("creates an authoritative %s focus without reusing graph sessions", async kind => {
+    sessionStorage.setItem("workbench:agent-session:/proj:run-a:project%3Arun-a%3Anone", "old_graph_session");
+    mocks.workbenchState.agentFocus = { kind, id: kind === "report" ? "run-a" : "notebook-a", runId: "run-a" };
+    render(<MemoryRouter initialEntries={["/?agent_session=old_graph_session"]}><AgentSurfaceProvider projectRoot="/proj" runId="run-a"><AgentPanel projectRoot="/proj" runId="run-a" /></AgentSurfaceProvider></MemoryRouter>);
+    await screen.findByRole("listbox", { name: "Agent model" });
+    fireEvent.change(screen.getByRole("textbox", { name: "Ask Agent" }), { target: { value: "Inspect current focus" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send to Agent" }));
+    await waitFor(() => expect(mocks.createAgentSession).toHaveBeenCalledWith("/proj", expect.objectContaining({ focus: expect.objectContaining({kind, id: kind === "report" ? "run-a" : "notebook-a", label: expect.stringMatching(kind === "report" ? /^Report/ : /^Plan/)}) })));
+    expect(mocks.getAgentSession).not.toHaveBeenCalledWith("/proj", "old_graph_session");
+  });
+
+  it("keeps an unsent message when the view, and with it the Agent's scope, changes", async () => {
+    mocks.workbenchState.agentFocus = null;
+    const tree = () => <MemoryRouter><AgentSurfaceProvider projectRoot="/proj" runId="run-a"><AgentPanel projectRoot="/proj" runId="run-a" /></AgentSurfaceProvider></MemoryRouter>;
+    const view = render(tree());
+    await screen.findByRole("listbox", { name: "Agent model" });
+    fireEvent.change(screen.getByRole("textbox", { name: "Ask Agent" }), { target: { value: "Half-written question" } });
+    mocks.workbenchState.agentFocus = { kind: "report", id: "run-a", runId: "run-a" };
+    view.rerender(tree());
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Ask Agent" })).toHaveValue("Half-written question"));
+    view.unmount();
+    render(tree());
+    expect(await screen.findByRole("textbox", { name: "Ask Agent" })).toHaveValue("Half-written question");
+    sessionStorage.removeItem("workbench:agent-draft:/proj");
   });
 
   it("shares model selection and a submitted turn across the panel surface", async () => {
@@ -283,6 +311,7 @@ describe("AgentSurfaceProvider", () => {
       "先检查这个图",
       expect.any(AbortSignal),
       undefined, // a chain session's context is bound by the server, not refreshed per turn
+      "proposal_only",
     ));
   });
 
@@ -462,11 +491,19 @@ describe("AgentSurfaceProvider", () => {
         familyCount: 2,
         familyRunCount: 2,
       },
-      activeRunId: "run-new",
+      activeRunId: "run-old",
       setActiveRunId: vi.fn(),
     };
 
-    mount();
+    const view = mount();
+    (mocks.forest.current as {activeRunId: string}).activeRunId = "run-new";
+    view.rerender(
+      <MemoryRouter>
+        <AgentSurfaceProvider projectRoot="/proj" runId="run-a">
+          <AgentPanel projectRoot="/proj" runId="run-a" />
+        </AgentSurfaceProvider>
+      </MemoryRouter>,
+    );
     fireEvent.change(await screen.findByRole("textbox", { name: "Ask Agent" }), {
       target: { value: "检查刚切换的运行" },
     });
@@ -489,7 +526,7 @@ describe("AgentSurfaceProvider", () => {
     ));
   });
 
-  it("acts on a node selected in another run, in that run (v1.8.10 focus)", async () => {
+  it.each([false, true])("acts on a node in another run, including restored selection (%s)", async (restored) => {
     const olsModel = {
       id: "node-ols", nodeKey: "node-ols", opNodeId: "model:ols_1", nodeHash: "node-ols", raw: null,
       stage: "model", kind: "model", title: "ols_robust", parentStageId: null, trust: "ok", decisions: [],
@@ -499,7 +536,8 @@ describe("AgentSurfaceProvider", () => {
                       nodeHash: "node-iv", title: "iv_2sls", runs: ["run-iv"] };
     const head = (runId: string, hash: string) => ({ runId, headNodeHash: hash, fromNode: null, rerunOf: null,
                                                      rerunReason: null, status: "completed", createdAt: null });
-    mocks.workbenchState.selectedKey = null;
+    mocks.workbenchState.selectedKey = restored ? ivModel.nodeKey : null;
+    mocks.workbenchState.agentFocus = null;
     mocks.lineageModel.current = { nodes: [olsModel, ivModel] };
     mocks.forest.current = {
       forest: { schemaVersion: 4, legacy: false, nodes: [olsModel, ivModel], edges: [],
@@ -738,7 +776,21 @@ describe("AgentSurfaceProvider", () => {
       "proposal-1",
       { revision: 1, fingerprint: "fingerprint-1", active_head_run_id: "run-a" },
     ));
-    expect(await screen.findByText("confirmed")).toBeInTheDocument();
+    // A settled proposal folds into one line instead of staying above the input.
+    expect(await screen.findByTestId("agent-settled-proposals")).toHaveTextContent("1 earlier proposal · confirmed");
+    expect(screen.queryByRole("button", { name: "Confirm proposal proposal-1" })).toBeNull();
+  });
+
+  it("confirms a linked proposal against its bound chain rather than another visible run", async () => {
+    const proposal = {...pendingProposal, preconditions: {active_head_run_id: "run-source"}};
+    mocks.getAgentSession.mockResolvedValue(session("agent_linked", [], [proposal]));
+    render(<MemoryRouter initialEntries={["/?agent_session=agent_linked"]}>
+      <AgentSurfaceProvider projectRoot="/proj" runId="run-other"><AgentPanel projectRoot="/proj" runId="run-other" /></AgentSurfaceProvider>
+    </MemoryRouter>);
+    fireEvent.click(await screen.findByRole("button", {name: "Confirm proposal proposal-1"}));
+    await waitFor(() => expect(mocks.confirmAgentProposal).toHaveBeenCalledWith("/proj", "agent_linked", "proposal-1",
+      {revision: 1, fingerprint: "fingerprint-1", active_head_run_id: "run-source"}));
+    expect(screen.getByText("Linked Agent session")).toBeInTheDocument();
   });
 
   it("declines a visible proposal through the scoped Agent API", async () => {
@@ -757,7 +809,9 @@ describe("AgentSurfaceProvider", () => {
       "proposal-1",
       undefined,
     ));
-    expect(await screen.findByText("declined")).toBeInTheDocument();
+    // A settled proposal folds into one line instead of staying above the input.
+    expect(await screen.findByTestId("agent-settled-proposals")).toHaveTextContent("1 earlier proposal · declined");
+    expect(screen.queryByRole("button", { name: "Confirm proposal proposal-1" })).toBeNull();
   });
 
   it("revises a visible proposal through the scoped Agent API", async () => {
@@ -770,8 +824,8 @@ describe("AgentSurfaceProvider", () => {
     mount();
 
     fireEvent.click(await screen.findByRole("button", { name: "Revise proposal proposal-1" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Proposal changes proposal-1" }), {
-      target: { value: '{"covariance":{"old":"nonrobust","new":"unadjusted"}}' },
+    fireEvent.change(screen.getByLabelText("Proposal changes proposal-1.covariance.new"), {
+      target: { value: "unadjusted" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save revision proposal-1" }));
     await waitFor(() => expect(mocks.reviseAgentProposal).toHaveBeenCalledWith(
@@ -845,4 +899,32 @@ describe("AgentSurfaceProvider", () => {
       "record-1",
     );
   }, 10000);
+});
+
+describe("the conversation a view continues", () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+    localStorage.clear();
+    vi.clearAllMocks();
+    mocks.lineageModel.current = { nodes: [] };
+    mocks.workbenchState.selectedKey = null;
+    mocks.workbenchState.agentFocus = null;
+    mocks.forest.current = null;
+    mocks.fetchLlmProviders.mockResolvedValue({ active_provider_id: provider.id, providers: [provider] });
+    mocks.fetchLlmConfig.mockResolvedValue(config);
+    mocks.getAgentEvents.mockResolvedValue({ events: [] });
+  });
+
+  it("is kept when loading fails for a reason other than 404, and forgotten on 404", async () => {
+    const key = "workbench:agent-session:/proj:run-a:project%3Arun-a%3Anone";
+    localStorage.setItem(key, "agent_chain_kept");
+    mocks.getAgentSession.mockRejectedValueOnce(Object.assign(new Error("Failed to fetch"), { status: 0 }));
+    const first = mount();
+    await waitFor(() => expect(mocks.getAgentSession).toHaveBeenCalled());
+    await waitFor(() => expect(localStorage.getItem(key)).toBe("agent_chain_kept"));
+    first.unmount();
+    mocks.getAgentSession.mockRejectedValueOnce(Object.assign(new Error("not found"), { status: 404 }));
+    mount();
+    await waitFor(() => expect(localStorage.getItem(key)).toBeNull());
+  });
 });

@@ -464,7 +464,8 @@ def test_context_builder_projects_custom_message_and_compaction_without_mutating
 ) -> None:
     repository = JsonlSessionRepository(tmp_path / "workbench")
     repository.create_session("session-a", chain_id="chain-a", role="chain")
-    repository.append("session-a", "message", {"role": "user", "content": "inspect"})
+    repository.append("session-a", "message", {"role": "user", "content": "earlier question"})
+    kept = repository.append("session-a", "message", {"role": "user", "content": "inspect"})
     custom = CustomAgentMessage(content="diagnostic evidence", name="diagnostics")
     repository.append("session-a", "custom_message", custom.to_entry_payload())
     repository.append(
@@ -475,18 +476,19 @@ def test_context_builder_projects_custom_message_and_compaction_without_mutating
     repository.append(
         "session-a",
         "compaction",
-        {"summary": "Earlier evidence was compacted.", "tokens_before": 500},
+        {"summary": "Earlier evidence was compacted.", "tokens_before": 500,
+         "first_kept_entry_id": kept.entry_id},
     )
 
     snapshot = ContextBuilder(repository).build("session-a")
 
-    assert [message["content"] for message in snapshot.messages] == [
-        "inspect",
-        "diagnostic evidence",
-        "Earlier evidence was compacted.",
-    ]
+    # The summary stands in for what precedes the first kept entry; history
+    # itself is untouched.
+    contents = [message["content"] for message in snapshot.messages]
+    assert contents[0].endswith("Earlier evidence was compacted.")
+    assert contents[1:] == ["inspect", "diagnostic evidence"]
     assert len(snapshot.fingerprint) == 64
-    assert len(repository.get_branch("session-a")) == 4
+    assert len(repository.get_branch("session-a")) == 5
 
 
 def test_agent_core_rejects_concurrent_prompt(tmp_path: Path) -> None:

@@ -19,6 +19,9 @@ dependencies = [
   "statsmodels>=0.14",
   "arch==8.0.0",
   "scipy>=1.13",
+  # honest-DID LPs: the same HiGHS release scipy 1.18 bundles, called directly
+  # (engine/highs_lp.py; results held bit-identical to linprog by tests).
+  "highspy==1.12.0",
   "matplotlib>=3.8",
   "jinja2>=3.1",
   "reportlab>=4.2",
@@ -39,6 +42,10 @@ workbench = "workbench.cli:app"
 
 [tool.setuptools.packages.find]
 where = ["backend"]
+
+[tool.setuptools.package-data]
+# The Agent's built-in analysis guide and instruction templates.
+workbench = ["agent/guides/*.md"]
 
 [tool.pytest.ini_options]
 pythonpath = ["backend", "."]

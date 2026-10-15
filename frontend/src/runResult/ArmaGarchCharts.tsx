@@ -231,7 +231,7 @@ function ChartAskAi({ title, spec }: { title: string; spec: ChartAiSpec }) {
         </span>
       )}
       {status === "error" && (
-        <div role="alert" style={{ fontSize: 11, color: "var(--accent-negative, #d33)", marginTop: 4 }}>
+        <div role="alert" style={{ fontSize: 11, color: "var(--status-fails-fg)", marginTop: 4 }}>
           {error}
         </div>
       )}
@@ -243,7 +243,7 @@ function ChartAskAi({ title, spec }: { title: string; spec: ChartAiSpec }) {
             marginTop: 6,
             padding: 8,
             whiteSpace: "pre-wrap",
-            background: "var(--bg-card-2, rgba(0,0,0,0.03))",
+            background: "var(--bg-card-2)",
             borderRadius: 6,
           }}
         >
@@ -269,7 +269,7 @@ export function SeriesChart({
   title,
   rows: source,
   valueKey,
-  color = "#4a6cf7",
+  color = "var(--chart-1)",
   zeroLine = false,
   ai,
 }: {
@@ -301,15 +301,15 @@ export function SeriesChart({
       ai={ai}
     >
       <svg width={W} height={H} aria-label={title} role="img">
-        <line x1={PAD} y1={H - PAD} x2={W - PAD} y2={H - PAD} stroke="#ccc" />
+        <line x1={PAD} y1={H - PAD} x2={W - PAD} y2={H - PAD} stroke="var(--chart-grid)" />
         {zeroLine && lo < 0 && hi > 0 && (
-          <line x1={PAD} y1={sy(0)} x2={W - PAD} y2={sy(0)} stroke="#ccc" strokeDasharray="3 3" />
+          <line x1={PAD} y1={sy(0)} x2={W - PAD} y2={sy(0)} stroke="var(--chart-grid)" strokeDasharray="3 3" />
         )}
         <polyline points={path} fill="none" stroke={color} strokeWidth={1.2} />
-        <text x={PAD} y={12} fontSize={10} fill="#8e8e93">
+        <text x={PAD} y={12} fontSize={10} fill="var(--chart-axis)">
           {hi.toPrecision(4)}
         </text>
-        <text x={PAD} y={H - PAD + 12} fontSize={10} fill="#8e8e93">
+        <text x={PAD} y={H - PAD + 12} fontSize={10} fill="var(--chart-axis)">
           {lo.toPrecision(4)}
         </text>
       </svg>
@@ -350,11 +350,11 @@ export function CorrelogramChart({
       ai={ai}
     >
       <svg width={W} height={H} aria-label={title} role="img">
-        <line x1={PAD} y1={sy(0)} x2={W - PAD} y2={sy(0)} stroke="#ccc" />
+        <line x1={PAD} y1={sy(0)} x2={W - PAD} y2={sy(0)} stroke="var(--chart-grid)" />
         {band !== null && (
           <>
-            <line x1={PAD} y1={sy(band)} x2={W - PAD} y2={sy(band)} stroke="#f55" strokeDasharray="4 3" />
-            <line x1={PAD} y1={sy(-band)} x2={W - PAD} y2={sy(-band)} stroke="#f55" strokeDasharray="4 3" />
+            <line x1={PAD} y1={sy(band)} x2={W - PAD} y2={sy(band)} stroke="var(--status-fails-fg)" strokeDasharray="4 3" />
+            <line x1={PAD} y1={sy(-band)} x2={W - PAD} y2={sy(-band)} stroke="var(--status-fails-fg)" strokeDasharray="4 3" />
           </>
         )}
         {bars.map((bar, index) => (
@@ -364,7 +364,7 @@ export function CorrelogramChart({
             y1={sy(0)}
             x2={sx(index)}
             y2={sy(bar.value)}
-            stroke={band !== null && Math.abs(bar.value) > band ? "#f55" : "#4a6cf7"}
+            stroke={band !== null && Math.abs(bar.value) > band ? "var(--status-fails-fg)" : "var(--chart-1)"}
             strokeWidth={2}
           />
         ))}
@@ -400,9 +400,9 @@ export function QQChart({ title, rows: source, ai }: { title: string; rows: Row[
       ai={ai}
     >
       <svg width={W} height={H} aria-label={title} role="img">
-        <line x1={sx(lo)} y1={sy(lo)} x2={sx(hi)} y2={sy(hi)} stroke="#f55" strokeDasharray="4 3" />
+        <line x1={sx(lo)} y1={sy(lo)} x2={sx(hi)} y2={sy(hi)} stroke="var(--status-fails-fg)" strokeDasharray="4 3" />
         {points.map((p, index) => (
-          <circle key={index} cx={sx(p.theoretical)} cy={sy(p.observed)} r={1.3} fill="#4a6cf7" />
+          <circle key={index} cx={sx(p.theoretical)} cy={sy(p.observed)} r={1.3} fill="var(--chart-1)" />
         ))}
       </svg>
     </Frame>
@@ -464,12 +464,12 @@ export function IntervalBandChart({
             <polyline points={line(band.upperKey)} fill="none" stroke={band.color} strokeWidth={1} opacity={0.75} />
           </g>
         ))}
-        <polyline points={line(observedKey)} fill="none" stroke="#1c1c1e" strokeWidth={1.2} />
+        <polyline points={line(observedKey)} fill="none" stroke="var(--label)" strokeWidth={1.2} />
         {markKey &&
           points.map((row, index) => {
             const value = num(row[observedKey]);
             if (value === null || row[markKey] !== true) return null;
-            return <circle key={index} cx={sx(index)} cy={sy(value)} r={2.6} fill="#f55" />;
+            return <circle key={index} cx={sx(index)} cy={sy(value)} r={2.6} fill="var(--status-fails-fg)" />;
           })}
       </svg>
     </Frame>
@@ -518,18 +518,18 @@ export function DualAxisChart({
       ai={ai}
     >
       <svg width={W} height={H} aria-label={title} role="img">
-        <line x1={PAD} y1={H - PAD} x2={W - PAD} y2={H - PAD} stroke="#ccc" />
+        <line x1={PAD} y1={H - PAD} x2={W - PAD} y2={H - PAD} stroke="var(--chart-grid)" />
         <polyline
           points={line(leftKey, leftLo, leftHi)}
           fill="none"
-          stroke="#8e8e93"
+          stroke="var(--chart-axis)"
           strokeWidth={1}
           opacity={0.8}
         />
         <polyline
           points={line(rightKey, rightLo, rightHi)}
           fill="none"
-          stroke="#f55"
+          stroke="var(--status-fails-fg)"
           strokeWidth={1.4}
         />
       </svg>

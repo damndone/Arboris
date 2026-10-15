@@ -57,7 +57,7 @@ function PacketStatus({ packet }: { packet: AnalysisLoopPacketBundle }) {
         gap: 3,
         padding: 8,
         borderRadius: 6,
-        background: "var(--bg-card-2, rgba(255,255,255,0.04))",
+        background: "var(--bg-card-2)",
       }}
     >
       <strong>{packet.child_run_id}</strong>
@@ -148,7 +148,7 @@ export function AnalysisLoopSection({ node }: { node: GraphViewNode }) {
           flexDirection: "column",
           gap: 8,
           padding: 10,
-          background: "var(--bg-card-2, rgba(255,255,255,0.04))",
+          background: "var(--bg-card-2)",
           borderRadius: 8,
           fontSize: 12,
         }}

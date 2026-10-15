@@ -474,6 +474,7 @@ export function WorkbenchStateProvider({
         tabs = reduceSetActive(tabs, REPORT_REVIEW_TAB_ID);
       } else if (urlRef.current.view === "report") {
         const restore =
+          findNodeTab(tabs.tabs, tabs.activeTabId) ??
           findNodeTab(tabs.tabs, lastNodeTabIdRef.current) ??
           newestNodeTab(tabs.tabs);
         if (restore !== null) {

@@ -78,7 +78,8 @@ def test_offline_draft_edit_save_history_and_export(report_case):
                          "ci_lower": .85, "ci_upper": 1.65}.items():
         assert any(key.endswith("/" + field) and got == value for key, got in values.items())
     assert any(value == "outcome" for value in values.values())
-    payload = request_for(snapshot)
+    estimate = next(f for f in snapshot["facts"] if f["field"].endswith("/estimate") and f["value"] == 1.25)
+    payload = request_for(snapshot, text=f"My interpretation of the computed results. The slope is [[v:{estimate['id']}]].")
     saved = post(report_case, payload)
     assert saved.status_code == 200, saved.text
     record = saved.json()["record"]
@@ -99,10 +100,42 @@ def test_offline_draft_edit_save_history_and_export(report_case):
         assert exported.status_code == 200, exported.text
         if format in ("html", "pdf-print"):
             assert "My interpretation" in exported.text and "data:image/png;base64" in exported.text
-            assert "Computed evidence" in exported.text and "1.25" in exported.text
+            # The marker becomes the value; the appendix lists the fact it shows.
+            assert "The slope is 1.25." in exported.text and "[[v:" not in exported.text
+            assert "Evidence behind the numbers" in exported.text and estimate["id"] in exported.text
         else:
             assert zipfile.is_zipfile(io.BytesIO(exported.content))
     assert __import__('json').loads((run.root / "model_results/ols_1.json").read_text()) == result
+
+
+def test_draft_reads_as_prose_with_every_number_bound_to_a_fact(report_case):
+    from workbench.services.manual_report_text import render_values, resolve, value_ids
+    snapshot = draft(report_case)
+    facts = {fact["id"]: fact for fact in snapshot["facts"]}
+    assert "[[c:" not in snapshot["text"] and value_ids(snapshot["text"])
+    # Every marker names exactly one fact of the snapshot.
+    assert all(resolve(marker, facts) for marker in value_ids(snapshot["text"]))
+    shown = render_values(snapshot["text"], facts)
+    assert "### Estimates" in shown and "1.25" in shown and "p 0.004" in shown
+    assert "coefficient · " not in shown and "metric · " not in shown, "lines are prose, not field paths"
+
+
+def test_value_markers_name_one_fact_by_a_short_prefix():
+    from workbench.services.manual_report_text import resolve, render_values
+    facts = {"f_aaaaaaaaaa11": {"id": "f_aaaaaaaaaa11", "field": "x/estimate", "value": 2.5},
+             "f_aaaaaaaaaa22": {"id": "f_aaaaaaaaaa22", "field": "x/p_value", "value": 0.0}}
+    assert resolve("f_aaaaaaaaaa1", facts) == "f_aaaaaaaaaa11"
+    assert resolve("f_aaaaaaaa", facts) is None, "a prefix shared by two facts names neither"
+    assert resolve("f_aaa", facts) is None, "too short to be a reference"
+    assert render_values("b = [[v:f_aaaaaaaaaa1]], p [[v:f_aaaaaaaaaa2]]", facts) == "b = 2.5, p < 0.001"
+
+
+def test_text_may_show_only_selected_facts(report_case):
+    snapshot = draft(report_case)
+    first, second = snapshot["facts"][0], snapshot["facts"][1]
+    payload = request_for(snapshot, fact_ids=[first["id"]], text=f"Value [[v:{second['id']}]].")
+    response = post(report_case, payload)
+    assert response.status_code == 422 and "not in the selected evidence" in response.text
 
 
 @pytest.mark.parametrize("field,value", [("fact_ids", ["foreign_fact"]), ("figure_ids", ["foreign_figure"]),

@@ -130,6 +130,28 @@ function renderWithRerun(node: GraphViewNode, submitRerun = vi.fn().mockResolved
 }
 
 describe("OperationSection (editable)", () => {
+  it("blocks invalid nested options and confirms only the latest structured edit", async () => {
+    const node = modelNode();
+    node.editableSchema = [{kind: "json", key: "model_options", label: "Options", required: true,
+      value: {bootstrap_reps: 20}, schema: {type: "object", required: ["bootstrap_reps"],
+        properties: {bootstrap_reps: {type: "integer", minimum: 0, maximum: 1000}}}}];
+    const {submitRerun} = renderWithRerun(node);
+    const input = screen.getByLabelText("Options.bootstrap_reps");
+    fireEvent.change(input, {target: {value: "2.5"}});
+    expect(screen.getByTestId("operation-rerun-submit")).toBeDisabled();
+    fireEvent.change(input, {target: {value: "40"}});
+    fireEvent.click(screen.getByTestId("operation-rerun-submit"));
+    expect(screen.getByTestId("manual-patch-preview")).toHaveTextContent('"bootstrap_reps":40');
+    fireEvent.change(input, {target: {value: "60"}});
+    expect(screen.queryByTestId("manual-patch-preview")).toBeNull();
+    fireEvent.click(screen.getByTestId("operation-rerun-submit"));
+    fireEvent.click(screen.getByTestId("operation-rerun-submit"));
+    await waitFor(() => expect(submitRerun).toHaveBeenCalledOnce());
+    expect(submitRerun.mock.calls[0][0].manualPatch.changes).toEqual([
+      {field_id: "model_options", old_value: {bootstrap_reps: 20}, new_value: {bootstrap_reps: 60}}
+    ]);
+  });
+
   it("explains that the current X list can be reduced before rerunning", () => {
     const node = modelNode();
     node.editableSchema = [
@@ -364,16 +386,7 @@ describe("OperationSection (editable)", () => {
 });
 
 describe("object-valued params", () => {
-  it("does not render a control for a param whose value is an object", () => {
-    /**
-     * There is no scalar control for `kind: "object"`, so the fallback rendered
-     * the value directly and the drawer showed "[object Object]". Observed in a
-     * browser once v1.8.7 began publishing `labels` for every family -- the
-     * whole suite was green while the panel showed that string to every user.
-     *
-     * Filtered by kind rather than by key: the previous guard named
-     * `model_options` specifically, so the next object-valued param repeated it.
-     */
+  it("preserves object metadata in read-only contexts without object coercion", () => {
     resolvedContextMock.current = null;
     const node = modelNode();
     node.editableSchema = [
@@ -388,7 +401,7 @@ describe("object-valued params", () => {
 
     render(<OperationSection node={node as unknown as GraphViewNode} />);
     expect(screen.queryByText(/\[object Object\]/)).toBeNull();
-    expect(screen.queryByText(/Column metadata/)).toBeNull();
+    expect(screen.getByText(/Column metadata/)).toBeInTheDocument();
     // The scalar controls beside it are unaffected.
     expect(screen.getByText(/Covariance/)).toBeInTheDocument();
   });

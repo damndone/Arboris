@@ -3,7 +3,7 @@
 // V1.5.2 P3 — container + view switcher integration.
 //
 // The container's data-loading path is already covered by
-// `lineage/LineageRouteContainer.test.tsx` (it delegates here). This
+// `WorkbenchRouteContainer.perRun.test.tsx`. This
 // file adds the V1.5.2-specific behaviour:
 //   - topbar renders the three view tabs
 //   - switching view via topbar updates URL `?view=`
@@ -27,6 +27,9 @@ import {
   uploadDraftNodeFixture,
 } from "../apiFixtures";
 import { forestEdgeFixture, forestHeadFixture, forestNodeFixture } from "../apiFixtures";
+
+// These assertions cover the retained classic route, rails and panels.
+beforeEach(() => localStorage.setItem("workbench:workspace", "classic"));
 
 const routerFuture = { v7_startTransition: true, v7_relativeSplatPath: true };
 
@@ -408,7 +411,7 @@ describe("WorkbenchRouteContainer", () => {
 
     expect(screen.getByRole("button", { name: "Float node panel" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Pin node panel" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Collapse node panel" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Collapse node panel" })).toBeNull();
     expect(screen.getByRole("button", { name: /node actions/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Close" })).toBeNull();
     expect(screen.getByRole("button", { name: "Close Original OLS tab" })).toBeInTheDocument();

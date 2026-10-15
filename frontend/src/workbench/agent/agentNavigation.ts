@@ -5,6 +5,7 @@ import {
   type WorkbenchUrlSlice,
 } from "../state/urlSchema";
 import type { AgentNavigationRef } from "./agentTypes";
+import {parseTabsParams, reduceOpenTab, writeTabsParams} from "../state/tabsSchema";
 
 export type AgentNavigationHandler = (ref: AgentNavigationRef) => boolean;
 
@@ -19,11 +20,16 @@ export function applyAgentNavigationRef(
   params: URLSearchParams,
   ref: AgentNavigationRef,
 ): URLSearchParams {
-  const out = new URLSearchParams(params);
+  let out = new URLSearchParams(params);
   if (!ref.available) return out;
 
   const href = ref.href;
   if (href.run_id) out.set("run", href.run_id);
+  if (href.forest_node_key) {
+    const tabs = parseTabsParams(out);
+    const clock = Math.max(0, ...tabs.tabs.map(tab => tab.openedAt));
+    out = writeTabsParams(out, reduceOpenTab(tabs, clock, href.forest_node_key).next);
+  }
 
   const current = parseWorkbenchUrl(out);
   if (href.view === "graph") {
@@ -44,6 +50,8 @@ export function applyAgentNavigationRef(
 
   const next: WorkbenchUrlSlice = {
     ...current,
+    view: "graph",
+    focusKey: href.forest_node_key ?? current.focusKey,
     bottomPanel: "agent",
     agentSessionId: href.session_id,
     agentEntryId: href.entry_id,

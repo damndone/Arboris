@@ -319,3 +319,12 @@ def test_asking_the_same_test_again_runs_it_again(tmp_path: Path) -> None:
     first_ids = {artifact["artifact_id"] for result in first["results"] for artifact in result["artifacts"]}
     second_ids = {artifact["artifact_id"] for result in second["results"] for artifact in result["artifacts"]}
     assert first_ids and second_ids and first_ids.isdisjoint(second_ids)
+
+
+def test_proposal_only_turn_never_runs_even_a_read_only_workflow(tmp_path: Path) -> None:
+    fixture = _Fixture(tmp_path)
+    fixture.orchestrator.execution_policy = "proposal_only"
+    receipt = fixture.propose([_t_test("review_before_execution")])
+    assert receipt["requires_confirmation"] is True
+    assert "review" in receipt["confirmation_reason"].lower()
+    assert analysis_ledger.read(fixture.project_root) == []

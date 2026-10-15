@@ -27,6 +27,7 @@ class DisclosureLine(TypedDict):
     who: str
     status: str | None
     what: str
+    title: str | None
     categories: list[str]
     run_id: str | None
     produced_run_id: str | None

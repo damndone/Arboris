@@ -1275,6 +1275,36 @@ def test_rerun_precheck_rejects_non_option_fields_before_confirmation(
         )
 
 
+def test_rerun_precheck_uses_the_proposals_model_type_for_an_auto_run(
+    tmp_path: Path,
+) -> None:
+    """User review 6: a run fitted with model_type auto refused every
+    covariance patch, even with the model_type the error asked for."""
+
+    project_root = tmp_path / "project"
+    _write_project_run(project_root)
+    inputs = project_root / "runs" / "run-a" / "run_inputs.json"
+    inputs.write_text(json.dumps({"rerun_of": None, "form": {"model_type": "auto"}}))
+    provider = _load_provider_type()(project_root)
+    orchestrator = _make_orchestrator(tmp_path, context_provider=provider)
+
+    with pytest.raises(ToolVisibleError, match="also set changes.model_type"):
+        orchestrator._precheck_model_options(
+            owner_run_id="run-a",
+            changes={"model_options": {"covariance": "unadjusted"}},
+        )
+    for model_type in ("ols", {"old": "auto", "new": "ols"}):
+        orchestrator._precheck_model_options(
+            owner_run_id="run-a",
+            changes={"model_options": {"covariance": "unadjusted"}, "model_type": model_type},
+        )
+    with pytest.raises(ToolVisibleError, match="OLS_MODEL_OPTIONS_INVALID_COVARIANCE"):
+        orchestrator._precheck_model_options(
+            owner_run_id="run-a",
+            changes={"model_options": {"covariance": "hc3"}, "model_type": "ols"},
+        )
+
+
 def test_operation_artifact_rejects_a_record_from_another_chain(
     tmp_path: Path,
 ) -> None:

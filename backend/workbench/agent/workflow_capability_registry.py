@@ -265,9 +265,9 @@ def workflow_capability_step_contracts() -> dict[str, Any]:
         contracts[operation.operation_id] = StepSpecContract(
             summary=operation.summary,
             fields={
-                "input_mode": "The typed adapter input mode; only frame is executable.",
-                "column_bindings": "Server-owned source-column bindings for the selected adapter.",
-                "options": "Adapter-owned typed options. Code, formulas, paths, and callbacks are refused.",
+                "input_mode": "How the data reaches the method; only the whole dataset (frame) runs.",
+                "column_bindings": "Which columns of the dataset play which role.",
+                "options": "Settings for this method: plain values only; code, formulas, paths and callbacks are refused.",
             },
             required=("input_mode", "column_bindings", "options"),
             field_types={"input_mode": "string", "column_bindings": "object", "options": "object"},

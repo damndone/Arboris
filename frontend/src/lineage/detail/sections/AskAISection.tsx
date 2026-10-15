@@ -301,7 +301,7 @@ export function AskAISection({ node }: { node: GraphViewNode }) {
           flexDirection: "column",
           gap: 6,
           padding: 10,
-          background: "var(--bg-card-2, rgba(255,255,255,0.04))",
+          background: "var(--bg-card-2)",
           borderRadius: 8,
           fontSize: 12,
           color: "var(--label-secondary)",
@@ -382,7 +382,7 @@ export function AskAISection({ node }: { node: GraphViewNode }) {
                       padding: "3px 7px",
                       borderRadius: 999,
                       border: "1px solid var(--separator)",
-                      background: "var(--bg-card, rgba(255,255,255,0.03))",
+                      background: "var(--bg-card)",
                       color: "var(--label-tertiary)",
                       fontSize: 10.5,
                       lineHeight: 1.2,
@@ -446,7 +446,7 @@ export function AskAISection({ node }: { node: GraphViewNode }) {
                       minHeight: 0,
                       borderRadius: 999,
                       border: "1px solid var(--separator)",
-                      background: "var(--bg-card-2, rgba(0,0,0,0.05))",
+                      background: "var(--bg-card-2)",
                       color: "var(--label)",
                       fontSize: 10.5,
                       cursor: isSubmitting ? "not-allowed" : "pointer",
@@ -500,8 +500,8 @@ export function AskAISection({ node }: { node: GraphViewNode }) {
               resize: "vertical",
               borderRadius: 6,
               border: "1px solid var(--separator)",
-              background: "var(--bg-card, rgba(255,255,255,0.06))",
-              color: "var(--label-primary)",
+              background: "var(--bg-card)",
+              color: "var(--label)",
               font: "inherit",
               fontSize: 12,
               padding: "8px 10px",
@@ -524,10 +524,10 @@ export function AskAISection({ node }: { node: GraphViewNode }) {
               borderRadius: 6,
               border: "1px solid var(--separator)",
               background: packet && !analysisLoopLoading
-                ? "var(--accent, rgba(40,120,255,0.18))"
+                ? "var(--tint-fill)"
                 : "transparent",
               color: packet && !analysisLoopLoading
-                ? "var(--label-primary)"
+                ? "var(--on-tint)"
                 : "var(--label-tertiary)",
               cursor: packet && !analysisLoopLoading && !isSubmitting
                 ? "pointer"
@@ -540,7 +540,7 @@ export function AskAISection({ node }: { node: GraphViewNode }) {
           </button>
         </form>
         {error && (
-          <div role="alert" style={{ color: "var(--danger, #b00020)" }}>
+          <div role="alert" style={{ color: "var(--status-fails-fg)" }}>
             {error}
           </div>
         )}
@@ -554,7 +554,7 @@ export function AskAISection({ node }: { node: GraphViewNode }) {
               borderRadius: 6,
               border: "1px solid var(--separator)",
               wordBreak: "break-word",
-              color: "var(--label-primary)",
+              color: "var(--label)",
             }}
           >
             {renderMarkdown(answer)}
@@ -603,7 +603,7 @@ function LlmProviderBadge({
       <span
         data-testid="llm-provider-badge"
         title="Configure the language-model provider in Workbench Settings, then restart the backend."
-        style={{ fontSize: 10.5, color: "var(--diff-removed, #b35900)", fontWeight: 500 }}
+        style={{ fontSize: 10.5, color: "var(--diff-removed)", fontWeight: 500 }}
       >
         LLM not configured
       </span>
@@ -661,11 +661,11 @@ function AskAiHistory({
             </div>
             <div style={{ fontWeight: 600, margin: "3px 0" }}>{record.question}</div>
             {record.status === "answered" ? (
-              <div style={{ color: "var(--label-primary)" }}>
+              <div style={{ color: "var(--label)" }}>
                 {renderMarkdown(record.answer ?? "")}
               </div>
             ) : (
-              <div style={{ color: "var(--danger, #b00020)" }}>{record.error}</div>
+              <div style={{ color: "var(--status-fails-fg)" }}>{record.error}</div>
             )}
           </div>
         ))}

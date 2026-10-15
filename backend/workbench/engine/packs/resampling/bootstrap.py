@@ -30,9 +30,9 @@ from .common import (
     numeric_sample,
     statistic_value,
 )
+from workbench.contracts.model.resampling import BOOTSTRAP_INTERVAL_METHODS
 
 
-BOOTSTRAP_INTERVAL_METHODS = frozenset({"percentile", "basic", "bca"})
 
 
 def _reject(reason_code: str, message: str) -> None:

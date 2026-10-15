@@ -201,8 +201,12 @@ class NodeToolsMixin:
         *,
         owner_run_id: str,
         patch: dict[str, Any],
+        model_type: str | None = None,
     ) -> None:
         """Raise the owning pack's structured error if the patch cannot execute.
+
+        ``model_type`` is the proposal's own model_type change, applied with
+        the patch exactly as the rerun service will apply it.
 
         Silent when the node's pack declares no validator, or when the node's
         current contract cannot be resolved — refusing a patch on the basis of
@@ -249,7 +253,7 @@ class NodeToolsMixin:
             # whose current form is the authoritative contract source.
             merge_form_overrides(
                 source_form,
-                {"model_options": dict(patch)},
+                {"model_options": dict(patch), **({"model_type": model_type} if model_type else {})},
             )
         except ModelOptionsError as exc:
             error = ContractError(str(exc))

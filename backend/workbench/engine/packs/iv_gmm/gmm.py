@@ -23,10 +23,9 @@ from .common import (
     solve,
     symmetric,
 )
+from workbench.contracts.model.iv_gmm import GMM_ESTIMATORS, GMM_COVARIANCE_METHODS
 
 
-GMM_ESTIMATORS = frozenset({"one_step", "two_step"})
-GMM_COVARIANCE_METHODS = frozenset({"heteroskedastic_hc0"})
 
 
 def _confidence_level(value: Any) -> float:

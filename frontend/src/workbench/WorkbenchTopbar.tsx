@@ -14,13 +14,8 @@ import { useNavigate } from "react-router-dom";
 import {
   useWorkbench,
 } from "./WorkbenchStateProvider";
-import { useLineage } from "../lineage/LineageContext";
 import type { ViewMode } from "./state/urlSchema";
-import {
-  actionsForSurface,
-  type ActionContext,
-} from "./registry/actionRegistry";
-import { pickRerunTargetKey } from "./rerunTarget";
+import { useTopbarActions } from "./useTopbarActions";
 import { rootToSlug } from "./projectSlug";
 import { CreateProjectModal } from "../launcher/CreateProjectModal";
 import { listRecents, touchRecent } from "../launcher/recents";
@@ -135,7 +130,7 @@ export function ProjectSwitcher({ projectRoot }: { projectRoot: string }) {
             padding: 6,
             minWidth: 260,
             boxShadow:
-              "0 16px 40px rgba(0,0,0,0.75), 0 0 0 1px var(--separator)",
+              "var(--shadow-pop), 0 0 0 1px var(--separator)",
             zIndex: 1000,
           }}
         >
@@ -233,36 +228,7 @@ export function WorkbenchTopbar({
   onViewChange?: () => void;
 }) {
   const { state, dispatch } = useWorkbench();
-  const { model } = useLineage();
-
-  // Topbar action slot (plan §15). Driven by actionRegistry filtered by
-  // surface="topbar". These actions are analysis-level, so the context node
-  // is the primary MODEL node (its drawer hosts the editable rerun panel) —
-  // not whatever happens to be selected. v1.6.6 ③: this makes "Rerun" a
-  // meaningful "re-run this analysis" shortcut that opens the model's rerun
-  // panel from any view, instead of no-op'ing on the current selection.
-  const targetKey = pickRerunTargetKey(model, state.selectedKey);
-  const ctxNode =
-    model.nodes.find((n) => n.nodeKey === targetKey) ?? model.nodes[0];
-  const actionCtx: ActionContext | null = ctxNode
-    ? {
-        node: ctxNode,
-        model,
-        selectedKey: state.selectedKey,
-        focusKey: state.focusKey,
-        pinned: state.pinned,
-        dispatch: {
-          openDetail: dispatch.selectByCanvasClick,
-          pinTab: dispatch.selectByCanvasClick,
-          pinUpstream: dispatch.pinFocus,
-          // F1: focus-only (see ContextMenu) — don't move selection.
-          focusUpstream: dispatch.setFocusOnly,
-        },
-      }
-    : null;
-  const topbarActions = actionCtx
-    ? actionsForSurface("topbar", actionCtx)
-    : [];
+  const { actionCtx, actions: topbarActions } = useTopbarActions();
 
   return (
     <div
@@ -275,8 +241,8 @@ export function WorkbenchTopbar({
         gap: 16,
         padding: "0 16px",
         height: 40,
-        borderBottom: "1px solid var(--separator, #2e2e30)",
-        background: "var(--surface-elevated, transparent)",
+        borderBottom: "1px solid var(--separator)",
+        background: "var(--bg-card, transparent)",
       }}
     >
       <div
@@ -366,8 +332,8 @@ function ViewTabButton({
       style={{
         padding: "8px 12px",
         border: 0,
-        background: active ? "var(--tint-bg, rgba(10,132,255,0.12))" : "transparent",
-        color: active ? "var(--tint, #0a84ff)" : "var(--label-secondary)",
+        background: active ? "var(--tint-bg)" : "transparent",
+        color: active ? "var(--tint)" : "var(--label-secondary)",
         cursor: "pointer",
         fontSize: 13,
         fontWeight: active ? 600 : 400,

@@ -259,6 +259,21 @@ describe("§7 row: Search hover (not committed)", () => {
 });
 
 describe("View / panel / search dispatch", () => {
+  it("preserves an explicitly selected node when leaving Report in the same action", () => {
+    renderAt("/?tabs=n1,n2&active=n2&focus=n2");
+    act(() => dispatch().setView("report"));
+    act(() => {
+      dispatch().selectByCanvasClick("dataset");
+      dispatch().setView("graph");
+    });
+    expect(state().activeTabId).toBe("dataset");
+    expect(state().selectedKey).toBe("dataset");
+    expect(state().focusKey).toBe("dataset");
+    expect(state().tabs.map((tab) => tab.id)).toEqual([
+      "n1", "n2", REPORT_REVIEW_TAB_ID, "dataset",
+    ]);
+  });
+
   it("enters Report by activating the system tab without changing node selection", () => {
     renderAt("/?tabs=n1,n2&active=n2&focus=n2");
 

@@ -168,6 +168,44 @@ def _post_values(payload):
     return values
 
 
+def _export_covariance(executed, packet, form, kernel, layout, *, request_summary=None):
+    from ..contracts.model.execution_profile import family_takes_covariance
+
+    summary = request_summary or {}
+    # Generic rerun transport fills in "robust" even for a family that has no
+    # covariance selector. The sealed request summary and explicit form must
+    # independently prove it was inapplicable; never override a real request.
+    transport_default_only = (
+        bool(kernel.get("model_type"))
+        and not family_takes_covariance(kernel["model_type"])
+        and summary.get("model_type") == kernel["model_type"]
+        and summary.get("covariance_applies") is False
+        and summary.get("covariance_explicit") is False
+        and summary.get("covariance") is None
+        and not form.get("covariance")
+        and not packet.get("covariance")
+        and executed.get("covariance") == "robust"
+    )
+    if transport_default_only:
+        executed = {**executed, "covariance": None}
+    covariance = executed.get("covariance") or packet.get('covariance') or form.get('covariance') or None
+    if covariance is None:
+        if kernel["covariance_estimator"] in {"nonrobust", "unadjusted"}:
+            covariance = "unadjusted"
+        elif layout.intrinsic_covariance and kernel["covariance_estimator"] == layout.intrinsic_covariance:
+            covariance = layout.intrinsic_covariance
+        elif kernel['covariance_estimator'] is not None:
+            refuse("Executed covariance cannot be proved from the owner record")
+    labels = {'unadjusted': {'nonrobust','unadjusted'}, 'robust': {'robust','HC1'},
+              'clustered': {'cluster','clustered'}, 'hac': {'HAC'}}
+    if layout.intrinsic_covariance:
+        labels[layout.intrinsic_covariance] = {layout.intrinsic_covariance}
+    if not isinstance(packet.get('survey_design'), dict) and covariance is not None:
+        if kernel['covariance_estimator'] not in labels.get(covariance, set()):
+            refuse("Executed covariance input disagrees with its actual inference kernel")
+    return covariance
+
+
 class _Builder:
     def __init__(self, project, run_id):
         self.project = Path(project).resolve()
@@ -500,17 +538,8 @@ class _Builder:
                     rel_tol=16*math.ulp(1.0),abs_tol=0.0):
                 refuse('Model standard error and inference kernel disagree')
         evidence = packet.get('covariance_evidence') or {}
-        covariance = executed.get("covariance") or packet.get('covariance') or form.get('covariance') or None
-        if covariance is None:
-            if kernel["covariance_estimator"] in {"nonrobust", "unadjusted"}:
-                covariance = "unadjusted"
-            elif kernel['covariance_estimator'] is not None:
-                refuse("Executed covariance cannot be proved from the owner record")
-        labels = {'unadjusted': {'nonrobust','unadjusted'}, 'robust': {'robust','HC1'},
-                  'clustered': {'cluster','clustered'}, 'hac': {'HAC'}}
-        if not isinstance(packet.get('survey_design'), dict) and covariance is not None:
-            if kernel['covariance_estimator'] not in labels.get(covariance, set()):
-                refuse("Executed covariance input disagrees with its actual inference kernel")
+        covariance = _export_covariance(executed, packet, form, kernel, layout,
+            request_summary=inputs.get("contract_summary"))
         cluster = options.get('cluster') or executed.get('entity_col') or form.get('entity_col') or None
         if covariance == 'clustered' and evidence:
             if (evidence.get('cluster_variable') != cluster or evidence.get('cluster_count') != kernel['n_clusters']

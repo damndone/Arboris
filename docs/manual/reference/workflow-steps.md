@@ -13,8 +13,8 @@ Run the frozen categorical statistical operation through its typed, bounded adap
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `categorical.mcnemar`
 
@@ -23,8 +23,8 @@ Run the frozen categorical statistical operation through its typed, bounded adap
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `data.aggregate`
 
@@ -169,8 +169,8 @@ Run the frozen model_diagnostics statistical operation through its typed, bounde
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `diagnostics.breusch_pagan`
 
@@ -179,8 +179,8 @@ Run the frozen model_diagnostics statistical operation through its typed, bounde
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `diagnostics.influence`
 
@@ -189,8 +189,8 @@ Run the frozen model_diagnostics statistical operation through its typed, bounde
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `diagnostics.reset`
 
@@ -199,8 +199,8 @@ Run the frozen model_diagnostics statistical operation through its typed, bounde
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `diagnostics.vif`
 
@@ -209,8 +209,8 @@ Run the frozen model_diagnostics statistical operation through its typed, bounde
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `diagnostics.white`
 
@@ -219,8 +219,8 @@ Run the frozen model_diagnostics statistical operation through its typed, bounde
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `glm.beta`
 
@@ -229,8 +229,8 @@ Run the frozen glm_extensions statistical operation through its typed, bounded a
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `glm.hurdle_negative_binomial`
 
@@ -239,8 +239,8 @@ Run the frozen glm_extensions statistical operation through its typed, bounded a
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `glm.hurdle_poisson`
 
@@ -249,8 +249,8 @@ Run the frozen glm_extensions statistical operation through its typed, bounded a
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `glm.zero_inflated_negative_binomial`
 
@@ -259,8 +259,8 @@ Run the frozen glm_extensions statistical operation through its typed, bounded a
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `glm.zero_inflated_poisson`
 
@@ -269,8 +269,8 @@ Run the frozen glm_extensions statistical operation through its typed, bounded a
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `imputation.mice`
 
@@ -278,9 +278,9 @@ Multiple Imputation by Chained Equations. Recommended when more than 5-10% of ro
 
 | Field | Required | Meaning |
 |---|---|---|
-| `input_mode` | yes | The typed adapter input mode; only frame is executable. |
-| `column_bindings` | yes | Server-owned source-column bindings for the selected adapter. |
-| `options` | yes | Adapter-owned typed options. Code, formulas, paths, and callbacks are refused. |
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
 
 ## `iv.gmm`
 
@@ -289,8 +289,8 @@ Run the frozen iv_gmm statistical operation through its typed, bounded adapter.
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `iv.weak_instruments`
 
@@ -299,8 +299,8 @@ Run the frozen iv_gmm statistical operation through its typed, bounded adapter.
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `matching.att`
 
@@ -309,8 +309,8 @@ Run the frozen matching statistical operation through its typed, bounded adapter
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `matching.balance`
 
@@ -319,8 +319,8 @@ Run the frozen matching statistical operation through its typed, bounded adapter
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `meta.combine`
 
@@ -329,8 +329,8 @@ Run the frozen meta_analysis statistical operation through its typed, bounded ad
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `meta.effect_size`
 
@@ -339,8 +339,8 @@ Run the frozen meta_analysis statistical operation through its typed, bounded ad
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `missing_data.rubin_pool`
 
@@ -349,8 +349,8 @@ Run the frozen missing_data statistical operation through its typed, bounded ada
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `missingness.profile`
 
@@ -359,8 +359,8 @@ Run the frozen missing_data statistical operation through its typed, bounded ada
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `model.auto`
 
@@ -368,9 +368,9 @@ Pick the best model automatically based on y type.
 
 | Field | Required | Meaning |
 |---|---|---|
-| `input_mode` | yes | The typed adapter input mode; only frame is executable. |
-| `column_bindings` | yes | Server-owned source-column bindings for the selected adapter. |
-| `options` | yes | Adapter-owned typed options. Code, formulas, paths, and callbacks are refused. |
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
 
 ## `model.custom`
 
@@ -448,9 +448,9 @@ Execute time_series.arma_garch through its registered model pack.
 
 | Field | Required | Meaning |
 |---|---|---|
-| `input_mode` | yes | The typed adapter input mode; only frame is executable. |
-| `column_bindings` | yes | Server-owned source-column bindings for the selected adapter. |
-| `options` | yes | Adapter-owned typed options. Code, formulas, paths, and callbacks are refused. |
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
 
 ## `model.time_series.ets`
 
@@ -458,9 +458,9 @@ Execute time_series.ets through its registered model pack.
 
 | Field | Required | Meaning |
 |---|---|---|
-| `input_mode` | yes | The typed adapter input mode; only frame is executable. |
-| `column_bindings` | yes | Server-owned source-column bindings for the selected adapter. |
-| `options` | yes | Adapter-owned typed options. Code, formulas, paths, and callbacks are refused. |
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
 
 ## `model.white_test`
 
@@ -477,8 +477,8 @@ Run the frozen multiple_comparisons statistical operation through its typed, bou
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `multiple_comparisons.scheffe`
 
@@ -487,8 +487,8 @@ Run the frozen multiple_comparisons statistical operation through its typed, bou
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `multivariate.clustering`
 
@@ -497,8 +497,8 @@ Run the frozen multivariate statistical operation through its typed, bounded ada
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `multivariate.correspondence`
 
@@ -507,8 +507,8 @@ Run the frozen multivariate statistical operation through its typed, bounded ada
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `multivariate.cronbach_alpha`
 
@@ -517,8 +517,8 @@ Run the frozen multivariate statistical operation through its typed, bounded ada
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `multivariate.discriminant`
 
@@ -527,8 +527,8 @@ Run the frozen multivariate statistical operation through its typed, bounded ada
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `multivariate.efa`
 
@@ -537,8 +537,8 @@ Run the frozen multivariate statistical operation through its typed, bounded ada
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `multivariate.manova`
 
@@ -547,8 +547,8 @@ Run the frozen multivariate statistical operation through its typed, bounded ada
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `multivariate.mca`
 
@@ -557,8 +557,8 @@ Run the frozen multivariate statistical operation through its typed, bounded ada
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `multivariate.pca`
 
@@ -567,8 +567,8 @@ Run the frozen multivariate statistical operation through its typed, bounded ada
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `nonparametric.friedman`
 
@@ -577,8 +577,8 @@ Run the frozen nonparametric statistical operation through its typed, bounded ad
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `nonparametric.kendall`
 
@@ -587,8 +587,8 @@ Run the frozen nonparametric statistical operation through its typed, bounded ad
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `nonparametric.kruskal_wallis`
 
@@ -597,8 +597,8 @@ Run the frozen nonparametric statistical operation through its typed, bounded ad
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `nonparametric.mann_whitney`
 
@@ -607,8 +607,8 @@ Run the frozen nonparametric statistical operation through its typed, bounded ad
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `nonparametric.robust_summary`
 
@@ -617,8 +617,8 @@ Run the frozen nonparametric statistical operation through its typed, bounded ad
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `nonparametric.spearman`
 
@@ -627,8 +627,8 @@ Run the frozen nonparametric statistical operation through its typed, bounded ad
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `nonparametric.wilcoxon_signed_rank`
 
@@ -637,8 +637,8 @@ Run the frozen nonparametric statistical operation through its typed, bounded ad
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `postestimation.lincom`
 
@@ -703,8 +703,8 @@ Run the frozen power_analysis statistical operation through its typed, bounded a
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `power_analysis.solve`
 
@@ -713,8 +713,8 @@ Run the frozen power_analysis statistical operation through its typed, bounded a
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `prediction.prediction_lasso`
 
@@ -722,9 +722,9 @@ L1-regularized linear prediction. Execute the bounded out-of-sample prediction p
 
 | Field | Required | Meaning |
 |---|---|---|
-| `input_mode` | yes | The typed adapter input mode; only frame is executable. |
-| `column_bindings` | yes | Server-owned source-column bindings for the selected adapter. |
-| `options` | yes | Adapter-owned typed options. Code, formulas, paths, and callbacks are refused. |
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
 
 ## `prediction.prediction_random_forest`
 
@@ -732,9 +732,9 @@ Tree-ensemble prediction. Execute the bounded out-of-sample prediction protocol.
 
 | Field | Required | Meaning |
 |---|---|---|
-| `input_mode` | yes | The typed adapter input mode; only frame is executable. |
-| `column_bindings` | yes | Server-owned source-column bindings for the selected adapter. |
-| `options` | yes | Adapter-owned typed options. Code, formulas, paths, and callbacks are refused. |
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
 
 ## `prediction.prediction_ridge`
 
@@ -742,9 +742,9 @@ L2-regularized linear prediction. Execute the bounded out-of-sample prediction p
 
 | Field | Required | Meaning |
 |---|---|---|
-| `input_mode` | yes | The typed adapter input mode; only frame is executable. |
-| `column_bindings` | yes | Server-owned source-column bindings for the selected adapter. |
-| `options` | yes | Adapter-owned typed options. Code, formulas, paths, and callbacks are refused. |
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
 
 ## `repeated_measures_anova.mixed_design`
 
@@ -753,8 +753,8 @@ Run the frozen repeated_measures_anova statistical operation through its typed, 
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `repeated_measures_anova.repeated_only`
 
@@ -763,8 +763,8 @@ Run the frozen repeated_measures_anova statistical operation through its typed, 
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `report.compose`
 
@@ -784,9 +784,9 @@ Resample prediction-training data with Oversample.
 
 | Field | Required | Meaning |
 |---|---|---|
-| `input_mode` | yes | The typed adapter input mode; only frame is executable. |
-| `column_bindings` | yes | Server-owned source-column bindings for the selected adapter. |
-| `options` | yes | Adapter-owned typed options. Code, formulas, paths, and callbacks are refused. |
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
 
 ## `resample.smote`
 
@@ -794,9 +794,9 @@ Resample prediction-training data with SMOTE.
 
 | Field | Required | Meaning |
 |---|---|---|
-| `input_mode` | yes | The typed adapter input mode; only frame is executable. |
-| `column_bindings` | yes | Server-owned source-column bindings for the selected adapter. |
-| `options` | yes | Adapter-owned typed options. Code, formulas, paths, and callbacks are refused. |
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
 
 ## `resample.undersample`
 
@@ -804,9 +804,9 @@ Resample prediction-training data with Undersample.
 
 | Field | Required | Meaning |
 |---|---|---|
-| `input_mode` | yes | The typed adapter input mode; only frame is executable. |
-| `column_bindings` | yes | Server-owned source-column bindings for the selected adapter. |
-| `options` | yes | Adapter-owned typed options. Code, formulas, paths, and callbacks are refused. |
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
 
 ## `resampling.bootstrap`
 
@@ -815,8 +815,8 @@ Run the frozen resampling statistical operation through its typed, bounded adapt
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `resampling.permutation`
 
@@ -825,8 +825,8 @@ Run the frozen resampling statistical operation through its typed, bounded adapt
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `roc.calibration`
 
@@ -835,8 +835,8 @@ Run the frozen roc_diagnostics statistical operation through its typed, bounded 
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `roc.curve`
 
@@ -845,8 +845,8 @@ Run the frozen roc_diagnostics statistical operation through its typed, bounded 
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `spatial.geary_c`
 
@@ -855,8 +855,8 @@ Run the frozen spatial_statistics statistical operation through its typed, bound
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `spatial.getis_ord_g`
 
@@ -865,8 +865,8 @@ Run the frozen spatial_statistics statistical operation through its typed, bound
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `spatial.moran_i`
 
@@ -875,8 +875,8 @@ Run the frozen spatial_statistics statistical operation through its typed, bound
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `statistical.derive_boolean`
 
@@ -927,8 +927,8 @@ Run the frozen survival_analysis statistical operation through its typed, bounde
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `survival.log_rank`
 
@@ -937,8 +937,8 @@ Run the frozen survival_analysis statistical operation through its typed, bounde
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `survival.rmst`
 
@@ -947,8 +947,8 @@ Run the frozen survival_analysis statistical operation through its typed, bounde
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `synthetic_control.fit`
 
@@ -957,8 +957,8 @@ Run the frozen synthetic_control statistical operation through its typed, bounde
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `synthetic_control.placebo`
 
@@ -967,8 +967,8 @@ Run the frozen synthetic_control statistical operation through its typed, bounde
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `test.anova`
 
@@ -976,9 +976,9 @@ One-way ANOVA of a numeric outcome across a categorical group with three or more
 
 | Field | Required | Meaning |
 |---|---|---|
-| `input_mode` | yes | The typed adapter input mode; only frame is executable. |
-| `column_bindings` | yes | Server-owned source-column bindings for the selected adapter. |
-| `options` | yes | Adapter-owned typed options. Code, formulas, paths, and callbacks are refused. |
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
 
 ## `test.chi_square`
 
@@ -986,9 +986,9 @@ Chi-square test of independence between two categorical columns.
 
 | Field | Required | Meaning |
 |---|---|---|
-| `input_mode` | yes | The typed adapter input mode; only frame is executable. |
-| `column_bindings` | yes | Server-owned source-column bindings for the selected adapter. |
-| `options` | yes | Adapter-owned typed options. Code, formulas, paths, and callbacks are refused. |
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
 
 ## `test.correlations`
 
@@ -996,9 +996,9 @@ Pearson correlation for every pair of numeric analysis columns.
 
 | Field | Required | Meaning |
 |---|---|---|
-| `input_mode` | yes | The typed adapter input mode; only frame is executable. |
-| `column_bindings` | yes | Server-owned source-column bindings for the selected adapter. |
-| `options` | yes | Adapter-owned typed options. Code, formulas, paths, and callbacks are refused. |
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
 
 ## `test.evidence`
 
@@ -1006,9 +1006,9 @@ Advanced evidence packet: effect sizes, ANOVA post-hoc comparisons, variance tes
 
 | Field | Required | Meaning |
 |---|---|---|
-| `input_mode` | yes | The typed adapter input mode; only frame is executable. |
-| `column_bindings` | yes | Server-owned source-column bindings for the selected adapter. |
-| `options` | yes | Adapter-owned typed options. Code, formulas, paths, and callbacks are refused. |
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
 
 ## `test.fisher_exact`
 
@@ -1016,9 +1016,9 @@ Fisher exact test of independence, for tables too sparse for the chi-square appr
 
 | Field | Required | Meaning |
 |---|---|---|
-| `input_mode` | yes | The typed adapter input mode; only frame is executable. |
-| `column_bindings` | yes | Server-owned source-column bindings for the selected adapter. |
-| `options` | yes | Adapter-owned typed options. Code, formulas, paths, and callbacks are refused. |
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
 
 ## `test.nonparametric`
 
@@ -1026,9 +1026,9 @@ Mann-Whitney U and Kruskal-Wallis rank tests, for group differences without a no
 
 | Field | Required | Meaning |
 |---|---|---|
-| `input_mode` | yes | The typed adapter input mode; only frame is executable. |
-| `column_bindings` | yes | Server-owned source-column bindings for the selected adapter. |
-| `options` | yes | Adapter-owned typed options. Code, formulas, paths, and callbacks are refused. |
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
 
 ## `test.rank_correlations`
 
@@ -1036,9 +1036,9 @@ Spearman and Kendall rank correlation, for monotonic association that is not lin
 
 | Field | Required | Meaning |
 |---|---|---|
-| `input_mode` | yes | The typed adapter input mode; only frame is executable. |
-| `column_bindings` | yes | Server-owned source-column bindings for the selected adapter. |
-| `options` | yes | Adapter-owned typed options. Code, formulas, paths, and callbacks are refused. |
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
 
 ## `test.t_tests`
 
@@ -1046,9 +1046,9 @@ Welch two-sample t-test of a numeric outcome across a binary group.
 
 | Field | Required | Meaning |
 |---|---|---|
-| `input_mode` | yes | The typed adapter input mode; only frame is executable. |
-| `column_bindings` | yes | Server-owned source-column bindings for the selected adapter. |
-| `options` | yes | Adapter-owned typed options. Code, formulas, paths, and callbacks are refused. |
+| `input_mode` | yes | How the data reaches the method; only the whole dataset (frame) runs. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
 
 ## `time_series.acf`
 
@@ -1057,8 +1057,8 @@ Run the frozen time_series statistical operation through its typed, bounded adap
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `time_series.adf`
 
@@ -1067,8 +1067,8 @@ Run the frozen time_series statistical operation through its typed, bounded adap
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `time_series.arima`
 
@@ -1077,8 +1077,8 @@ Run the frozen time_series statistical operation through its typed, bounded adap
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `time_series.cointegration`
 
@@ -1087,8 +1087,8 @@ Run the frozen time_series statistical operation through its typed, bounded adap
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `time_series.granger`
 
@@ -1097,8 +1097,8 @@ Run the frozen time_series statistical operation through its typed, bounded adap
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `time_series.irf`
 
@@ -1107,8 +1107,8 @@ Run the frozen time_series statistical operation through its typed, bounded adap
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `time_series.kpss`
 
@@ -1117,8 +1117,8 @@ Run the frozen time_series statistical operation through its typed, bounded adap
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `time_series.pacf`
 
@@ -1127,8 +1127,8 @@ Run the frozen time_series statistical operation through its typed, bounded adap
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `time_series.var`
 
@@ -1137,8 +1137,8 @@ Run the frozen time_series statistical operation through its typed, bounded adap
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 
 ## `time_series.vecm`
 
@@ -1147,6 +1147,6 @@ Run the frozen time_series statistical operation through its typed, bounded adap
 | Field | Required | Meaning |
 |---|---|---|
 | `input_mode` | yes | Registry-declared adapter input mode; it is not inferred from the data. |
-| `column_bindings` | yes | Server-resolved source column bindings declared by this operation. |
-| `options` | yes | Operation policy and estimator options validated by the frozen pack contract. |
+| `column_bindings` | yes | Which columns of the dataset play which role. |
+| `options` | yes | Settings for this method; each is checked against the method's contract. |
 

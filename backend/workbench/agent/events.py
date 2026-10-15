@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import json
-import os
-import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import RLock
@@ -65,6 +63,10 @@ class AgentEventStream:
         if create:
             self.events_dir.mkdir(parents=True, exist_ok=True)
         self._lock = RLock()
+        # Per log: how far it has been read, its last seq and the ids in it.
+        # Streaming emits one event per token, and re-reading and rewriting the
+        # whole log for each (as before) cost 23 ms per token on a 2 MB log.
+        self._tails: dict[Path, _Tail] = {}
 
     def _path(self, session_id: str) -> Path:
         if not session_id or Path(session_id).name != session_id:
@@ -84,23 +86,73 @@ class AgentEventStream:
             raise ValueError("event_type must not be empty")
         # The file lock serializes emitters in other requests and processes;
         # the instance lock alone would let two of them take the same seq.
-        with self._lock, _exclusive_jsonl_lock(self._path(session_id)):
-            events = self._read(session_id)
+        path = self._path(session_id)
+        with self._lock, _exclusive_jsonl_lock(path):
+            tail = self._tail(path)
             requested_id = event_id or uuid4().hex
-            for event in events:
-                if event.event_id == requested_id:
-                    return event
+            if requested_id in tail.ids:
+                return next(event for event in self._read(session_id) if event.event_id == requested_id)
             event = AgentEvent(
                 event_id=requested_id,
                 session_id=session_id,
-                seq=(events[-1].seq + 1 if events else 1),
+                seq=tail.last_seq + 1,
                 event_type=event_type,
                 payload=dict(payload),
                 command_id=command_id,
                 created_at=_now(),
             )
-            self._atomic_append(self._path(session_id), event.to_dict())
+            line = (json.dumps(event.to_dict(), ensure_ascii=False, sort_keys=True) + "\n").encode("utf-8")
+            # One write of one complete line, under the file lock. A crash can
+            # leave at most a partial last line, which reading skips.
+            with path.open("ab") as handle:
+                handle.write(line)
+            tail.size += len(line)
+            tail.last_seq = event.seq
+            tail.ids.add(event.event_id)
             return event
+
+    def _tail(self, path: Path) -> "_Tail":
+        """The log's end state, reading only what was appended since last time."""
+
+        size = path.stat().st_size if path.exists() else 0
+        cached = self._tails.get(path)
+        if cached is not None and cached.size == size:
+            return cached
+        if cached is None or cached.size > size:
+            cached = _Tail()
+        chunk = b""
+        if size:
+            with path.open("rb") as handle:
+                handle.seek(cached.size)
+                chunk = handle.read(size - cached.size)
+        # Only complete lines move the read position forward.
+        complete = chunk[: chunk.rfind(b"\n") + 1]
+        for raw in complete.splitlines():
+            if not raw.strip():
+                continue
+            try:
+                value = json.loads(raw)
+            except json.JSONDecodeError:
+                continue  # a line cut short by an interrupted write, since repaired
+            cached.last_seq = max(cached.last_seq, int(value["seq"]))
+            cached.ids.add(str(value["event_id"]))
+        cached.size += len(complete)
+        if cached.size != size:
+            # A partial last line from an interrupted write: the next append
+            # starts on a fresh line so both stay readable.
+            with path.open("ab") as handle:
+                handle.write(b"\n")
+            cached.size = size + 1
+        self._tails[path] = cached
+        return cached
+
+    def delete(self, session_id: str) -> None:
+        """Remove a deleted conversation's event log."""
+
+        path = self._path(session_id)
+        with self._lock, _exclusive_jsonl_lock(path):
+            path.unlink(missing_ok=True)
+            self._tails.pop(path, None)
 
     def replay(self, session_id: str, *, after_seq: int = 0) -> list[AgentEvent]:
         with self._lock:
@@ -112,16 +164,18 @@ class AgentEventStream:
             return []
         events: list[AgentEvent] = []
         for line in path.read_text(encoding="utf-8").splitlines():
-            if line.strip():
+            if not line.strip():
+                continue
+            try:
                 events.append(AgentEvent.from_dict(json.loads(line)))
+            except json.JSONDecodeError:
+                continue  # a line cut short by an interrupted write
         return events
 
-    @staticmethod
-    def _atomic_append(path: Path, value: dict[str, Any]) -> None:
-        existing = path.read_bytes() if path.exists() else b""
-        line = (json.dumps(value, ensure_ascii=False, sort_keys=True) + "\n").encode("utf-8")
-        with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as handle:
-            temp_path = Path(handle.name)
-            handle.write(existing)
-            handle.write(line)
-        os.replace(temp_path, path)
+
+@dataclass
+class _Tail:
+    size: int = 0
+    last_seq: int = 0
+    ids: set[str] = field(default_factory=set)
+

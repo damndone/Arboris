@@ -128,12 +128,12 @@ interface BadgeDescriptor {
 // never consulted for them (their style/appearance stays byte-for-byte).
 const LIFECYCLE_STYLE: Record<string, { border: string; opacity: number; glow?: string }> = {
   draft: { border: "2px dashed var(--label-tertiary)", opacity: 0.75 },
-  validating: { border: "2px dashed #c98a3a", opacity: 0.9 },
-  valid: { border: "2px solid #3a9ac9", opacity: 1 },
-  invalid: { border: "2px solid #b03a3a", opacity: 1 },
-  pending: { border: "2px solid #c9a03a", opacity: 1, glow: "0 0 14px rgba(201,160,58,.55)" },
-  executed: { border: "2px solid #1f6f43", opacity: 1 },
-  failed: { border: "2px solid #b03a3a", opacity: 1 },
+  validating: { border: "2px dashed var(--status-caution-fg)", opacity: 0.9 },
+  valid: { border: "2px solid var(--tint)", opacity: 1 },
+  invalid: { border: "2px solid var(--status-fails-fg)", opacity: 1 },
+  pending: { border: "2px solid var(--highlight)", opacity: 1, glow: "0 0 14px var(--highlight-glow)" },
+  executed: { border: "2px solid var(--status-holds-fg)", opacity: 1 },
+  failed: { border: "2px solid var(--status-fails-fg)", opacity: 1 },
 };
 
 function badgeFor(node: GraphViewNode): BadgeDescriptor | null {
@@ -248,7 +248,7 @@ export function GraphNode({ data }: GraphNodeProps) {
       <div className="ln-graph-node__bar" />
       <div className="ln-graph-node__body">
         <div className="ln-graph-node__row1">
-          <span className="ln-graph-node__kind">{node.kind}</span>
+          <span className="ln-graph-node__kind">{node.kind.replace(/_/g, " ")}</span>
           {role && (
             <span
               className="ln-graph-node__role-badge"

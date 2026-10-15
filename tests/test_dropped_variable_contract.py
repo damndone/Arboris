@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from pathlib import Path
 
 import pandas as pd
@@ -33,3 +35,20 @@ def test_missing_structured_did_covariate_is_still_reported_as_dropped(tmp_path:
         model_declared_variables=set(),
     )
     assert dropped[0]["reason"] == "perfect_collinearity"
+
+
+@pytest.mark.parametrize("column", ["region", "o'brien", 'say "hi"', "back\\slash", "both'\"quotes"])
+def test_a_categorical_column_is_found_whatever_its_name_quotes(tmp_path, column):
+    """The term is the estimator's own quoting (formula_terms.quote_column), so
+    a categorical whose name needs escaping is not reported as dropped."""
+    import pandas as pd
+
+    from workbench.formula_terms import quote_column
+    from workbench.orchestrator._column_checks import _check_dropped_variables
+
+    frame = pd.DataFrame({column: ["a", "b", "a", "b"], "y": [1.0, 2.0, 3.0, 4.0]})
+    coefficients = {"Intercept": {}, f"C({quote_column(column)})[T.b]": {}}
+    dropped = _check_dropped_variables(
+        [column], [("ols_1", {"coefficients": coefficients})], frame, [], tmp_path, categorical_vars={column},
+    )
+    assert dropped == []

@@ -9,6 +9,7 @@
 import {
   CandidateTable,
   numberText,
+  pValueText,
   object,
   rows,
   text,
@@ -182,11 +183,11 @@ export function ArmaGarchDashboard({ artifacts, charts }: Props) {
         <dl className="summary-list">
           <div>
             <dt>Normality p-value</dt>
-            <dd>{numberText(object(artifacts.diagnostics?.normality).p_value)}</dd>
+            <dd>{pValueText(object(artifacts.diagnostics?.normality).p_value)}</dd>
           </div>
           <div>
             <dt>ARCH-LM p-value</dt>
-            <dd>{numberText(object(artifacts.diagnostics?.arch_lm).p_value)}</dd>
+            <dd>{pValueText(object(artifacts.diagnostics?.arch_lm).p_value)}</dd>
           </div>
           <div>
             <dt>Warnings</dt>

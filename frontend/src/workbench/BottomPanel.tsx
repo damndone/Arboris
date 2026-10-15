@@ -121,7 +121,7 @@ export function BottomPanel({ runId, projectRoot }: BottomPanelProps) {
       data-testid="bottom-panel"
       data-open={open ? "true" : "false"}
       style={{
-        borderTop: "1px solid var(--separator, #2e2e30)",
+        borderTop: "1px solid var(--separator)",
         display: "flex",
         flexDirection: "column",
         flex: "0 0 auto",
@@ -196,12 +196,12 @@ export function BottomPanel({ runId, projectRoot }: BottomPanelProps) {
                       padding: "0 12px",
                       border: 0,
                       background: isActive
-                        ? "var(--tint-bg, rgba(10,132,255,0.12))"
+                        ? "var(--tint-bg)"
                         : "transparent",
                       color: disabled
                         ? "var(--label-tertiary)"
                         : isActive
-                          ? "var(--tint, #0a84ff)"
+                          ? "var(--tint)"
                           : "var(--label-secondary)",
                       cursor: disabled ? "help" : "pointer",
                       fontSize: 12,

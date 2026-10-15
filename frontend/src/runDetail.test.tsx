@@ -1,7 +1,7 @@
 // frontend/src/runDetail.test.tsx
 //
 // Integration smoke for the T5.7 swap: confirms that the lineage tab on
-// /runs/:runId now mounts LineageRouteContainer (which exposes
+// /runs/:runId now mounts WorkbenchRouteContainer (which exposes
 // data-testid="graph-workbench" via the V1.5.0 GraphWorkbench).
 //
 // Wraps RunDetailRoute in a MemoryRouter with a stub Outlet context so we
@@ -30,6 +30,8 @@ let fetchMock: ReturnType<typeof vi.fn<typeof fetch>>;
 const originalFetch = globalThis.fetch;
 
 beforeEach(() => {
+  // Explicitly exercise the retained classic graph shell.
+  localStorage.setItem("workbench:workspace", "classic");
   fetchMock = vi.fn<typeof fetch>();
   vi.stubGlobal("fetch", fetchMock);
 });
@@ -89,7 +91,7 @@ function renderAt(path: string) {
 }
 
 describe("RunDetailRoute — T5.7 swap smoke", () => {
-  it("?tab=lineage mounts LineageRouteContainer (data-testid graph-workbench)", async () => {
+  it("?tab=lineage mounts WorkbenchRouteContainer (data-testid graph-workbench)", async () => {
     // First fetch: run detail (consumed by RunResultView — but it's hidden
     // when tab=lineage, so this fetch never actually fires). Mock it
     // anyway in case the implementation re-orders.

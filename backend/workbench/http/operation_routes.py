@@ -59,23 +59,27 @@ class ManualOperationRequest(BaseModel):
         return self
 
 # Bind existing route declarations, never duplicate their parameter tables.
-# Tuple: identity, route module, path, confirmation path, target requirements.
+# Tuple: identity, route module, path, confirmation path, target requirements,
+# surface. The surface is where a person operates it in the workbench:
+# "graph" (the step's own detail), "data", "table", "notebook",
+# "new_analysis" (the new-analysis wizard), "analyze" (the manual operation
+# builder) or "agent" (a proposal confirmed in the Agent).
 _DEDICATED = (
     ("model.custom", "notebook_routes", "/notebooks/{notebook_id}/options/{option_id}/confirm-and-execute", None,
-     ("notebook_option", "admitted_capability_binding", "trusted_execution_gateway")),
-    ("graph.fork", "agent_routes", "/agent/fork-proposals", "/agent/sessions/{session_id}/proposals/{proposal_id}/confirm", ("graph_node",)),
-    ("operation.multi_step", "operation_routes", "/operations/run", "/operations/run", ("dataset_or_model_or_upload",)),
-    ("data.column.cast", "data_operation_routes", "/data-operations/column-cast/preview", "/data-operations/column-cast/confirm", ("dataset_node",)),
-    ("data.columns.cast", "data_operation_routes", "/data-operations/columns-cast/preview", "/data-operations/columns-cast/confirm", ("dataset_node",)),
-    ("code.execute", "data_operation_routes", "/data-operations/code-execute/preview", "/data-operations/code-execute/confirm", ("dataset_node", "risk_authorization")),
-    ("model.rerun", "rerun_routes", "/runs/{run_id}/rerun", None, ("run", "editable_node",)),
-    ("metadata.edit", "rerun_routes", "/runs/{run_id}/rerun", None, ("run", "editable_node",)),
-    ("data.import", "projects_routes", "/uploads", None, ("project",)),
-    ("model.draft", "drafts_routes", "/pipeline-drafts/genesis", None, ("verified_upload",)),
-    ("model.compare", "graph_routes", "/compare-nodes", None, ("model_nodes",)),
-    ("table.export", "runs_routes", "/runs/{run_id}/report/result-table-export", None, ("run",)),
-    ("data.export", "runs_routes", "/runs/{run_id}/datasets/export/preview", "/runs/{run_id}/datasets/export", ("dataset_node",)),
-    ("script.export", "script_export_routes", "/runs/{run_id}/script-export", None, ("run",)),
+     ("notebook_option", "admitted_capability_binding", "trusted_execution_gateway"), "notebook"),
+    ("graph.fork", "agent_routes", "/agent/fork-proposals", "/agent/sessions/{session_id}/proposals/{proposal_id}/confirm", ("graph_node",), "agent"),
+    ("operation.multi_step", "operation_routes", "/operations/run", "/operations/run", ("dataset_or_model_or_upload",), "analyze"),
+    ("data.column.cast", "data_operation_routes", "/data-operations/column-cast/preview", "/data-operations/column-cast/confirm", ("dataset_node",), "graph"),
+    ("data.columns.cast", "data_operation_routes", "/data-operations/columns-cast/preview", "/data-operations/columns-cast/confirm", ("dataset_node",), "graph"),
+    ("code.execute", "data_operation_routes", "/data-operations/code-execute/preview", "/data-operations/code-execute/confirm", ("dataset_node", "risk_authorization"), "graph"),
+    ("model.rerun", "rerun_routes", "/runs/{run_id}/rerun", None, ("run", "editable_node",), "graph"),
+    ("metadata.edit", "rerun_routes", "/runs/{run_id}/rerun", None, ("run", "editable_node",), "data"),
+    ("data.import", "projects_routes", "/uploads", None, ("project",), "new_analysis"),
+    ("model.draft", "drafts_routes", "/pipeline-drafts/genesis", None, ("verified_upload",), "new_analysis"),
+    ("model.compare", "graph_routes", "/compare-nodes", None, ("model_nodes",), "graph"),
+    ("table.export", "runs_routes", "/runs/{run_id}/report/result-table-export", None, ("run",), "table"),
+    ("data.export", "runs_routes", "/runs/{run_id}/datasets/export/preview", "/runs/{run_id}/datasets/export", ("dataset_node",), "data"),
+    ("script.export", "script_export_routes", "/runs/{run_id}/script-export", None, ("run",), "graph"),
 )
 
 
@@ -92,7 +96,7 @@ def _local_refs(value: Any) -> Any:
 @lru_cache(maxsize=1)
 def _dedicated_operations() -> tuple[dict[str, Any], ...]:
     declarations = []
-    for identity, module_name, path, confirmation_path, targets in _DEDICATED:
+    for identity, module_name, path, confirmation_path, targets, surface in _DEDICATED:
         module = import_module(f"workbench.http.{module_name}")
         route = next(item for item in module.router.routes if item.path == path and "POST" in item.methods)
         document = get_openapi(title="Operation", version="1", routes=[route])
@@ -108,7 +112,7 @@ def _dedicated_operations() -> tuple[dict[str, Any], ...]:
                 required.append(key)
         schema = {"type": "object", "properties": properties, "required": required,
                   "$defs": _local_refs(document.get("components", {}).get("schemas", {}))}
-        execution = {"kind": "dedicated", "method": "POST", "path": path, "request_schema": schema}
+        execution = {"kind": "dedicated", "method": "POST", "path": path, "request_schema": schema, "surface": surface}
         if confirmation_path:
             execution["confirmation_path"] = confirmation_path
         declarations.append({"id": identity, "name": operation.get("summary", identity),

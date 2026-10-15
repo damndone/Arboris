@@ -6,8 +6,10 @@ Faithful Python port of R ``HonestDiD 0.2.8``. The committed R oracles under
 from __future__ import annotations
 
 import numpy as np
-from scipy.optimize import brentq, linprog, minimize
+from scipy.optimize import brentq, minimize
 from scipy.stats import norm, truncnorm
+
+from .highs_lp import linprog_highs
 
 
 class HonestDiDError(ValueError):
@@ -200,9 +202,7 @@ def _test_delta_lp(y_T: np.ndarray, X_T: np.ndarray, sigma: np.ndarray) -> dict:
     f = np.concatenate([[1.0], np.zeros(dim_delta)])
     C = -np.hstack([sd_vec.reshape(-1, 1), X_T])  # C x <= b
     b = -y_T
-    res = linprog(
-        f, A_ub=C, b_ub=b, bounds=[(None, None)] * (dim_delta + 1), method="highs"
-    )
+    res = linprog_highs(f, A_ub=C, b_ub=b, bounds=[(None, None)] * (dim_delta + 1))
     if not res.success or res.x is None:
         return {"eta_star": np.inf, "delta_star": None, "lambda": None, "error_flag": 1}
     eta = float(res.fun)
@@ -326,9 +326,7 @@ def _max_program(*, s_T, gamma_tilde, sigma, W_T, c):
     Aeq = W_T.T  # rows = ncol(W_T), cols = len(x)
     beq = np.zeros(Aeq.shape[0])
     beq[0] = 1.0
-    res = linprog(
-        c=-f, A_eq=Aeq, b_eq=beq, bounds=(0, None), method="highs"
-    )
+    res = linprog_highs(-f, A_eq=Aeq, b_eq=beq, bounds=(0, None))
     if not res.success or res.x is None:
         return {"solution": None, "optimum": np.inf, "success": False}
     return {"solution": np.asarray(res.x, dtype=float), "optimum": float(res.fun), "success": True}

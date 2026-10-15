@@ -2,12 +2,13 @@ import { render, screen } from "@testing-library/react";
 import { it, expect } from "vitest";
 import { ModelNodeBadge, runShort, hashShort } from "./ModelNodeBadge";
 
-it("shows run short id, hash short, and source/rerun", () => {
+it("shows readable time and keeps exact identity in collapsed Source", () => {
   render(
     <ModelNodeBadge runId="20260630_021506_881210_d5cbd8a7" nodeHash="bb21bce…" role="source" />,
   );
-  expect(screen.getByText(/021506/)).toBeInTheDocument();
-  expect(screen.getByText(/bb21b/)).toBeInTheDocument();
+  expect(screen.getByText("02:15:06")).toBeVisible();
+  expect(screen.getByText(/bb21b/)).not.toBeVisible();
+  expect(screen.getByText("Source")).toBeVisible();
   expect(screen.getByText(/source/)).toBeInTheDocument();
 });
 

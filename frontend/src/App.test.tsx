@@ -66,6 +66,8 @@ beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn());
   try {
     localStorage.clear();
+    // This suite retains the classic-shell compatibility contract.
+    localStorage.setItem("workbench:workspace", "classic");
   } catch {
     // ignore
   }
@@ -960,37 +962,14 @@ test("project navigation places a Settings gear immediately before the theme con
   expect(await screen.findByTestId("llm-provider-manager")).toBeInTheDocument();
 });
 
-import { validatePanelPrediction } from "./App";
-
-describe("validatePanelPrediction", () => {
-  it("flags entity == time", () => {
-    expect(validatePanelPrediction({
-      modelType: "panel_ols", entity: "firm", time: "firm",
-      isPanelData: true, predictionEnabled: false, predictionModelType: "",
-    })).toMatch(/same column|entity.*time/i);
-  });
-  it("flags prediction enabled without algorithm", () => {
-    expect(validatePanelPrediction({
-      modelType: "auto", entity: "", time: "",
-      isPanelData: false, predictionEnabled: true, predictionModelType: "",
-    })).toMatch(/algorithm/i);
-  });
-  it("flags panel selected, no columns, non-panel data", () => {
-    expect(validatePanelPrediction({
-      modelType: "panel_ols", entity: "", time: "",
-      isPanelData: false, predictionEnabled: false, predictionModelType: "",
-    })).toMatch(/panel/i);
-  });
-  it("passes a valid panel config", () => {
-    expect(validatePanelPrediction({
-      modelType: "panel_ols", entity: "firm", time: "yr",
-      isPanelData: true, predictionEnabled: false, predictionModelType: "",
-    })).toBeNull();
-  });
-  it("passes a non-panel non-prediction config", () => {
-    expect(validatePanelPrediction({
-      modelType: "auto", entity: "", time: "",
-      isPanelData: false, predictionEnabled: false, predictionModelType: "",
-    })).toBeNull();
-  });
+test("an unconfigured project opens the new workspace with the import action", async () => {
+  localStorage.removeItem("workbench:workspace");
+  (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse({
+    schema_version: 2, nodes: {}, edges: [], heads: [], families: [], legacy: false,
+  }));
+  const { rootToSlug } = await import("./workbench/projectSlug");
+  renderAt(`/p/${rootToSlug("/tmp/default-workspace")}/graph`);
+  expect(await screen.findByTestId("workspace-project-start")).toBeInTheDocument();
+  expect(screen.getByTestId("genesis-cta")).toBeInTheDocument();
+  expect(screen.queryByRole("tab", {name: "Workbench"})).not.toBeInTheDocument();
 });

@@ -282,7 +282,7 @@ def test_c1_capability_remains_absent_from_existing_discoverability_surfaces() -
         / "src"
         / "workbench"
         / "agent"
-        / "featureRegistry.ts"
+        / "builtinFeatureViews.ts"  # featureRegistry.ts was unused and removed in v1.9.0
     ).resolve()
     section_registry = (
         Path(__file__).parents[2]

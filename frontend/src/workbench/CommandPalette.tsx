@@ -30,6 +30,7 @@ import {
 import { isEditableTarget } from "./keyboard";
 import { useProjectRootOptional } from "./ProjectRootContext";
 import { rootToSlug } from "./projectSlug";
+import { useAskAgentAboutNode } from "../workspace/agent/askAgent";
 
 export interface CommandPaletteProps {
   projectRoot?: string | null;
@@ -62,6 +63,7 @@ export function CommandPalette({ projectRoot = null }: CommandPaletteProps) {
     [model.nodes, selectedKey],
   );
 
+  const askAgent = useAskAgentAboutNode(dispatch.selectByCanvasClick);
   const ctx = useMemo<ActionContext | null>(() => {
     if (node === null) return null;
     return {
@@ -75,9 +77,10 @@ export function CommandPalette({ projectRoot = null }: CommandPaletteProps) {
         pinTab: dispatch.selectByCanvasClick,
         pinUpstream: dispatch.pinFocus,
         focusUpstream: dispatch.setFocusOnly,
+        askAgent,
       },
     };
-  }, [node, model, state, dispatch]);
+  }, [node, model, state, dispatch, askAgent]);
 
   const nodeActions = useMemo<ActionEntry[]>(
     () => (ctx === null ? [] : actionsForSurface("command-palette", ctx)),
@@ -183,7 +186,7 @@ export function CommandPalette({ projectRoot = null }: CommandPaletteProps) {
       style={{
         position: "fixed",
         inset: 0,
-        background: "rgba(0,0,0,0.45)",
+        background: "var(--scrim)",
         display: "flex",
         justifyContent: "center",
         alignItems: "flex-start",
@@ -202,9 +205,9 @@ export function CommandPalette({ projectRoot = null }: CommandPaletteProps) {
         style={{
           width: "min(560px, 92vw)",
           maxHeight: "60vh",
-          background: "var(--bg-card-2, #1c1c1e)",
+          background: "var(--bg-card-2)",
           borderRadius: 12,
-          boxShadow: "0 24px 60px rgba(0,0,0,0.6)",
+          boxShadow: "var(--shadow-modal)",
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
@@ -275,7 +278,7 @@ export function CommandPalette({ projectRoot = null }: CommandPaletteProps) {
                   width: "100%",
                   background:
                     i === cursor
-                      ? "var(--tint-bg, rgba(10,132,255,0.15))"
+                      ? "var(--tint-bg)"
                       : "transparent",
                   color: disabled ? "var(--label-tertiary)" : "var(--label)",
                   cursor: disabled ? "not-allowed" : "pointer",
