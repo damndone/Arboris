@@ -95,7 +95,7 @@
 | `workbench-v1.8.12` | `workbench-v1.8.12` | `c8621b90` | `v1.8.12`（main 上为 squash `91550d73`） | —（未存档；轮换出常驻时再打 `archive/worktree/workbench-v1.8.12`） | — |  | 常驻 |
 | `workbench-v1.8.13` | `workbench-v1.8.13` | `b48f37e5` | `v1.8.13`（main 上为 squash `c81fc89f`） | `archive/worktree/workbench-v1.8.13` | —（本机压缩包 `local/archive/worktree-workbench-v1.8.13-leftovers-2026-10-15.tar.gz`，11,971 项，附 `.manifest.json`） | 未跟踪的 `local/`（3,023 项）与数据核对运行记录（8,949 项）；可能含 Stata 许可证页眉，不推送 | 已移除工作目录（2026-10-15；目录移入废纸篓，分支与存档 tag 保留） |
 | `workbench-v1.9.0` | `workbench-v1.9.0` | `5f91ead3` | `v1.9.0`（main 上为 squash `402d2d3e`） | `archive/worktree/workbench-v1.9.0` | — |  | 常驻 |
-| 另 22 个 v1.8.11 Codex lane / 审查工作目录（`codex-v1811-*`） | `lane/v1811-*`、`eval/v1811-codex`、`codex/v1811-*` | 见 `archive-index.json` | — | —（只在本机） | — | 同上；主仓库 `.git/hooks/pre-push` 拒绝推送这些分支 | 已移除工作目录（2026-10-07）；未跟踪与被忽略的证据原样保存在本机 `local/worktree-leftovers/<名字>/`，分支保留 |
+| 另 22 个 v1.8.11 Codex lane / 审查工作目录（`codex-v1811-*`） | `lane/v1811-*`、`eval/v1811-codex`、`codex/v1811-*` | 见 `archive-index.json` | — | —（只在本机） | — | 同上；主仓库 `.git/hooks/pre-push` 拒绝推送这些分支 | 已移除工作目录（2026-10-07）；未跟踪与被忽略的证据原样保存在本机 `local/worktree-leftovers/<名字>/`（2026-10-15 打包为 `local/archive/main-worktree-leftovers-2026-10-15.tar.gz`，包内路径 `worktree-leftovers/<名字>/`），分支保留 |
 
 `codex-c373`、`codex-c3f1` 是 Codex 自己的 worktree（`~/.codex/worktrees/`），提交 `90799cd7` 已包含在 `archive/v1.8.9-codex-wip` 中。
 
@@ -136,3 +136,16 @@
 - `findings.md`
 - `progress.md`
 - `task_plan.md`
+
+## 2026-10-15 本机证据压缩
+
+为释放磁盘，以下只在本机、被 git 忽略的证据打成压缩包，放在主仓库 `local/archive/`，各附一份 `.manifest.json`（每个文件的大小与 sha256、符号链接目标、压缩包自身的 sha256）。打包后逐个读回压缩包内的文件，与磁盘原件逐字节比对，全部一致后才把原件移入废纸篓。
+
+| 压缩包 | 来源 | 内容 | 原大小 → 压缩包 |
+|---|---|---|---|
+| `worktree-workbench-v1.8.11-oracle-runs-2026-10-15.tar.gz` | `.worktrees/workbench-v1.8.11/tests/fixtures/script_export/local_runs/`（保留已跟踪的 `.gitignore`） | 数据核对运行 6,790 次：60,660 个文件、69 个符号链接 | 1.59 GB → 153 MB |
+| `worktree-workbench-v1.8.12-oracle-runs-2026-10-15.tar.gz` | `.worktrees/workbench-v1.8.12/tests/fixtures/script_export/local_runs/`（同上） | 4,330 次：41,110 个文件、27 个符号链接 | 822 MB → 131 MB |
+| `main-worktree-leftovers-2026-10-15.tar.gz` | 主仓库 `local/worktree-leftovers/` | 上表 23 个已移除工作目录的未跟踪证据：43,103 个文件、169 个符号链接 | 688 MB → 264 MB |
+
+可能含 Stata 许可证页眉，不推送。恢复：在对应目录下 `tar -xzf <压缩包>`。
+
