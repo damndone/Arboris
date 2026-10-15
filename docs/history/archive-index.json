@@ -1828,6 +1828,36 @@
    "leftovers_tag": null,
    "kept": true,
    "note": "v1.8.11 lane / review worktree. History carries Stata license values: not tagged or pushed; kept locally (branch + refs/private/v1.8.11-full-history). Released as squash 8b1a5390 (tag v1.8.11)."
+  },
+  {
+   "name": "workbench-v1.8.13",
+   "path": ".worktrees/workbench-v1.8.13",
+   "branch": "workbench-v1.8.13",
+   "head": "b48f37e5d388e7a395a11fc38eb1dd9950f4daaf",
+   "release_tags": [
+    "v1.8.13"
+   ],
+   "worktree_tag": "archive/worktree/workbench-v1.8.13",
+   "leftover_files": [],
+   "deleted_tracked": [],
+   "leftovers_tag": null,
+   "leftovers_local_archive": "local/archive/worktree-workbench-v1.8.13-leftovers-2026-10-15.tar.gz",
+   "kept": false,
+   "removed": "2026-10-15"
+  },
+  {
+   "name": "workbench-v1.9.0",
+   "path": ".worktrees/workbench-v1.9.0",
+   "branch": "workbench-v1.9.0",
+   "head": "5f91ead3dab752ea92bbc66319b49f6f1ae080f0",
+   "release_tags": [
+    "v1.9.0"
+   ],
+   "worktree_tag": "archive/worktree/workbench-v1.9.0",
+   "leftover_files": [],
+   "deleted_tracked": [],
+   "leftovers_tag": null,
+   "kept": true
   }
  ],
  "orphans": [
