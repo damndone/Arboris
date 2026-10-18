@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from collections import deque
 from collections.abc import Iterable, Mapping
@@ -740,7 +741,18 @@ class AgentCore:
                         self.tool_runtime.execute(
                             tool_call,
                             session_id=self.session_id,
-                            metadata=tool_context,
+                            metadata={
+                                **(tool_context or {}),
+                                "command_id": command_id,
+                                "provider_step": self._steps_used,
+                                "tool_call_id": tool_call_id,
+                                "invocation_id": "invocation_" + hashlib.sha256(
+                                    json.dumps([
+                                        "workbench.agent.invocation.v1", self.session_id,
+                                        command_id, self._steps_used, tool_call_id,
+                                    ], separators=(",", ":")).encode("utf-8")
+                                ).hexdigest(),
+                            },
                         )
                     )
                     self._active_tool_task = tool_task
