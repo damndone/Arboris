@@ -23,7 +23,8 @@ class Scenario:
     main_term: str | None
     #: Families whose estimate of ``main_term`` answers the question.
     appropriate_families: tuple[str, ...]
-    #: Operation ids (or prefixes) a competent analysis runs; scored as coverage.
+    #: Checks a competent analysis runs, scored as coverage. Each entry is one
+    #: check; ``a|b`` lists operation ids that equally count for it.
     expected_checks: tuple[str, ...]
     #: Naive choices that answer a different question or are biased here.
     traps: tuple[str, ...]
@@ -284,11 +285,11 @@ def _survey(rng: np.random.Generator) -> pd.DataFrame:
 
 SCENARIOS: dict[str, Scenario] = {s.id: s for s in [
     Scenario("cs_hetero", "Returns to education with heteroskedastic errors", "wage", "education",
-             ("ols",), ("diagnostics.breusch_pagan", "diagnostics.white", "diagnostics.vif", "diagnostics.reset"),
+             ("ols",), ("diagnostics.breusch_pagan|diagnostics.white|model.white_test", "diagnostics.reset", "diagnostics.vif"),
              ("level wage without log", "conventional standard errors"), 0.08, 0.02, _wage_hetero,
-             notes="Estimand is the log-wage semi-elasticity; robust SEs required."),
+             notes="Estimand is the log-wage semi-elasticity; robust SEs required.", extra={"log_outcome": True}),
     Scenario("cs_ovb", "Education and wages with an ability proxy", "log_wage", "education",
-             ("ols",), ("diagnostics.vif", "diagnostics.reset"), ("omit test_score",), 0.06, 0.015, _wage_ovb,
+             ("ols",), ("diagnostics.reset|diagnostics.vif",), ("omit test_score",), 0.06, 0.015, _wage_ovb,
              notes="Controlling for test_score removes most ability bias; naive slope is about 0.10."),
     Scenario("iv_valid", "Returns to education with a college-proximity instrument", "log_wage", "education",
              ("iv_2sls", "iv.gmm"), ("iv.weak_instruments",), ("OLS as causal", "mother_educ as instrument"),
@@ -305,7 +306,7 @@ SCENARIOS: dict[str, Scenario] = {s.id: s for s in [
              ("cs_did", "sa_did", "dcdh"), (), ("TWFE as the headline estimate",), _did_staggered_truth(), 0.45,
              _did_staggered, notes="Heterogeneous dynamic effects bias TWFE."),
     Scenario("ts_spurious", "Advertising and sales indices (random walks)", "sales_index", "ad_spend_index",
-             ("time_series",), ("time_series.adf", "time_series.kpss", "time_series.cointegration"),
+             ("time_series",), ("time_series.adf|time_series.kpss", "time_series.cointegration"),
              ("levels regression as evidence",), 0.0, None, _spurious_ts,
              notes="No relation; levels OLS is spurious. Truth is 'no evidence of a relationship'."),
     Scenario("ts_cointegrated", "Consumption and income (cointegrated)", "consumption", "income",
@@ -326,7 +327,7 @@ SCENARIOS: dict[str, Scenario] = {s.id: s for s in [
              ("linear_mixed_effects",), (), ("pooled OLS ignoring repeated measures",), -1.2, 0.15, _repeated,
              notes="Estimand is the arm-by-visit interaction."),
     Scenario("missing_mar", "Slope of y on x with outcome-dependent missingness", "y", "x",
-             ("ols",), ("missingness.profile", "imputation.mice", "missing_data.rubin_pool"), ("silent listwise deletion",),
+             ("ols",), ("missingness.profile|statistical.explore", "imputation.mice"), ("silent listwise deletion",),
              0.7, 0.08, _missing_mar),
     Scenario("leverage", "Rent and density with high-leverage cities", "rent", "density",
              ("ols",), ("diagnostics.influence",), ("reporting the full-sample slope without influence checks",),
@@ -338,10 +339,10 @@ SCENARIOS: dict[str, Scenario] = {s.id: s for s in [
              ("quantile_regression",), (), ("mean effect only",), 2.0, 0.6, _quantile,
              notes="Mean effect 2; quantile effects 2 + 3 * z_tau."),
     Scenario("collinear", "Price and demand with near-duplicate prices", "demand", None,
-             ("ols",), ("diagnostics.vif", "postestimation.wald", "postestimation.lincom"), ("interpreting each price separately",),
+             ("ols",), ("diagnostics.vif", "postestimation.wald|postestimation.lincom|model.joint_f_test"), ("interpreting each price separately",),
              -3.62, 0.6, _collinear, notes="Only the combined price effect (about -2 - 1.5*1.08) is identified."),
     Scenario("dirty_data", "Salary, hours and tenure in a messy HR extract", "salary_k", "tenure_years",
-             ("ols",), ("data.dedupe", "data.recode", "missingness.profile"), ("treating -99 as a salary",),
+             ("ols",), ("data.dedupe", "data.recode|data.fill_missing|data.subset"), ("treating -99 as a salary",),
              1.2, 0.15, _dirty),
     Scenario("survey_mean", "Average household spending from a stratified sample", "spending", None,
              (), (), ("unweighted mean",), 56.0, 1.5, _survey, notes="Population mean = 0.8*60 + 0.2*40."),

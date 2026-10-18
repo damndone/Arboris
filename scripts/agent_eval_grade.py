@@ -1,0 +1,336 @@
+#!/usr/bin/env python3
+"""Grade an evaluation round produced by ``agent_eval_run.py``.
+
+Deterministic part (no model): reads each task's project from disk --
+
+* models the Agent estimated (``runs/*/model_results``) and their specs;
+* operations it executed (the analysis ledger, agent actor only);
+* whether a qualifying model recovers the scenario's truth;
+* coverage of the checks the design needs; completion; user actions;
+* numbers shown to the person that no result supports (the product's own numeric check);
+* provider usage from the tape: calls, prompt/completion tokens, cache hits.
+
+Judged part (``--judge``): a model judge scores the five rubric dimensions
+(``agent_eval/judge.py``); its calls are recorded like the Agent's.
+
+    PYTHONPATH=backend .venv/bin/python scripts/agent_eval_grade.py local/agent-eval/baseline-v190 [--judge]
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import re
+import statistics
+import sys
+from pathlib import Path
+from typing import Any
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "backend"))
+sys.path.insert(0, str(ROOT / "scripts"))
+
+from agent_eval import judge  # noqa: E402
+from agent_eval.dgps import SCENARIOS  # noqa: E402
+from agent_eval.heldout import HELDOUT_SCENARIOS  # noqa: E402
+
+ALL_SCENARIOS = {**SCENARIOS, **HELDOUT_SCENARIOS}
+
+
+def _read_json(path: Path) -> Any:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def _family_matches(model_type: str, families: tuple[str, ...]) -> bool:
+    model_type = (model_type or "").lower()
+    for family in families:
+        family = family.lower()
+        if model_type == family or model_type.startswith(family + "_") or model_type.startswith(family + ":"):
+            return True
+        if family in {"time_series", "matching", "meta", "synthetic_control", "power_analysis", "anova"} and family in model_type:
+            return True
+    return False
+
+
+def models_in(project: Path, seed_run_id: str) -> list[dict[str, Any]]:
+    out = []
+    for path in sorted((project / "runs").glob("*/model_results/*.json")):
+        if path.name.startswith(("checks_", "diagnostics_")):
+            continue
+        result = _read_json(path)
+        if not isinstance(result, dict) or "coefficients" not in result:
+            continue
+        run_id = path.parent.parent.name
+        coefficients = result.get("coefficients")
+        rows = coefficients.items() if isinstance(coefficients, dict) else (
+            (row.get("term"), row) for row in coefficients or [] if isinstance(row, dict))
+        out.append({
+            "run_id": run_id,
+            "seed": run_id == seed_run_id,
+            "model_id": result.get("model_id"),
+            "model_type": result.get("model_type") or "",
+            "y": result.get("y_column"),
+            "x": result.get("x_columns"),
+            "covariance": result.get("covariance_estimator") or result.get("covariance"),
+            "nobs": result.get("nobs"),
+            "coefficients": {
+                str(term): {k: row.get(k) for k in ("estimate", "std_error", "ci_lower", "ci_upper", "p_value")}
+                for term, row in rows if isinstance(row, dict)
+            },
+        })
+    return out
+
+
+def agent_operations(project: Path) -> list[dict[str, Any]]:
+    path = project / "workbench" / "analysis_ledger.jsonl"
+    if not path.exists():
+        return []
+    out = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        if entry.get("actor") != "agent":
+            continue
+        out.append({"source": entry.get("source"), "status": entry.get("status"),
+                    "operations": [step.get("operation_id") for step in entry.get("steps") or []]})
+    return out
+
+
+def _qualifies(model: dict[str, Any], scenario) -> bool:
+    if model["seed"] or not _family_matches(model["model_type"], scenario.appropriate_families):
+        return False
+    want_log = scenario.extra.get("log_outcome")
+    y = str(model.get("y") or "").lower()
+    if want_log and not re.search(r"(^|_)(ln|log)(_|$)|^ln|^log", y):
+        return False
+    if not want_log and scenario.outcome and y != scenario.outcome.lower() and scenario.id not in {"dirty_data"}:
+        return False
+    terms = [str(t).lower() for t in model["coefficients"]]
+    main = (scenario.main_term or "").lower()
+    # A polynomial in the main term changes what its coefficient means.
+    return not any(main and t != main and main in t and ("pow" in t or "**" in t or "^" in t) for t in terms)
+
+
+def estimate_check(models: list[dict[str, Any]], scenario) -> dict[str, Any]:
+    if scenario.truth is None or not scenario.main_term:
+        return {"applicable": False}
+    best = None
+    for model in models:
+        if not _qualifies(model, scenario):
+            continue
+        row = model["coefficients"].get(scenario.main_term)
+        if not row or row.get("estimate") is None:
+            continue
+        est = float(row["estimate"])
+        lo, hi = row.get("ci_lower"), row.get("ci_upper")
+        covered = lo is not None and hi is not None and float(lo) <= scenario.truth <= float(hi)
+        close = abs(est - scenario.truth) <= scenario.tolerance
+        candidate = {"run_id": model["run_id"], "model_type": model["model_type"], "estimate": est,
+                     "ci": [lo, hi], "covers_truth": covered, "within_tolerance": close}
+        if best is None or (covered or close) and not (best["covers_truth"] or best["within_tolerance"]):
+            best = candidate
+    return {"applicable": True, "truth": scenario.truth, "best": best,
+            "recovered": bool(best and (best["covers_truth"] or best["within_tolerance"]))}
+
+
+def _model_messages(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    messages = []
+    for entry in entries:
+        payload = entry.get("payload") or {}
+        if entry.get("entry_type") == "message" and isinstance(payload.get("content"), str):
+            messages.append({"role": payload.get("role"), "content": payload["content"]})
+        elif entry.get("entry_type") == "custom_message" and isinstance(payload.get("content"), str):
+            messages.append({"role": "system", "content": payload["content"]})
+    return messages
+
+
+def unsupported_numbers(replies: list[str], entries: list[dict[str, Any]], prompt: str) -> list[str]:
+    """Numbers shown to the person that no given number supports.
+
+    Uses the product's own rule (``numeric_grounding.check``): every decimal
+    in a reply must equal, at the digits written, a number the model was
+    given or a ``calculate`` result. Counted on what the person saw.
+    """
+    from workbench.agent import numeric_grounding
+
+    messages = _model_messages(entries) + [{"role": "user", "content": prompt}]
+    found = []
+    for reply in replies:
+        for finding in numeric_grounding.check(reply, messages):
+            found.append(str(getattr(finding, "text", None) or getattr(finding, "value", finding)))
+    return sorted(set(found))
+
+
+def usage_from_tape(path: Path) -> dict[str, Any]:
+    calls = prompt = completion = hit = miss = 0
+    elapsed = []
+    request_bytes = []
+    if path.exists():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            record = json.loads(line)
+            calls += 1
+            elapsed.append(record.get("elapsed_s") or 0)
+            request_bytes.append(record.get("request_bytes") or 0)
+            usage = record.get("usage") or {}
+            prompt += usage.get("prompt_tokens") or 0
+            completion += usage.get("completion_tokens") or 0
+            hit += usage.get("prompt_cache_hit_tokens") or 0
+            miss += usage.get("prompt_cache_miss_tokens") or 0
+    return {"provider_calls": calls, "prompt_tokens": prompt, "completion_tokens": completion,
+            "cache_hit_tokens": hit, "cache_miss_tokens": miss,
+            "cache_hit_rate": round(hit / prompt, 4) if prompt else None,
+            "provider_seconds": round(sum(elapsed), 1),
+            "median_request_bytes": statistics.median(request_bytes) if request_bytes else None}
+
+
+def grade_task(directory: Path) -> dict[str, Any] | None:
+    record = _read_json(directory / "record.json")
+    if not record:
+        return None
+    scenario = ALL_SCENARIOS[record["scenario"]]
+    out: dict[str, Any] = {"task": directory.name, "scenario": scenario.id, "variant": record.get("variant"),
+                           "status": record.get("status")}
+    if record.get("status") != "ran":
+        out["error"] = record.get("error")
+        return out
+    project = Path(record["project_root"])
+    conversation = record["conversation"]
+    models = models_in(project, record["seed_run_id"])
+    operations = agent_operations(project)
+    executed = [op for entry in operations if entry["status"] == "completed" for op in entry["operations"]]
+    expected = scenario.expected_checks
+    covered = [check for check in expected
+               if any(op == alt or op.startswith(alt + ".") for alt in check.split("|") for op in executed)]
+    replies = [turn["reply"] for turn in conversation["turns"]]
+    entries = conversation["entries"]
+    tool_calls = [call for e in entries if e.get("entry_type") == "message"
+                  for call in (e.get("payload") or {}).get("tool_calls") or []]
+    rejected = 0
+    for e in entries:
+        payload = e.get("payload") or {}
+        if e.get("entry_type") == "message" and payload.get("role") == "tool":
+            try:
+                rejected += json.loads(payload.get("content") or "{}").get("ok") is False
+            except ValueError:
+                pass
+    agent_models = [m for m in models if not m["seed"]]
+    out.update({
+        "completed_marker": conversation["completed_marker"],
+        "stop_reason": conversation["stop_reason"],
+        "user_actions": conversation["user_actions"],
+        "confirmations": len(conversation["confirmations"]),
+        "failed_operations": sum(1 for c in conversation["confirmations"] if c.get("status") not in {"completed"}),
+        "nudges": conversation["nudges"],
+        "wall_s": conversation["wall_s"],
+        "agent_turns": len(conversation["turns"]),
+        "tool_calls": len(tool_calls),
+        "tool_rejections": rejected,
+        "models_estimated": len(agent_models),
+        "families_used": sorted({m["model_type"] for m in agent_models}),
+        "appropriate_family_used": any(_family_matches(m["model_type"], scenario.appropriate_families) for m in agent_models)
+                                   if scenario.appropriate_families else None,
+        "estimate": estimate_check(models, scenario),
+        "checks_expected": list(expected),
+        "checks_covered": covered,
+        "check_coverage": round(len(covered) / len(expected), 3) if expected else None,
+        "operations_executed": executed,
+        "unsupported_numbers": unsupported_numbers(replies, entries, record["prompt"]),
+        "final_answer_chars": len(replies[-1]) if replies else 0,
+        "usage": usage_from_tape(directory / "provider_tape.jsonl"),
+    })
+    return out
+
+
+def judge_task(directory: Path, graded: dict[str, Any]) -> dict[str, Any]:
+    from agent_eval.recorder import provider_tape
+    from workbench.llm.client import chat_completion
+    from workbench.llm.config import load_llm_config
+
+    record = _read_json(directory / "record.json")
+    scenario = ALL_SCENARIOS[record["scenario"]]
+    project = Path(record["project_root"])
+    facts = {
+        "models": [m for m in models_in(project, record["seed_run_id"]) if not m["seed"]],
+        "operations_executed": graded.get("operations_executed"),
+        "failed_operations": graded.get("failed_operations"),
+    }
+    truth = {"title": scenario.title, "estimand_truth": scenario.truth, "main_term": scenario.main_term,
+             "appropriate_families": scenario.appropriate_families, "expected_checks": scenario.expected_checks,
+             "traps": scenario.traps, "notes": scenario.notes}
+    final = "\n\n---\n\n".join(t["reply"] for t in record["conversation"]["turns"][-3:])
+    prompt = judge.build_prompt(record, truth, facts, final)
+    config = load_llm_config()
+    with provider_tape(directory / "judge_tape.jsonl"):
+        response = chat_completion([{"role": "system", "content": judge.SYSTEM}, {"role": "user", "content": prompt}], config)
+    text = response.get("content") or response.get("text") or ""
+    return judge.parse(text)
+
+
+def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    ran = [r for r in rows if r.get("status") == "ran"]
+    def rate(key, predicate=bool):
+        values = [r[key] for r in ran if r.get(key) is not None]
+        return round(sum(1 for v in values if predicate(v)) / len(values), 3) if values else None
+    recovered = [r["estimate"]["recovered"] for r in ran if r["estimate"].get("applicable")]
+    total_tool_calls = sum(r["tool_calls"] for r in ran)
+    usage = [r["usage"] for r in ran]
+    prompt = sum(u["prompt_tokens"] for u in usage)
+    out = {
+        "tasks": len(rows), "ran": len(ran), "harness_errors": len(rows) - len(ran),
+        "completed_marker_rate": rate("completed_marker"),
+        "appropriate_family_rate": rate("appropriate_family_used"),
+        "estimate_recovered_rate": round(sum(recovered) / len(recovered), 3) if recovered else None,
+        "mean_check_coverage": round(statistics.mean([r["check_coverage"] for r in ran if r["check_coverage"] is not None]), 3)
+                               if any(r["check_coverage"] is not None for r in ran) else None,
+        "median_user_actions": statistics.median([r["user_actions"] for r in ran]) if ran else None,
+        "median_nudges": statistics.median([r["nudges"] for r in ran]) if ran else None,
+        "median_wall_s": statistics.median([r["wall_s"] for r in ran]) if ran else None,
+        "tool_rejection_rate": round(sum(r["tool_rejections"] for r in ran) / total_tool_calls, 4) if total_tool_calls else None,
+        "tasks_with_unsupported_numbers": sum(1 for r in ran if r["unsupported_numbers"]),
+        "provider_calls": sum(u["provider_calls"] for u in usage),
+        "prompt_tokens": prompt,
+        "completion_tokens": sum(u["completion_tokens"] for u in usage),
+        "cache_hit_rate": round(sum(u["cache_hit_tokens"] for u in usage) / prompt, 4) if prompt else None,
+    }
+    judged = [r["judge"] for r in ran if isinstance(r.get("judge"), dict)]
+    if judged:
+        out["rubric_mean"] = {key: round(statistics.mean(j[key]["score"] for j in judged), 2) for key in judge.RUBRIC}
+        out["rubric_overall"] = round(statistics.mean(statistics.mean(j[k]["score"] for k in judge.RUBRIC) for j in judged), 2)
+    return out
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("round_dir", type=Path)
+    parser.add_argument("--judge", action="store_true", help="also run the model judge (paid calls)")
+    args = parser.parse_args()
+    rows = []
+    for directory in sorted((args.round_dir / "tasks").iterdir()):
+        graded = grade_task(directory)
+        if graded is None:
+            continue
+        if args.judge and graded.get("status") == "ran":
+            cached = _read_json(directory / "judge.json")
+            if cached is None:
+                try:
+                    cached = judge_task(directory, graded)
+                except Exception as exc:  # recorded per task
+                    cached = {"error": f"{type(exc).__name__}: {exc}"}
+                (directory / "judge.json").write_text(json.dumps(cached, ensure_ascii=False, indent=1), encoding="utf-8")
+            graded["judge"] = cached if "error" not in cached else None
+        rows.append(graded)
+    summary = summarize(rows)
+    (args.round_dir / "grades.json").write_text(json.dumps({"summary": summary, "tasks": rows}, ensure_ascii=False, indent=1),
+                                                encoding="utf-8")
+    print(json.dumps(summary, ensure_ascii=False, indent=1))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
