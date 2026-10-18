@@ -121,24 +121,93 @@ def _qualifies(model: dict[str, Any], scenario) -> bool:
     return not any(main and t != main and main in t and ("pow" in t or "**" in t or "^" in t) for t in terms)
 
 
-def estimate_check(models: list[dict[str, Any]], scenario) -> dict[str, Any]:
-    if scenario.truth is None or not scenario.main_term or scenario.extra.get("score_estimate") is False:
+def artifact_operations(project: Path) -> list[str]:
+    """Operations that left a workflow artifact but no model result file."""
+    ops = []
+    for path in sorted((project / "runs").glob("*/artifacts/*/*.json")):
+        name = path.stem
+        for prefix, kind in (("workflow_p7_", "p7"), ("workflow_capability_", "capability")):
+            if name.startswith(prefix):
+                body = re.sub(r"_[0-9a-f]{16}_[0-9a-f]{24}$", "", name[len(prefix):])
+                ops.append(body)
+    return ops
+
+
+def _artifact_families(project: Path) -> set[str]:
+    families = set()
+    for op in artifact_operations(project):
+        if "arma_garch" in op:
+            families.update({"arma_garch", "time_series"})
+        for family in ("time_series", "matching", "meta", "synthetic_control", "power_analysis", "survival"):
+            if op.startswith(family):
+                families.add(family if family != "survival" else "survival_test")
+    return families
+
+
+def _garch_persistence(project: Path) -> float | None:
+    for path in sorted((project / "runs").glob("*/artifacts/*/*arma_garch*.json")):
+        found: dict[str, float] = {}
+
+        def walk(node):
+            if isinstance(node, dict):
+                for key, value in node.items():
+                    if key == "variance" and isinstance(value, dict) and "alpha[1]" in value and "beta[1]" in value:
+                        found["p"] = float(value["alpha[1]"]) + float(value["beta[1]"])
+                    walk(value)
+            elif isinstance(node, list):
+                for value in node:
+                    walk(value)
+        walk(_read_json(path))
+        if "p" in found:
+            return found["p"]
+    return None
+
+
+def _candidate_rows(model: dict[str, Any], scenario) -> list[tuple[float, Any, Any]]:
+    coefficients = model["coefficients"]
+    extra = scenario.extra
+    if "terms_by_family" in extra:
+        term = next((t for f, t in extra["terms_by_family"].items() if _family_matches(model["model_type"], (f,))), None)
+        row = coefficients.get(term) if term else None
+        return [(float(row["estimate"]), row.get("ci_lower"), row.get("ci_upper"))] if row and row.get("estimate") is not None else []
+    if "term_contains" in extra:
+        rows = [row for term, row in coefficients.items()
+                if all(part in term.lower() for part in extra["term_contains"]) and row.get("estimate") is not None]
+        return [(float(r["estimate"]), r.get("ci_lower"), r.get("ci_upper")) for r in rows]
+    if "linear_combination" in extra:
+        names = {t for weights in extra["linear_combination"] for t in weights}
+        present = {t for t in names if coefficients.get(t, {}).get("estimate") is not None}
+        for weights in extra["linear_combination"]:
+            # A combination applies only to a model that holds exactly its terms.
+            if set(weights) == present:
+                return [(sum(w * float(coefficients[t]["estimate"]) for t, w in weights.items()), None, None)]
+        return []
+    row = coefficients.get(scenario.main_term)
+    return [(float(row["estimate"]), row.get("ci_lower"), row.get("ci_upper"))] if row and row.get("estimate") is not None else []
+
+
+def estimate_check(models: list[dict[str, Any]], scenario, project: Path | None = None) -> dict[str, Any]:
+    extra = scenario.extra
+    scored_by_rule = any(k in extra for k in ("terms_by_family", "term_contains", "linear_combination", "garch_persistence"))
+    if scenario.truth is None or extra.get("score_estimate") is False or not (scenario.main_term or scored_by_rule):
         return {"applicable": False}
+    if extra.get("garch_persistence"):
+        value = _garch_persistence(project) if project else None
+        recovered = value is not None and abs(value - scenario.truth) <= scenario.tolerance
+        return {"applicable": True, "truth": scenario.truth, "recovered": recovered,
+                "best": None if value is None else {"estimate": value, "model_type": "arma_garch", "ci": [None, None],
+                                                    "covers_truth": False, "within_tolerance": recovered}}
     best = None
     for model in models:
         if not _qualifies(model, scenario):
             continue
-        row = model["coefficients"].get(scenario.main_term)
-        if not row or row.get("estimate") is None:
-            continue
-        est = float(row["estimate"])
-        lo, hi = row.get("ci_lower"), row.get("ci_upper")
-        covered = lo is not None and hi is not None and float(lo) <= scenario.truth <= float(hi)
-        close = abs(est - scenario.truth) <= scenario.tolerance
-        candidate = {"run_id": model["run_id"], "model_type": model["model_type"], "estimate": est,
-                     "ci": [lo, hi], "covers_truth": covered, "within_tolerance": close}
-        if best is None or (covered or close) and not (best["covers_truth"] or best["within_tolerance"]):
-            best = candidate
+        for est, lo, hi in _candidate_rows(model, scenario):
+            covered = lo is not None and hi is not None and float(lo) <= scenario.truth <= float(hi)
+            close = abs(est - scenario.truth) <= scenario.tolerance
+            candidate = {"run_id": model["run_id"], "model_type": model["model_type"], "estimate": est,
+                         "ci": [lo, hi], "covers_truth": covered, "within_tolerance": close}
+            if best is None or (covered or close) and not (best["covers_truth"] or best["within_tolerance"]):
+                best = candidate
     return {"applicable": True, "truth": scenario.truth, "best": best,
             "recovered": bool(best and (best["covers_truth"] or best["within_tolerance"]))}
 
@@ -238,10 +307,12 @@ def grade_task(directory: Path) -> dict[str, Any] | None:
         "tool_calls": len(tool_calls),
         "tool_rejections": rejected,
         "models_estimated": len(agent_models),
-        "families_used": sorted({m["model_type"] for m in agent_models}),
-        "appropriate_family_used": any(_family_matches(m["model_type"], scenario.appropriate_families) for m in agent_models)
+        "families_used": sorted({m["model_type"] for m in agent_models} | _artifact_families(project)),
+        "appropriate_family_used": (any(_family_matches(m["model_type"], scenario.appropriate_families) for m in agent_models)
+                                    or bool(_artifact_families(project) & set(scenario.appropriate_families)))
                                    if scenario.appropriate_families else None,
-        "estimate": estimate_check(models, scenario),
+        "artifact_operations": artifact_operations(project),
+        "estimate": estimate_check(models, scenario, project),
         "checks_expected": list(expected),
         "checks_covered": covered,
         "check_coverage": round(len(covered) / len(expected), 3) if expected else None,

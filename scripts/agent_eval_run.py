@@ -108,7 +108,8 @@ def main() -> int:
     (out / "run_meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
 
     # The local-request guard admits loopback host names only.
-    client = TestClient(app, base_url="http://127.0.0.1")
+    # A server error is a result to record, not a harness crash.
+    client = TestClient(app, base_url="http://127.0.0.1", raise_server_exceptions=False)
     for task in tasks:
         for rep in range(1, args.repeat + 1):
             name = f"{task.id}.r{rep}"
@@ -143,6 +144,17 @@ def main() -> int:
                     tape.context = {"task": name}
                     record["conversation"] = run_conversation(client, project.root, run_id, task.prompt, policy)
                 record["status"] = "ran"
+            except RuntimeError as exc:
+                # The person's first step (import plus a first model) failed, so in
+                # v1.9.0 there is no run for the Agent to talk to: the task is
+                # unreachable, which counts against the version, not the harness.
+                if "fixture run" in str(exc) and "ended" in str(exc):
+                    record["status"] = "unreachable"
+                    record["error"] = f"{type(exc).__name__}: {exc}"
+                else:
+                    record["status"] = "harness_error"
+                    record["error"] = f"{type(exc).__name__}: {exc}"
+                    record["traceback"] = traceback.format_exc()
             except Exception as exc:  # recorded, the round continues
                 record["status"] = "harness_error"
                 record["error"] = f"{type(exc).__name__}: {exc}"
