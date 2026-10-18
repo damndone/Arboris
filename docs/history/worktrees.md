@@ -86,7 +86,7 @@
 | `workbench-v1.8.8-p5` | `workbench-v1.8.8-p5` | `d9fdac91` | — | `archive/worktree/workbench-v1.8.8-p5` | — |  | 已移除工作目录 |
 | `workbench-v1.8.8-p6` | `workbench-v1.8.8-p6` | `3285bc6d` | — | `archive/worktree/workbench-v1.8.8-p6` | — |  | 已移除工作目录 |
 | `workbench-v1.8.8-p7-multivariate` | `workbench-v1.8.8-p7-multivariate` | `0ef1110c` | — | `archive/worktree/workbench-v1.8.8-p7-multivariate` | `archive/leftovers/workbench-v1.8.8-p7-multivariate`（14 项） | P7 扩展的 2 条 devline 与 4 份设计/计划。**分支上 40 个提交未进 main**；Codex 核查结论：有遗漏（契约/数值对照测试、多重插补端到端接线），v1.8.10 选择性移植，见 BACKLOG | 已移除工作目录 |
-| `workbench-v1.8.9` | `workbench-v1.8.9` | `03fee6d8` | — | `archive/worktree/workbench-v1.8.9` | — |  | 常驻 |
+| `workbench-v1.8.9` | `workbench-v1.8.9` | `03fee6d8` | — | `archive/worktree/workbench-v1.8.9` | — | 只有被忽略的 `.DS_Store` | 已移除工作目录（2026-10-17，为 v1.9.1 腾出常驻名额；分支与存档 tag 保留） |
 | `workbench-v1.8.9-hardening-integration` | `workbench-v1.8.9-hardening-integration` | `214dee95` | — | `archive/worktree/workbench-v1.8.9-hardening-integration` | `archive/leftovers/workbench-v1.8.9-hardening-integration`（3 项） | 未跟踪的构建产物；分支本身即 `archive/v1.8.9-codex-wip` | 已移除工作目录 |
 | `workbench-v1.8.10` | `workbench-v1.8.10` | `bea7e2a0` | `v1.8.10` | `archive/worktree/workbench-v1.8.10` | — |  | 常驻 |
 | `codex-v1810-evaluation` | `eval/v1810-codex` | `9ce17129` | — | `archive/local-only/eval-v1810-codex` | — | Codex 评估线，v1.8.10 工单 A；已并入 v1.8.10 | 已移除工作目录（2026-10-08；分支 `eval/v1810-codex` 与远端 `archive/local-only/eval-v1810-codex` 保留） |

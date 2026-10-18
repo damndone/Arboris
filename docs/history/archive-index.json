@@ -1401,7 +1401,8 @@
    "leftover_files": [],
    "deleted_tracked": [],
    "leftovers_tag": null,
-   "kept": true
+   "kept": false,
+   "removed": "2026-10-17"
   },
   {
    "name": "workbench-v1.8.9-hardening-integration",
