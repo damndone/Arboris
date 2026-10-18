@@ -63,7 +63,46 @@ def _compact(node, depth: int = 0):
     return node
 
 
-def artifact_results(project: Path, limit_chars: int = 1500) -> list[dict]:
+def _with_fit(project: Path, model: dict) -> dict:
+    """Add the fit statistics a write-up quotes (R squared, nobs, AIC, ...) to a model entry."""
+    path = project / "runs" / model["run_id"] / "model_results" / f"{model['model_id']}.json"
+    payload = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    fit = {k: payload.get(k) for k in ("nobs", "r_squared", "r_squared_adj", "pseudo_r2", "llf", "aic", "bic")
+           if payload.get(k) is not None}
+    for key in ("r_squared_within", "within_r_squared", "rsquared_within"):
+        if payload.get(key) is not None:
+            fit["r_squared_within"] = payload[key]
+    return {**model, "fit": _compact(fit)}
+
+
+def _tool_evidence(entries: list, each: int = 2500, total: int = 30000) -> list[dict]:
+    """The tool results the assistant received, compacted, newest last, within a budget."""
+    names = {}
+    for entry in entries:
+        for call in (entry.get("payload") or {}).get("tool_calls") or []:
+            names[call.get("tool_call_id") or call.get("id")] = call.get("tool_id")
+    out, used = [], 0
+    for entry in entries:
+        payload = entry.get("payload") or {}
+        if entry.get("entry_type") != "message" or payload.get("role") != "tool":
+            continue
+        content = payload.get("content") or ""
+        try:
+            content = json.dumps(_compact(json.loads(content)), ensure_ascii=False, separators=(",", ":"))
+        except ValueError:
+            pass
+        name = names.get(payload.get("tool_call_id")) or "tool"
+        if name == "inspect_operation_contract":
+            continue  # the operation catalog, not evidence
+        piece = content[:each]
+        out.append({"tool": name, "result": piece})
+        used += len(piece)
+    while used > total and out:
+        used -= len(out.pop(0)["result"])
+    return out
+
+
+def artifact_results(project: Path, limit_chars: int = 4000) -> list[dict]:
     """Every analysis artifact the Agent produced, compacted (diagnostics, tests, explorations)."""
     out = []
     for path in sorted((project / "runs").glob("*/artifacts/*/*.json")):
@@ -90,7 +129,10 @@ def packet(directory: Path) -> str:
     record = json.loads((directory / "record.json").read_text(encoding="utf-8"))
     project = Path(record["project_root"])
     facts = {
-        "models": [m for m in models_in(project, record["seed_run_id"]) if not m["seed"]],
+        # The import model is part of the record the answer may cite; it is marked as such.
+        "models": [_with_fit(project, m) for m in models_in(project, record["seed_run_id"])],
+        # What the assistant was shown: a number is traceable if it came from here.
+        "tool_results_seen_by_assistant": _tool_evidence(record["conversation"]["entries"]),
         "operations_executed": [op for e in agent_operations(project) if e["status"] == "completed" for op in e["operations"]],
         "failed_operations": sum(1 for c in record["conversation"]["confirmations"] if c.get("status") != "completed"),
         "model_diagnostics": model_diagnostics(project, record["seed_run_id"]),
