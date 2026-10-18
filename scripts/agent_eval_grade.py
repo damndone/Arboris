@@ -203,8 +203,10 @@ def _candidate_rows(model: dict[str, Any], scenario) -> list[tuple[float, Any, A
         row = coefficients.get(term) if term else None
         return [(float(row["estimate"]), row.get("ci_lower"), row.get("ci_upper"))] if row and row.get("estimate") is not None else []
     if "term_contains" in extra:
+        groups = extra["term_contains"]
+        groups = groups if isinstance(groups[0], tuple) else (groups,)
         rows = [row for term, row in coefficients.items()
-                if all(part in term.lower() for part in extra["term_contains"]) and row.get("estimate") is not None]
+                if any(all(part in term.lower() for part in group) for group in groups) and row.get("estimate") is not None]
         return [(float(r["estimate"]), r.get("ci_lower"), r.get("ci_upper")) for r in rows]
     if "linear_combination" in extra:
         names = {t for weights in extra["linear_combination"] for t in weights}

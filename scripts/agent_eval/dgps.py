@@ -332,8 +332,10 @@ SCENARIOS: dict[str, Scenario] = {s.id: s for s in [
              ("ols", "linear_mixed_effects"), (), ("student-level SEs",), 3.0, 1.5, _cluster_experiment,
              notes="Treatment assigned by classroom (30 clusters); cluster SEs or a multilevel model."),
     Scenario("lmm_repeated", "Treatment and symptom trajectories", "symptom_score", None,
-             ("linear_mixed_effects",), (), ("pooled OLS ignoring repeated measures",), -1.2, 0.15, _repeated,
-             notes="Estimand is the arm-by-visit interaction.", extra={"term_contains": ("arm", "visit")}),
+             # A patient fixed-effects model with an arm-by-visit term estimates the same slope difference.
+             ("linear_mixed_effects", "panel_ols"), (), ("pooled OLS ignoring repeated measures",), -1.2, 0.15, _repeated,
+             notes="Estimand is the arm-by-visit interaction.",
+             extra={"term_contains": (("arm", "visit"), ("treat", "visit"))}),
     Scenario("missing_mar", "Slope of y on x with outcome-dependent missingness", "y", "x",
              ("ols",), ("missingness.profile|statistical.explore", "imputation.mice"), ("silent listwise deletion",),
              0.7, 0.08, _missing_mar),
