@@ -812,6 +812,17 @@ class AgentCore:
                     self._active_turn_started = False
                     return content
                 self._active_turn_started = False
+                if self._steer_queue:
+                    # The person steered while tools ran: their words go in now,
+                    # at this tool boundary, before the next model call (v1.9.1).
+                    steer_text = self._steer_queue.popleft()
+                    self.events.emit(
+                        self.session_id,
+                        "queue_update",
+                        {"queue": "steer", "applied": True, "content": steer_text},
+                        command_id=command_id,
+                    )
+                    return await self._run_turn(steer_text, append_user=True, tool_context=tool_context)
                 return await self._run_turn(
                     None,
                     append_user=False,

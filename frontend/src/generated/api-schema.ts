@@ -409,6 +409,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/agent/sessions/{session_id}/follow_up": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Follow Up Agent Turn
+         * @description Queue a request to run after the current turn finishes (v1.9.1).
+         */
+        post: operations["follow_up_agent_turn_agent_sessions__session_id__follow_up_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/agent/sessions/{session_id}/fork": {
         parameters: {
             query?: never;
@@ -616,6 +636,26 @@ export interface paths {
          *     not deleted); the next message continues from here.
          */
         post: operations["rewind_agent_session_agent_sessions__session_id__rewind_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent/sessions/{session_id}/steer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Steer Agent Turn
+         * @description Change direction mid-turn: the text reaches the model at the next tool boundary (v1.9.1).
+         */
+        post: operations["steer_agent_turn_agent_sessions__session_id__steer_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3160,6 +3200,11 @@ export interface components {
             role?: "main" | "chain";
             /** Run Id */
             run_id?: string | null;
+        };
+        /** AgentSteerRequest */
+        AgentSteerRequest: {
+            /** Text */
+            text: string;
         };
         /** AgentTurn */
         AgentTurn: {
@@ -11126,6 +11171,45 @@ export interface operations {
             };
         };
     };
+    follow_up_agent_turn_agent_sessions__session_id__follow_up_post: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentSteerRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     fork_agent_session_agent_sessions__session_id__fork_post: {
         parameters: {
             query: {
@@ -11509,6 +11593,45 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentSessionChange"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    steer_agent_turn_agent_sessions__session_id__steer_post: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentSteerRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description Validation Error */

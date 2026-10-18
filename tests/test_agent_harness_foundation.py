@@ -981,3 +981,50 @@ def test_concurrent_writers_to_one_session_lose_nothing(tmp_path: Path) -> None:
     replayed = AgentEventStream(root).replay("session-a")
     assert len(replayed) == writers * per_writer
     assert [event.seq for event in replayed] == list(range(1, writers * per_writer + 1))
+
+
+class _ToolThenTextAdapter:
+    """First call asks for a tool; the next answers in text."""
+
+    def __init__(self) -> None:
+        self.requests: list[ModelRequest] = []
+
+    async def stream(self, request: ModelRequest) -> AsyncIterator[ModelStreamEvent]:
+        self.requests.append(request)
+        if len(self.requests) == 1:
+            yield ModelStreamEvent.tool_call_delta(request.request_id, {
+                "tool_call_id": "slow-1", "tool_id": "slow_tool", "arguments": {}})
+            yield ModelStreamEvent.done(request.request_id, finish_reason="tool_calls")
+            return
+        yield ModelStreamEvent.text_delta(request.request_id, "adjusted")
+        yield ModelStreamEvent.done(request.request_id)
+
+
+def test_a_steer_during_a_tool_reaches_the_model_at_the_tool_boundary(tmp_path: Path) -> None:
+    """v1.9.1: the person's correction is the next thing the model reads, not after the whole turn."""
+
+    async def scenario() -> None:
+        repository = JsonlSessionRepository(tmp_path / "workbench")
+        repository.create_session("session-a", chain_id="chain-a", role="chain")
+        events = AgentEventStream(tmp_path / "workbench")
+        adapter = _ToolThenTextAdapter()
+        agent = AgentCore(repository, events, adapter, session_id="session-a")
+        registry = ToolRegistry()
+
+        async def slow_tool(arguments, context):
+            await agent.steer("use log wages instead")
+            return {"done": True}
+
+        registry.register(ToolDefinition(tool_id="slow_tool", version="v1", side_effect="none",
+                                         input_schema={"type": "object", "properties": {}}, handler=slow_tool))
+        agent.attach_tools(registry.descriptors(), registry)
+        assert await agent.prompt("estimate the wage model") == "adjusted"
+        second = adapter.requests[1].messages
+        assert [m["role"] for m in second[-2:]] == ["tool", "user"]
+        assert second[-1]["content"] == "use log wages instead"
+        applied = [e for e in events.replay("session-a")
+                   if e.event_type == "queue_update" and (e.payload or {}).get("applied")]
+        assert len(applied) == 1
+        assert len(adapter.requests) == 2  # no extra turn after the answer
+
+    asyncio.run(scenario())

@@ -2794,6 +2794,41 @@ async def abort_agent_turn(
     return {"status": "cancelling", "session_id": session_id}
 
 
+class AgentSteerRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = Field(min_length=1, max_length=MAX_QUESTION_CHARS)
+
+
+@router.post("/agent/sessions/{session_id}/steer")
+async def steer_agent_turn(session_id: str, project_root: str, body: AgentSteerRequest) -> dict[str, Any]:
+    """Change direction mid-turn: the text reaches the model at the next tool boundary (v1.9.1)."""
+
+    return await _queue_for_active_turn(project_root, session_id, body.text, "steer")
+
+
+@router.post("/agent/sessions/{session_id}/follow_up")
+async def follow_up_agent_turn(session_id: str, project_root: str, body: AgentSteerRequest) -> dict[str, Any]:
+    """Queue a request to run after the current turn finishes (v1.9.1)."""
+
+    return await _queue_for_active_turn(project_root, session_id, body.text, "follow_up")
+
+
+async def _queue_for_active_turn(project_root: str, session_id: str, text: str, queue: str) -> dict[str, Any]:
+    root = _project_root(project_root)
+    _get_session(root, session_id)
+    agent = _ACTIVE_TURNS.get(_active_turn_key(root, session_id))
+    if agent is None:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="AGENT_TURN_NOT_ACTIVE",
+            message="This Agent session has no active turn; send it as a new message instead.",
+            details={"session_id": session_id},
+        )
+    await (agent.steer(text.strip()) if queue == "steer" else agent.follow_up(text.strip()))
+    return {"status": "queued", "queue": queue, "session_id": session_id}
+
+
 @router.get("/agent/sessions/{session_id}/events")
 def get_agent_events(
     session_id: str,
