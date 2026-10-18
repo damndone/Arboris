@@ -66,6 +66,7 @@ def models_in(project: Path, seed_run_id: str) -> list[dict[str, Any]]:
         if not isinstance(result, dict) or "coefficients" not in result:
             continue
         run_id = path.parent.parent.name
+        form = ((_read_json(path.parent.parent / "run_inputs.json") or {}).get("form") or {})
         coefficients = result.get("coefficients")
         rows = coefficients.items() if isinstance(coefficients, dict) else (
             (row.get("term"), row) for row in coefficients or [] if isinstance(row, dict))
@@ -74,8 +75,9 @@ def models_in(project: Path, seed_run_id: str) -> list[dict[str, Any]]:
             "seed": run_id == seed_run_id,
             "model_id": result.get("model_id"),
             "model_type": result.get("model_type") or "",
-            "y": result.get("y_column"),
-            "x": result.get("x_columns"),
+            # Some families (IV, panel) leave y/x out of the result; the run's form has them.
+            "y": result.get("y_column") or form.get("y"),
+            "x": result.get("x_columns") or [v for v in str(form.get("x") or "").split(",") if v],
             "covariance": result.get("covariance_estimator") or result.get("covariance"),
             "nobs": result.get("nobs"),
             "coefficients": {
@@ -108,9 +110,10 @@ def _qualifies(model: dict[str, Any], scenario) -> bool:
         return False
     want_log = scenario.extra.get("log_outcome")
     y = str(model.get("y") or "").lower()
-    if want_log and not re.search(r"(^|_)(ln|log)(_|$)|^ln|^log", y):
+    outcome = (scenario.outcome or "").lower()
+    if want_log and not (y != outcome and (outcome in y or re.search(r"(^|_)(ln|log)", y))):
         return False
-    if not want_log and scenario.outcome and y != scenario.outcome.lower() and scenario.id not in {"dirty_data"}:
+    if not want_log and outcome and y != outcome and scenario.id not in {"dirty_data"}:
         return False
     terms = [str(t).lower() for t in model["coefficients"]]
     main = (scenario.main_term or "").lower()
@@ -119,7 +122,7 @@ def _qualifies(model: dict[str, Any], scenario) -> bool:
 
 
 def estimate_check(models: list[dict[str, Any]], scenario) -> dict[str, Any]:
-    if scenario.truth is None or not scenario.main_term:
+    if scenario.truth is None or not scenario.main_term or scenario.extra.get("score_estimate") is False:
         return {"applicable": False}
     best = None
     for model in models:

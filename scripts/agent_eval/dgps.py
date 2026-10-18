@@ -296,7 +296,9 @@ SCENARIOS: dict[str, Scenario] = {s.id: s for s in [
              0.10, 0.03, _iv(1.2), notes="near_college is valid; mother_educ violates exclusion."),
     Scenario("iv_weak", "Returns to education with a weak instrument", "log_wage", "education",
              ("iv_2sls", "iv.gmm"), ("iv.weak_instruments",), ("claiming a precise IV estimate",),
-             0.10, 0.25, _iv(0.08), notes="First stage is weak; the right answer flags it and avoids strong claims."),
+             0.10, 0.25, _iv(0.08), notes="First stage is weak; the right answer flags it and avoids strong claims.",
+             # Any weak-IV interval covers the truth, so recovery says nothing here; the judge scores it.
+             extra={"score_estimate": False}),
     Scenario("panel_fe", "Training and productivity in a firm panel", "productivity", "training",
              ("panel_ols",), (), ("pooled OLS",), 0.5, 0.06, _panel_fe,
              notes="Firm effects correlate with training; cluster by firm."),
