@@ -315,7 +315,10 @@ SCENARIOS: dict[str, Scenario] = {s.id: s for s in [
              notes="No relation; levels OLS is spurious. Truth is 'no evidence of a relationship'.",
              extra={"score_estimate": False}),
     Scenario("ts_cointegrated", "Consumption and income (cointegrated)", "consumption", "income",
-             ("time_series", "ols"), ("time_series.adf", "time_series.cointegration"), (), 1.5, 0.08, _cointegrated_ts),
+             ("time_series", "ols"), ("time_series.adf", "time_series.cointegration"), (), 1.5, 0.08, _cointegrated_ts,
+             # A VECM with rank 1 normalises the first series' beta to 1; the long-run
+             # coefficient is minus the second entry.
+             extra={"vecm_long_run": True}),
     Scenario("ts_garch", "Volatility clustering in daily returns", "return_pct", None,
              ("arma_garch",), ("time_series.acf",), ("constant-variance model",), 0.98, 0.03, _garch_returns,
              notes="Truth is volatility persistence alpha + beta = 0.98.", extra={"garch_persistence": True}),
@@ -349,7 +352,10 @@ SCENARIOS: dict[str, Scenario] = {s.id: s for s in [
              # Both prices together, or either one alone (it then carries the combined
              # effect), expressed per unit of price.
              extra={"linear_combination": ({"price": 1.0, "price_with_tax": 1.08}, {"price": 1.0},
-                                           {"price_with_tax": 1.08})}),
+                                           {"price_with_tax": 1.08}),
+                    # A log-log model answers with the elasticity: -3.62 * E[price] / E[demand]
+                    # = -3.62 * 10.0 / 65.3 = -0.554.
+                    "log_log_elasticity": (-0.554, 0.08)}),
     Scenario("dirty_data", "Salary, hours and tenure in a messy HR extract", "salary_k", "tenure_years",
              ("ols",), ("data.dedupe", "data.recode|data.fill_missing|data.subset"), ("treating -99 as a salary",),
              1.2, 0.15, _dirty),

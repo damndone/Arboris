@@ -88,6 +88,20 @@ def models_in(project: Path, seed_run_id: str) -> list[dict[str, Any]]:
     return out
 
 
+#: Checks the engine computes for every fitted linear model (diagnostics_*.json),
+#: named by the operation they stand in for.
+_AUTOMATIC = {"breusch_pagan": "diagnostics.breusch_pagan", "cooks_distance": "diagnostics.influence",
+              "durbin_watson": "diagnostics.breusch_godfrey"}
+
+
+def automatic_diagnostics(project: Path) -> set[str]:
+    found = set()
+    for path in (project / "runs").glob("*/model_results/diagnostics_*.json"):
+        payload = _read_json(path) or {}
+        found.update(op for key, op in _AUTOMATIC.items() if payload.get(key) is not None)
+    return found
+
+
 def agent_operations(project: Path) -> list[dict[str, Any]]:
     path = project / "workbench" / "analysis_ledger.jsonl"
     if not path.exists():
@@ -163,6 +177,24 @@ def _garch_persistence(project: Path) -> float | None:
     return None
 
 
+def _vecm_long_run(project: Path, outcome: str) -> list[float]:
+    values = []
+    for path in sorted((project / "runs").glob("*/artifacts/p7_analysis/*time_series_vecm*.json")):
+        payload = _read_json(path) or {}
+        result = ((payload.get("result") or {}).get("result") or {})
+        beta = result.get("beta")
+        request = payload.get("request") or {}
+        columns = list(((request.get("column_bindings") or {}).get("columns") or []))
+        if isinstance(beta, list) and len(beta) == 2 and beta[0] and abs(float(beta[0][0])) > 0:
+            # With the outcome first, the long-run slope is -beta[1]/beta[0];
+            # with it second, the reciprocal.
+            slope = -float(beta[1][0]) / float(beta[0][0])
+            if columns and columns[0] != outcome and slope:
+                slope = 1 / slope
+            values.append(slope)
+    return values
+
+
 def _candidate_rows(model: dict[str, Any], scenario) -> list[tuple[float, Any, Any]]:
     coefficients = model["coefficients"]
     extra = scenario.extra
@@ -198,6 +230,26 @@ def estimate_check(models: list[dict[str, Any]], scenario, project: Path | None 
                 "best": None if value is None else {"estimate": value, "model_type": "arma_garch", "ci": [None, None],
                                                     "covers_truth": False, "within_tolerance": recovered}}
     best = None
+    if extra.get("vecm_long_run") and project is not None:
+        for value in _vecm_long_run(project, scenario.outcome):
+            close = abs(value - scenario.truth) <= scenario.tolerance
+            if best is None or close and not best["within_tolerance"]:
+                best = {"model_type": "vecm", "estimate": value, "ci": [None, None], "covers_truth": False,
+                        "within_tolerance": close}
+    if "log_log_elasticity" in extra:
+        target, tolerance = extra["log_log_elasticity"]
+        for model in models:
+            y = str(model.get("y") or "").lower()
+            if model["seed"] or not re.search(r"(^|_)(ln|log)", y):
+                continue
+            for term, row in model["coefficients"].items():
+                if re.search(r"(^|_)(ln|log)", term.lower()) and "price" in term.lower() and row.get("estimate") is not None:
+                    est = float(row["estimate"])
+                    close = abs(est - target) <= tolerance
+                    if best is None or close and not best["within_tolerance"]:
+                        best = {"model_type": model["model_type"] + " (log-log elasticity)", "estimate": est,
+                                "ci": [row.get("ci_lower"), row.get("ci_upper")], "covers_truth": False,
+                                "within_tolerance": close}
     for model in models:
         if not _qualifies(model, scenario):
             continue
@@ -280,8 +332,10 @@ def grade_task(directory: Path) -> dict[str, Any] | None:
     operations = agent_operations(project)
     executed = [op for entry in operations if entry["status"] == "completed" for op in entry["operations"]]
     expected = scenario.expected_checks
+    automatic = automatic_diagnostics(project)
     covered = [check for check in expected
-               if any(op == alt or op.startswith(alt + ".") for alt in check.split("|") for op in executed)]
+               if any(op == alt or op.startswith(alt + ".") for alt in check.split("|") for op in executed)
+               or any(alt in automatic for alt in check.split("|"))]
     replies = [turn["reply"] for turn in conversation["turns"]]
     entries = conversation["entries"]
     tool_calls = [call for e in entries if e.get("entry_type") == "message"
