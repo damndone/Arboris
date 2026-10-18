@@ -52,6 +52,11 @@ class ExternalTask:
 
 
 def _numeric_columns(path: Path, limit: int = 200) -> list[str]:
+    if path.suffix.lower() in {".dta", ".sav"}:
+        import pandas as pd
+
+        frame = pd.read_stata(path) if path.suffix.lower() == ".dta" else pd.read_spss(path)
+        return [c for c in frame.columns if pd.api.types.is_numeric_dtype(frame[c]) and frame[c].notna().any()]
     with path.open(newline="", encoding="utf-8", errors="replace") as handle:
         reader = csv.DictReader(handle)
         rows = [row for _, row in zip(range(limit), reader)]
@@ -140,6 +145,65 @@ def blade_tasks() -> list[ExternalTask]:
                     "hold up in peer review and write it up. End with a separate line FINAL ANSWER: <your conclusion in one sentence, with the key estimate>."),
             data_path=BLADE / name / "data.csv", reference=reference))
     return tasks
+
+
+REPLICATION = EXTERNAL / "replication" / "prepared"
+
+#: Each target was reproduced in Stata 18 from the original files
+#: (``local/external/replication/oracle/*.do``) and matches the printed table.
+REPLICATIONS = (
+    {"id": "replication.ajr2001", "file": "ajr2001_maketable4.dta", "target": 0.94, "tolerance": 0.005, "se": 0.16,
+     "prompt": ("This is the data for Table 4 of Acemoglu, Johnson and Robinson (2001), 'The Colonial Origins of Comparative "
+                "Development' (AER). Reproduce the paper's headline estimate: the effect of average protection against "
+                "expropriation risk (avexpr) on log GDP per capita in 1995 (logpgp95), instrumented by log settler mortality "
+                "(logem4), in the base sample (baseco == 1), with no other controls (Table 4, column 1). Report the estimate and "
+                "its standard error as in the paper, check the instrument, and explain what the estimate means.")},
+    {"id": "replication.card_krueger1994", "file": "card_krueger_1994.csv", "target": 2.76, "tolerance": 0.015, "alt_targets": [2.75],
+     "prompt": ("This is the store survey from Card and Krueger (1994), 'Minimum Wages and Employment' (AER). state = 1 for New "
+                "Jersey (minimum wage rose in April 1992) and 0 for Pennsylvania; variables ending in 2 are from the second "
+                "interview; status2 codes the second-interview outcome. Full-time-equivalent employment is full-time employees "
+                "plus managers plus half the part-time employees. Reproduce the paper's difference-in-differences estimate of "
+                "the change in mean FTE employment in New Jersey relative to Pennsylvania (Table 3), and explain it.")},
+    {"id": "replication.dehejia_wahba1999", "file": "dehejia_wahba_nswre74.dta", "target": 1794.0, "tolerance": 1.0, "se": 633.0,
+     "prompt": ("This is the NSW experimental sample used by Dehejia and Wahba (1999), drawn from LaLonde (1986). treat marks "
+                "random assignment to the job-training program and re78 is 1978 earnings. Reproduce the experimental benchmark "
+                "estimate of the program's effect on 1978 earnings with its standard error, check balance on the "
+                "pre-treatment covariates, and explain the result.")},
+    {"id": "replication.angrist_krueger1991", "file": "angrist_krueger_1991_cohort30_39.csv", "target": 0.0891, "tolerance": 0.00005,
+     "se": 0.0161,
+     "prompt": ("This is the 1980 Census extract of men born 1930-1939 used by Angrist and Krueger (1991), 'Does Compulsory School "
+                "Attendance Affect Schooling and Earnings?' (QJE): lwklywge = log weekly wage, educ = years of schooling, yob = "
+                "year of birth (two digits), qob = quarter of birth, pob = state of birth. Reproduce the 2SLS estimate of the "
+                "return to schooling that uses quarter-of-birth by year-of-birth interactions as instruments and controls for "
+                "year of birth (Table V, column 2), compare it with OLS, and assess the instruments.")},
+    {"id": "replication.krueger1999", "file": "krueger1999_star.dta", "target": -0.62, "tolerance": 0.005, "se": 0.23,
+     "prompt": ("This is the Tennessee STAR data analysed in Krueger (1999) and in Angrist and Pischke, Mostly Harmless "
+                "Econometrics, Table 8.2.1. For kindergarten students (stark == 1), build each student's average percentile "
+                "score in reading and math relative to the distribution in regular-size classes, then regress it on actual "
+                "kindergarten class size. Reproduce the class-size coefficient and its standard error clustered by class, and "
+                "explain why the clustered standard error differs from the robust one.")},
+)
+
+
+def replication_tasks() -> list[ExternalTask]:
+    return [ExternalTask(id=item["id"], source="replication", language="en",
+                         prompt=item["prompt"] + ANSWER_EN.replace("For multiple choice write only the option; for a number write the number (a % sign is allowed).",
+                                                                   "Write the estimate first, then its standard error in parentheses."),
+                         data_path=REPLICATION / item["file"], reference=item) for item in REPLICATIONS]
+
+
+def replication_correct(reference: dict[str, Any], reply: str) -> bool | None:
+    import re
+
+    lines = [line for line in reply.splitlines() if "FINAL ANSWER" in line.upper()]
+    if not lines:
+        return None
+    match = re.search(r"-?\d+(?:,\d{3})*(?:\.\d+)?", lines[-1].split(":", 1)[-1])
+    if not match:
+        return False
+    value = float(match.group().replace(",", ""))
+    targets = [reference["target"], *reference.get("alt_targets", [])]
+    return any(abs(value - t) <= reference["tolerance"] for t in targets)
 
 
 def qrdata_correct(answer: str, reply: str, question_type: str) -> bool | None:

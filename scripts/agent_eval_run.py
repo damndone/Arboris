@@ -32,7 +32,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from agent_eval.recorder import provider_tape  # noqa: E402
 from agent_eval.runner import Policy, run_conversation  # noqa: E402
-from agent_eval.external import ExternalTask, blade_tasks, qrdata_subset, seed_model_for  # noqa: E402
+from agent_eval.external import ExternalTask, blade_tasks, qrdata_subset, replication_tasks, seed_model_for  # noqa: E402
 from agent_eval.heldout import heldout_tasks  # noqa: E402
 from agent_eval.tasks import dev_tasks  # noqa: E402
 from workbench.app import app  # noqa: E402
@@ -82,7 +82,7 @@ def main() -> int:
         return 2
     selected = {item for item in args.tasks.split(",") if item}
     suite = {"dev": dev_tasks, "heldout": heldout_tasks,
-             "external": lambda: [*qrdata_subset(), *blade_tasks()]}[args.suite]()
+             "external": lambda: [*qrdata_subset(), *blade_tasks(), *replication_tasks()]}[args.suite]()
     tasks = [task for task in suite if not selected or task.id in selected]
     if selected - {task.id for task in tasks}:
         print(f"unknown task ids: {sorted(selected - {t.id for t in tasks})}", file=sys.stderr)

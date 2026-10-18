@@ -33,7 +33,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from agent_eval import judge  # noqa: E402
 from agent_eval.dgps import SCENARIOS  # noqa: E402
-from agent_eval.external import SOCCER_REFERENCE, qrdata_correct  # noqa: E402
+from agent_eval.external import SOCCER_REFERENCE, qrdata_correct, replication_correct  # noqa: E402
 from agent_eval.heldout import HELDOUT_SCENARIOS  # noqa: E402
 
 ALL_SCENARIOS = {**SCENARIOS, **HELDOUT_SCENARIOS}
@@ -273,6 +273,8 @@ def grade_external(directory: Path, record: dict[str, Any]) -> dict[str, Any]:
     if record.get("source") == "qrdata":
         out["category"] = (record.get("reference") or {}).get("category")
         out["correct"] = bool(qrdata_correct(record["answer"], final, record["question_type"]))
+    if record.get("source") == "replication":
+        out["correct"] = bool(replication_correct(record["reference"], final))
     if record.get("task_id") == "blade.soccer":
         ors = [float(m) for m in re.findall(r"(?:odds ratio|OR)[^0-9]{0,20}(\d+\.\d+)", final, re.I)]
         out["reported_odds_ratios"] = ors
@@ -345,6 +347,8 @@ def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
                                             for c in {r["category"] for r in qr}
                                             for n in [sum(1 for r in qr if r["category"] == c)]},
             "blade_tasks": sum(1 for r in external if r.get("source") == "blade"),
+            "replications_reproduced": sum(1 for r in external if r.get("source") == "replication" and r.get("correct")),
+            "replications": sum(1 for r in external if r.get("source") == "replication"),
             "soccer": next(({"odds_ratios": r.get("reported_odds_ratios"), "within_range": r.get("within_many_analysts_range")}
                             for r in external if r["task"].startswith("blade.soccer")), None),
             "blade_rubric_overall": (round(statistics.mean(statistics.mean(r["judge"][k]["score"] for k in judge.RUBRIC)
