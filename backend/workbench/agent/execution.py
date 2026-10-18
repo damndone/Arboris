@@ -9,6 +9,7 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import RLock
 from typing import Any, Protocol
 
 import fcntl
@@ -31,7 +32,9 @@ class ChainExecutionLease:
     Operation records prevent two executors from claiming the same proposal.
     This second key prevents two different proposals from mutating the same
     Chain head concurrently, even when each HTTP request constructs a fresh
-    WorkbenchOrchestrator instance.
+    WorkbenchOrchestrator instance. A live holder retains its OS file lock
+    until release; the JSON deadline governs recovery only after that lock is
+    free, never takeover from a worker that is still running.
     """
 
     def __init__(
@@ -48,6 +51,8 @@ class ChainExecutionLease:
         self.active_head_run_id = active_head_run_id
         self.execution_key = execution_key
         self.lease_seconds = lease_seconds
+        self._lock = RLock()
+        self._handle = None
         identity = json.dumps(
             {"chain_id": chain_id, "active_head_run_id": active_head_run_id},
             ensure_ascii=False,
@@ -61,10 +66,18 @@ class ChainExecutionLease:
         )
 
     def acquire(self) -> None:
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        with self._path.open("a+", encoding="utf-8") as handle:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        with self._lock:
+            if self._handle is not None:
+                return
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            handle = self._path.open("a+", encoding="utf-8")
             try:
+                try:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError as exc:
+                    raise OperationClaimConflict(
+                        "another operation is executing against the same Chain active head"
+                    ) from exc
                 handle.seek(0)
                 raw = handle.read().strip()
                 current = json.loads(raw) if raw else {}
@@ -72,6 +85,7 @@ class ChainExecutionLease:
                 expires_at = float(current.get("expires_at", 0) or 0)
                 if current.get("status") == "active" and expires_at > now:
                     if current.get("execution_key") == self.execution_key:
+                        self._handle = handle
                         return
                     raise OperationClaimConflict(
                         "another operation is executing against the same Chain active head"
@@ -89,15 +103,18 @@ class ChainExecutionLease:
                 json.dump(payload, handle, ensure_ascii=False, sort_keys=True)
                 handle.write("\n")
                 handle.flush()
-            finally:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                self._handle = handle
+            except BaseException:
+                handle.close()
+                raise
 
     def release(self) -> None:
-        if not self._path.exists():
-            return
-        with self._path.open("r+", encoding="utf-8") as handle:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        with self._lock:
+            handle = self._handle
+            if handle is None:
+                return
             try:
+                handle.seek(0)
                 raw = handle.read().strip()
                 current = json.loads(raw) if raw else {}
                 if current.get("execution_key") != self.execution_key:
@@ -109,7 +126,11 @@ class ChainExecutionLease:
                 handle.write("\n")
                 handle.flush()
             finally:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                self._handle = None
+                try:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                finally:
+                    handle.close()
 
 
 def _now() -> datetime:
