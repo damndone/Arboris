@@ -32,6 +32,8 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from agent_eval.recorder import provider_tape  # noqa: E402
 from agent_eval.runner import Policy, run_conversation  # noqa: E402
+from agent_eval.external import ExternalTask, blade_tasks, qrdata_subset, seed_model_for  # noqa: E402
+from agent_eval.heldout import heldout_tasks  # noqa: E402
 from agent_eval.tasks import dev_tasks  # noqa: E402
 from workbench.app import app  # noqa: E402
 from workbench.dev_fixtures.agent_navigation import _wait_for_terminal_run  # noqa: E402
@@ -70,6 +72,8 @@ def main() -> int:
     parser.add_argument("--max-nudges", type=int, default=8)
     parser.add_argument("--max-wall-s", type=float, default=1800)
     parser.add_argument("--label", default="", help="round label, e.g. baseline-v190")
+    parser.add_argument("--suite", choices=("dev", "heldout", "external"), default="dev",
+                        help="heldout is run once, at the final evaluation only")
     args = parser.parse_args()
 
     config = load_llm_config()
@@ -77,7 +81,9 @@ def main() -> int:
         print("no model provider configured", file=sys.stderr)
         return 2
     selected = {item for item in args.tasks.split(",") if item}
-    tasks = [task for task in dev_tasks() if not selected or task.id in selected]
+    suite = {"dev": dev_tasks, "heldout": heldout_tasks,
+             "external": lambda: [*qrdata_subset(), *blade_tasks()]}[args.suite]()
+    tasks = [task for task in suite if not selected or task.id in selected]
     if selected - {task.id for task in tasks}:
         print(f"unknown task ids: {sorted(selected - {t.id for t in tasks})}", file=sys.stderr)
         return 2
@@ -96,6 +102,7 @@ def main() -> int:
         "base_url_host": config.base_url.split("/")[2] if "//" in config.base_url else config.base_url,
         "repeat": args.repeat,
         "policy": {"max_nudges": args.max_nudges, "max_wall_s": args.max_wall_s},
+        "suite": args.suite,
         "tasks": [task.id for task in tasks],
     }
     (out / "run_meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -111,13 +118,25 @@ def main() -> int:
                 continue
             directory.mkdir(parents=True, exist_ok=True)
             started = time.monotonic()
-            record = {"task_id": task.id, "repeat": rep, "scenario": task.scenario.id, "variant": task.variant,
-                      "language": task.language, "prompt": task.prompt, "seed": task.seed}
+            external = isinstance(task, ExternalTask)
+            record = {"task_id": task.id, "repeat": rep, "language": task.language, "prompt": task.prompt}
+            if external:
+                record.update({"suite": "external", "source": task.source, "answer": task.answer,
+                               "question_type": task.question_type, "reference": task.reference})
+            else:
+                record.update({"suite": args.suite, "scenario": task.scenario.id, "variant": task.variant, "seed": task.seed})
             try:
                 project = create_project(directory, "project")
-                dataset = directory / f"{task.scenario.id}.csv"
-                task.scenario.frame(task.seed).to_csv(dataset, index=False)
-                record["seed_run_id"] = run_id = _seed(project.root, dataset, task.seed_model)
+                if external:
+                    dataset = directory / task.data_path.name
+                    dataset.write_bytes(task.data_path.read_bytes())
+                    seed_form = seed_model_for(dataset)
+                else:
+                    dataset = directory / f"{task.scenario.id}.csv"
+                    task.scenario.frame(task.seed).to_csv(dataset, index=False)
+                    seed_form = task.seed_model
+                record["seed_model"] = seed_form
+                record["seed_run_id"] = run_id = _seed(project.root, dataset, seed_form)
                 record["project_root"] = str(project.root)
                 policy = Policy(max_nudges=args.max_nudges, max_wall_s=args.max_wall_s, language=task.language)
                 with provider_tape(directory / "provider_tape.jsonl") as tape:

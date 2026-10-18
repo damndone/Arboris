@@ -33,6 +33,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from agent_eval import judge  # noqa: E402
 from agent_eval.dgps import SCENARIOS  # noqa: E402
+from agent_eval.external import SOCCER_REFERENCE, qrdata_correct  # noqa: E402
 from agent_eval.heldout import HELDOUT_SCENARIOS  # noqa: E402
 
 ALL_SCENARIOS = {**SCENARIOS, **HELDOUT_SCENARIOS}
@@ -193,6 +194,8 @@ def grade_task(directory: Path) -> dict[str, Any] | None:
     record = _read_json(directory / "record.json")
     if not record:
         return None
+    if record.get("suite") == "external":
+        return grade_external(directory, record)
     scenario = ALL_SCENARIOS[record["scenario"]]
     out: dict[str, Any] = {"task": directory.name, "scenario": scenario.id, "variant": record.get("variant"),
                            "status": record.get("status")}
@@ -247,22 +250,55 @@ def grade_task(directory: Path) -> dict[str, Any] | None:
     return out
 
 
+def _final_answer_line(reply: str) -> str | None:
+    lines = [line for line in reply.splitlines() if "FINAL ANSWER" in line.upper()]
+    return lines[-1].split(":", 1)[-1].strip() if lines else None
+
+
+def grade_external(directory: Path, record: dict[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {"task": directory.name, "suite": "external", "source": record.get("source"),
+                           "status": record.get("status")}
+    if record.get("status") != "ran":
+        out["error"] = record.get("error")
+        return out
+    conversation = record["conversation"]
+    replies = [turn["reply"] for turn in conversation["turns"]]
+    final = next((r for r in reversed(replies) if "FINAL ANSWER" in r.upper()), replies[-1] if replies else "")
+    out.update({
+        "user_actions": conversation["user_actions"], "nudges": conversation["nudges"], "wall_s": conversation["wall_s"],
+        "completed_marker": conversation["completed_marker"], "final_answer": _final_answer_line(final),
+        "unsupported_numbers": unsupported_numbers(replies, conversation["entries"], record["prompt"]),
+        "usage": usage_from_tape(directory / "provider_tape.jsonl"),
+    })
+    if record.get("source") == "qrdata":
+        out["category"] = (record.get("reference") or {}).get("category")
+        out["correct"] = bool(qrdata_correct(record["answer"], final, record["question_type"]))
+    if record.get("task_id") == "blade.soccer":
+        ors = [float(m) for m in re.findall(r"(?:odds ratio|OR)[^0-9]{0,20}(\d+\.\d+)", final, re.I)]
+        out["reported_odds_ratios"] = ors
+        out["within_many_analysts_range"] = bool(ors) and SOCCER_REFERENCE["odds_ratio_min"] <= ors[0] <= SOCCER_REFERENCE["odds_ratio_max"]
+    return out
+
+
 def judge_task(directory: Path, graded: dict[str, Any]) -> dict[str, Any]:
     from agent_eval.recorder import provider_tape
     from workbench.llm.client import chat_completion
     from workbench.llm.config import load_llm_config
 
     record = _read_json(directory / "record.json")
-    scenario = ALL_SCENARIOS[record["scenario"]]
     project = Path(record["project_root"])
     facts = {
         "models": [m for m in models_in(project, record["seed_run_id"]) if not m["seed"]],
-        "operations_executed": graded.get("operations_executed"),
+        "operations_executed": [op for e in agent_operations(project) if e["status"] == "completed" for op in e["operations"]],
         "failed_operations": graded.get("failed_operations"),
     }
-    truth = {"title": scenario.title, "estimand_truth": scenario.truth, "main_term": scenario.main_term,
-             "appropriate_families": scenario.appropriate_families, "expected_checks": scenario.expected_checks,
-             "traps": scenario.traps, "notes": scenario.notes}
+    if record.get("suite") == "external":
+        truth = {"source": record.get("source"), "reference": record.get("reference"), "answer": record.get("answer")}
+    else:
+        scenario = ALL_SCENARIOS[record["scenario"]]
+        truth = {"title": scenario.title, "estimand_truth": scenario.truth, "main_term": scenario.main_term,
+                 "appropriate_families": scenario.appropriate_families, "expected_checks": scenario.expected_checks,
+                 "traps": scenario.traps, "notes": scenario.notes}
     final = "\n\n---\n\n".join(t["reply"] for t in record["conversation"]["turns"][-3:])
     prompt = judge.build_prompt(record, truth, facts, final)
     config = load_llm_config()
@@ -273,6 +309,8 @@ def judge_task(directory: Path, graded: dict[str, Any]) -> dict[str, Any]:
 
 
 def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    external = [r for r in rows if r.get("suite") == "external" and r.get("status") == "ran"]
+    rows = [r for r in rows if r.get("suite") != "external"]
     ran = [r for r in rows if r.get("status") == "ran"]
     def rate(key, predicate=bool):
         values = [r[key] for r in ran if r.get(key) is not None]
@@ -298,6 +336,22 @@ def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "completion_tokens": sum(u["completion_tokens"] for u in usage),
         "cache_hit_rate": round(sum(u["cache_hit_tokens"] for u in usage) / prompt, 4) if prompt else None,
     }
+    if external:
+        qr = [r for r in external if r.get("source") == "qrdata"]
+        out["external"] = {
+            "qrdata_tasks": len(qr),
+            "qrdata_accuracy": round(sum(r["correct"] for r in qr) / len(qr), 3) if qr else None,
+            "qrdata_accuracy_by_category": {c: round(sum(r["correct"] for r in qr if r["category"] == c) / n, 3)
+                                            for c in {r["category"] for r in qr}
+                                            for n in [sum(1 for r in qr if r["category"] == c)]},
+            "blade_tasks": sum(1 for r in external if r.get("source") == "blade"),
+            "soccer": next(({"odds_ratios": r.get("reported_odds_ratios"), "within_range": r.get("within_many_analysts_range")}
+                            for r in external if r["task"].startswith("blade.soccer")), None),
+            "blade_rubric_overall": (round(statistics.mean(statistics.mean(r["judge"][k]["score"] for k in judge.RUBRIC)
+                                                           for r in external if r.get("source") == "blade" and isinstance(r.get("judge"), dict)), 2)
+                                     if any(r.get("source") == "blade" and isinstance(r.get("judge"), dict) for r in external) else None),
+            "median_user_actions": statistics.median([r["user_actions"] for r in external]),
+        }
     judged = [r["judge"] for r in ran if isinstance(r.get("judge"), dict)]
     if judged:
         out["rubric_mean"] = {key: round(statistics.mean(j[key]["score"] for j in judged), 2) for key in judge.RUBRIC}
