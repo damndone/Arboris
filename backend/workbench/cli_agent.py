@@ -94,18 +94,35 @@ async def _stream_headless_turn(
             await asyncio.wait({task}, timeout=0.1)
             drain()
         result = await task
+        drain()
     except BaseException:
         # A broken output stream or Ctrl-C must not leave an unattended model
-        # task running without its event consumer. Existing abort semantics apply.
-        try:
-            await routes.abort_agent_turn(session_id, root)
-        except Exception:
-            pass
-        task.cancel()
-        await asyncio.gather(task, return_exceptions=True)
+        # task running without its event consumer. Capture the exact descendant:
+        # a rejected request must never abort another caller's session turn.
+        owned = routes.turn_registry.owned_task_for(task)
+
+        async def stop_and_drain() -> None:
+            if owned is not None and not owned.done():
+                try:
+                    await routes.abort_agent_turn(session_id, root)
+                except Exception:
+                    pass
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            if owned is not None:
+                await asyncio.gather(owned, return_exceptions=True)
+
+        cleanup = asyncio.create_task(stop_and_drain())
+        while not cleanup.done():
+            try:
+                await asyncio.shield(cleanup)
+            except asyncio.CancelledError:
+                # Repeated Ctrl-C must not close the event loop while an
+                # operation is still binding its effect and releasing leases.
+                continue
+        cleanup.result()
+        # Do not retry the failed output sink or replace its original exception.
         raise
-    finally:
-        drain()
     proposals = routes.get_agent_proposals(session_id, root)['proposals']
     pending = [item for item in proposals if item.get('status') == 'pending']
     plan = routes.get_agent_plan(session_id, root)['plan']

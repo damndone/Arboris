@@ -207,3 +207,110 @@ def test_headless_continue_retains_project_permission_denials(tmp_path, monkeypa
     assert tool_results[-1]['output']['denied'] is True
     assert fixture.orchestrator.operation_store.list_records() == []
     assert fixture.repository.get_metadata('chain-session')['execution_mode'] == 'auto'
+
+
+@pytest.mark.parametrize('continuation', [False, True])
+@pytest.mark.parametrize('blocked_at', ['provider', 'tool'])
+def test_broken_event_sink_drains_original_owned_turn_despite_repeated_cancellation(
+    tmp_path, monkeypatch, continuation, blocked_at,
+):
+    import asyncio
+    from dataclasses import replace
+    from tests.test_agent_routes import _context_packet
+    from workbench.agent.model import ModelStreamEvent
+    from workbench.agent.tools import ToolDefinition
+    from workbench.cli_agent import run_headless, continue_headless
+    from workbench.http import agent_routes as routes
+
+    async def scenario():
+        started, output_failed, aborted, release = (asyncio.Event() for _ in range(4))
+        completed = []
+        calls = []
+        original_error = OSError('original broken output')
+
+        async def blocking_inspection(arguments, context):
+            started.set()
+            try:
+                await release.wait()
+            except asyncio.CancelledError:
+                aborted.set()
+                # Mimic an operation that must finish binding its effect before
+                # cancellation can release the active tool and turn ownership.
+                await release.wait()
+            completed.append('effect-bound')
+            return {'completed': True}
+
+        class BlockingProvider:
+            def __init__(self, config):
+                pass
+            async def stream(self, request):
+                calls.append(request)
+                if blocked_at == 'provider':
+                    started.set()
+                    await request.abort_event.wait()
+                    aborted.set()
+                    await release.wait()
+                else:
+                    yield ModelStreamEvent.tool_call_delta(request.request_id, {
+                        'tool_call_id': 'blocking-read', 'tool_id': 'inspect_blocking', 'arguments': {},
+                    })
+                yield ModelStreamEvent.done(request.request_id, 'tool_calls' if blocked_at == 'tool' else 'stop')
+
+        monkeypatch.setattr(routes, 'load_llm_config', lambda: replace(_config(), context_window_tokens=128_000))
+        monkeypatch.setattr(routes, 'OpenAICompatibleModelAdapter', BlockingProvider)
+        monkeypatch.setattr(routes.NodeOperationContextProvider, 'tool_definitions', lambda *args, **kwargs: [
+            ToolDefinition('inspect_blocking', 'v1', {'type': 'object'}, 'none', blocking_inspection),
+        ])
+        project = tmp_path / 'project'
+        project.mkdir()
+        session = routes.create_agent_session(str(project), routes.AgentSessionCreateRequest(
+            role='chain', chain_id='chain-a', run_id='run-a', context_packet=_context_packet(),
+        ))['session_id']
+        emitted = []
+        def broken_sink(event):
+            if started.is_set():
+                output_failed.set()
+                # A second output attempt must not replace the first error.
+                if emitted:
+                    raise OSError('secondary broken output')
+                emitted.append(event)
+                raise original_error
+
+        if continuation:
+            work = continue_headless(project, session, on_event=broken_sink)
+        else:
+            work = run_headless(project, 'Inspect once.', session_id=session, on_event=broken_sink)
+        runner = asyncio.create_task(work)
+        key = routes._active_turn_key(project, session)
+        try:
+            await asyncio.wait_for(output_failed.wait(), 2)
+            await asyncio.wait_for(aborted.wait(), 2)
+            owned = routes.turn_registry.tasks[key]
+            core = routes.turn_registry.get(project, session)
+            await asyncio.sleep(0)
+            assert not runner.done(), 'CLI cleanup returned before its owned turn drained'
+            for _ in range(2):
+                runner.cancel()
+                await asyncio.sleep(0)
+                assert not runner.done(), 'repeated cancellation bypassed the drain'
+                assert routes.turn_registry.get(project, session) is core
+                assert key in routes.turn_registry.tasks and key in routes.turn_registry.reserved
+            release.set()
+            with pytest.raises(OSError) as caught:
+                await runner
+            assert caught.value is original_error
+            await asyncio.sleep(0)
+            assert owned.done()
+            assert key not in routes.turn_registry.tasks and key not in routes.turn_registry.reserved
+            assert routes.turn_registry.get(project, session) is None
+            assert len(calls) == 1  # Cleanup must never start another turn.
+            if blocked_at == 'tool':
+                assert completed == ['effect-bound']
+        finally:
+            release.set()
+            await asyncio.gather(runner, return_exceptions=True)
+            owned = routes.turn_registry.tasks.get(key)
+            if owned is not None:
+                await asyncio.gather(owned, return_exceptions=True)
+
+    asyncio.run(scenario())

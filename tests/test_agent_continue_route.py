@@ -82,7 +82,7 @@ def test_session_grants_and_project_rules_are_read_from_their_stores(tmp_path: P
     (root / "workbench" / "agent-permissions.json").write_text(json.dumps({
         "allow": [{"class": "derive", "operation_id": "model.genesis"}],
         "deny": [{"class": "external"}],
-        "ask": [{"class": "nonsense"}],
+        "ask": [],
     }), encoding="utf-8")
     rules = agent_routes._project_permission_rules(root)
     assert rules.allow == (Rule(PermissionClass.DERIVE, "model.genesis"),)

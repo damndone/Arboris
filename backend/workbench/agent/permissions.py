@@ -202,19 +202,37 @@ def rules_from_payload(payload: object) -> Rules:
     """Project rules from ``<project>/workbench/agent-permissions.json``.
 
     Shape: ``{"allow": [{"class": "derive", "operation_id": "model.genesis"}], "ask": [...], "deny": [...]}``.
-    Anything malformed is ignored rather than guessed; the floor holds regardless.
+    An omitted ``operation_id`` means the whole class. A supplied qualifier
+    must be a non-empty string; it is never coerced or removed. Malformed
+    documents raise ``ValueError`` as a whole, so invalid deny entries cannot
+    silently disappear while other entries grant authority.
     """
+    if type(payload) is not dict:
+        raise ValueError("permission rules must be an object")
+    if payload.keys() - {"allow", "ask", "deny"}:
+        raise ValueError("permission rules contain unknown fields")
 
     def entries(name: str) -> tuple[Rule, ...]:
-        items = payload.get(name) if isinstance(payload, dict) else None
+        items = payload.get(name, [])
+        if type(items) is not list:
+            raise ValueError(f"permission rules {name} must be a list")
         out = []
-        for item in items if isinstance(items, list) else ():
+        for index, item in enumerate(items):
+            location = f"permission rules {name}[{index}]"
+            if type(item) is not dict:
+                raise ValueError(f"{location} must be an object")
+            if item.keys() - {"class", "operation_id"}:
+                raise ValueError(f"{location} contains unknown fields")
+            if type(item.get("class")) is not str:
+                raise ValueError(f"{location}.class must be a known permission class string")
             try:
-                cls = PermissionClass(str(item.get("class")))
-            except (ValueError, AttributeError):
-                continue
+                cls = PermissionClass(item["class"])
+            except ValueError as exc:
+                raise ValueError(f"{location}.class must be a known permission class string") from exc
             operation_id = item.get("operation_id")
-            out.append(Rule(cls, str(operation_id) if isinstance(operation_id, str) and operation_id else None))
+            if "operation_id" in item and (type(operation_id) is not str or not operation_id):
+                raise ValueError(f"{location}.operation_id must be a non-empty string when supplied")
+            out.append(Rule(cls, operation_id))
         return tuple(out)
 
     return Rules(allow=entries("allow"), ask=entries("ask"), deny=entries("deny"))

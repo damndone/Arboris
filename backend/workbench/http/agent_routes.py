@@ -2342,14 +2342,39 @@ async def compact_agent_session(
 
 
 def _project_permission_rules(root: Path):
-    """Project rules from ``workbench/agent-permissions.json``; none when absent or unreadable."""
+    """Read complete project rules; an invalid store must not discard denies."""
     from ..agent.permissions import Rules, rules_from_payload
+
+    def unique_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate permission key")
+            result[key] = value
+        return result
 
     path = root / "workbench" / "agent-permissions.json"
     try:
-        return rules_from_payload(json.loads(path.read_text(encoding="utf-8"))) if path.is_file() else Rules()
-    except (OSError, ValueError):
-        return Rules()
+        document = path.read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        if not path.is_symlink():
+            return Rules()
+        raise WorkbenchAPIError(
+            status_code=503, code="AGENT_PERMISSION_RULES_INVALID",
+            message="The project permission rules cannot be read; repair the permission file before continuing.",
+        ) from exc
+    except (OSError, UnicodeError) as exc:
+        raise WorkbenchAPIError(
+            status_code=503, code="AGENT_PERMISSION_RULES_INVALID",
+            message="The project permission rules cannot be read; repair the permission file before continuing.",
+        ) from exc
+    try:
+        return rules_from_payload(json.loads(document, object_pairs_hook=unique_keys))
+    except ValueError as exc:
+        raise WorkbenchAPIError(
+            status_code=503, code="AGENT_PERMISSION_RULES_INVALID",
+            message="The project permission rules are invalid; repair the permission file before continuing.",
+        ) from exc
 
 
 def _session_grants(repository: Any, session_id: str):
@@ -2389,10 +2414,9 @@ async def run_agent_turn(
     root = _project_root(project_root)
     repository, events, metadata = _get_session(root, session_id)
     turn_key = _reserve_turn(root, session_id)
-    try:
-        return await _run_reserved_agent_turn(root, session_id, body, repository, events, metadata, turn_key)
-    finally:
-        _release_turn(turn_key)
+    return await turn_registry.run_owned(turn_key, lambda: _run_reserved_agent_turn(
+        root, session_id, body, repository, events, metadata, turn_key
+    ))
 
 
 class AgentPlanApproveRequest(BaseModel):
@@ -2458,12 +2482,9 @@ async def continue_agent_turn(
     root = _project_root(project_root)
     repository, events, metadata = _get_session(root, session_id)
     turn_key = _reserve_turn(root, session_id)
-    try:
-        return await _run_reserved_agent_turn(
-            root, session_id, body, repository, events, metadata, turn_key, continuation=True
-        )
-    finally:
-        _release_turn(turn_key)
+    return await turn_registry.run_owned(turn_key, lambda: _run_reserved_agent_turn(
+        root, session_id, body, repository, events, metadata, turn_key, continuation=True
+    ))
 
 
 async def _run_reserved_agent_turn(
@@ -2477,6 +2498,7 @@ async def _run_reserved_agent_turn(
     *,
     continuation: bool = False,
 ) -> dict[str, Any]:
+    permission_rules = _project_permission_rules(root)
     _tell_agent_finished_outcomes(root, session_id)
     config = load_llm_config()
     if not config.is_configured():
@@ -2531,7 +2553,7 @@ async def _run_reserved_agent_turn(
                     "to the person as a card; read-only analysis runs at once."
                 ),
             })
-        orchestrator.permission_rules = _project_permission_rules(root)
+        orchestrator.permission_rules = permission_rules
         orchestrator.session_grants = _session_grants(repository, session_id)
         orchestrator.register_chain(str(metadata.get("chain_id")), session_id, agent)
         orchestrator.read_only_runner = lambda proposal, actor=None: _run_read_only_proposal(
