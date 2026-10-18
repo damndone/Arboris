@@ -70,6 +70,7 @@ from .proposals import (
     ProposalConfirmation,
     ProposalConfirmationError,
     ProposalDecision,
+    ProposalInvocation,
     ProposalRevision,
     ProposalStaleError,
     ProposalStore,
@@ -827,6 +828,7 @@ class WorkbenchOrchestrator:
         session_id: str | None = None,
         command_id: str | None = None,
         proposal_id: str | None = None,
+        invocation: ProposalInvocation | None = None,
     ) -> OperationReceipt:
         """Admit a typed request under a server-selected Chain session."""
 
@@ -842,6 +844,7 @@ class WorkbenchOrchestrator:
             operation_registry=self.operation_registry,
             proposal_store=self.proposal_store,
             events=self.events,
+            invocation=invocation,
         )
 
     def revise_proposal(
@@ -2824,6 +2827,11 @@ class WorkbenchOrchestrator:
                 OperationRequest.from_arguments({**arguments, "operation_id": operation_id}),
                 chain_id=chain_id,
                 command_id=command_id,
+                invocation=(ProposalInvocation(
+                    invocation_id=metadata["invocation_id"],
+                    provider_step=metadata["provider_step"],
+                    tool_call_id=metadata["tool_call_id"],
+                ) if metadata.get("invocation_id") is not None else None),
             )
             proposal = receipt.proposal
             return await self._run_or_await_confirmation(proposal, session_id=session_id)

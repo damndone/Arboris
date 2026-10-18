@@ -261,7 +261,7 @@ class AgentCore:
         budget: AgentRunBudget | Mapping[str, Any] | None = None,
     ) -> str:
         normalized_budget = AgentRunBudget.from_value(budget)
-        self._begin(normalized_budget)
+        self._begin(normalized_budget, command_id=(tool_context or {}).get("command_id"))
         self._user_text = text
         try:
             return await self._run_with_budget(
@@ -279,7 +279,7 @@ class AgentCore:
         tool_context: dict[str, Any] | None = None,
     ) -> str:
         normalized_budget = AgentRunBudget.from_value(budget)
-        self._begin(normalized_budget)
+        self._begin(normalized_budget, command_id=(tool_context or {}).get("command_id"))
         try:
             self._assert_continuable()
             return await self._run_with_budget(None, append_user=False, tool_context=tool_context)
@@ -317,14 +317,18 @@ class AgentCore:
             command_id=self._active_command_id,
         )
 
-    def _begin(self, budget: AgentRunBudget) -> None:
+    def _begin(self, budget: AgentRunBudget, *, command_id: str | None = None) -> None:
         if self.phase != "idle":
             raise AgentCoreBusyError("agent is already running")
+        # Dispatch already owns its command. tool_context is server-supplied,
+        # unlike model arguments; share that identity with messages and events.
+        if command_id is not None and (not isinstance(command_id, str) or not command_id.strip()):
+            raise ValueError("command_id must be a non-empty string")
         self.repository.update_status(self.session_id, "running")
         self.phase = "running"
         self._abort_requested = False
         self._timeout_requested = False
-        self._active_command_id = uuid4().hex
+        self._active_command_id = command_id if command_id is not None else uuid4().hex
         self._budget = budget
         self._steps_used = 0
         self._turn_started_at = asyncio.get_running_loop().time()

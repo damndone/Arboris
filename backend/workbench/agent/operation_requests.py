@@ -5,6 +5,7 @@ execution leases and idempotency remain with their existing owners.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
@@ -12,7 +13,7 @@ from typing import Any, Literal
 
 from .events import AgentEventStream
 from .operations import OperationDefinition, OperationRegistry
-from .proposals import ProposalRevision, ProposalStore
+from .proposals import ProposalInvocation, ProposalRevision, ProposalStore
 from .session import JsonlSessionRepository
 
 
@@ -78,6 +79,7 @@ def admit(
     operation_registry: OperationRegistry,
     proposal_store: ProposalStore,
     events: AgentEventStream,
+    invocation: ProposalInvocation | None = None,
 ) -> OperationReceipt:
     """Validate scope and the declaration before persisting the original records."""
 
@@ -86,7 +88,8 @@ def admit(
         raise ValueError("proposal session must be a matching chain session")
     definition = operation_registry.require(request.operation_id, request.operation_version)
     validate(request, definition)
-    proposal = proposal_store.create(
+    create = proposal_store.create if invocation is None else proposal_store.create_prepared
+    proposal = create(
         session_id=session_id,
         chain_id=chain_id,
         operation_id=request.operation_id,
@@ -99,8 +102,10 @@ def admit(
         risks=request.risks,
         command_id=command_id,
         proposal_id=proposal_id,
+        **({"invocation": invocation} if invocation is not None else {}),
     )
-    repository.append(
+    append = repository.append if invocation is None else repository.append_once
+    append(
         session_id,
         "custom_message",
         {
@@ -109,17 +114,28 @@ def admit(
             "content": json.dumps(proposal.to_dict(), ensure_ascii=False, sort_keys=True),
             "proposal": proposal.to_dict(),
         },
+        **({"key": invocation.invocation_id, "stage": "operation_proposal"}
+           if invocation is not None else {}),
     )
     events.emit(
         session_id,
         "proposal_ready",
         proposal.to_dict(),
         command_id=command_id,
+        **({"event_id": _invocation_event_id(invocation, "proposal_ready")}
+           if invocation is not None else {}),
     )
     events.emit(
         session_id,
         "needs_confirmation",
         {"proposal_id": proposal.proposal_id, "revision": proposal.revision},
         command_id=command_id,
+        **({"event_id": _invocation_event_id(invocation, "needs_confirmation")}
+           if invocation is not None else {}),
     )
     return OperationReceipt(proposal=proposal)
+
+
+def _invocation_event_id(invocation: ProposalInvocation, stage: str) -> str:
+    identity = json.dumps(["prepared-proposal", invocation.invocation_id, stage])
+    return hashlib.sha256(identity.encode("utf-8")).hexdigest()
