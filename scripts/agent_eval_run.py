@@ -110,7 +110,10 @@ def main() -> int:
     # The local-request guard admits loopback host names only.
     # A server error is a result to record, not a harness crash.
     client = TestClient(app, base_url="http://127.0.0.1", raise_server_exceptions=False)
+    provider_down = False
     for task in tasks:
+        if provider_down:
+            break
         for rep in range(1, args.repeat + 1):
             name = f"{task.id}.r{rep}"
             directory = out / "tasks" / name
@@ -168,6 +171,7 @@ def main() -> int:
             if tape.exists() and any(json.loads(line).get("status") in {402, 500, 502, 503}
                                      for line in tape.read_text(encoding="utf-8").splitlines()[-3:]):
                 print(f"{name}: provider unavailable; stopping the round", flush=True)
+                provider_down = True
                 break
             print(f"{name}: {record['status']} {record['elapsed_s']}s actions={conversation.get('user_actions')} "
                   f"stop={conversation.get('stop_reason')}", flush=True)
