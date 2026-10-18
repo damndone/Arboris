@@ -144,7 +144,9 @@ class NodeToolsMixin:
                 "contract_owner": "operation_registry",
             }
             if operation.vocabulary_builder is not None:
-                contract_payload["step_vocabulary"] = operation.vocabulary_builder()
+                contract_payload["step_vocabulary"] = _step_vocabulary_view(
+                    operation.vocabulary_builder(), request.step_operation_ids
+                )
         else:
             contract = resolve_operation_contract(stage=node.get("stage"), manifest=manifest)
             if contract is not None:
@@ -519,3 +521,55 @@ class NodeToolsMixin:
             )
         return run_root
 
+
+
+#: Implementation identities in a step specification that tell a model nothing
+#: about how to write the step.
+_INTERNAL_STEP_KEYS = frozenset({
+    "semantic_validator_key", "reference_resolver_key", "column_extractor_key", "dispatcher_key",
+    "reconciler_key", "diff_builder_key", "verification_builder_key", "output_schema_ref", "scope",
+    "effect_level", "scope_requirements", "confirmation_policy", "risk_class", "risk_level",
+    "replayable_by_recipe", "capability_kind", "natural_language_enabled",
+})
+
+
+def _step_vocabulary_view(vocabulary: dict[str, Any], requested: tuple[str, ...]) -> dict[str, Any]:
+    """The step vocabulary, sized to what the Agent asked for.
+
+    Without ``requested``: every step as one line (summary and required
+    fields), so all of them stay discoverable. With it: those steps' full
+    specifications, minus implementation identities. Unknown ids are named
+    so the Agent can correct them instead of guessing.
+    """
+
+    steps = vocabulary.get("step_operations") or {}
+    shared = {key: value for key, value in vocabulary.items() if key != "step_operations"}
+    if not requested:
+        return {
+            **shared,
+            # "id: first sentence of the summary [required fields]" keeps the
+            # whole catalogue discoverable in about a tenth of the full size.
+            "step_index": [
+                f"{operation_id}: {_first_sentence(spec.get('summary'))} [{', '.join(spec.get('required') or ())}]"
+                for operation_id, spec in steps.items()
+            ],
+            "how_to_get_specs": (
+                "Call inspect_operation_contract again with step_operation_ids set to the steps you will "
+                "use (up to 12) to get their field names, types and allowed values."
+            ),
+        }
+    unknown = [operation_id for operation_id in requested if operation_id not in steps]
+    return {
+        **shared,
+        "step_operations": {
+            operation_id: {key: value for key, value in steps[operation_id].items() if key not in _INTERNAL_STEP_KEYS}
+            for operation_id in requested
+            if operation_id in steps
+        },
+        **({"unknown_step_operation_ids": unknown, "known_step_operation_ids": sorted(steps)} if unknown else {}),
+    }
+
+
+def _first_sentence(text: object, limit: int = 90) -> str:
+    sentence = str(text or "").split(". ")[0].strip().rstrip(".")
+    return sentence if len(sentence) <= limit else sentence[: limit - 1].rstrip() + "…"

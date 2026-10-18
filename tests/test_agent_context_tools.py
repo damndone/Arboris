@@ -536,7 +536,7 @@ def test_configured_chain_exposes_read_only_node_context_provider(
         expected = (
             16384
             if descriptor["tool_id"] == "list_project_datasets"
-            else 262144
+            else 65536
             if descriptor["tool_id"] == "inspect_operation_contract"
             else 12288
             if descriptor["tool_id"] == "inspect_time_series_summary"
@@ -1155,6 +1155,7 @@ def test_multi_step_contract_publishes_live_step_vocabulary_on_model_nodes(
                     "active_head_run_id": "run-a",
                     "operation_id": "operation.multi_step",
                     "operation_version": "v1",
+                    "step_operation_ids": ["diagnostics.vif"],
                 },
             },
             session_id="chain-session",
@@ -1165,6 +1166,9 @@ def test_multi_step_contract_publishes_live_step_vocabulary_on_model_nodes(
     contract = result.output["contract"]
     assert contract["contract_owner"] == "operation_registry"
     vocabulary = contract["step_vocabulary"]
+    # Only the requested step's full specification, without implementation keys.
+    assert list(vocabulary["step_operations"]) == ["diagnostics.vif"]
+    assert "dispatcher_key" not in vocabulary["step_operations"]["diagnostics.vif"]
     diagnostics_vif = vocabulary["step_operations"]["diagnostics.vif"]
     assert diagnostics_vif["required"] == [
         "input_mode",
@@ -1172,6 +1176,39 @@ def test_multi_step_contract_publishes_live_step_vocabulary_on_model_nodes(
         "options",
     ]
     assert diagnostics_vif["field_enums"]["input_mode"] == ["typed"]
+
+
+def test_multi_step_contract_without_step_ids_indexes_every_step_compactly(tmp_path: Path) -> None:
+    """v1.9.1 M0: the full vocabulary was 250 KB per call; the index keeps every step discoverable."""
+    import json as _json
+
+    from workbench.agent.workflow_contracts import WORKFLOW_STEP_SPEC_CONTRACTS
+
+    project_root = tmp_path / "project"
+    _write_project_run(project_root)
+    provider = _load_provider_type()(project_root)
+    registry = ToolRegistry()
+    from workbench.agent.operations import OperationRegistry
+
+    for definition in provider.tool_definitions(chain_id="chain-a", session_id="chain-session",
+                                                operation_registry=OperationRegistry()):
+        registry.register(definition)
+    arguments = {"owner_run_id": "run-a", "op_node_id": "model:ols_1", "active_head_run_id": "run-a",
+                 "operation_id": "operation.multi_step"}
+    index = asyncio.run(registry.execute({"tool_call_id": "c1", "tool_id": "inspect_operation_contract",
+                                          "arguments": arguments}, session_id="chain-session"))
+    vocabulary = index.output["contract"]["step_vocabulary"]
+    listed = {line.split(":", 1)[0] for line in vocabulary["step_index"]}
+    assert listed == set(WORKFLOW_STEP_SPEC_CONTRACTS)
+    assert "step_operations" not in vocabulary and "how_to_get_specs" in vocabulary
+    assert len(_json.dumps(index.output, ensure_ascii=False)) < 40_000
+
+    wrong = asyncio.run(registry.execute({"tool_call_id": "c2", "tool_id": "inspect_operation_contract",
+                                          "arguments": {**arguments, "step_operation_ids": ["model.genesis", "nope.step"]}},
+                                         session_id="chain-session"))
+    detail = wrong.output["contract"]["step_vocabulary"]
+    assert list(detail["step_operations"]) == ["model.genesis"]
+    assert detail["unknown_step_operation_ids"] == ["nope.step"]
 
 
 def test_completed_workflow_result_is_discoverable_as_bounded_evidence(

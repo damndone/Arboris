@@ -97,6 +97,7 @@ class RegistrationMixin:
                     ),
                     operation_id=str(arguments["operation_id"]),
                     operation_version=str(arguments.get("operation_version") or "v1"),
+                    step_operation_ids=tuple(str(item) for item in arguments.get("step_operation_ids") or ()),
                 ),
                 operation_registry=registry,
             )
@@ -757,6 +758,15 @@ class RegistrationMixin:
                             "enum": top_level_operation_ids,
                         },
                         "operation_version": {"type": "string"},
+                        "step_operation_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "maxItems": 12,
+                            "description": (
+                                "operation.multi_step only: the step operations you will use. Their full "
+                                "specifications are returned; without this you get a one-line index of every step."
+                            ),
+                        },
                     },
                     "additionalProperties": False,
                 },
@@ -770,7 +780,9 @@ class RegistrationMixin:
                 # contract, so the live 74-step vocabulary is larger; keep a
                 # generous explicit cap below the model context window while
                 # ensuring the contract remains whole.
-                max_output_budget=262144,
+                # The full vocabulary is no longer returned whole: an index, or
+                # the specifications of the steps asked for (v1.9.1).
+                max_output_budget=65536,
                 handler=inspect_operation_contract,
             ),
             ToolDefinition(

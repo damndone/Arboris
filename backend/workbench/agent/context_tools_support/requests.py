@@ -23,6 +23,10 @@ class InspectOperationContractRequest:
     active_head_run_id: str
     operation_id: str
     operation_version: str = "v1"
+    #: For operation.multi_step: the steps whose full specifications to return.
+    #: Without it the contract lists every step briefly (v1.9.1 M0: the whole
+    #: vocabulary was 250 KB per call and stayed in every later request).
+    step_operation_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
