@@ -80,9 +80,9 @@ def export(round_dir: Path, tasks: list[Path]) -> None:
 def run_backend(round_dir: Path, tasks: list[Path], backend: str, limit: int | None) -> None:
     done = 0
     for directory in tasks:
-        target = round_dir / "judging" / directory.name
+        target = (round_dir / "judging" / directory.name).resolve()
         result_file = target / f"{backend}.result.json"
-        if result_file.exists():
+        if result_file.exists() and "scores" in json.loads(result_file.read_text(encoding="utf-8")):
             print(f"[{backend}] {directory.name}: already judged, skipped")
             continue
         if limit is not None and done >= limit:

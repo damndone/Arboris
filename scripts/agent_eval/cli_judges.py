@@ -68,6 +68,8 @@ def command(backend: str, workdir: Path, prompt_file: Path, schema_file: Path, o
 def run(backend: str, prompt: str, record_dir: Path, *, timeout_s: float = 600) -> dict[str, Any]:
     """Run one judge call; keep the command, prompt and raw output in ``record_dir``."""
 
+    # The CLI runs in an empty scratch directory, so every path must be absolute.
+    record_dir = record_dir.resolve()
     record_dir.mkdir(parents=True, exist_ok=True)
     prompt_file = record_dir / f"{backend}.prompt.txt"
     prompt_file.write_text(INSTRUCTION + prompt, encoding="utf-8")
