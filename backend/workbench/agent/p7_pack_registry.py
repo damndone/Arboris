@@ -585,6 +585,8 @@ _register_request_schema(
             "covariance_method": "string",
             "center_moments": "boolean",
             "confidence_level": "number",
+            "intercept": "boolean",
+            "intercept_column": "string",
         },
     ),
 )
@@ -598,6 +600,7 @@ _register_request_schema(
             "endog": "columns",
             "instruments": "columns",
         },
+        option_shapes={"intercept": "boolean", "intercept_column": "string"},
     ),
 )
 _register_request_schema(

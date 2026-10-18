@@ -448,6 +448,13 @@ def execute_iv(frame: pd.DataFrame | None, request: Request) -> Result:
     endog = _row_matrix(source, endog_columns)
     instruments = _row_matrix(source, instrument_columns)
     names = dict(options)
+    exog, exog_columns = _iv_exog_with_intercept(
+        exog,
+        list(exog_columns),
+        intercept=_bool_option(names, "intercept", True),
+        intercept_column=names.pop("intercept_column", "const"),
+    )
+    names.pop("intercept", None)
     names.setdefault("exog_names", list(exog_columns))
     names.setdefault("endog_names", list(endog_columns))
     names.setdefault("instrument_names", list(instrument_columns))
@@ -457,6 +464,40 @@ def execute_iv(frame: pd.DataFrame | None, request: Request) -> Result:
         raise P7PackAdapterError(
             f"IV adapter received unsupported operation: {operation_id}"
         ) from exc
+
+
+def _iv_exog_with_intercept(
+    exog: np.ndarray,
+    columns: list[str],
+    *,
+    intercept: bool,
+    intercept_column: object,
+) -> tuple[np.ndarray, list[str]]:
+    """Add the intercept a workflow request implies, unless the design has one.
+
+    The pack estimates exactly the design it is given. A workflow request
+    binds data columns, and data rarely carry a column of ones, so without
+    this the first stage and the GMM fit run through the origin (v1.9.1 M0:
+    partial F 6223.5 instead of 170.6). As with the diagnostics adapter the
+    intercept is on unless ``intercept`` is false; a bound column that is
+    already constant serves as the intercept and none is added.
+    """
+
+    if not intercept:
+        return exog, columns
+    if type(intercept_column) is not str or not intercept_column:
+        raise P7PackAdapterError("IV intercept_column must be a non-empty string")
+    if exog.size and any(
+        np.all(np.isfinite(exog[:, index])) and np.ptp(exog[:, index]) == 0 and exog[0, index] != 0
+        for index in range(exog.shape[1])
+    ):
+        return exog, columns
+    if intercept_column in columns:
+        raise P7PackAdapterError(
+            f"IV exog column {intercept_column!r} is not constant; name the intercept column differently"
+        )
+    ones = np.ones((exog.shape[0], 1))
+    return np.column_stack((ones, exog)) if exog.size else ones, [intercept_column, *columns]
 
 
 def _execute_iv_gmm(

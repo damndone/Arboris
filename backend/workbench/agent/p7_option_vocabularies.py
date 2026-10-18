@@ -209,7 +209,8 @@ OPTION_VOCABULARIES: dict[str, dict[str, tuple[str, ...]]] = {
 
 #: String options whose value names something in the data, not a policy.
 OPEN_STRING_OPTIONS: dict[str, frozenset[str]] = {
-    **{operation_id: frozenset({"intercept_column"}) for operation_id in (*_DIAGNOSTICS, "diagnostics.breusch_godfrey")},
+    **{operation_id: frozenset({"intercept_column"})
+       for operation_id in (*_DIAGNOSTICS, "diagnostics.breusch_godfrey", "iv.gmm", "iv.weak_instruments")},
     "synthetic_control.fit": frozenset({"treated_unit"}),
     "synthetic_control.placebo": frozenset({"treated_unit"}),
 }
