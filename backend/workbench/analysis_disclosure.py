@@ -93,7 +93,7 @@ def disclosure(project_root: Path | str, run_id: str) -> dict[str, Any]:
         groups = _estimated_groups(root, entry.get("produced_run_id"))
         if groups > 1:
             step_counts["model"] += groups - 1
-        who = "agent_without_confirmation" if entry.get("authorized_by") == "read_only_policy" else (
+        who = "agent_without_confirmation" if entry.get("authorized_by") in _STANDING_AUTHORITIES else (
             "agent_confirmed_by_user" if entry.get("actor") == "agent" else "user"
         )
         tests_by_authority[who] += int(entry.get("inferential_steps") or 0)
@@ -131,9 +131,19 @@ def _estimated_groups(root: Path, run_id: Any) -> int:
     return sum(1 for member in members or () if isinstance(member, dict) and member.get("status") == "estimated")
 
 
+#: Authorities under which the Agent ran something without a per-step click.
+_STANDING_AUTHORITIES = frozenset({"read_only_policy", "approved_plan", "session_grant", "project_rule"})
+_STANDING_LABELS = {
+    "read_only_policy": "Agent (read-only, no confirmation)",
+    "approved_plan": "Agent (within the approved plan)",
+    "session_grant": "Agent (allowed for this conversation)",
+    "project_rule": "Agent (allowed by a project rule)",
+}
+
+
 def _who(entry: Mapping[str, Any]) -> str:
-    if entry.get("authorized_by") == "read_only_policy":
-        return "Agent (read-only, no confirmation)"
+    if entry.get("authorized_by") in _STANDING_AUTHORITIES:
+        return _STANDING_LABELS[entry["authorized_by"]]
     return "Agent (confirmed by user)" if entry.get("actor") == "agent" else "User"
 
 

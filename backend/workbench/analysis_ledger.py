@@ -132,7 +132,9 @@ class LedgerEntry:
     actor: Literal["user", "agent"]
     # Who allowed it to run: the user's own action or confirmation, or the
     # read-only analysis policy (Agent analyses that change no data).
-    authorized_by: Literal["user", "read_only_policy"]
+    # v1.9.1: or the person's standing permission -- the approved plan, a
+    # conversation grant or a project rule (agent/permissions.py).
+    authorized_by: Literal["user", "read_only_policy", "approved_plan", "session_grant", "project_rule"]
     source: str  # the route or operation that ran it
     status: Literal["completed", "failed"]
     steps: tuple[LedgerStep, ...]

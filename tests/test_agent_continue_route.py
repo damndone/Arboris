@@ -68,3 +68,29 @@ def test_continue_refuses_while_a_turn_is_running(tmp_path: Path, monkeypatch) -
             agent_routes._RESERVED_TURNS.discard(key)
         assert busy.status_code == 409
         assert busy.json()["error"]["code"] == "AGENT_TURN_IN_PROGRESS"
+
+
+def test_session_grants_and_project_rules_are_read_from_their_stores(tmp_path: Path) -> None:
+    import json
+
+    from workbench.agent.permissions import PermissionClass, Rule
+    from workbench.agent.session import JsonlSessionRepository
+    from workbench.http import agent_routes
+
+    root = tmp_path / "project"
+    (root / "workbench").mkdir(parents=True)
+    (root / "workbench" / "agent-permissions.json").write_text(json.dumps({
+        "allow": [{"class": "derive", "operation_id": "model.genesis"}],
+        "deny": [{"class": "external"}],
+        "ask": [{"class": "nonsense"}],
+    }), encoding="utf-8")
+    rules = agent_routes._project_permission_rules(root)
+    assert rules.allow == (Rule(PermissionClass.DERIVE, "model.genesis"),)
+    assert rules.deny == (Rule(PermissionClass.EXTERNAL),) and rules.ask == ()
+
+    repository = JsonlSessionRepository(root / "workbench")
+    repository.create_session("s1", chain_id="c", role="chain")
+    repository.update_metadata("s1", permission_grants=[{"class": "derive"}, {"class": "external"}])
+    grants = agent_routes._session_grants(repository, "s1")
+    # External is never grantable, whatever the metadata says.
+    assert grants.entries == frozenset({Rule(PermissionClass.DERIVE)})

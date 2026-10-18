@@ -604,7 +604,16 @@ class WorkbenchOrchestrator:
         # head checks a confirmation needs. When absent, every proposal waits
         # for the user (see read_only_policy).
         self.execution_policy = "auto_read_only"
-        self.read_only_runner: Callable[[Any], Awaitable[OperationRecord]] | None = None
+        # v1.9.1 execution mode ("ask" every step / "auto" within an approved
+        # plan), project permission rules and this conversation's grants; the
+        # permission engine (permissions.py) decides from these and the
+        # operation's declared class, never from model text.
+        self.execution_mode = "ask"
+        self.permission_rules = None
+        self.session_grants = None
+        self.plan_scope = None
+        # runner(proposal, actor) confirms and executes under the given authority.
+        self.read_only_runner: Callable[..., Awaitable[OperationRecord]] | None = None
         self._lease_owner = f"agent:{uuid4().hex}"
 
     def _compile_workflow_record(
@@ -3080,35 +3089,81 @@ class WorkbenchOrchestrator:
         )
         return registry
 
-    async def _run_or_await_confirmation(self, proposal: Any, *, session_id: str) -> dict[str, Any]:
-        """Run a read-only workflow now; leave anything else for the user.
+    def _permission_request(self, proposal: Any, *, within_budget: bool):
+        from . import permissions
 
-        The model receives the executed workflow's results in the same turn,
-        so it answers with the numbers instead of asking for a click.
+        operation_id = str(proposal.operation_id)
+        if operation_id == "operation.multi_step":
+            steps = proposal.changes.get("steps") or ()
+            cls = permissions.strictest(
+                permissions.permission_class(str(step.get("operation_id", "")))
+                for step in steps if isinstance(step, dict)
+            ) if steps else permissions.PermissionClass.MODIFY
+        else:
+            try:
+                risk = self.operation_registry.require(operation_id, proposal.operation_version).risk_level
+            except Exception:  # noqa: BLE001 - an unknown operation fails closed below
+                risk = None
+            cls = permissions.permission_class(operation_id, risk_level=risk)
+        # Operations that edit the dataset or labels a run already has.
+        touches_source = operation_id in {"metadata.edit", "data.column.cast", "data.columns.cast"}
+        scope = self.plan_scope or {}
+        return permissions.Request(
+            operation_id=operation_id,
+            permission_class=cls,
+            touches_source=touches_source,
+            in_plan=bool(scope.get("in_plan")),
+            class_allowed_by_plan=cls.value in set(scope.get("allowed_classes") or ()),
+            named_in_plan=bool(scope.get("named")),
+            within_budget=within_budget,
+        )
+
+    async def _run_or_await_confirmation(self, proposal: Any, *, session_id: str) -> dict[str, Any]:
+        """Run what the person's mode, rules and grants allow; leave the rest for them.
+
+        The model receives an executed operation's results in the same turn, so
+        it answers with the numbers instead of asking for a click.
         """
 
         from ..analysis_ledger import inferential_count, read as read_ledger
-        from .read_only_policy import ACTOR, decide
+        from . import permissions
+        from .read_only_policy import ACTOR, decide as read_only_budget
 
-        if self.execution_policy != "auto_read_only":
-            return {
-                "requires_confirmation": True,
-                "proposal": proposal.to_dict(),
-                "confirmation_reason": "Review before execution was requested for this turn.",
-            }
         project_root = getattr(self.context_provider, "project_root", None)
-        if self.read_only_runner is None or project_root is None:
-            return {"requires_confirmation": True, "proposal": proposal.to_dict()}
-        prior = inferential_count(read_ledger(project_root), session_id=session_id)
-        decision = decide(proposal.operation_id, proposal.changes, prior_inferential_steps=prior)
-        if not decision.allowed:
-            return {
-                "requires_confirmation": True,
-                "proposal": proposal.to_dict(),
-                "confirmation_reason": decision.reason,
-            }
+        prior = inferential_count(read_ledger(project_root), session_id=session_id) if project_root else 0
+        budget = read_only_budget(proposal.operation_id, proposal.changes, prior_inferential_steps=prior)
+        request = self._permission_request(proposal, within_budget=True)
+        if request.permission_class == permissions.PermissionClass.ANALYZE:
+            # Read-only analysis has its own limits (steps per workflow, tests per
+            # conversation), because many tests is where p-hacking lives.
+            from dataclasses import replace
+
+            request = replace(request, within_budget=budget.allowed)
+        rules = self.permission_rules or permissions.Rules()
+        if self.execution_policy != "auto_read_only":
+            # "Review before running": every class asks, read-only analysis included.
+            rules = permissions.Rules(allow=rules.allow, deny=rules.deny,
+                                      ask=(*rules.ask, permissions.Rule(permissions.PermissionClass.ANALYZE)))
+        mode = permissions.Mode(self.execution_mode if self.execution_mode in {"ask", "auto"} else "ask")
+        decision = permissions.decide(mode, request, rules, self.session_grants or permissions.Grants())
+        if decision.outcome == permissions.Outcome.DENY:
+            return {"executed": False, "denied": True, "proposal_id": proposal.proposal_id,
+                    "reason": decision.reason,
+                    "guidance": "A project rule forbids this operation. Tell the person; do not try another route to it."}
+        if decision.outcome == permissions.Outcome.ASK or self.read_only_runner is None or project_root is None:
+            reason = decision.reason if decision.outcome == permissions.Outcome.ASK else "no runner is attached"
+            if not decision.floor and not budget.allowed:
+                # The read-only policy names what made it wait (a data change,
+                # the session's test budget), which is the more useful reason.
+                reason = budget.reason
+            if self.execution_policy != "auto_read_only" and decision.outcome == permissions.Outcome.ASK and not decision.floor:
+                reason = "Review before execution was requested for this turn."
+            return {"requires_confirmation": True, "proposal": proposal.to_dict(), "confirmation_reason": reason,
+                    "permission_class": request.permission_class.value}
+        actor = ACTOR if request.permission_class == permissions.PermissionClass.ANALYZE else decision.authority
         try:
-            record = await self.read_only_runner(proposal)
+            record = await (self.read_only_runner(proposal) if actor == ACTOR
+                            else self.read_only_runner(proposal, actor))
         except Exception as exc:  # noqa: BLE001 - reported to the model, never swallowed
             # A tool exception would end the turn as a runtime error; the user
             # is better served by the Agent explaining what stopped the run.
@@ -3118,18 +3173,18 @@ class WorkbenchOrchestrator:
                 "proposal_id": proposal.proposal_id,
                 "error": f"{type(exc).__name__}: {detail}",
                 "guidance": (
-                    "The read-only workflow could not run. Tell the user what stopped it; "
-                    "do not report any result."
+                    "The operation could not run. Tell the user what stopped it; do not report any result."
                 ),
             }
         results = []
         results_reader = getattr(self.context_provider, "executed_workflow_results", None)
         if record.status == "completed" and results_reader is not None:
             results = results_reader(record)
-        tests_run = prior + (decision.inferential_steps if record.status == "completed" else 0)
+        tests_run = prior + (budget.inferential_steps if record.status == "completed" else 0)
         return {
             "executed": True,
-            "authorized_by": ACTOR,
+            "authorized_by": actor,
+            "authorization_reason": decision.reason,
             "proposal_id": proposal.proposal_id,
             "operation": {
                 "record_id": record.record_id,
@@ -3139,9 +3194,10 @@ class WorkbenchOrchestrator:
             "results": results,
             "inferential_tests_run_this_session": tests_run,
             "guidance": (
-                "This read-only workflow ran without a confirmation and is recorded in the "
-                "analysis ledger. Answer from these results only; say how many tests were run "
-                "in this session when you report a p-value."
+                "This operation ran without a confirmation ("
+                + decision.reason
+                + ") and is recorded in the analysis ledger. Answer from these results only; say how many "
+                "tests were run in this session when you report a p-value."
                 if record.status == "completed"
                 else "The workflow failed; tell the user what failed from operation.error."
             ),
@@ -3307,7 +3363,11 @@ def _record_operation_in_ledger(project_root: Any, record: OperationRecord) -> N
             # Manual UI and CLI operations use the same lifecycle as Agent
             # proposals; durable adapter provenance identifies the user.
             actor="user" if record.actor_type in {"human_ui", "human_cli"} else "agent",
-            authorized_by="read_only_policy" if record.actor_type == "read_only_policy" else "user",
+            authorized_by=(
+                record.actor_type
+                if record.actor_type in {"read_only_policy", "approved_plan", "session_grant", "project_rule"}
+                else "user"
+            ),
             source=source,
             status="completed" if record.status == "completed" else "failed",
             steps=steps,

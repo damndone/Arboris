@@ -2784,6 +2784,12 @@ export interface components {
                 [key: string]: unknown;
             } | null;
             /**
+             * Execution Mode
+             * @default ask
+             * @enum {string}
+             */
+            execution_mode?: "ask" | "auto";
+            /**
              * Execution Policy
              * @default auto_read_only
              * @enum {string}
@@ -3026,6 +3032,11 @@ export interface components {
             confirmed_payload_hash?: string | null;
             /** Fingerprint */
             fingerprint: string;
+            /**
+             * Grant Session
+             * @default false
+             */
+            grant_session?: boolean;
             /** Revision */
             revision: number;
         };
@@ -3128,6 +3139,12 @@ export interface components {
             context_packet?: {
                 [key: string]: unknown;
             } | null;
+            /**
+             * Execution Mode
+             * @default ask
+             * @enum {string}
+             */
+            execution_mode?: "ask" | "auto";
             /**
              * Execution Policy
              * @default auto_read_only

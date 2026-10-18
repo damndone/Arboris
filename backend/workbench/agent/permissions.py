@@ -140,6 +140,10 @@ class Decision:
     reason: str
     #: The safety floor decided it; nothing the person configured could change it.
     floor: bool = False
+    #: Who allowed it, for the ledger: the mode's default ("default"), a project
+    #: rule ("project_rule"), a conversation grant ("session_grant") or the
+    #: approved plan ("approved_plan").
+    authority: str = "default"
 
 
 def on_floor(request: Request) -> bool:
@@ -157,9 +161,10 @@ def decide(mode: Mode, request: Request, rules: Rules = Rules(), grants: Grants 
     if any(rule.matches(request) for rule in rules.ask):
         return Decision(Outcome.ASK, "a project rule asks before this operation")
     if any(rule.matches(request) for rule in rules.allow):
-        return Decision(Outcome.ALLOW, "a project rule allows this operation")
+        return Decision(Outcome.ALLOW, "a project rule allows this operation", authority="project_rule")
     if grants.covers(request):
-        return Decision(Outcome.ALLOW, "you allowed this kind of operation for this conversation")
+        return Decision(Outcome.ALLOW, "you allowed this kind of operation for this conversation",
+                        authority="session_grant")
     return _default(mode, request)
 
 
@@ -180,14 +185,36 @@ def _default(mode: Mode, request: Request) -> Decision:
         return Decision(Outcome.ASK, "the approved plan's budget is spent")
     if cls in {PermissionClass.ANALYZE, PermissionClass.DERIVE}:
         if request.class_allowed_by_plan:
-            return Decision(Outcome.ALLOW, "the approved plan covers this step")
+            return Decision(Outcome.ALLOW, "the approved plan covers this step", authority="approved_plan")
         return Decision(Outcome.ASK, "the approved plan does not allow this kind of step")
     if cls == PermissionClass.MODIFY and request.named_in_plan and request.class_allowed_by_plan:
-        return Decision(Outcome.ALLOW, "the approved plan names this change")
+        return Decision(Outcome.ALLOW, "the approved plan names this change", authority="approved_plan")
     return Decision(Outcome.ASK, "changes to existing objects are confirmed unless the plan names them")
 
 
 __all__ = [
     "Decision", "GRANTABLE", "Grants", "Mode", "Outcome", "PermissionClass", "Request", "Rule", "Rules",
-    "decide", "on_floor", "permission_class", "strictest",
+    "decide", "on_floor", "permission_class", "rules_from_payload", "strictest",
 ]
+
+
+def rules_from_payload(payload: object) -> Rules:
+    """Project rules from ``<project>/workbench/agent-permissions.json``.
+
+    Shape: ``{"allow": [{"class": "derive", "operation_id": "model.genesis"}], "ask": [...], "deny": [...]}``.
+    Anything malformed is ignored rather than guessed; the floor holds regardless.
+    """
+
+    def entries(name: str) -> tuple[Rule, ...]:
+        items = payload.get(name) if isinstance(payload, dict) else None
+        out = []
+        for item in items if isinstance(items, list) else ():
+            try:
+                cls = PermissionClass(str(item.get("class")))
+            except (ValueError, AttributeError):
+                continue
+            operation_id = item.get("operation_id")
+            out.append(Rule(cls, str(operation_id) if isinstance(operation_id, str) and operation_id else None))
+        return tuple(out)
+
+    return Rules(allow=entries("allow"), ask=entries("ask"), deny=entries("deny"))

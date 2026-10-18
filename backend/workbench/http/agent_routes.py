@@ -287,6 +287,8 @@ class AgentTurnRequest(BaseModel):
 
     question: str = Field(min_length=1, max_length=MAX_QUESTION_CHARS)
     execution_policy: Literal["auto_read_only", "proposal_only"] = "auto_read_only"
+    # v1.9.1: "ask" every step, or "auto" within the approved plan.
+    execution_mode: Literal["ask", "auto"] = "ask"
     # The panel's current project context. A Main session's overview was
     # written once, at creation, so runs made afterwards (a metadata edit, a
     # rerun) were invisible and the Agent kept reading the old run.
@@ -303,6 +305,8 @@ class AgentContinueRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     execution_policy: Literal["auto_read_only", "proposal_only"] = "auto_read_only"
+    # v1.9.1: "ask" every step, or "auto" within the approved plan.
+    execution_mode: Literal["ask", "auto"] = "ask"
     context_packet: dict[str, Any] | None = None
 
 
@@ -323,6 +327,9 @@ class AgentProposalConfirmRequest(BaseModel):
     fingerprint: str = Field(min_length=1)
     active_head_run_id: str = Field(min_length=1)
     confirmed_payload_hash: str | None = Field(default=None, min_length=1)
+    # v1.9.1 "don't ask again in this conversation": later proposals of the
+    # same permission class run without a card. Never covers the safety floor.
+    grant_session: bool = False
 
 
 class AgentProposalDeclineRequest(BaseModel):
@@ -2190,7 +2197,8 @@ def revise_agent_proposal(
     }
 
 
-async def _run_read_only_proposal(root: Path, orchestrator: WorkbenchOrchestrator, proposal) -> Any:
+async def _run_read_only_proposal(root: Path, orchestrator: WorkbenchOrchestrator, proposal,
+                                  actor: str | None = None) -> Any:
     """Confirm and execute a read-only workflow under the read-only policy.
 
     The same checks as a user's confirmation -- current context fingerprint
@@ -2211,7 +2219,7 @@ async def _run_read_only_proposal(root: Path, orchestrator: WorkbenchOrchestrato
         proposal.proposal_id,
         revision=proposal.revision,
         fingerprint=proposal.fingerprint,
-        actor_type=ACTOR,
+        actor_type=actor or ACTOR,
         current_context_fingerprint=fingerprint,
         current_active_head_run_id=active_head_run_id,
     )
@@ -2319,6 +2327,8 @@ async def confirm_agent_proposal(
             message="The proposal revision or fingerprint is no longer confirmable.",
             details={"proposal_id": proposal_id},
         ) from exc
+    if body.grant_session:
+        _grant_for_session(repository, session_id, orchestrator, proposal)
     # Design §8.2: the user confirmation IS the execution gate. The registry
     # selects the request-independent operation handler; no model text
     # participates in execution.
@@ -2499,6 +2509,45 @@ async def compact_agent_session(
     return _public_session(repository, session_id, repository.get_metadata(session_id), config)
 
 
+def _project_permission_rules(root: Path):
+    """Project rules from ``workbench/agent-permissions.json``; none when absent or unreadable."""
+    from ..agent.permissions import Rules, rules_from_payload
+
+    path = root / "workbench" / "agent-permissions.json"
+    try:
+        return rules_from_payload(json.loads(path.read_text(encoding="utf-8"))) if path.is_file() else Rules()
+    except (OSError, ValueError):
+        return Rules()
+
+
+def _session_grants(repository: Any, session_id: str):
+    """This conversation's "don't ask again" answers, kept in the session metadata."""
+    from ..agent.permissions import GRANTABLE, Grants, PermissionClass, Rule
+
+    entries = set()
+    for item in (repository.get_metadata(session_id).get("permission_grants") or []):
+        try:
+            cls = PermissionClass(str(item.get("class")))
+        except (ValueError, AttributeError):
+            continue
+        if cls in GRANTABLE:
+            entries.add(Rule(cls, item.get("operation_id") or None))
+    return Grants(frozenset(entries))
+
+
+def _grant_for_session(repository: Any, session_id: str, orchestrator: Any, proposal: Any) -> None:
+    """Remember "don't ask again" for this proposal's class, if it is grantable."""
+    from ..agent.permissions import GRANTABLE
+
+    request = orchestrator._permission_request(proposal, within_budget=True)
+    if request.permission_class not in GRANTABLE or request.touches_source:
+        return
+    grants = list(repository.get_metadata(session_id).get("permission_grants") or [])
+    entry = {"class": request.permission_class.value}
+    if entry not in grants:
+        repository.update_metadata(session_id, permission_grants=[*grants, entry])
+
+
 def _reserve_turn(root: Path, session_id: str) -> tuple[str, str]:
     turn_key = _active_turn_key(root, session_id)
     with _TURN_RESERVATION_LOCK:
@@ -2602,8 +2651,13 @@ async def _run_reserved_agent_turn(
             context_provider=NodeOperationContextProvider(root),
         )
         orchestrator.execution_policy = body.execution_policy
+        orchestrator.execution_mode = body.execution_mode
+        orchestrator.permission_rules = _project_permission_rules(root)
+        orchestrator.session_grants = _session_grants(repository, session_id)
         orchestrator.register_chain(str(metadata.get("chain_id")), session_id, agent)
-        orchestrator.read_only_runner = lambda proposal: _run_read_only_proposal(root, orchestrator, proposal)
+        orchestrator.read_only_runner = lambda proposal, actor=None: _run_read_only_proposal(
+            root, orchestrator, proposal, actor
+        )
         tool_context = {
             "allowed_operations": operation_registry.natural_language_operation_ids(
                 scope_requirements=("chain", "active_head")
