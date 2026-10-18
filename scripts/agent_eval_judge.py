@@ -46,6 +46,46 @@ def _tasks(round_dir: Path, only: set[str]) -> list[Path]:
     return out
 
 
+_DROP_KEYS = {"scope", "assumptions", "input_semantics", "evidence_digest", "schema_version", "contract",
+              "contract_version", "request_fingerprint", "result_sha256", "source", "fitted_values", "residuals",
+              "fitted_values_preview", "residuals_preview", "forecast", "scores", "rows"}
+
+
+def _compact(node, depth: int = 0):
+    """A reader-sized view of a result: numbers to 6 significant digits, long lists cut."""
+    if isinstance(node, float):
+        return float(f"{node:.6g}")
+    if isinstance(node, dict):
+        return {k: _compact(v, depth + 1) for k, v in node.items() if k not in _DROP_KEYS and depth < 8}
+    if isinstance(node, list):
+        items = [_compact(v, depth + 1) for v in node[:12]]
+        return items + ([f"... {len(node) - 12} more"] if len(node) > 12 else [])
+    return node
+
+
+def artifact_results(project: Path, limit_chars: int = 1500) -> list[dict]:
+    """Every analysis artifact the Agent produced, compacted (diagnostics, tests, explorations)."""
+    out = []
+    for path in sorted((project / "runs").glob("*/artifacts/*/*.json")):
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        body = payload.get("result", payload) if isinstance(payload, dict) else payload
+        text = json.dumps(_compact(body), ensure_ascii=False, separators=(",", ":"))
+        out.append({"artifact": path.parent.name + "/" + path.stem[:60],
+                    "result": text[:limit_chars] + (" ...[cut]" if len(text) > limit_chars else "")})
+    return out
+
+
+def model_diagnostics(project: Path, seed_run_id: str) -> list[dict]:
+    """The engine's automatic diagnostics for every model the Agent fitted."""
+    out = []
+    for path in sorted((project / "runs").glob("*/model_results/diagnostics_*.json")):
+        if path.parent.parent.name == seed_run_id:
+            continue
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        out.append({"run_id": path.parent.parent.name, **_compact({k: v for k, v in payload.items() if k != "vif_basis"})})
+    return out
+
+
 def packet(directory: Path) -> str:
     record = json.loads((directory / "record.json").read_text(encoding="utf-8"))
     project = Path(record["project_root"])
@@ -53,6 +93,8 @@ def packet(directory: Path) -> str:
         "models": [m for m in models_in(project, record["seed_run_id"]) if not m["seed"]],
         "operations_executed": [op for e in agent_operations(project) if e["status"] == "completed" for op in e["operations"]],
         "failed_operations": sum(1 for c in record["conversation"]["confirmations"] if c.get("status") != "completed"),
+        "model_diagnostics": model_diagnostics(project, record["seed_run_id"]),
+        "analysis_artifacts": artifact_results(project),
     }
     if record.get("suite") == "external":
         truth = {"source": record.get("source"), "reference": record.get("reference")}

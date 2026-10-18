@@ -34,7 +34,7 @@ def build_prompt(task: dict[str, Any], scenario: dict[str, Any], facts: dict[str
     return (
         f"Research question given to the assistant:\n{task['prompt']}\n\n"
         f"Ground truth (hidden from the assistant):\n{json.dumps(scenario, ensure_ascii=False, indent=1)}\n\n"
-        f"Analyses present in the project (read from disk):\n{json.dumps(facts, ensure_ascii=False, indent=1)[:24000]}\n\n"
+        f"Analyses present in the project (read from disk):\n{json.dumps(facts, ensure_ascii=False, indent=1)[:45000]}\n\n"
         f"The assistant's final answer to the person:\n{final_answer[:12000]}\n\n"
         f"Score each dimension 1-5:\n{rubric}\n\n"
         'Reply as {"method": {"score": n, "reason": "..."}, "diagnostics": {...}, "robustness": {...}, '
