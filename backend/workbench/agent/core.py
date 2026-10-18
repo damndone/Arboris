@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+from contextlib import aclosing
 from collections import deque
 from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass
@@ -20,6 +21,7 @@ from . import numeric_grounding
 from .model import ModelAdapter, ModelRequest
 from .phases import CorePhase
 from .session import JsonlSessionRepository
+from .step_observation import observe_provider
 from .tools import ToolResult, ToolRuntime
 from .turn_messages import (
     budget_exhausted_message,
@@ -180,11 +182,14 @@ class AgentCore:
             self._core_phase = None
             self._end()
 
-    async def _provider_events(self, request, *, timeout_s=None):
-        """One provider request, shared by ordinary turns and deterministic phases."""
-        async with asyncio.timeout(timeout_s):
-            async for event in self.adapter.stream(request):
-                yield event
+    def _provider_events(self, request, *, timeout_s=None):
+        """Core owns the provider call; observations own no command or budget."""
+        return observe_provider(
+            lambda: self.adapter.stream(request), request=request, events=self.events,
+            session_id=self.session_id, command_id=self._active_command_id, provider_step=self._steps_used,
+            phase_episode_id=self._core_phase.episode_id if self._core_phase is not None else None,
+            model=self.model_name, timeout_s=timeout_s,
+        )
 
     def _phase_checkpoint(self, phase, status):
         self.repository.append(self.session_id, "phase_state", {
@@ -591,44 +596,45 @@ class AgentCore:
         if active_phase is not None:
             self._phase_checkpoint(active_phase, "running")
         try:
-            async for event in self._provider_events(
+            async with aclosing(self._provider_events(
                 request, timeout_s=phase_request.provider_timeout_s if phase_request is not None else None
-            ):
-                if active_phase is not None:
-                    phase_events.append(event)
-                if self._abort_requested:
-                    finish_reason = "aborted"
-                    break
-                if event.type == "text_delta":
-                    chunks.append(event.delta)
-                    self.events.emit(
-                        self.session_id,
-                        "message_update",
-                        {"delta": event.delta, "request_id": request.request_id},
-                        command_id=command_id,
-                    )
-                elif event.type in {"tool_call_start", "tool_call_delta"}:
-                    if event.tool_call is not None:
-                        call = dict(event.tool_call)
-                        call_id = str(call.get("tool_call_id", uuid4().hex))
-                        current = tool_calls.setdefault(call_id, {})
-                        current.update(call)
-                elif event.type == "done":
-                    finish_reason = event.finish_reason or "stop"
-                    if active_phase is None:
+            )) as stream:
+                async for event in stream:
+                    if active_phase is not None:
+                        phase_events.append(event)
+                    if self._abort_requested:
+                        finish_reason = "aborted"
                         break
-                elif event.type == "retry":
-                    # Recorded so a flaky provider is visible, not only survived.
-                    self.events.emit(
-                        self.session_id,
-                        "provider_retry",
-                        {"request_id": request.request_id, "error": event.error},
-                        command_id=command_id,
-                    )
-                elif event.type == "error":
-                    finish_reason = "error"
-                    error = event.error or "provider_error"
-                    break
+                    if event.type == "text_delta":
+                        chunks.append(event.delta)
+                        self.events.emit(
+                            self.session_id,
+                            "message_update",
+                            {"delta": event.delta, "request_id": request.request_id},
+                            command_id=command_id,
+                        )
+                    elif event.type in {"tool_call_start", "tool_call_delta"}:
+                        if event.tool_call is not None:
+                            call = dict(event.tool_call)
+                            call_id = str(call.get("tool_call_id", uuid4().hex))
+                            current = tool_calls.setdefault(call_id, {})
+                            current.update(call)
+                    elif event.type == "done":
+                        finish_reason = event.finish_reason or "stop"
+                        if active_phase is None:
+                            break
+                    elif event.type == "retry":
+                        # Recorded so a flaky provider is visible, not only survived.
+                        self.events.emit(
+                            self.session_id,
+                            "provider_retry",
+                            {"request_id": request.request_id, "error": event.error},
+                            command_id=command_id,
+                        )
+                    elif event.type == "error":
+                        finish_reason = "error"
+                        error = event.error or "provider_error"
+                        break
         except Exception as exc:  # Provider errors become durable turn state.
             finish_reason = "error"
             error = type(exc).__name__

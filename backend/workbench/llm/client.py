@@ -332,6 +332,9 @@ async def async_stream_chat_completion(
                             "type": "done",
                             "finish_reason": finish_reason,
                             "model": model,
+                            **({"usage": payload["usage"]} if isinstance(payload.get("usage"), dict) else {}),
+                            **({"provider_request_id": payload["id"]}
+                               if isinstance(payload.get("id"), str) and payload["id"] else {}),
                         }
                         return
     except LLMUpstreamError:

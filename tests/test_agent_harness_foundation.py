@@ -228,11 +228,16 @@ def test_agent_core_persists_messages_and_emits_stream_events(tmp_path: Path) ->
             "message_start",
             "message_update",
             "message_update",
+            "provider_step",
             "message_end",
             "turn_end",
             "save_point",
             "agent_end",
         ]
+        [observation] = [event for event in events.replay("session-a") if event.event_type == "provider_step"]
+        assert observation.payload["request_id"] == adapter.requests[0].request_id
+        assert observation.payload["usage"] is None and observation.payload["usage_state"] == "unavailable"
+        assert observation.payload["cost"] is None
         assert adapter.requests[0].messages[-1]["content"] == "check the model"
         assert "command_id" not in adapter.requests[0].messages[-1]
 
@@ -808,7 +813,8 @@ def test_openai_compatible_adapter_normalizes_public_stream_client(monkeypatch) 
     async def fake_stream(messages: list[dict[str, str]], actual_config: LLMConfig, **_kwargs):
         calls.append((messages, actual_config))
         yield {"type": "text_delta", "delta": "one streamed answer"}
-        yield {"type": "done", "finish_reason": "stop", "model": "deepseek-chat"}
+        yield {"type": "done", "finish_reason": "stop", "model": "deepseek-chat",
+               "provider_request_id": "upstream-reported-1"}
 
     monkeypatch.setattr("workbench.agent.model.async_stream_chat_completion", fake_stream)
 
@@ -821,7 +827,8 @@ def test_openai_compatible_adapter_normalizes_public_stream_client(monkeypatch) 
         streamed = [event async for event in adapter.stream(request)]
         assert [event.type for event in streamed] == ["text_delta", "done"]
         assert streamed[0].delta == "one streamed answer"
-        assert streamed[1].provider_request_id == "request-1"
+        assert streamed[1].provider_request_id == "upstream-reported-1"
+        assert streamed[1].request_id == "request-1"
         assert calls == [(request.messages, config)]
 
     asyncio.run(scenario())
@@ -846,7 +853,9 @@ def test_openai_compatible_adapter_forwards_public_stream_deltas(monkeypatch) ->
         streamed = [event async for event in adapter.stream(request)]
         assert [event.type for event in streamed] == ["text_delta", "text_delta", "done"]
         assert [event.delta for event in streamed[:2]] == ["first ", "second"]
-        assert streamed[-1].provider_request_id == "request-stream-1"
+        # A local correlation id must not masquerade as an unreported upstream id.
+        assert streamed[-1].provider_request_id is None
+        assert streamed[-1].request_id == "request-stream-1"
 
     asyncio.run(scenario())
 

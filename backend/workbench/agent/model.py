@@ -351,7 +351,8 @@ class OpenAICompatibleModelAdapter:
                             type="done",
                             request_id=request.request_id,
                             finish_reason=finish_reason if isinstance(finish_reason, str) else "stop",
-                            provider_request_id=request.request_id,
+                            provider_request_id=item.get("provider_request_id"),
+                            usage=item.get("usage"),
                         )
                         return
                 raise LLMUpstreamError("LLM provider ended the stream without a completion")
