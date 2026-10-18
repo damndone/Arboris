@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import inspect
 import json
@@ -231,6 +232,29 @@ class WorkbenchOperationLifecycle:
         self.risk_authorization_store = risk_authorization_store
 
     async def execute(self, record_id: str) -> OperationRecord:
+        # Cancelling an await on to_thread does not stop its native worker.
+        # Keep the whole effect/commit/lease lifetime owned until it drains,
+        # rather than cancelling the handler and releasing a still-live lease.
+        # This defers caller cancellation; it is not native run cancellation
+        # or a substitute for process-restart reconciliation.
+        owned = asyncio.create_task(self._execute_owned(record_id))
+        try:
+            return await asyncio.shield(owned)
+        except asyncio.CancelledError:
+            while not owned.done():
+                try:
+                    await asyncio.shield(owned)
+                except asyncio.CancelledError:
+                    continue
+                except Exception:
+                    break
+            # Retrieve a drained failure even when cancellation wins the
+            # caller-facing outcome; no task exception should be abandoned.
+            if not owned.cancelled():
+                owned.exception()
+            raise
+
+    async def _execute_owned(self, record_id: str) -> OperationRecord:
         record = self.operation_store.get(record_id)
         definition = self.operation_registry.require(
             record.operation_id,
