@@ -292,6 +292,29 @@ class AgentTurnRequest(BaseModel):
     context_packet: dict[str, Any] | None = None
 
 
+class AgentContinueRequest(BaseModel):
+    """Continue the Agent after something happened outside a turn (v1.9.1).
+
+    In Ask every step a confirmed proposal runs between turns; this resumes the
+    Agent with the outcome so the person never has to say "continue".
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    execution_policy: Literal["auto_read_only", "proposal_only"] = "auto_read_only"
+    context_packet: dict[str, Any] | None = None
+
+
+#: What the Agent is told when it is resumed after a confirmation. The outcome
+#: itself is the ``agent_operation_result`` message just before this one.
+CONTINUATION_NOTE = (
+    "Workbench: the person confirmed your proposal and the Workbench executed it; the result is in the "
+    "workbench message just above. Confirmation is how your proposals run, so you did execute it. Continue "
+    "the work the person asked for: read the results you still need and propose the next step, or, if the "
+    "analysis is complete, give your final answer. Do not ask the person to say continue."
+)
+
+
 class AgentProposalConfirmRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -2475,14 +2498,7 @@ async def compact_agent_session(
     return _public_session(repository, session_id, repository.get_metadata(session_id), config)
 
 
-@router.post("/agent/sessions/{session_id}/turns")
-async def run_agent_turn(
-    session_id: str,
-    project_root: str,
-    body: AgentTurnRequest,
-) -> AgentTurn:
-    root = _project_root(project_root)
-    repository, events, metadata = _get_session(root, session_id)
+def _reserve_turn(root: Path, session_id: str) -> tuple[str, str]:
     turn_key = _active_turn_key(root, session_id)
     with _TURN_RESERVATION_LOCK:
         if turn_key in _ACTIVE_TURNS or turn_key in _RESERVED_TURNS:
@@ -2493,11 +2509,46 @@ async def run_agent_turn(
                 details={"session_id": session_id},
             )
         _RESERVED_TURNS.add(turn_key)
+    return turn_key
+
+
+def _release_turn(turn_key: tuple[str, str]) -> None:
+    with _TURN_RESERVATION_LOCK:
+        _RESERVED_TURNS.discard(turn_key)
+
+
+@router.post("/agent/sessions/{session_id}/turns")
+async def run_agent_turn(
+    session_id: str,
+    project_root: str,
+    body: AgentTurnRequest,
+) -> AgentTurn:
+    root = _project_root(project_root)
+    repository, events, metadata = _get_session(root, session_id)
+    turn_key = _reserve_turn(root, session_id)
     try:
         return await _run_reserved_agent_turn(root, session_id, body, repository, events, metadata, turn_key)
     finally:
-        with _TURN_RESERVATION_LOCK:
-            _RESERVED_TURNS.discard(turn_key)
+        _release_turn(turn_key)
+
+
+@router.post("/agent/sessions/{session_id}/continue")
+async def continue_agent_turn(
+    session_id: str,
+    project_root: str,
+    body: AgentContinueRequest,
+) -> AgentTurn:
+    """Resume the Agent after a confirmed proposal finished (Ask every step)."""
+
+    root = _project_root(project_root)
+    repository, events, metadata = _get_session(root, session_id)
+    turn_key = _reserve_turn(root, session_id)
+    try:
+        return await _run_reserved_agent_turn(
+            root, session_id, body, repository, events, metadata, turn_key, continuation=True
+        )
+    finally:
+        _release_turn(turn_key)
 
 
 async def _run_reserved_agent_turn(
@@ -2508,6 +2559,8 @@ async def _run_reserved_agent_turn(
     events: Any,
     metadata: dict[str, Any],
     turn_key: tuple[str, str],
+    *,
+    continuation: bool = False,
 ) -> dict[str, Any]:
     _tell_agent_finished_outcomes(root, session_id)
     config = load_llm_config()
@@ -2564,11 +2617,18 @@ async def _run_reserved_agent_turn(
     _ACTIVE_TURNS[turn_key] = agent
     try:
         with egress_project(root):
-            await agent.prompt(
-                body.question.strip(),
-                budget={"max_steps": DEFAULT_MAX_STEPS, "timeout_s": DEFAULT_TIMEOUT_S},
-                tool_context=tool_context,
-            )
+            budget = {"max_steps": DEFAULT_MAX_STEPS, "timeout_s": DEFAULT_TIMEOUT_S}
+            if continuation:
+                repository.append(session_id, "custom_message", {
+                    "message_type": "agent_continuation",
+                    "audience": "model",
+                    "model_role": "user",
+                    "name": "workbench_continuation",
+                    "content": CONTINUATION_NOTE,
+                })
+                await agent.continue_(budget=budget, tool_context=tool_context)
+            else:
+                await agent.prompt(body.question.strip(), budget=budget, tool_context=tool_context)
     finally:
         if _ACTIVE_TURNS.get(turn_key) is agent:
             _ACTIVE_TURNS.pop(turn_key, None)

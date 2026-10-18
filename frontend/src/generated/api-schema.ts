@@ -372,6 +372,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/agent/sessions/{session_id}/continue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Continue Agent Turn
+         * @description Resume the Agent after a confirmed proposal finished (Ask every step).
+         */
+        post: operations["continue_agent_turn_agent_sessions__session_id__continue_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/agent/sessions/{session_id}/events": {
         parameters: {
             query?: never;
@@ -2750,6 +2770,25 @@ export interface components {
             window_declared: boolean;
             /** Window Tokens */
             window_tokens: number;
+        };
+        /**
+         * AgentContinueRequest
+         * @description Continue the Agent after something happened outside a turn (v1.9.1).
+         *
+         *     In Ask every step a confirmed proposal runs between turns; this resumes the
+         *     Agent with the outcome so the person never has to say "continue".
+         */
+        AgentContinueRequest: {
+            /** Context Packet */
+            context_packet?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Execution Policy
+             * @default auto_read_only
+             * @enum {string}
+             */
+            execution_policy?: "auto_read_only" | "proposal_only";
         };
         /**
          * AgentConversation
@@ -10941,6 +10980,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentSession"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    continue_agent_turn_agent_sessions__session_id__continue_post: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentContinueRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentTurn"];
                 };
             };
             /** @description Validation Error */

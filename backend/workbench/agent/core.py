@@ -179,12 +179,13 @@ class AgentCore:
         self,
         *,
         budget: AgentRunBudget | Mapping[str, Any] | None = None,
+        tool_context: dict[str, Any] | None = None,
     ) -> str:
         normalized_budget = AgentRunBudget.from_value(budget)
         self._begin(normalized_budget)
         try:
             self._assert_continuable()
-            return await self._run_with_budget(None, append_user=False)
+            return await self._run_with_budget(None, append_user=False, tool_context=tool_context)
         finally:
             self._end()
 
