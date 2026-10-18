@@ -566,6 +566,38 @@ def _require_editable_rerun_target(
     )
 
 
+_UPDATE_PLAN_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "required": ["question", "steps"],
+    "properties": {
+        "question": {"type": "string"},
+        "criteria": {"type": "array", "items": {"type": "string"}, "maxItems": 12},
+        "steps": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 40,
+            "items": {
+                "type": "object",
+                "required": ["step_id", "title", "operation_ids"],
+                "properties": {
+                    "step_id": {"type": "string"},
+                    "title": {"type": "string"},
+                    "operation_ids": {"type": "array", "items": {"type": "string"}},
+                    "depends_on": {"type": "array", "items": {"type": "string"}},
+                    "expected_outputs": {"type": "array", "items": {"type": "string"}},
+                    "status": {"type": "string", "enum": ["pending", "running", "awaiting", "done", "skipped", "failed"]},
+                },
+                "additionalProperties": False,
+            },
+        },
+        "budget": {"type": "object", "properties": {"steps": {"type": "integer"}, "wall_s": {"type": "integer"},
+                                                     "inferential": {"type": "integer"}}, "additionalProperties": False},
+        "allowed_classes": {"type": "array", "items": {"type": "string", "enum": ["analyze", "derive", "modify"]}},
+    },
+    "additionalProperties": False,
+}
+
+
 class WorkbenchOrchestrator:
     """Bind Main/Chain roles to AgentCore without leaking Workbench state into it."""
 
@@ -3077,6 +3109,59 @@ class WorkbenchOrchestrator:
             )
         )
 
+        async def update_plan(arguments: dict[str, Any], context) -> dict[str, Any]:
+            from . import plans as plan_module
+
+            if context.session_id != session_id:
+                raise ValueError("tool session is outside the registered chain scope")
+            try:
+                steps = plan_module.parse_steps(arguments.get("steps"), self.known_plan_operations())
+                plan = plan_module.merge(
+                    self._current_plan(session_id),
+                    question=str(arguments.get("question") or "").strip()[:1000],
+                    criteria=[str(c)[:300] for c in arguments.get("criteria") or ()][:12],
+                    steps=steps,
+                    budget={k: int(v) for k, v in (arguments.get("budget") or {}).items()
+                            if k in {"steps", "wall_s", "inferential"} and str(v).isdigit()},
+                    allowed_classes=arguments.get("allowed_classes"),
+                )
+            except plan_module.PlanError as exc:
+                return {"saved": False, "error": str(exc),
+                        "guidance": "Fix the plan as the error says and call update_plan again."}
+            if not plan.question:
+                return {"saved": False, "error": "question is required", "guidance": "State the research question."}
+            plan = self.plan_store.save(session_id, plan)
+            needs_person = self.execution_mode == "auto" and plan.status in {"draft", "needs_approval"}
+            return {
+                "saved": True,
+                "plan": plan.to_dict(),
+                **({"requires_confirmation": True, "awaiting": "plan_approval"} if needs_person else {}),
+                "guidance": (
+                    "The plan is shown to the person, who approves it before anything in it runs. End your turn "
+                    "with a short summary of the plan; you will be resumed after the approval."
+                    if needs_person else
+                    "The plan is shown to the person. Carry it out step by step; update it (statuses, new steps) "
+                    "as results come in."
+                ),
+            }
+
+        registry.register(
+            ToolDefinition(
+                tool_id="update_plan",
+                version="v1",
+                input_schema=_UPDATE_PLAN_SCHEMA,
+                side_effect="proposal",
+                scope_requirements=("chain",),
+                handler=update_plan,
+                description=(
+                    "Write or revise the analysis plan: the research question, the judgement criteria fixed "
+                    "before any result is seen, and typed steps (workflow operation ids, dependencies, expected "
+                    "outputs, statuses). In Auto mode the person approves it once and planned steps then run "
+                    "without a card."
+                ),
+            )
+        )
+
         registry.register(
             ToolDefinition(
                 tool_id="propose_operation",
@@ -3088,6 +3173,32 @@ class WorkbenchOrchestrator:
             )
         )
         return registry
+
+    @property
+    def plan_store(self):
+        from .plans import PlanStore
+
+        return PlanStore(self.repository.root)
+
+    def _current_plan(self, session_id: str):
+        try:
+            return self.plan_store.current(session_id)
+        except (OSError, ValueError, KeyError):
+            return None
+
+    @staticmethod
+    def _proposal_operation_ids(proposal: Any) -> list[str]:
+        if str(proposal.operation_id) == "operation.multi_step":
+            return [str(step.get("operation_id", "")) for step in proposal.changes.get("steps") or ()
+                    if isinstance(step, dict)]
+        return [str(proposal.operation_id)]
+
+    def known_plan_operations(self) -> set[str]:
+        from .workflow_contracts import WORKFLOW_STEP_SPEC_CONTRACTS
+
+        return set(WORKFLOW_STEP_SPEC_CONTRACTS) | set(
+            self.operation_registry.natural_language_operation_ids(scope_requirements=("chain", "active_head"))
+        )
 
     def _permission_request(self, proposal: Any, *, within_budget: bool):
         from . import permissions
@@ -3108,6 +3219,8 @@ class WorkbenchOrchestrator:
         # Operations that edit the dataset or labels a run already has.
         touches_source = operation_id in {"metadata.edit", "data.column.cast", "data.columns.cast"}
         scope = self.plan_scope or {}
+        if scope.get("within_budget") is False:
+            within_budget = False
         return permissions.Request(
             operation_id=operation_id,
             permission_class=cls,
@@ -3131,6 +3244,13 @@ class WorkbenchOrchestrator:
 
         project_root = getattr(self.context_provider, "project_root", None)
         prior = inferential_count(read_ledger(project_root), session_id=session_id) if project_root else 0
+        plan = self._current_plan(session_id)
+        operation_ids = self._proposal_operation_ids(proposal)
+        if plan is not None:
+            from . import plans as plan_module
+
+            self.plan_scope = plan_module.scope_for(plan, operation_ids,
+                                                    executed_steps=sum(s.status == "done" for s in plan.steps))
         budget = read_only_budget(proposal.operation_id, proposal.changes, prior_inferential_steps=prior)
         request = self._permission_request(proposal, within_budget=True)
         if request.permission_class == permissions.PermissionClass.ANALYZE:
@@ -3180,6 +3300,10 @@ class WorkbenchOrchestrator:
         results_reader = getattr(self.context_provider, "executed_workflow_results", None)
         if record.status == "completed" and results_reader is not None:
             results = results_reader(record)
+        if plan is not None and actor == "approved_plan":
+            from . import plans as plan_module
+
+            plan = self.plan_store.save(session_id, plan_module.mark_executed(plan, operation_ids, record.status))
         tests_run = prior + (budget.inferential_steps if record.status == "completed" else 0)
         return {
             "executed": True,

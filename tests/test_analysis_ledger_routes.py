@@ -27,6 +27,7 @@ EXEMPT: dict[tuple[str, str], str] = {
     ("POST", "/agent/sessions/{session_id}/operations/{record_id}/reconcile"): LIFECYCLE,
     ("POST", "/agent/sessions/{session_id}/turns"): "read-only workflows it runs are recorded by the lifecycle",
     ("POST", "/agent/sessions/{session_id}/abort"): NO_ANALYSIS,
+    ("POST", "/agent/sessions/{session_id}/plan/approve"): "fixes the question and criteria in the plan store; the planned steps are recorded when they run",
     ("POST", "/agent/sessions/{session_id}/continue"): "a turn like /turns: read-only workflows it runs are recorded by the lifecycle",
     # Conversation management (v1.9.0): the conversation log and its display
     # metadata only; no data, model or result changes.

@@ -474,6 +474,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/agent/sessions/{session_id}/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Agent Plan
+         * @description The conversation's current plan and its version history (v1.9.1).
+         */
+        get: operations["get_agent_plan_agent_sessions__session_id__plan_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent/sessions/{session_id}/plan/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve Agent Plan
+         * @description Approve the plan the person is looking at; its planned steps may then run in Auto mode.
+         */
+        post: operations["approve_agent_plan_agent_sessions__session_id__plan_approve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/agent/sessions/{session_id}/projection": {
         parameters: {
             query?: never;
@@ -3023,6 +3063,11 @@ export interface components {
         AgentOperationProjection: {
             operation: components["schemas"]["OperationRecordView"];
             projection: components["schemas"]["NavigationProjectionView"];
+        };
+        /** AgentPlanApproveRequest */
+        AgentPlanApproveRequest: {
+            /** Version */
+            version: number;
         };
         /** AgentProposalConfirmRequest */
         AgentProposalConfirmRequest: {
@@ -11173,6 +11218,80 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OperationReconciled"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_agent_plan_agent_sessions__session_id__plan_get: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    approve_agent_plan_agent_sessions__session_id__plan_approve_post: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentPlanApproveRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description Validation Error */

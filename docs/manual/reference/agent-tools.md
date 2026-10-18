@@ -52,3 +52,4 @@ Every tool the Agent can call, and the class of content its result contains. The
 | `show_dataset_rows` | `rows` |
 | `submit_analysis_loop_intent` | `workbench_state` |
 | `submit_notebook_option_batch` | `workbench_state` |
+| `update_plan` | `workbench_state` |

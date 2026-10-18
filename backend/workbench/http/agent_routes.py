@@ -159,6 +159,8 @@ CHAIN_AGENT_PROTOCOL = """Workbench Chain Agent workflow protocol (agent/v1):
 - A propose_operation result with requires_confirmation: true ends your turn: reply with a short summary of what you proposed and call no further tools. Continuing past it spends the step budget and can end the turn in an error even though the proposal was created.
 - Inspect only what the request needs. Calling every inspect tool wastes steps; tools for other model families return nothing useful about this node.
 - propose_analysis_loop also creates a reviewable pending proposal only; it never confirms or executes the rerun.
+- For an analysis with more than one step, first call update_plan with the research question, the criteria you will judge results by (fixed before you see any estimate), and typed steps (workflow operation ids, dependencies, expected outputs). Keep it current as you go: mark steps done or skipped, add steps you need. In Auto mode the person approves the plan once; after that, steps it covers run as soon as you propose them and you receive their results in the same turn, so keep going until the analysis is complete. In Ask mode every step that changes something is confirmed; after a confirmation you are resumed with its result.
+- When the whole analysis is done, check it against the question and criteria before your final answer: the right method for the design, the diagnostics it needs, at least one defensible robustness check, and every number traceable to a result.
 - For operation.multi_step, inspect_operation_contract without step_operation_ids returns a one-line index of every step; call it with step_operation_ids (the steps you will use, up to 12) to get their exact fields before composing changes.steps.
 - Use the exact operation_id and operation_version returned by inspect_operation_contract. For model.rerun, target contains run_id, node_ref, node_hash, and forest_node_key; map the inspection field op_node_id to node_ref, and do not put active_head_run_id in target. For graph.fork, the backend binds target.source_session_entry_id to the current Chain leaf; do not invent an Agent entry id. In preconditions, include exactly context_version, context_fingerprint, active_head_run_id, and owner_resolution.
 - graph.fork creates a durable fork, child Chain, and child Agent session after confirmation. It does not submit a child statistical run and does not automatically continue with model.rerun.
@@ -2582,6 +2584,58 @@ async def run_agent_turn(
         _release_turn(turn_key)
 
 
+class AgentPlanApproveRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    #: The version the person saw; a newer version must be looked at first.
+    version: int = Field(gt=0)
+
+
+@router.get("/agent/sessions/{session_id}/plan")
+def get_agent_plan(session_id: str, project_root: str) -> dict[str, Any]:
+    """The conversation's current plan and its version history (v1.9.1)."""
+
+    from ..agent.plans import PlanStore
+
+    root = _project_root(project_root)
+    repository, _events, _metadata = _get_session(root, session_id)
+    store = PlanStore(repository.root)
+    plan = store.current(session_id)
+    return {"plan": plan.to_dict() if plan else None,
+            "versions": [{"version": p.version, "status": p.status, "updated_at": p.updated_at}
+                         for p in store.history(session_id)]}
+
+
+@router.post("/agent/sessions/{session_id}/plan/approve")
+def approve_agent_plan(session_id: str, project_root: str, body: AgentPlanApproveRequest) -> dict[str, Any]:
+    """Approve the plan the person is looking at; its planned steps may then run in Auto mode."""
+
+    from ..agent.plans import PlanError, PlanStore, approve
+
+    root = _project_root(project_root)
+    repository, _events, _metadata = _get_session(root, session_id)
+    store = PlanStore(repository.root)
+    plan = store.current(session_id)
+    if plan is None:
+        raise WorkbenchAPIError(status_code=404, code="AGENT_PLAN_NOT_FOUND", message="This conversation has no plan.")
+    if plan.version != body.version:
+        raise WorkbenchAPIError(status_code=409, code="AGENT_PLAN_CHANGED",
+                                message="The plan changed since it was shown; review the new version.",
+                                details={"current_version": plan.version})
+    try:
+        approved = store.save(session_id, approve(plan))
+    except PlanError as exc:
+        raise WorkbenchAPIError(status_code=409, code="AGENT_PLAN_NOT_APPROVABLE", message=str(exc)) from exc
+    repository.append(session_id, "custom_message", {
+        "message_type": "agent_plan_approved",
+        "audience": "model",
+        "name": "workbench_plan",
+        "content": (f"Workbench: the person approved plan {approved.plan_id} version {approved.version}. "
+                    "Its question and criteria are now fixed; planned steps of the allowed kinds run without a card."),
+    })
+    return {"plan": approved.to_dict()}
+
+
 @router.post("/agent/sessions/{session_id}/continue")
 async def continue_agent_turn(
     session_id: str,
@@ -2652,6 +2706,20 @@ async def _run_reserved_agent_turn(
         )
         orchestrator.execution_policy = body.execution_policy
         orchestrator.execution_mode = body.execution_mode
+        if metadata.get("execution_mode") != body.execution_mode:
+            repository.update_metadata(session_id, execution_mode=body.execution_mode)
+            repository.append(session_id, "custom_message", {
+                "message_type": "agent_execution_mode",
+                "audience": "model",
+                "name": "workbench_mode",
+                "content": (
+                    "Workbench: execution mode is now Auto within plan. Write the plan with update_plan; once the "
+                    "person approves it, planned steps run without a card."
+                    if body.execution_mode == "auto" else
+                    "Workbench: execution mode is now Ask every step. Each step that changes something is shown "
+                    "to the person as a card; read-only analysis runs at once."
+                ),
+            })
         orchestrator.permission_rules = _project_permission_rules(root)
         orchestrator.session_grants = _session_grants(repository, session_id)
         orchestrator.register_chain(str(metadata.get("chain_id")), session_id, agent)
