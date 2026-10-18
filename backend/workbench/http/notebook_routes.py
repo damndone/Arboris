@@ -1173,8 +1173,24 @@ def _planning_agent(
         if config.timeout_s >= NOTEBOOK_PROVIDER_TIMEOUT_S
         else replace(config, timeout_s=NOTEBOOK_PROVIDER_TIMEOUT_S)
     )
+    adapter = CancellableOpenAICompatibleModelAdapter(notebook_config)
+
+    async def run_planning_phase(phase):
+        # The endpoint owns the project identity. The planning context is a
+        # bounded model packet and must never be used to infer a storage root.
+        from ..agent.core import AgentCore
+        from ..agent.events import AgentEventStream
+        from ..agent.session import JsonlSessionRepository
+
+        repository = JsonlSessionRepository(root / "workbench")
+        session_id = f"notebook_planning_{phase.episode_id}"
+        repository.create_session(session_id, chain_id=notebook_id, role="planning")
+        core = AgentCore(repository, AgentEventStream(repository.root), adapter, session_id=session_id)
+        return await core.run_phase(phase)
+
     return NotebookPlanningAgent(
-        adapter=CancellableOpenAICompatibleModelAdapter(notebook_config),
+        adapter=adapter,
+        phase_runner=run_planning_phase,
         capability_catalog=catalog,
         capability_artifact_types=dynamic_artifact_types,
         inspection_executor=execute_inspections,

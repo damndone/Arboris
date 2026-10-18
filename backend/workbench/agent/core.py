@@ -6,7 +6,7 @@ import asyncio
 import json
 from collections import deque
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 import math
 from numbers import Real
 from typing import Any
@@ -17,6 +17,7 @@ from .context import ContextBuilder
 from .events import AgentEventStream
 from . import numeric_grounding
 from .model import ModelAdapter, ModelRequest
+from .phases import CorePhase
 from .session import JsonlSessionRepository
 from .tools import ToolResult, ToolRuntime
 from .turn_messages import (
@@ -124,7 +125,7 @@ class AgentCore:
         self._abort_requested = False
         self._timeout_requested = False
         self._abort_event: asyncio.Event | None = None
-        self._active_tool_task: asyncio.Task[ToolResult] | None = None
+        self._active_tool_task: asyncio.Task[Any] | None = None
         self._steer_queue: deque[str] = deque()
         self._follow_up_queue: deque[str] = deque()
         self._active_command_id: str | None = None
@@ -143,6 +144,101 @@ class AgentCore:
         self.compaction_policy = compaction_policy
         self.model_name = model_name
         self._overflow_retried = False
+        self._core_phase: CorePhase | None = None
+        self._phase_messages: list[dict[str, Any]] = []
+        self._phase_result: Any = None
+        self._phase_completed = False
+        self._standalone_phase = False
+
+    def enter_phase(self, phase: CorePhase) -> None:
+        """Schedule a deterministic phase on this running Core's next step.
+
+        This control boundary performs no provider call and grants no operation
+        authority. Product tool registration must still admit its source scope.
+        """
+        if self.phase != "running" or self._core_phase is not None:
+            raise AgentCoreBusyError("phase entry requires a running Core without an active phase")
+        self._core_phase = phase
+        self._phase_messages = []
+        self._phase_completed = False
+
+    async def run_phase(self, phase: CorePhase, *, budget=None):
+        """Standalone compatibility entry; reuse the existing turn driver."""
+        self._begin(AgentRunBudget.from_value(budget))
+        self._standalone_phase = True
+        try:
+            self.enter_phase(phase)
+            await self._run_with_budget(None, append_user=False)
+            if not self._phase_completed:
+                raise phase.failure("timeout" if self._timeout_requested else "budget")
+            return self._phase_result
+        except BaseException:
+            self._final_status = "cancelled" if self._abort_requested else "failed"
+            raise
+        finally:
+            self._core_phase = None
+            self._end()
+
+    async def _provider_events(self, request, *, timeout_s=None):
+        """One provider request, shared by ordinary turns and deterministic phases."""
+        async with asyncio.timeout(timeout_s):
+            async for event in self.adapter.stream(request):
+                yield event
+
+    def _phase_checkpoint(self, phase, status):
+        self.repository.append(self.session_id, "phase_state", {
+            "episode_id": phase.episode_id, "status": status,
+            "command_id": self._active_command_id, "steps_used": self._steps_used,
+            "wall_used_s": asyncio.get_running_loop().time() - self._turn_started_at,
+            "phase": phase.checkpoint(),
+        })
+
+    async def _consume_phase(self, phase, events, error, *, tool_context):
+        self.repository.append(self.session_id, "phase_provider_result", {
+            "episode_id": phase.episode_id, "events": [asdict(event) for event in events],
+            "error": type(error).__name__ if error is not None else None,
+        })
+        if self._abort_requested:
+            self._phase_checkpoint(phase, "interrupted")
+            return self._persist_terminal_error("agent_timeout" if self._timeout_requested else "agent_aborted")
+        task = asyncio.create_task(phase.consume(events, error=error))
+        self._active_tool_task = task
+        try:
+            step = await task
+        except asyncio.CancelledError:
+            self._phase_checkpoint(phase, "interrupted")
+            if self._abort_requested:
+                return self._persist_terminal_error("agent_timeout" if self._timeout_requested else "agent_aborted")
+            raise
+        except Exception:
+            self._final_status = "failed"
+            self._phase_checkpoint(phase, "failed")
+            raise
+        finally:
+            if self._active_tool_task is task:
+                self._active_tool_task = None
+        if step.next not in {"continue", "completed", "refused"}:
+            raise ValueError("phase returned an invalid transition")
+        for message in step.append_messages:
+            self._phase_messages.append(dict(message))
+            self.repository.append(self.session_id, "phase_message", {
+                "episode_id": phase.episode_id, "message": message,
+            })
+        self._active_request_id = None
+        self._active_message_started = False
+        self._phase_checkpoint(phase, step.next)
+        if step.next == "continue":
+            return await self._run_turn(None, append_user=False, tool_context=tool_context)
+        self._phase_result = step.result
+        self._phase_completed = True
+        self._core_phase = None
+        if self._standalone_phase:
+            return ""
+        self.repository.append(self.session_id, "custom_message", {
+            "audience": "model", "model_role": "user", "name": "workbench_phase_result",
+            "content": json.dumps(dict(step.public_result), ensure_ascii=False, sort_keys=True),
+        })
+        return await self._run_turn(None, append_user=False, tool_context=tool_context)
 
     def attach_tools(
         self,
@@ -230,6 +326,10 @@ class AgentCore:
         self._active_command_id = uuid4().hex
         self._budget = budget
         self._steps_used = 0
+        self._turn_started_at = asyncio.get_running_loop().time()
+        self._standalone_phase = False
+        self._phase_completed = False
+        self._phase_result = None
         self._overflow_retried = False
         self._final_status = None
         self._last_tool_call_fingerprint = None
@@ -260,6 +360,8 @@ class AgentCore:
         self._active_message_started = False
         self._active_context_fingerprint = None
         self._final_status = None
+        self._core_phase = None
+        self._phase_messages = []
 
     def _assert_continuable(self) -> None:
         """Match the provider contract: continue only from user/tool results."""
@@ -428,8 +530,9 @@ class AgentCore:
                 {"role": "user", "content": text, "command_id": command_id},
             )
 
+        active_phase = self._core_phase
         context = self.context_builder.build(self.session_id)
-        if self.compaction_policy is not None:
+        if self.compaction_policy is not None and active_phase is None:
             tokens = self.context_tokens(context.messages)
             if self.compaction_policy.should_compact(tokens):
                 if await self.compact("auto", tokens_before=tokens, command_id=command_id) is not None:
@@ -440,12 +543,30 @@ class AgentCore:
             self._budget.max_steps is not None
             and self._steps_used >= self._budget.max_steps
         ):
+            if active_phase is not None:
+                self._final_status = "failed"
+                self._phase_checkpoint(active_phase, "failed")
+                raise active_phase.failure("budget")
             return self._persist_terminal_error("max_steps_exceeded")
+        try:
+            phase_request = active_phase.request(self._phase_messages) if active_phase is not None else None
+        except Exception:
+            self._final_status = "failed"
+            self._phase_checkpoint(active_phase, "failed")
+            raise
+        if phase_request is not None and not self._phase_messages:
+            self._phase_messages = [dict(message) for message in phase_request.messages]
+            for message in self._phase_messages:
+                self.repository.append(self.session_id, "phase_message", {
+                    "episode_id": active_phase.episode_id, "message": message,
+                })
         self._steps_used += 1
         request = ModelRequest(
             request_id=uuid4().hex,
-            messages=context.messages,
-            tools=self.tools,
+            messages=phase_request.messages if phase_request is not None else context.messages,
+            tools=phase_request.tools if phase_request is not None else self.tools,
+            response_schema=phase_request.response_schema if phase_request is not None else None,
+            model_config=phase_request.model_config if phase_request is not None else {},
             abort_event=self._new_abort_event(),
         )
         self._active_request_id = request.request_id
@@ -460,8 +581,16 @@ class AgentCore:
         tool_calls: dict[str, dict[str, Any]] = {}
         finish_reason = "stop"
         error: str | None = None
+        phase_events = []
+        phase_error = None
+        if active_phase is not None:
+            self._phase_checkpoint(active_phase, "running")
         try:
-            async for event in self.adapter.stream(request):
+            async for event in self._provider_events(
+                request, timeout_s=phase_request.provider_timeout_s if phase_request is not None else None
+            ):
+                if active_phase is not None:
+                    phase_events.append(event)
                 if self._abort_requested:
                     finish_reason = "aborted"
                     break
@@ -481,7 +610,8 @@ class AgentCore:
                         current.update(call)
                 elif event.type == "done":
                     finish_reason = event.finish_reason or "stop"
-                    break
+                    if active_phase is None:
+                        break
                 elif event.type == "retry":
                     # Recorded so a flaky provider is visible, not only survived.
                     self.events.emit(
@@ -497,6 +627,10 @@ class AgentCore:
         except Exception as exc:  # Provider errors become durable turn state.
             finish_reason = "error"
             error = type(exc).__name__
+            phase_error = exc
+
+        if active_phase is not None:
+            return await self._consume_phase(active_phase, phase_events, phase_error, tool_context=tool_context)
 
         if finish_reason == "tool_calls" and tool_calls and self.tool_runtime is None:
             finish_reason = "error"

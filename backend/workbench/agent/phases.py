@@ -1,0 +1,42 @@
+"""Deterministic phases consumed by the existing AgentCore provider step."""
+
+from dataclasses import dataclass, field
+from typing import Any, Generic, Literal, Mapping, Protocol, Sequence, TypeVar
+
+from .model import ModelStreamEvent
+
+T = TypeVar("T")
+
+
+@dataclass(frozen=True)
+class PhaseRequest:
+    messages: list[dict[str, Any]]
+    tools: list[dict[str, Any]]
+    response_schema: dict[str, Any] | None = None
+    model_config: Mapping[str, Any] = field(default_factory=dict)
+    provider_timeout_s: float | None = None
+
+
+@dataclass(frozen=True)
+class PhaseStep(Generic[T]):
+    next: Literal["continue", "completed", "refused"]
+    append_messages: tuple[dict[str, Any], ...] = ()
+    result: T | None = None
+    public_result: Mapping[str, Any] = field(default_factory=dict)
+
+
+class CorePhase(Protocol[T]):
+    episode_id: str
+
+    def request(self, transcript: Sequence[dict[str, Any]]) -> PhaseRequest: ...
+
+    async def consume(
+        self,
+        events: Sequence[ModelStreamEvent],
+        *,
+        error: Exception | None = None,
+    ) -> PhaseStep[T]: ...
+
+    def checkpoint(self) -> dict[str, Any]: ...
+
+    def failure(self, reason: str, error: Exception | None = None) -> Exception: ...
