@@ -119,6 +119,23 @@ DEFAULT_MAX_STEPS = 10
 # at any time; this ceiling only has to leave room for a long answer and one
 # rewrite.
 DEFAULT_TIMEOUT_S = 300.0
+# v1.9.1 execution modes do more inside one turn, so they get more room.
+# Ask every step: read-only analysis runs inline and a turn ends at the
+# first card, so it needs room for a few analyses and their reading, not for
+# a whole analysis. Auto within plan: planned steps execute inside the turn
+# (run, read the result, write it up), so a turn may cover several of them.
+# In the v1.9.1 smoke, turns used 1-7 steps in Ask, and an Auto turn that
+# executed two planned steps and read their results stopped at 11 of 10.
+# The person can stop a turn at any time; these bound a runaway loop.
+MODE_BUDGETS = {
+    None: {"max_steps": DEFAULT_MAX_STEPS, "timeout_s": DEFAULT_TIMEOUT_S},
+    "ask": {"max_steps": 25, "timeout_s": 600.0},
+    "auto": {"max_steps": 40, "timeout_s": 1200.0},
+}
+
+
+def turn_budget(execution_mode: str | None) -> dict[str, float | int]:
+    return dict(MODE_BUDGETS.get(execution_mode, MODE_BUDGETS[None]))
 
 # A live turn is process-local by design: the local Workbench server owns the
 # in-flight provider stream and is the only component able to abort it safely.
@@ -2741,7 +2758,7 @@ async def _run_reserved_agent_turn(
     _ACTIVE_TURNS[turn_key] = agent
     try:
         with egress_project(root):
-            budget = {"max_steps": DEFAULT_MAX_STEPS, "timeout_s": DEFAULT_TIMEOUT_S}
+            budget = turn_budget(body.execution_mode)
             if continuation:
                 repository.append(session_id, "custom_message", {
                     "message_type": "agent_continuation",

@@ -94,3 +94,29 @@ def test_session_grants_and_project_rules_are_read_from_their_stores(tmp_path: P
     grants = agent_routes._session_grants(repository, "s1")
     # External is never grantable, whatever the metadata says.
     assert grants.entries == frozenset({Rule(PermissionClass.DERIVE)})
+
+
+def test_the_turn_budget_follows_the_execution_mode(tmp_path: Path, monkeypatch) -> None:
+    from workbench.agent.core import AgentCore
+    from workbench.http import agent_routes
+
+    seen: list[dict] = []
+    original = AgentCore.prompt
+
+    async def recording_prompt(self, text, *, budget=None, **kwargs):
+        seen.append(dict(budget or {}))
+        return await original(self, text, budget=budget, **kwargs)
+
+    monkeypatch.setattr(AgentCore, "prompt", recording_prompt)
+    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
+    monkeypatch.setattr(agent_routes, "OpenAICompatibleModelAdapter", FakeAgentAdapter)
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        session_id = _session(client, project_root)
+        for mode in ("ask", "auto"):
+            response = client.post(f"/agent/sessions/{session_id}/turns", params={"project_root": str(project_root)},
+                                   json={"question": "请提出下一步。", "execution_mode": mode})
+            assert response.status_code == 200, response.text
+    assert seen == [agent_routes.MODE_BUDGETS["ask"], agent_routes.MODE_BUDGETS["auto"]]
+    assert seen[1]["max_steps"] > seen[0]["max_steps"] > agent_routes.DEFAULT_MAX_STEPS
