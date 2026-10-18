@@ -2860,21 +2860,33 @@ class WorkbenchOrchestrator:
                 raise ValueError("tool session is outside the registered chain scope")
             try:
                 steps = plan_module.parse_steps(arguments.get("steps"), self.known_plan_operations())
-                plan = plan_module.merge(
-                    self._current_plan(session_id),
-                    question=str(arguments.get("question") or "").strip()[:1000],
-                    criteria=[str(c)[:300] for c in arguments.get("criteria") or ()][:12],
-                    steps=steps,
-                    budget={k: int(v) for k, v in (arguments.get("budget") or {}).items()
-                            if k in {"steps", "wall_s", "inferential"} and str(v).isdigit()},
-                    allowed_classes=arguments.get("allowed_classes"),
-                )
+                def revise(previous):
+                    plan = plan_module.merge(
+                        previous,
+                        question=str(arguments.get("question") or "").strip()[:1000],
+                        criteria=[str(c)[:300] for c in arguments.get("criteria") or ()][:12],
+                        steps=steps,
+                        budget={k: int(v) for k, v in (arguments.get("budget") or {}).items()
+                                if k in {"steps", "wall_s", "inferential"} and str(v).isdigit()},
+                        allowed_classes=arguments.get("allowed_classes"),
+                    )
+                    if not plan.question:
+                        raise plan_module.PlanError("question is required")
+                    if (previous is not None and previous.approved_version is not None
+                            and plan.question != previous.question):
+                        from ..analysis_ledger import record_plan_event_once
+
+                        project_root = getattr(self.context_provider, "project_root", None)
+                        if project_root is None:
+                            raise plan_module.PlanError("a project is required to record a question change")
+                        intent = record_plan_event_once(project_root, session_id=session_id, event_type="question_change",
+                                                        plan_snapshot=plan.to_dict())
+                        plan = plan_module.Plan.from_dict(intent["plan_snapshot"])
+                    return plan
+                plan = self.plan_store.update(session_id, revise)
             except plan_module.PlanError as exc:
                 return {"saved": False, "error": str(exc),
                         "guidance": "Fix the plan as the error says and call update_plan again."}
-            if not plan.question:
-                return {"saved": False, "error": "question is required", "guidance": "State the research question."}
-            plan = self.plan_store.save(session_id, plan)
             needs_person = self.execution_mode == "auto" and plan.status in {"draft", "needs_approval"}
             return {
                 "saved": True,
@@ -3024,10 +3036,21 @@ class WorkbenchOrchestrator:
         results_reader = getattr(self.context_provider, "executed_workflow_results", None)
         if record.status == "completed" and results_reader is not None:
             results = results_reader(record)
+        plan_update_conflict = False
         if plan is not None and actor == "approved_plan":
             from . import plans as plan_module
 
-            plan = self.plan_store.save(session_id, plan_module.mark_executed(plan, operation_ids, record.status))
+            expected_plan = plan
+            def mark_current(current):
+                if current != expected_plan:
+                    raise plan_module.PlanError("plan changed during execution")
+                return plan_module.mark_executed(current, operation_ids, record.status)
+            try:
+                plan = self.plan_store.update(session_id, mark_current)
+            except plan_module.PlanError:
+                # The operation already happened. Preserve its result and the
+                # user's newer plan; do not replay or replace either of them.
+                plan_update_conflict = True
         tests_run = prior + (budget.inferential_steps if record.status == "completed" else 0)
         return {
             "executed": True,
@@ -3041,6 +3064,9 @@ class WorkbenchOrchestrator:
             },
             "results": results,
             "inferential_tests_run_this_session": tests_run,
+            **({"plan_update_conflict": True,
+                "plan_update_note": "The plan changed during execution. The operation is recorded; review its step status without rerunning it."}
+               if plan_update_conflict else {}),
             "guidance": (
                 "This operation ran without a confirmation ("
                 + decision.reason

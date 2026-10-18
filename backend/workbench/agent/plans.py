@@ -13,13 +13,16 @@ Design: ``docs/superpowers/specs/2026-10-18-v1.9.1-agent-autonomy-design.md`` §
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 import threading
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from uuid import uuid4
 
+from ..jsonl_store import _exclusive_jsonl_lock
 from .permissions import PermissionClass, permission_class, strictest
 
 STEP_STATUSES = ("pending", "running", "awaiting", "done", "skipped", "failed")
@@ -177,14 +180,27 @@ def approve(plan: Plan) -> Plan:
     return replace(plan, status="approved", approved_version=plan.version, approved_at=_now(), updated_at=_now())
 
 
+def _ready_step_index(plan: Plan, operation_ids: list[str]) -> int | None:
+    """Select one covering open step, in plan order, after every dependency succeeded."""
+
+    requested = set(operation_ids)
+    if not requested:
+        return None
+    done = {step.step_id for step in plan.steps if step.status == "done"}
+    for index, step in enumerate(plan.steps):
+        if (step.status in {"pending", "running", "awaiting"}
+                and all(dependency in done for dependency in step.depends_on)
+                and requested <= set(step.operation_ids)):
+            return index
+    return None
+
+
 def scope_for(plan: Plan | None, operation_ids: list[str], *, executed_steps: int = 0) -> dict[str, Any]:
     """What the permission engine needs to know about a request and the approved plan."""
 
     if plan is None or plan.status != "approved":
         return {"in_plan": False, "allowed_classes": []}
-    open_steps = [step for step in plan.steps if step.status in {"pending", "running", "awaiting"}]
-    covered = set().union(*(set(step.operation_ids) for step in open_steps)) if open_steps else set()
-    in_plan = bool(operation_ids) and set(operation_ids) <= covered
+    in_plan = _ready_step_index(plan, operation_ids) is not None
     max_steps = int(plan.budget.get("steps") or 0)
     return {"in_plan": in_plan, "allowed_classes": list(plan.allowed_classes),
             "within_budget": not max_steps or executed_steps < max_steps,
@@ -192,14 +208,12 @@ def scope_for(plan: Plan | None, operation_ids: list[str], *, executed_steps: in
 
 
 def mark_executed(plan: Plan, operation_ids: list[str], status: str) -> Plan:
-    """Mark the first open step whose operations cover the executed ones."""
+    """Mark the same ready covering step that can supply plan authority."""
 
-    executed = set(operation_ids)
     steps = list(plan.steps)
-    for index, step in enumerate(steps):
-        if step.status in {"pending", "running", "awaiting"} and executed and executed <= set(step.operation_ids):
-            steps[index] = replace(step, status="done" if status == "completed" else "failed")
-            break
+    index = _ready_step_index(plan, operation_ids)
+    if index is not None:
+        steps[index] = replace(steps[index], status="done" if status == "completed" else "failed")
     finished = all(step.status in {"done", "skipped"} for step in steps)
     return replace(plan, steps=tuple(steps), status="completed" if finished and plan.status == "approved" else plan.status,
                    updated_at=_now())
@@ -214,6 +228,8 @@ class PlanStore:
         self.root = Path(workbench_root) / "plans"
 
     def _path(self, session_id: str) -> Path:
+        if not session_id or Path(session_id).name != session_id or session_id in {".", ".."}:
+            raise PlanError("invalid plan session identifier")
         return self.root / f"{session_id}.jsonl"
 
     def current(self, session_id: str) -> Plan | None:
@@ -229,9 +245,48 @@ class PlanStore:
             return []
         return [Plan.from_dict(json.loads(line)) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
+    def _append(self, session_id: str, plan: Plan) -> None:
+        """Caller owns the plan transaction lock; readers see an old or new file."""
+        path = self._path(session_id)
+        existing = path.read_bytes() if path.exists() else b""
+        if existing and not existing.endswith(b"\n"):
+            raise PlanError("incomplete plan history needs reconciliation")
+        line = (json.dumps(plan.to_dict(), ensure_ascii=False, allow_nan=False) + "\n").encode("utf-8")
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(dir=self.root, delete=False) as handle:
+                temporary = Path(handle.name)
+                handle.write(existing)
+                handle.write(line)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, path)
+            directory = os.open(self.root, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+
     def save(self, session_id: str, plan: Plan) -> Plan:
-        with self._lock:
-            self.root.mkdir(parents=True, exist_ok=True)
-            with self._path(session_id).open("a", encoding="utf-8") as handle:
-                handle.write(json.dumps(plan.to_dict(), ensure_ascii=False) + "\n")
+        """Append a caller-owned snapshot; compound product changes use update."""
+        with self._lock, _exclusive_jsonl_lock(self._path(session_id)):
+            self._append(session_id, plan)
         return plan
+
+    def update(self, session_id: str, change: Callable[[Plan | None], Plan]) -> Plan:
+        """Serialize read/validate/write across instances and worker processes.
+
+        A failed callback cannot grant plan authority. Callbacks may first
+        write idempotent intent records; those records alone grant nothing.
+        """
+        with self._lock, _exclusive_jsonl_lock(self._path(session_id)):
+            previous = self.current(session_id)
+            updated = change(previous)
+            if not isinstance(updated, Plan):
+                raise PlanError("plan update must return a Plan")
+            if updated != previous:
+                self._append(session_id, updated)
+            return updated

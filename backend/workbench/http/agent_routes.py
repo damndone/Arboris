@@ -2450,24 +2450,38 @@ def approve_agent_plan(session_id: str, project_root: str, body: AgentPlanApprov
     root = _project_root(project_root)
     repository, _events, _metadata = _get_session(root, session_id)
     store = PlanStore(repository.root)
-    plan = store.current(session_id)
-    if plan is None:
-        raise WorkbenchAPIError(status_code=404, code="AGENT_PLAN_NOT_FOUND", message="This conversation has no plan.")
-    if plan.version != body.version:
-        raise WorkbenchAPIError(status_code=409, code="AGENT_PLAN_CHANGED",
-                                message="The plan changed since it was shown; review the new version.",
-                                details={"current_version": plan.version})
+    from ..analysis_ledger import read as read_ledger, record_plan_event_once
+
+    def approve_current(plan):
+        if plan is None:
+            raise WorkbenchAPIError(status_code=404, code="AGENT_PLAN_NOT_FOUND", message="This conversation has no plan.")
+        if plan.version != body.version:
+            raise WorkbenchAPIError(status_code=409, code="AGENT_PLAN_CHANGED",
+                                    message="The plan changed since it was shown; review the new version.",
+                                    details={"current_version": plan.version})
+        if plan.status == "approved" and plan.approved_version == body.version:
+            # Repair a failed session notice only for approvals already audited
+            # by this path. Never backdate evidence for legacy approvals.
+            if any(entry.get("event_type") == "criteria_fixed" and entry.get("session_id") == session_id
+                   and entry.get("plan_id") == plan.plan_id and entry.get("plan_version") == plan.version
+                   for entry in read_ledger(root)):
+                return plan
+        if plan.status not in {"draft", "needs_approval"}:
+            raise PlanError(f"a {plan.status} plan cannot be approved")
+        record_plan_event_once(root, session_id=session_id, event_type="criteria_fixed", plan_snapshot=plan.to_dict())
+        return approve(plan)
+
     try:
-        approved = store.save(session_id, approve(plan))
+        approved = store.update(session_id, approve_current)
     except PlanError as exc:
         raise WorkbenchAPIError(status_code=409, code="AGENT_PLAN_NOT_APPROVABLE", message=str(exc)) from exc
-    repository.append(session_id, "custom_message", {
+    repository.append_once(session_id, "custom_message", {
         "message_type": "agent_plan_approved",
         "audience": "model",
         "name": "workbench_plan",
         "content": (f"Workbench: the person approved plan {approved.plan_id} version {approved.version}. "
                     "Its question and criteria are now fixed; planned steps of the allowed kinds run without a card."),
-    })
+    }, key=f"{approved.plan_id}:{approved.version}", stage="plan_approved")
     return {"plan": approved.to_dict()}
 
 

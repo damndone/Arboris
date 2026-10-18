@@ -19,6 +19,8 @@ fails until someone classifies it.
 from __future__ import annotations
 
 import json
+import hashlib
+import os
 import logging
 import threading
 from collections.abc import Iterable, Mapping
@@ -26,6 +28,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
+
+from .jsonl_store import _exclusive_jsonl_lock
 
 Category = Literal[
     "data_change", "metadata_change", "deletion", "model", "inferential", "descriptive", "report", "export",
@@ -178,10 +182,64 @@ def record(project_root: Path | str, entry: LedgerEntry) -> dict[str, Any]:
         payload["source_upload_sha256"] = upload_sha(project_root, entry.run_id or entry.produced_run_id)
     path = ledger_path(project_root)
     line = json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n"
-    with _LOCK:
-        path.parent.mkdir(parents=True, exist_ok=True)
+    with _LOCK, _exclusive_jsonl_lock(path):
         with path.open("a", encoding="utf-8") as handle:
             handle.write(line)
+    return payload
+
+
+def record_plan_event_once(project_root: Path | str, *, session_id: str, event_type: str,
+                           plan_snapshot: Mapping[str, Any]) -> dict[str, Any]:
+    """Fix an exact research intent before plan authority becomes active.
+
+    This event records a request, not proof that results were unseen or that
+    the matching plan commit succeeded. Pre-specified/exploratory status needs
+    separate exposure evidence; no analysis count or result is fabricated.
+    """
+    if event_type not in {"criteria_fixed", "question_change"}:
+        raise ValueError("unknown plan event type")
+    snapshot = json.loads(json.dumps(dict(plan_snapshot), ensure_ascii=False, allow_nan=False))
+    identity = ["agent.plan-event.v1", session_id, snapshot["plan_id"], snapshot["version"], event_type]
+    event_id = hashlib.sha256(json.dumps(identity, ensure_ascii=False).encode("utf-8")).hexdigest()
+    payload = {
+        "record_type": "research_intent", "event_type": event_type, "event_id": event_id,
+        "actor": "user" if event_type == "criteria_fixed" else "agent", "authorized_by": "user",
+        "source": f"agent.plan.{event_type}", "status": "completed", "steps": [],
+        "inferential_steps": 0, "changes_data": False, "session_id": session_id,
+        "plan_id": snapshot["plan_id"], "plan_version": snapshot["version"], "plan_snapshot": snapshot,
+        "activation": "requires_matching_approved_plan", "summary": "Research intent recorded; no analysis executed.",
+    }
+    path = ledger_path(project_root)
+    with _LOCK, _exclusive_jsonl_lock(path):
+        raw = path.read_text(encoding="utf-8") if path.exists() else ""
+        if raw and not raw.endswith("\n"):
+            raise ValueError("incomplete analysis ledger needs reconciliation")
+        entries = [json.loads(line) for line in raw.splitlines() if line.strip()]
+        matches = [entry for entry in entries if entry.get("event_id") == event_id]
+        if matches:
+            recorded = {k: v for k, v in matches[0].items() if k != "at"}
+            expected = payload
+            if event_type == "question_change":
+                # This event prepares a generated revision timestamp. The
+                # first snapshot owns it; return that exact snapshot to commit.
+                # Every other field must still match the same requested change.
+                def without_generated_time(value):
+                    return {**value, "plan_snapshot": {
+                        key: item for key, item in value.get("plan_snapshot", {}).items() if key != "updated_at"}}
+                recorded, expected = without_generated_time(recorded), without_generated_time(expected)
+            if len(matches) != 1 or recorded != expected:
+                raise ValueError("plan event conflicts with the recorded research intent")
+            return matches[0]
+        payload["at"] = datetime.now(UTC).isoformat(timespec="milliseconds")
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
     return payload
 
 
