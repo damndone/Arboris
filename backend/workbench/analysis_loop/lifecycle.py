@@ -5,7 +5,10 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from ..agent.operation_requests import OperationRequest
 
 from .contracts import SourceRunContract
 from .plan import (
@@ -83,6 +86,22 @@ class AnalysisLoopProposalSpec:
     @property
     def plan(self) -> PlanDiff:
         return self.plan_diff
+
+    def to_operation_request(self) -> OperationRequest:
+        """Expose the same PlanDiff-bound fields to shared typed admission."""
+
+        from ..agent.operation_requests import OperationRequest
+
+        return OperationRequest(
+            operation_id=self.operation_id,
+            operation_version=self.operation_version,
+            target=dict(self.target),
+            preconditions=dict(self.preconditions),
+            changes=dict(self.changes),
+            evidence_refs=list(self.evidence_refs),
+            expected_effect=list(self.expected_effect),
+            risks=list(self.risks),
+        )
 
     def to_proposal_kwargs(
         self,
@@ -238,12 +257,14 @@ def create_analysis_loop_proposal(
     """Adapt the pure spec into the existing ProposalStore lifecycle."""
 
     spec = build_analysis_loop_proposal(**build_kwargs)
-    proposal_kwargs = spec.to_proposal_kwargs(
-        chain_id=chain_id,
-        command_id=command_id,
-    )
+    request = spec.to_operation_request()
+    admission_scope = {
+        "chain_id": chain_id,
+        "command_id": command_id,
+        "proposal_id": spec.proposal_id,
+    }
     if session_id is not None:
-        proposal_kwargs["session_id"] = session_id
+        admission_scope["session_id"] = session_id
 
     from ..agent.proposals import ProposalConfirmationError
 
@@ -255,9 +276,9 @@ def create_analysis_loop_proposal(
         if (
             existing.operation_id == spec.operation_id
             and existing.operation_version == spec.operation_version
-            and existing.target == proposal_kwargs["target"]
-            and existing.preconditions == proposal_kwargs["preconditions"]
-            and existing.changes == proposal_kwargs["changes"]
+            and existing.target == request.target
+            and existing.preconditions == request.preconditions
+            and existing.changes == request.changes
         ):
             return existing
         raise AnalysisLoopProposalError(
@@ -266,7 +287,7 @@ def create_analysis_loop_proposal(
             details={"proposal_id": spec.proposal_id},
         )
     try:
-        return orchestrator.create_proposal(**proposal_kwargs)
+        return orchestrator.admit_operation_request(request, **admission_scope).proposal
     except ProposalConfirmationError as exc:
         # ProposalStore.create is append-only and the deterministic id makes a
         # concurrent retry safe. Only convert a duplicate into the existing
@@ -277,9 +298,9 @@ def create_analysis_loop_proposal(
             raise
         if (
             existing.operation_id == spec.operation_id
-            and existing.target == proposal_kwargs["target"]
-            and existing.preconditions == proposal_kwargs["preconditions"]
-            and existing.changes == proposal_kwargs["changes"]
+            and existing.target == request.target
+            and existing.preconditions == request.preconditions
+            and existing.changes == request.changes
         ):
             return existing
         raise AnalysisLoopProposalError(

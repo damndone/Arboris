@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from .events import AgentEventStream
-from .operations import OperationRegistry
+from .operations import OperationDefinition, OperationRegistry
 from .proposals import ProposalRevision, ProposalStore
 from .session import JsonlSessionRepository
 
@@ -57,6 +57,16 @@ class OperationReceipt:
     status: Literal["pending"] = "pending"
 
 
+def validate(request: OperationRequest, definition: OperationDefinition) -> None:
+    """Apply an already-resolved declaration without persistence or authority."""
+
+    definition.validate(
+        target=request.target,
+        preconditions=request.preconditions,
+        changes=request.changes,
+    )
+
+
 def admit(
     request: OperationRequest,
     *,
@@ -75,7 +85,7 @@ def admit(
     if metadata.get("role") != "chain" or metadata.get("chain_id") != chain_id:
         raise ValueError("proposal session must be a matching chain session")
     definition = operation_registry.require(request.operation_id, request.operation_version)
-    definition.validate(target=request.target, preconditions=request.preconditions, changes=request.changes)
+    validate(request, definition)
     proposal = proposal_store.create(
         session_id=session_id,
         chain_id=chain_id,

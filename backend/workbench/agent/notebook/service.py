@@ -68,6 +68,7 @@ from ...lineage.run_family import (
     resolve_run_family,
 )
 from ...data_operations import resolve_data_column_cast_context
+from .. import operation_requests
 from ..context_compiler import (
     NotebookPlanningContextV1,
     compile_notebook_planning_context,
@@ -3594,10 +3595,18 @@ class NotebookService:
                 operation_id=proposal.operation_id,
             ) from error
         try:
-            definition.validate(
-                target=proposal.target,
-                preconditions=proposal.preconditions,
-                changes=proposal.changes,
+            operation_requests.validate(
+                operation_requests.OperationRequest(
+                    operation_id=proposal.operation_id,
+                    operation_version=proposal.operation_version,
+                    target=proposal.target,
+                    preconditions=proposal.preconditions,
+                    changes=proposal.changes,
+                    evidence_refs=(),
+                    expected_effect=(),
+                    risks=(),
+                ),
+                definition,
             )
             self._assert_p7_source_preflight(notebook, proposal)
         except OperationValidationError as error:
