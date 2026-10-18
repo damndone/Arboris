@@ -138,3 +138,51 @@ def unfinished_outcomes(branch: Any) -> list[str]:
             if isinstance(record_id, str):
                 latest[record_id] = str(metadata.get("status"))
     return [record_id for record_id, status in latest.items() if status not in TERMINAL]
+
+
+#: Room for one executed operation's result in the conversation. The full
+#: record stays in the session entry (``operation_result``) and the operation
+#: store; only the model-visible text is bounded. Unbounded, one Kaplan-Meier
+#: workflow (every curve point and censoring flag) put ~450k characters into
+#: every later request of a v1.9.1 smoke run.
+RESULT_VIEW_CHARS = 12_000
+#: Lists longer than this show their first and last items and their length.
+LONG_LIST = 12
+_LIST_HEAD, _LIST_TAIL = 6, 2
+
+
+def _shorten_lists(value: Any) -> Any:
+    """Every key and scalar kept; only long lists shortened, saying how long they were."""
+
+    if isinstance(value, Mapping):
+        return {key: _shorten_lists(item) for key, item in value.items()}
+    if isinstance(value, list):
+        items = [_shorten_lists(item) for item in value]
+        if len(items) <= LONG_LIST:
+            return items
+        return {"_shortened_list": {"length": len(items), "first": items[:_LIST_HEAD], "last": items[-_LIST_TAIL:]}}
+    return value
+
+
+def result_view(payload: Mapping[str, Any], *, budget: int = RESULT_VIEW_CHARS) -> str:
+    """The model-visible text of an executed operation's result.
+
+    Estimates, standard errors, tests and fit statistics are scalars or short
+    tables and survive whole, so the numbers the Agent cites stay in the
+    evidence the numeric check reads. Long series (curve points, residuals,
+    per-row flags) are shortened; if the result is still too large, a prefix
+    is kept and the cut sections are named.
+    """
+
+    from .tools import _project_value
+
+    view = _shorten_lists(payload)
+    text = json.dumps(view, ensure_ascii=False, sort_keys=True)
+    if len(text) <= budget and view == payload:
+        return text
+    note = ("Workbench: this result was shortened for the conversation (long lists show their first and last "
+            "items and their length). The full result is on record: read an artifact with "
+            "inspect_operation_artifact (operation_record_id and artifact_id below).\n")
+    if len(text) > budget - len(note):
+        text = json.dumps(_project_value(view, budget - len(note)), ensure_ascii=False, sort_keys=True)
+    return note + text

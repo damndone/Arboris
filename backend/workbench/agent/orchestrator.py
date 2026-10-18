@@ -57,6 +57,7 @@ from .execution import (
     merge_execution,
 )
 from .events import AgentEventStream
+from .operation_outcome import result_view
 from .operations import (
     RERUN_OPERATIONS,
     OperationRecord,
@@ -2486,7 +2487,7 @@ class WorkbenchOrchestrator:
             {
                 "message_type": "operation_result",
                 "audience": "model",
-                "content": json.dumps(payload, ensure_ascii=False, sort_keys=True),
+                "content": result_view(payload),
                 "operation_result": payload,
             },
         )
