@@ -38,6 +38,10 @@ class Policy:
     #: The UI's default in v1.9.0 ("Review before running"): read-only
     #: workflows also wait for a confirmation.
     execution_policy: str = "proposal_only"
+    #: v1.9.1: "legacy" (v1.9.0 flow: confirm, then the person says continue),
+    #: "ask" (confirm, then the Workbench resumes the Agent) or "auto"
+    #: (approve the plan once, then the Workbench resumes the Agent).
+    mode: str = "legacy"
 
 
 def _session_entries(root: Path, session_id: str) -> list[dict[str, Any]]:
@@ -98,14 +102,33 @@ def _confirm(client, root: Path, session_id: str, run_id: str, proposal: dict[st
     }
 
 
-def _turn(client, root: Path, session_id: str, text: str, execution_policy: str) -> dict[str, Any]:
+def _approve_plan_if_waiting(client, root: Path, session_id: str) -> bool:
+    response = client.get(f"/agent/sessions/{session_id}/plan", params={"project_root": str(root)})
+    plan = (response.json() or {}).get("plan") if response.status_code == 200 else None
+    if not plan or plan.get("status") not in {"draft", "needs_approval"}:
+        return False
+    approved = client.post(f"/agent/sessions/{session_id}/plan/approve", params={"project_root": str(root)},
+                           json={"version": plan["version"]})
+    return approved.status_code == 200
+
+
+def _turn(client, root: Path, session_id: str, text: str | None, execution_policy: str,
+          mode: str = "legacy") -> dict[str, Any]:
+    """One person turn (text), or a Workbench continuation (text None, v1.9.1)."""
     started = time.monotonic()
-    response = client.post(f"/agent/sessions/{session_id}/turns", params={"project_root": str(root)},
-                           json={"question": text, "execution_policy": execution_policy})
+    body: dict[str, Any] = {"execution_policy": execution_policy}
+    if mode in {"ask", "auto"}:
+        body["execution_mode"] = mode
+    if text is None:
+        response = client.post(f"/agent/sessions/{session_id}/continue", params={"project_root": str(root)}, json=body)
+    else:
+        response = client.post(f"/agent/sessions/{session_id}/turns", params={"project_root": str(root)},
+                               json={"question": text, **body})
     body = response.json() if response.headers.get("content-type", "").startswith("application/json") else {"raw": response.text}
     assistant = body.get("assistant")
     reply = (assistant or {}).get("content") if isinstance(assistant, dict) else (assistant or "")
-    return {"user": text, "http_status": response.status_code, "status": body.get("status"),
+    return {"user": text if text is not None else "<workbench continuation>", "http_status": response.status_code,
+            "status": body.get("status"),
             "reply": reply or "", "error": body.get("error") or body.get("detail"),
             "elapsed_s": round(time.monotonic() - started, 1)}
 
@@ -126,8 +149,11 @@ def run_conversation(client, root: Path, run_id: str, prompt: str, policy: Polic
     nudge = NUDGE_ZH if policy.language == "zh" else NUDGE_EN
     confirmed_note = CONFIRMED_ZH if policy.language == "zh" else CONFIRMED_EN
     started = time.monotonic()
-    turns: list[dict[str, Any]] = [_turn(client, root, session_id, prompt, policy.execution_policy)]
+    turn = lambda text: _turn(client, root, session_id, text, policy.execution_policy, policy.mode)  # noqa: E731
+    turns: list[dict[str, Any]] = [turn(prompt)]
     confirmations: list[dict[str, Any]] = []
+    plan_approvals = 0
+    continuations = 0
     nudges = 0
     completed = False
     stop_reason = "nudge_budget"
@@ -135,30 +161,44 @@ def run_conversation(client, root: Path, run_id: str, prompt: str, policy: Polic
         if any(marker in turns[-1]["reply"] for marker in COMPLETION_MARKERS):
             completed, stop_reason = True, "completion_marker"
             break
+        if policy.mode == "auto" and _approve_plan_if_waiting(client, root, session_id):
+            plan_approvals += 1
+            continuations += 1
+            turns.append(turn(None))
+            continue
         pending = _pending_proposals(client, root, session_id)
         if pending:
             head = _active_head(client, root, session_id, run_id)
             for proposal in pending:
                 confirmations.append(_confirm(client, root, session_id, head, proposal))
+            if policy.mode in {"ask", "auto"}:
+                # v1.9.1: the Workbench resumes the Agent; the person says nothing.
+                continuations += 1
+                if continuations > 4 * policy.max_nudges:
+                    break
+                turns.append(turn(None))
+                continue
             # After confirming, v1.9.0 needs the person to speak again; the
             # nudge that follows is counted separately.
             if nudges >= policy.max_nudges:
                 break
             nudges += 1
-            turns.append(_turn(client, root, session_id, f"{confirmed_note}{nudge}", policy.execution_policy))
+            turns.append(turn(f"{confirmed_note}{nudge}"))
             continue
         if nudges >= policy.max_nudges:
             break
         nudges += 1
-        turns.append(_turn(client, root, session_id, nudge, policy.execution_policy))
+        turns.append(turn(nudge))
     else:
         stop_reason = "wall_clock"
     return {
         "session_id": session_id,
         "turns": turns,
         "confirmations": confirmations,
+        "plan_approvals": plan_approvals,
+        "continuations": continuations,
         "nudges": nudges,
-        "user_actions": len(confirmations) + nudges,
+        "user_actions": len(confirmations) + nudges + plan_approvals,
         "completed_marker": completed,
         "stop_reason": stop_reason,
         "wall_s": round(time.monotonic() - started, 1),

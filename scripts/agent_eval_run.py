@@ -72,6 +72,8 @@ def main() -> int:
     parser.add_argument("--max-nudges", type=int, default=8)
     parser.add_argument("--max-wall-s", type=float, default=1800)
     parser.add_argument("--label", default="", help="round label, e.g. baseline-v190")
+    parser.add_argument("--mode", choices=("legacy", "ask", "auto"), default="legacy",
+                        help="legacy = v1.9.0 flow; ask / auto = v1.9.1 execution modes")
     parser.add_argument("--suite", choices=("dev", "heldout", "external"), default="dev",
                         help="heldout is run once, at the final evaluation only")
     args = parser.parse_args()
@@ -101,7 +103,7 @@ def main() -> int:
         "model": config.model,
         "base_url_host": config.base_url.split("/")[2] if "//" in config.base_url else config.base_url,
         "repeat": args.repeat,
-        "policy": {"max_nudges": args.max_nudges, "max_wall_s": args.max_wall_s},
+        "policy": {"max_nudges": args.max_nudges, "max_wall_s": args.max_wall_s, "mode": args.mode},
         "suite": args.suite,
         "tasks": [task.id for task in tasks],
     }
@@ -142,7 +144,8 @@ def main() -> int:
                 record["seed_model"] = seed_form
                 record["seed_run_id"] = run_id = _seed(project.root, dataset, seed_form)
                 record["project_root"] = str(project.root)
-                policy = Policy(max_nudges=args.max_nudges, max_wall_s=args.max_wall_s, language=task.language)
+                policy = Policy(max_nudges=args.max_nudges, max_wall_s=args.max_wall_s, language=task.language,
+                                mode=args.mode)
                 with provider_tape(directory / "provider_tape.jsonl") as tape:
                     tape.context = {"task": name}
                     record["conversation"] = run_conversation(client, project.root, run_id, task.prompt, policy)
