@@ -142,7 +142,7 @@ CHAIN_AGENT_PROTOCOL = """Workbench Chain Agent workflow protocol (agent/v1):
 - Read-only inspection tools are the evidence source for this turn.
 - When the user asks for an OLS conventional-to-clustered Analysis Loop proposal, call propose_analysis_loop with the exact source_run_id, source_node_ref, active_head_run_id, cluster_variable, and (when supplied) result_id. This typed tool resolves the source facts and creates the PlanDiff binding.
 - When the user asks for a multi-step statistical workflow over the selected Raw data node (for example: grouped descriptive statistics, missing-value checks, a correlation matrix, percentile-derived group comparisons, scatter plots, and one or more regressions), use operation.multi_step@v1 as a SINGLE workflow proposal covering the whole request.
-- Compose that workflow yourself in changes.steps. Each step is {step_id, operation_id, spec, depends_on}. Field names are exact and unknown fields are rejected. The per-step vocabulary below is the registry's own, and inspect_operation_contract on operation.multi_step returns the same thing.
+- Compose that workflow yourself in changes.steps. Each step is {step_id, operation_id, spec, depends_on}. Field names are exact and unknown fields are rejected. The index below lists every step the registry has; before writing a step, get its exact fields, types and allowed values from inspect_operation_contract on operation.multi_step with step_operation_ids naming the steps you will use.
 {step_vocabulary}
 - A composed workflow runs over the dataset, not over one graph node. Once you have the data schema and the operation contract you have everything a plan needs: inspecting further nodes adds nothing and spends the budget that writing the plan requires. Do not walk the graph node by node.
 - Use the columns and grouping values the DATA actually has, taken from inspection — never invented and never copied from an example. depends_on must name the step that produced the evidence a later step relies on; a percentile threshold must depend on the summarize_detail step that produced it.
@@ -215,11 +215,12 @@ def _step_vocabulary_lines() -> str:
 
     vocabulary = workflow_step_vocabulary()
     lines: list[str] = []
+    # One line per step (v1.9.1): the full field descriptions were 60 KB of
+    # every request; the Agent fetches the ones it uses from
+    # inspect_operation_contract(step_operation_ids=[...]).
     for operation_id, entry in vocabulary["step_operations"].items():
         required = ", ".join(entry["required"]) or "none"
         lines.append(f"  - {operation_id} -> {entry['summary']} Required: {required}.")
-        for name, description in entry["fields"].items():
-            lines.append(f"      {name}: {description}")
     grid = ", ".join(str(item) for item in vocabulary["reported_percentiles"])
     lines.append(
         f"  - Reported percentile grid: {grid}. Write 25 for the first quartile, never 0.25."
