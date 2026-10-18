@@ -15,8 +15,10 @@ alone cannot rule that out, so the rule is enforced here:
   the reply is shown with a visible warning naming the unverified numbers
   (``unverified_note``). Nothing is silently rewritten.
 
-Whole numbers below 1,000 and years are not checked: counts of tests,
-levels and codes are too often legitimate prose.
+Explicit sample sizes, observation counts and participant counts are checked
+as exact integers. Their evidence is still a bag of values, without a field
+or result-owner binding. Other whole numbers below 1,000 and years are not
+checked: counts of tests, levels and codes are too often legitimate prose.
 """
 
 from __future__ import annotations
@@ -51,10 +53,21 @@ _REPLY_NUMBER = re.compile(
     r"(?![A-Za-z0-9_]|[.,]\d)"
 )
 _SUPERSCRIPT = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹⁻⁺−", "0123456789-+-")
-# Whole numbers are checked from here up: smaller ones are too often prose
-# ("3 tests", "the 5% level", "1 = male"). Years are prose too.
+# Other whole numbers are checked from here up: smaller ones are too often
+# prose ("3 tests", "the 5% level", "1 = male"). Years are prose too.
 _MIN_CHECKED_INTEGER = 1000
 _YEARS = range(1900, 2101)
+_COUNT_BEFORE = re.compile(
+    r"(?:样本(?:量|人数)?|观测(?:数|数量)|参与者(?:人数|数量)|受试者(?:人数|数量)|人数"
+    r"|\bsample\s+size|\bnumber\s+of\s+(?:observations|participants)|\bn\s*[=:])"
+    r"\s*(?:为|是|有|共|is|was|were|[=:：])?\s*$",
+    re.IGNORECASE,
+)
+_COUNT_AFTER = re.compile(
+    r"^\s*(?:(?:个|名)\s*)?(?:观测(?:值)?|样本|参与者|受试者"
+    r"|(?:observations?|participants?|subjects?)\b)",
+    re.IGNORECASE,
+)
 # Letters on either side mean an identifier or a hash ("run-3e45ab"), not a number.
 _EVIDENCE_NUMBER = re.compile(r"(?<![0-9A-Za-z_.])\d+(?:\.\d+)?(?:[eE][-+]?\d+)?(?![A-Za-z_])")
 
@@ -109,6 +122,11 @@ class Evidence:
             if _rounds_to(candidate * 100, quantum, value):  # 0.0985 → 9.85%
                 return True
         return False
+
+    def supports_integer(self, value: Decimal) -> bool:
+        """Exact value presence, without rounding, percentage scaling or field binding."""
+        index = bisect.bisect_left(self._values, value)
+        return value == value.to_integral_value() and index < len(self._values) and self._values[index] == value
 
     def closest(self, value: Decimal, limit: int = 2) -> tuple[str, ...]:
         if not self._values:
@@ -249,9 +267,15 @@ def check(reply: str, messages: Sequence[Mapping[str, Any]]) -> tuple[Finding, .
             continue
         value = abs(value)
         scientific = bool(match.group("superscript") or match.group("exponent"))
-        if not scientific and "." not in text and (value < _MIN_CHECKED_INTEGER or int(value) in _YEARS):
+        integer = not scientific and "." not in text
+        count = integer and bool(
+            _COUNT_BEFORE.search(reply[max(0, match.start() - 64):match.start()])
+            or _COUNT_AFTER.match(reply[match.end():match.end() + 32])
+        )
+        if integer and not count and (value < _MIN_CHECKED_INTEGER or int(value) in _YEARS):
             continue
-        if _is_threshold(reply, match.start(), match.end(), value) or evidence.supports(value):
+        supported = evidence.supports_integer(value) if count else evidence.supports(value)
+        if _is_threshold(reply, match.start(), match.end(), value) or supported:
             continue
         seen.add(text)
         findings.append(Finding(text, evidence.closest(value)))

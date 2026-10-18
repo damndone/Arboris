@@ -39,7 +39,7 @@ RESULT = _tool({"p_value": 0.098491234, "mean_men": 5.1234, "mean_women": 4.0221
         "p 值远低于 0.05",
         "p is well below 0.05",
         "p is less than 0.01",
-        "样本 176 人，3 个检验",  # small integers are prose
+        "编号 176，3 个检验",  # ordinary identifiers and prose remain exempt
         "GSS 2022 的数据",  # years are prose
     ],
 )
