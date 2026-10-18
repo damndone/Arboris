@@ -162,6 +162,13 @@ def main() -> int:
             record["elapsed_s"] = round(time.monotonic() - started, 1)
             (directory / "record.json").write_text(json.dumps(record, ensure_ascii=False, indent=1), encoding="utf-8")
             conversation = record.get("conversation") or {}
+            # Stop the round when the provider stops serving (402 balance, 5xx):
+            # every further task would only record the same failure.
+            tape = directory / "provider_tape.jsonl"
+            if tape.exists() and any(json.loads(line).get("status") in {402, 500, 502, 503}
+                                     for line in tape.read_text(encoding="utf-8").splitlines()[-3:]):
+                print(f"{name}: provider unavailable; stopping the round", flush=True)
+                break
             print(f"{name}: {record['status']} {record['elapsed_s']}s actions={conversation.get('user_actions')} "
                   f"stop={conversation.get('stop_reason')}", flush=True)
     return 0
