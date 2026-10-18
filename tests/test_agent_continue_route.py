@@ -120,3 +120,23 @@ def test_the_turn_budget_follows_the_execution_mode(tmp_path: Path, monkeypatch)
             assert response.status_code == 200, response.text
     assert seen == [agent_routes.MODE_BUDGETS["ask"], agent_routes.MODE_BUDGETS["auto"]]
     assert seen[1]["max_steps"] > seen[0]["max_steps"] > agent_routes.DEFAULT_MAX_STEPS
+
+
+def test_the_focus_message_gives_the_node_id(tmp_path: Path) -> None:
+    import json
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        created = client.post(
+            "/agent/sessions", params={"project_root": str(project_root)},
+            json={"role": "chain", "chain_id": "chain-a", "run_id": "run-a", "context_packet": _context_packet(),
+                  "focus": {"kind": "node", "id": "model:ols_1", "run_id": "run-a",
+                            "label": "Imported data and first model"}},
+        )
+        assert created.status_code == 200, created.text
+        session_id = created.json()["session_id"]
+    entries = [json.loads(line) for line in
+               (project_root / "workbench" / "agent-sessions" / f"{session_id}.jsonl").read_text().splitlines()]
+    focus = next(e["payload"]["content"] for e in entries if e["payload"].get("name") == "workbench_agent_focus")
+    assert "'Imported data and first model' (id model:ols_1) in run run-a" in focus

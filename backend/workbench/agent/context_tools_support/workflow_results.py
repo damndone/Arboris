@@ -3,7 +3,7 @@
 from __future__ import annotations
 import json
 from typing import Any
-from ..context_compiler import resolve_registered_artifact
+from ..context_compiler import registered_artifact_suffix, resolve_registered_artifact
 from ..operations import OperationRecord, OperationRecordStore
 from ...jsonl_store import read_jsonl
 from ..tools import ToolVisibleError
@@ -214,7 +214,7 @@ class WorkflowResultsMixin:
             (
                 candidate
                 for candidate in records
-                if candidate.record_id == request.operation_record_id
+                if request.operation_record_id in _record_ids(candidate)
             ),
             None,
         )
@@ -222,6 +222,7 @@ class WorkflowResultsMixin:
             raise ToolVisibleError(
                 "OPERATION_RESULT_NOT_IN_SCOPE: the completed operation is not "
                 "available in this Chain and node scope."
+                + self._scope_hint(request.operation_record_id, chain_id=chain_id, session_id=session_id)
             )
         allowed_artifacts = set(_operation_artifact_ids(record))
         if request.artifact_id not in allowed_artifacts:
@@ -234,6 +235,13 @@ class WorkflowResultsMixin:
             request.artifact_id,
         )
         if artifact is None:
+            suffix = registered_artifact_suffix(self.project_root / "runs" / request.owner_run_id, request.artifact_id)
+            if suffix not in {None, ".json"}:
+                raise ToolVisibleError(
+                    f"OPERATION_ARTIFACT_UNAVAILABLE: this artifact is a {suffix} file (such as the workflow's "
+                    "report), not a JSON result. Its numbers come from the operation's analysis steps: read "
+                    "their result artifacts (the other artifact ids of this operation) instead."
+                )
             raise ToolVisibleError(
                 "OPERATION_ARTIFACT_UNAVAILABLE: the declared artifact is not "
                 "available from the active run."
@@ -433,6 +441,23 @@ class WorkflowResultsMixin:
             )
         return evidence, unavailable + max(len(artifact_ids) - 16, 0)
 
+    def _scope_hint(self, record_id: str, *, chain_id: str, session_id: str) -> str:
+        """Where the caller's own completed operation is, when it asked at the wrong node or run.
+
+        Only records this conversation owns are named, so the hint reveals
+        nothing the Agent could not list itself; the node check still applies.
+        """
+
+        store = OperationRecordStore(self.project_root / "workbench", create=False)
+        for record in store.list_records():
+            if (record.status == "completed" and record.chain_id == chain_id
+                    and record.agent_session_id == session_id and record.workflow_step_id is None
+                    and record_id in _record_ids(record)):
+                return (f" It ran on node {record.target.get('node_ref')} of run {record.target.get('run_id')}: "
+                        f"call again with owner_run_id {record.target.get('run_id')}, op_node_id "
+                        f"{record.target.get('node_ref')} and operation_record_id {record.record_id}.")
+        return ""
+
     def _completed_operation_records(
         self,
         *,
@@ -456,3 +481,13 @@ class WorkflowResultsMixin:
         ]
         return sorted(records, key=lambda record: (record.updated_at, record.record_id), reverse=True)
 
+
+def _record_ids(record: OperationRecord) -> set[str]:
+    """The ids that name one operation record: its own and its workflow's.
+
+    Results show both (``record_id`` and ``workflow_id``); the workflow id is
+    derived from the record, so accepting it names the same record.
+    """
+
+    workflow_id = record.workflow_id or (record.execution or {}).get("workflow_id") or f"workflow_{record.record_id}"
+    return {record.record_id, str(workflow_id)}

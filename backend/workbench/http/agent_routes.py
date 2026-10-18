@@ -1217,7 +1217,10 @@ def create_agent_session(
                 "audience": "model",
                 "name": "workbench_agent_focus",
                 "content": (
+                    # The id, not only the label: tools take ids, and with the label
+                    # alone the first call of 3 of 4 v1.9.1 smoke runs passed the label.
                     f"Focus: this conversation is about the {body.focus.kind} '{body.focus.label}'"
+                    + (f" (id {body.focus.id})" if body.focus.id and body.focus.id != body.focus.label else "")
                     + (f" in run {body.focus.run_id}" if body.focus.run_id else "")
                     + ". Act on it unless the user names another object."
                 ),

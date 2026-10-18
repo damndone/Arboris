@@ -164,7 +164,8 @@ def _shorten_lists(value: Any) -> Any:
     return value
 
 
-def result_view(payload: Mapping[str, Any], *, budget: int = RESULT_VIEW_CHARS) -> str:
+def result_view(payload: Mapping[str, Any], *, budget: int = RESULT_VIEW_CHARS,
+                read_with: Mapping[str, Any] | None = None) -> str:
     """The model-visible text of an executed operation's result.
 
     Estimates, standard errors, tests and fit statistics are scalars or short
@@ -180,9 +181,11 @@ def result_view(payload: Mapping[str, Any], *, budget: int = RESULT_VIEW_CHARS) 
     text = json.dumps(view, ensure_ascii=False, sort_keys=True)
     if len(text) <= budget and view == payload:
         return text
+    where = (" with " + ", ".join(f"{key} {value}" for key, value in read_with.items() if value)
+             + " and the artifact_id") if read_with else " (operation_record_id and artifact_id below)"
     note = ("Workbench: this result was shortened for the conversation (long lists show their first and last "
             "items and their length). The full result is on record: read an artifact with "
-            "inspect_operation_artifact (operation_record_id and artifact_id below).\n")
+            f"inspect_operation_artifact{where}.\n")
     if len(text) > budget - len(note):
         text = json.dumps(_project_value(view, budget - len(note)), ensure_ascii=False, sort_keys=True)
     return note + text

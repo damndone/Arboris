@@ -201,15 +201,44 @@ class ToolContext:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
-def _format_validation_error(error) -> dict[str, str]:
+#: An unexpected field's error lists the allowed ones when there are this few.
+MAX_ALLOWED_PROPERTIES = 24
+
+
+def _format_validation_error(error) -> dict[str, Any]:
     message = error.message
     if len(message) > MAX_VALIDATION_MESSAGE_CHARS:
         message = message[:MAX_VALIDATION_MESSAGE_CHARS] + "… [truncated]"
-    return {
+    formatted: dict[str, Any] = {
         "path": ".".join(str(part) for part in error.absolute_path) or "<root>",
         "message": message,
         "constraint": str(error.validator),
     }
+    if error.validator == "additionalProperties":
+        formatted.update(_unexpected_field_help(error))
+    return formatted
+
+
+def _unexpected_field_help(error) -> dict[str, Any]:
+    """Name the allowed fields and the likely intended one for each unexpected field.
+
+    In the v1.9.1 smoke the model wrote ``dependencies`` and ``required_steps``
+    for ``depends_on`` and had to guess again; the allowed names end the guess.
+    """
+
+    import difflib
+
+    allowed = sorted((error.schema.get("properties") or {}) if isinstance(error.schema, dict) else ())
+    instance = error.instance if isinstance(error.instance, dict) else {}
+    unexpected = [key for key in instance if key not in allowed]
+    if not allowed or len(allowed) > MAX_ALLOWED_PROPERTIES:
+        return {}
+    help_: dict[str, Any] = {"allowed_fields": allowed}
+    guesses = {key: match[0] for key in unexpected
+               if (match := difflib.get_close_matches(str(key), allowed, n=1, cutoff=0.6))}
+    if guesses:
+        help_["did_you_mean"] = guesses
+    return help_
 
 
 def _discriminated_branch(schema: dict[str, Any], instance: Any) -> dict[str, Any] | None:
@@ -238,7 +267,7 @@ def _discriminated_branch(schema: dict[str, Any], instance: Any) -> dict[str, An
     return None
 
 
-def validation_details(schema: dict[str, Any], arguments: Any) -> list[dict[str, str]]:
+def validation_details(schema: dict[str, Any], arguments: Any) -> list[dict[str, Any]]:
     """Explain why arguments failed a tool's schema, in terms the model can act on.
 
     Without this a rejection is just `invalid_tool_arguments`, and the model can
@@ -255,7 +284,7 @@ def validation_details(schema: dict[str, Any], arguments: Any) -> list[dict[str,
     """
 
     effective = _discriminated_branch(schema, arguments) or schema
-    details: list[dict[str, str]] = []
+    details: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
     errors = sorted(
         Draft202012Validator(effective).iter_errors(arguments),
@@ -297,6 +326,12 @@ def _is_agent_input_fault(exc: BaseException) -> bool:
             AnalysisLoopSourceResolutionError,
         ),
     )
+
+
+def _with_help(message: str) -> str:
+    from .contract_help import help_for
+
+    return message + help_for(message)
 
 
 class ToolVisibleError(ValueError):
@@ -466,7 +501,7 @@ class ToolRegistry:
                 tool_id=tool_id,
                 ok=False,
                 error=type(exc).__name__,
-                error_details=[{"message": str(exc)}],
+                error_details=[{"message": _with_help(str(exc))}],
             )
         except Exception as exc:
             # A refusal of the AGENT'S OWN submission is useless without its
@@ -479,6 +514,6 @@ class ToolRegistry:
                 ok=False,
                 error=type(exc).__name__,
                 error_details=(
-                    [{"message": str(exc)}] if _is_agent_input_fault(exc) else None
+                    [{"message": _with_help(str(exc))}] if _is_agent_input_fault(exc) else None
                 ),
             )

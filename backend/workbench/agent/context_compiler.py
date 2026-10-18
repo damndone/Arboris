@@ -374,6 +374,17 @@ def _read_json(path: Path) -> Any:
         return None
 
 
+def registered_artifact_suffix(run_root: Path, artifact_id: str) -> str | None:
+    """The file extension of a registered artifact (".json", ".html", ...), read from the index only."""
+
+    index = _read_json(run_root / "artifacts_index.json")
+    entries = index.get("artifacts") if isinstance(index, dict) else None
+    for item in entries if isinstance(entries, list) else ():
+        if isinstance(item, dict) and item.get("artifact_id") == artifact_id and isinstance(item.get("path"), str):
+            return Path(item["path"]).suffix.lower()
+    return None
+
+
 def resolve_registered_artifact(
     run_root: Path,
     artifact_id: str,

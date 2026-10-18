@@ -2487,7 +2487,11 @@ class WorkbenchOrchestrator:
             {
                 "message_type": "operation_result",
                 "audience": "model",
-                "content": result_view(payload),
+                "content": result_view(payload, read_with={
+                    "owner_run_id": (record.target or {}).get("run_id"),
+                    "op_node_id": (record.target or {}).get("node_ref"),
+                    "operation_record_id": record.record_id,
+                }),
                 "operation_result": payload,
             },
         )

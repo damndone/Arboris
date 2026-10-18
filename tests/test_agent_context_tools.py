@@ -2863,3 +2863,74 @@ def test_the_arma_garch_contract_payload_fits_the_tool_output_budget(
         f"contract payload is {len(serialized)} chars against a {budget} budget; "
         "the Agent would receive tool_output_budget_exceeded instead of the contract"
     )
+
+
+def _inspect_artifact(orchestrator, **arguments):
+    return asyncio.run(
+        orchestrator.tool_registry("chain-a").execute(
+            {"tool_call_id": "call-artifact", "tool_id": "inspect_operation_artifact", "arguments": arguments},
+            session_id="chain-session",
+        )
+    )
+
+
+def test_operation_artifact_accepts_the_workflow_id_of_its_own_record(tmp_path: Path) -> None:
+    """v1.9.1 smoke: the Agent named the workflow id the result showed, not the record id."""
+
+    from workbench.agent.context_tools_support.workflow_results import _record_ids
+    from workbench.agent.operations import OperationRecordStore
+
+    project_root = tmp_path / "project"
+    _write_project_run(project_root)
+    record_id, artifact_id = _write_completed_workflow_result(project_root)
+    record = next(r for r in OperationRecordStore(project_root / "workbench", create=False).list_records()
+                  if r.record_id == record_id)
+    (workflow_id,) = _record_ids(record) - {record_id}
+    orchestrator = _make_orchestrator(tmp_path, context_provider=_load_provider_type()(project_root))
+
+    result = _inspect_artifact(orchestrator, owner_run_id="run-a", op_node_id="model:ols_1",
+                               active_head_run_id="run-a", operation_record_id=workflow_id, artifact_id=artifact_id)
+
+    assert result.ok is True, result.error_details
+    assert result.output["artifact_evidence"]["evidence_ref"]["operation_record_id"] == record_id
+
+
+def test_operation_artifact_out_of_scope_names_where_its_own_record_ran(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    _write_project_run(project_root)
+    _write_project_run(project_root, run_id="run-b")
+    record_id, artifact_id = _write_completed_workflow_result(project_root)
+    foreign_id, _ = _write_completed_workflow_result(project_root, proposal_id="proposal-foreign",
+                                                     session_id="other-session", chain_id="chain-b")
+    orchestrator = _make_orchestrator(tmp_path, context_provider=_load_provider_type()(project_root))
+
+    own = _inspect_artifact(orchestrator, owner_run_id="run-b", op_node_id="model:ols_1",
+                            active_head_run_id="run-b", operation_record_id=record_id, artifact_id=artifact_id)
+    foreign = _inspect_artifact(orchestrator, owner_run_id="run-b", op_node_id="model:ols_1",
+                                active_head_run_id="run-b", operation_record_id=foreign_id, artifact_id=artifact_id)
+
+    message = own.error_details[0]["message"]
+    assert own.ok is False and "OPERATION_RESULT_NOT_IN_SCOPE" in message
+    assert "owner_run_id run-a, op_node_id model:ols_1" in message
+    # Another conversation's record stays unnamed.
+    assert foreign.ok is False and "run-a" not in foreign.error_details[0]["message"]
+
+
+def test_operation_artifact_says_a_report_file_is_not_a_json_result(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    _write_project_run(project_root)
+    record_id, _ = _write_completed_workflow_result(project_root, artifact_id="workflow_report_html")
+    run_root = project_root / "runs" / "run-a"
+    index = json.loads((run_root / "artifacts_index.json").read_text())
+    index["artifacts"][0].update({"artifact_type": "report", "path": "reports/workflow.html"})
+    (run_root / "artifacts_index.json").write_text(json.dumps(index))
+    (run_root / "reports").mkdir()
+    (run_root / "reports" / "workflow.html").write_text("<html></html>")
+    orchestrator = _make_orchestrator(tmp_path, context_provider=_load_provider_type()(project_root))
+
+    result = _inspect_artifact(orchestrator, owner_run_id="run-a", op_node_id="model:ols_1",
+                               active_head_run_id="run-a", operation_record_id=record_id,
+                               artifact_id="workflow_report_html")
+
+    assert result.ok is False
+    assert "is a .html file" in result.error_details[0]["message"]

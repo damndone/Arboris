@@ -46,3 +46,10 @@ def test_oversized_result_falls_back_to_a_named_prefix():
     text = result_view(payload)
     assert len(text) <= RESULT_VIEW_CHARS
     assert "_omitted_keys" in text or "_truncated_keys" in text
+
+
+def test_the_shortened_note_gives_the_exact_read_arguments():
+    text = result_view(_km_like(3000), read_with={"owner_run_id": "run-a", "op_node_id": "stage:cleaned",
+                                                  "operation_record_id": "oprec_1"})
+    assert ("inspect_operation_artifact with owner_run_id run-a, op_node_id stage:cleaned, "
+            "operation_record_id oprec_1 and the artifact_id") in text
