@@ -7,6 +7,7 @@ forks cheap and preserves a single provenance identity for every message.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import tempfile
@@ -22,6 +23,58 @@ from ..jsonl_store import _exclusive_jsonl_lock
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+class SessionAppendConflict(ValueError):
+    """An append-once identity conflicts with content or the current branch."""
+
+
+class SessionAppendPendingError(ValueError):
+    """A pending append intent must be explicitly verified before proceeding."""
+
+
+def _append_identity(key: str, stage: str, digest: str) -> dict[str, str]:
+    if any(not isinstance(value, str) or not value.strip() or len(value) > 512
+           for value in (key, stage)):
+        raise ValueError("append-once key and stage must be bounded non-empty strings")
+    if not isinstance(digest, str) or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+        raise ValueError("append-once payload digest is invalid")
+    return {"key": key, "stage": stage, "payload_sha256": digest}
+
+
+def _identity_from(value: Any) -> dict[str, str]:
+    if not isinstance(value, dict) or set(value) != {"key", "stage", "payload_sha256"}:
+        raise ValueError("append-once identity metadata is invalid")
+    return _append_identity(value["key"], value["stage"], value["payload_sha256"])
+
+
+def _payload_digest(entry_type: str, payload: dict[str, Any]) -> str:
+    def validate(value: Any) -> None:
+        if type(value) is dict:
+            if any(type(key) is not str for key in value):
+                raise ValueError("append-once payload requires string JSON keys")
+            for item in value.values():
+                validate(item)
+        elif type(value) is list:
+            for item in value:
+                validate(item)
+        elif value is not None and type(value) not in {str, int, float, bool}:
+            raise ValueError("append-once payload must contain JSON values")
+    if not isinstance(entry_type, str) or not entry_type or type(payload) is not dict:
+        raise ValueError("append-once requires an entry type and JSON payload object")
+    validate(payload)
+    encoded = json.dumps({"entry_type": entry_type, "payload": payload}, ensure_ascii=False,
+                         sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    value: dict[str, Any] = {}
+    for key, item in pairs:
+        if key in value:
+            raise SessionAppendPendingError("pending append intent contains duplicate fields")
+        value[key] = item
+    return value
 
 
 @dataclass(frozen=True)
@@ -46,9 +99,10 @@ class SessionTreeEntry:
     parent_ref: EntryRef | None
     created_at: str
     schema_version: str = "agent.session_entry.v1"
+    idempotency: dict[str, str] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        value = {
             "schema_version": self.schema_version,
             "entry_id": self.entry_id,
             "session_id": self.session_id,
@@ -57,6 +111,9 @@ class SessionTreeEntry:
             "parent_ref": self.parent_ref.to_dict() if self.parent_ref else None,
             "created_at": self.created_at,
         }
+        if self.idempotency is not None:
+            value["idempotency"] = dict(self.idempotency)
+        return value
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "SessionTreeEntry":
@@ -69,6 +126,7 @@ class SessionTreeEntry:
             parent_ref=EntryRef.from_dict(parent) if parent else None,
             created_at=str(value["created_at"]),
             schema_version=str(value.get("schema_version", "agent.session_entry.v1")),
+            idempotency=_identity_from(value["idempotency"]) if value.get("idempotency") is not None else None,
         )
 
 
@@ -101,6 +159,158 @@ class JsonlSessionRepository:
     def _metadata_path(self, session_id: str) -> Path:
         self._validate_session_id(session_id)
         return self.sessions_dir / f"{session_id}.meta.json"
+
+    def _append_intent_path(self, session_id: str) -> Path:
+        self._validate_session_id(session_id)
+        return self.sessions_dir / f"{session_id}.append-once.intent.json"
+
+    def _refuse_pending_append(self, session_id: str) -> None:
+        path = self._append_intent_path(session_id)
+        if path.exists() or path.is_symlink():
+            raise SessionAppendPendingError("pending append requires explicit append-once recovery")
+
+    @staticmethod
+    def _pointer_state(metadata: dict[str, Any]) -> dict[str, Any]:
+        return {key: metadata.get(key) for key in ("root_entry_id", "leaf_entry_id", "inherited_parent_ref")}
+
+    @staticmethod
+    def _parent_ref(metadata: dict[str, Any], session_id: str) -> EntryRef | None:
+        leaf = metadata.get("leaf_entry_id")
+        if leaf:
+            return EntryRef(session_id, leaf)
+        inherited = metadata.get("inherited_parent_ref")
+        return EntryRef.from_dict(inherited) if inherited else None
+
+    def _load_append_intent(self, session_id: str) -> dict[str, Any] | None:
+        path = self._append_intent_path(session_id)
+        if path.is_symlink():
+            raise SessionAppendPendingError("pending append intent is not a regular document")
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_unique_object)
+        except FileNotFoundError:
+            return None
+        except (ValueError, UnicodeError) as exc:
+            raise SessionAppendPendingError("pending append intent is corrupt") from exc
+        expected = {"schema_version", "session_id", "entry_id", "entry_type", "parent_ref", "created_at",
+                    "idempotency", "base"}
+        try:
+            if not isinstance(value, dict) or set(value) != expected:
+                raise ValueError
+            if value["schema_version"] != "agent.session_append_intent.v1" or value["session_id"] != session_id:
+                raise ValueError
+            for key in ("entry_id", "entry_type", "created_at"):
+                if not isinstance(value[key], str) or not value[key]:
+                    raise ValueError
+            _identity_from(value["idempotency"])
+            base = value["base"]
+            if not isinstance(base, dict) or set(base) != {"root_entry_id", "leaf_entry_id", "inherited_parent_ref"}:
+                raise ValueError
+            for key in ("root_entry_id", "leaf_entry_id"):
+                if base[key] is not None and (not isinstance(base[key], str) or not base[key]):
+                    raise ValueError
+            for ref in (value["parent_ref"], base["inherited_parent_ref"]):
+                if ref is not None and (not isinstance(ref, dict) or set(ref) != {"session_id", "entry_id"}
+                                        or any(not isinstance(item, str) or not item for item in ref.values())):
+                    raise ValueError
+            parent = self._parent_ref(base, session_id)
+            if value["parent_ref"] != (parent.to_dict() if parent else None):
+                raise ValueError
+        except (ValueError, TypeError, KeyError) as exc:
+            raise SessionAppendPendingError("pending append intent is invalid") from exc
+        return value
+
+    def _clear_append_intent(self, session_id: str) -> None:
+        self._append_intent_path(session_id).unlink()
+        self._sync_directory(self.sessions_dir)
+
+    def append_once(self, session_id: str, entry_type: str, payload: dict[str, Any], *,
+                    key: str, stage: str) -> SessionTreeEntry:
+        """Append one exact JSON message per session/key/stage, or return it.
+
+        A compact write-ahead intent fixes identity and parent before the log
+        write. An off-branch historical key is refused, never made active again.
+        Idempotency metadata stays outside the model-visible payload.
+        """
+        identity = _append_identity(key, stage, _payload_digest(entry_type, payload))
+        # Detach from caller mutation before the intent can become durable.
+        payload = json.loads(json.dumps(payload, ensure_ascii=False, allow_nan=False))
+        with self._lock, _exclusive_jsonl_lock(self._session_path(session_id)):
+            intent = self._load_append_intent(session_id)
+            if intent is not None:
+                if intent["idempotency"] != identity:
+                    raise SessionAppendPendingError("pending append belongs to a different key, stage or payload")
+                return self._finish_append_intent(session_id, intent, payload=payload)
+            entries = self._read_entries(session_id)
+            matches = [entry for entry in entries if entry.idempotency is not None
+                       and (entry.idempotency["key"], entry.idempotency["stage"]) == (key, stage)]
+            if matches:
+                if len(matches) != 1:
+                    raise SessionAppendConflict("append-once identity conflict: duplicate recorded entries")
+                existing = matches[0]
+                if (existing.idempotency != identity
+                        or _payload_digest(existing.entry_type, existing.payload) != identity["payload_sha256"]):
+                    raise SessionAppendConflict("append-once payload conflict")
+                if not any(entry.session_id == session_id and entry.entry_id == existing.entry_id
+                           for entry in self.get_branch(session_id)):
+                    raise SessionAppendConflict("append-once key is on an off-branch historical entry")
+                return existing
+            metadata = self.get_metadata(session_id)
+            parent = self._parent_ref(metadata, session_id)
+            intent = {"schema_version": "agent.session_append_intent.v1", "session_id": session_id,
+                      "entry_id": uuid4().hex, "entry_type": entry_type,
+                      "parent_ref": parent.to_dict() if parent else None, "created_at": _now(),
+                      "idempotency": identity, "base": self._pointer_state(metadata)}
+            self._atomic_write_json(self._append_intent_path(session_id), intent)
+            return self._finish_append_intent(session_id, intent, payload=payload)
+
+    def recover_append_once(self, session_id: str) -> SessionTreeEntry | None:
+        """Complete only the exact logged entry named by a verified intent.
+
+        If no entry was written, the compact intent cannot reconstruct content:
+        retry append_once with the original complete payload instead.
+        """
+        with self._lock, _exclusive_jsonl_lock(self._session_path(session_id)):
+            intent = self._load_append_intent(session_id)
+            return self._finish_append_intent(session_id, intent) if intent is not None else None
+
+    def _finish_append_intent(self, session_id: str, intent: dict[str, Any], *,
+                              payload: dict[str, Any] | None = None) -> SessionTreeEntry:
+        """Caller owns the session file lock; do not acquire a nested flock."""
+        metadata = self.get_metadata(session_id)
+        base = intent["base"]
+        committed = {**base, "root_entry_id": base["root_entry_id"] or intent["entry_id"],
+                     "leaf_entry_id": intent["entry_id"]}
+        current = self._pointer_state(metadata)
+        if current != base and current != committed:
+            raise SessionAppendPendingError("pending append does not match the current metadata branch")
+        entries = self._read_entries(session_id)
+        matches = [entry for entry in entries if entry.entry_id == intent["entry_id"]]
+        same_keys = [entry for entry in entries if entry.idempotency is not None
+                     and (entry.idempotency["key"], entry.idempotency["stage"]) == (
+                         intent["idempotency"]["key"], intent["idempotency"]["stage"])]
+        if len(matches) > 1 or any(entry.entry_id != intent["entry_id"] for entry in same_keys):
+            raise SessionAppendPendingError("pending append identity conflicts with the recorded log")
+        if matches:
+            entry = matches[0]
+            if (entry.session_id != session_id or entry.entry_type != intent["entry_type"]
+                    or entry.created_at != intent["created_at"] or entry.idempotency != intent["idempotency"]
+                    or (entry.parent_ref.to_dict() if entry.parent_ref else None) != intent["parent_ref"]
+                    or _payload_digest(entry.entry_type, entry.payload) != intent["idempotency"]["payload_sha256"]):
+                raise SessionAppendPendingError("pending append content conflicts with the exact recorded entry")
+        else:
+            if payload is None:
+                raise SessionAppendPendingError("pending append requires the original matching payload")
+            if current != base or _payload_digest(intent["entry_type"], payload) != intent["idempotency"]["payload_sha256"]:
+                raise SessionAppendPendingError("pending append cannot reconstruct an unknown log state")
+            parent = EntryRef.from_dict(intent["parent_ref"]) if intent["parent_ref"] else None
+            entry = SessionTreeEntry(entry_id=intent["entry_id"], session_id=session_id,
+                                     entry_type=intent["entry_type"], payload=payload, parent_ref=parent,
+                                     created_at=intent["created_at"], idempotency=dict(intent["idempotency"]))
+            self._atomic_append(self._session_path(session_id), entry.to_dict())
+        metadata.update(committed)
+        self._atomic_write_json(self._metadata_path(session_id), metadata)
+        self._clear_append_intent(session_id)
+        return entry
 
     def create_session(
         self,
@@ -181,6 +391,7 @@ class JsonlSessionRepository:
         # does not serialize two requests writing one session; the file lock
         # does (threads and processes alike).
         with self._lock, _exclusive_jsonl_lock(self._session_path(session_id)):
+            self._refuse_pending_append(session_id)
             metadata = self.get_metadata(session_id)
             previous = metadata.get("leaf_entry_id")
             parent_ref = EntryRef(session_id, previous) if previous else None
@@ -209,6 +420,7 @@ class JsonlSessionRepository:
         """
 
         with self._lock, _exclusive_jsonl_lock(self._session_path(session_id)):
+            self._refuse_pending_append(session_id)
             metadata = self.get_metadata(session_id)
             if metadata.get("status") == "running":
                 raise ValueError("a turn is running; wait for it or stop it before rewinding")
@@ -270,6 +482,7 @@ class JsonlSessionRepository:
         another conversation continues from it (it would lose its start)."""
 
         with self._lock, _exclusive_jsonl_lock(self._session_path(session_id)):
+            self._refuse_pending_append(session_id)
             metadata = self.get_metadata(session_id)
             if metadata.get("status") == "running":
                 raise ValueError("a turn is running; stop it before deleting the conversation")
@@ -340,18 +553,42 @@ class JsonlSessionRepository:
     def _atomic_append(path: Path, value: dict[str, Any]) -> None:
         existing = path.read_bytes() if path.exists() else b""
         line = (json.dumps(value, ensure_ascii=False, sort_keys=True) + "\n").encode("utf-8")
-        with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as handle:
-            temp_path = Path(handle.name)
-            handle.write(existing)
-            handle.write(line)
-        os.replace(temp_path, path)
+        temp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as handle:
+                temp_path = Path(handle.name)
+                handle.write(existing)
+                handle.write(line)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temp_path, path)
+            JsonlSessionRepository._sync_directory(path.parent)
+        finally:
+            if temp_path is not None:
+                temp_path.unlink(missing_ok=True)
 
     @staticmethod
     def _atomic_write_json(path: Path, value: dict[str, Any]) -> None:
-        with tempfile.NamedTemporaryFile(
-            mode="w", encoding="utf-8", dir=path.parent, delete=False
-        ) as handle:
-            temp_path = Path(handle.name)
-            json.dump(value, handle, ensure_ascii=False, sort_keys=True, indent=2)
-            handle.write("\n")
-        os.replace(temp_path, path)
+        temp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=path.parent, delete=False
+            ) as handle:
+                temp_path = Path(handle.name)
+                json.dump(value, handle, ensure_ascii=False, sort_keys=True, indent=2)
+                handle.write("\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temp_path, path)
+            JsonlSessionRepository._sync_directory(path.parent)
+        finally:
+            if temp_path is not None:
+                temp_path.unlink(missing_ok=True)
+
+    @staticmethod
+    def _sync_directory(path: Path) -> None:
+        directory_fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
