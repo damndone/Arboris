@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any
 
 from .canonical import canonical_json_v1, sha256_canonical
@@ -37,6 +39,24 @@ def analysis_sample_fingerprint(
     row_order: Any,
 ) -> str:
     """Fingerprint membership and the order in which rows enter estimation."""
+
+    # Decimal ASCII IDs need neither normalization nor JSON escaping. Their
+    # ordinary lexical order matches the quoted canonical sort keys, including
+    # prefixes and leading zeroes. Keep arbitrary iterables on the old path.
+    if (
+        type(row_set) in (list, tuple)
+        and type(row_order) in (list, tuple)
+        and all(type(item) is str and item.isascii() and item.isdecimal() for item in row_set)
+        and (row_order is row_set or all(
+            type(item) is str and item.isascii() and item.isdecimal() for item in row_order
+        ))
+    ):
+        wire = json.dumps(
+            {"fingerprint_type": "analysis_sample_v1",
+             "value": {"row_set": sorted(row_set), "row_order": row_order}},
+            ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+        ).encode("utf-8")
+        return hashlib.sha256(wire).hexdigest()
 
     row_set_value = sorted(
         row_set,
