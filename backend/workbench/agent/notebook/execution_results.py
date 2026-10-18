@@ -208,4 +208,3 @@ def artifact_validation_scope(
         "ambient_artifact_ids": ambient_artifact_ids,
         "ambient_artifact_count": len(ambient_artifact_ids),
     }
-

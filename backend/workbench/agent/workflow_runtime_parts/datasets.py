@@ -409,4 +409,3 @@ def _persist_workflow_exploration(
         source_frame=frame,
     )
     return record, fingerprint
-

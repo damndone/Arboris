@@ -671,4 +671,3 @@ def _wait_for_run(root: Path, run_id: str, *, timeout_seconds: float = 1800.0) -
                 return
         time.sleep(0.1)
     raise WorkflowExecutionError(f"run did not reach a terminal state: {run_id}")
-

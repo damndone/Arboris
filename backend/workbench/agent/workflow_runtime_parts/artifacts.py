@@ -24,4 +24,3 @@ def _ensure_runtime_artifact(
             raise WorkflowExecutionError("workflow-derived artifact binding is not deterministic")
         return
     register_artifact(run_root, artifact_id, path, artifact_type, step, inputs)
-

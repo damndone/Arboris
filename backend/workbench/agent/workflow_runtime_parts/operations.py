@@ -542,4 +542,3 @@ def _execute_time_series_recipe(
             "source": dict(lineage),
         },
     )
-

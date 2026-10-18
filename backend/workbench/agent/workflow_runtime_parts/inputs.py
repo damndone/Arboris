@@ -315,4 +315,3 @@ def _resolve_committed_source_frame(
             "content than the completed step published"
         )
     return frame
-

@@ -19,4 +19,3 @@ MAX_PROJECTED_POST_ESTIMATION_RESULTS = 20
 
 
 _PRODUCED_DATASET_FIELDS = ("run_id", "node_ref", "artifact_id", "content_sha256")
-

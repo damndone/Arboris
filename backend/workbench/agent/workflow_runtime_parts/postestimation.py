@@ -703,4 +703,3 @@ def _execute_model_quadratic_stationary_point(
         model_run_id=str(branch["run_id"]),
         lineage=lineage,
     )
-

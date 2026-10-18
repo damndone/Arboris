@@ -34,7 +34,6 @@ from ..data_operations import (
     preview_data_column_cast,
     preview_data_columns_cast,
 )
-from ..contracts.common.envelope import ContractError
 from ..lineage.run_inputs import read_run_inputs
 from .chains import (
     ChainHeadConflict,
@@ -57,6 +56,8 @@ from .execution import (
     merge_execution,
 )
 from .events import AgentEventStream
+from . import operation_requests
+from .operation_requests import OperationRequest, OperationReceipt
 from .operation_outcome import result_view
 from .operations import (
     RERUN_OPERATIONS,
@@ -79,7 +80,16 @@ from .risk import (
     RiskAuthorizationStore,
 )
 from .session import EntryRef, JsonlSessionRepository
-from .tools import ToolDefinition, ToolRegistry, ToolVisibleError
+from .tools import ToolRegistry, ToolVisibleError
+from .toolsets import _UPDATE_PLAN_SCHEMA, build_chain_tool_registry
+from .operation_handlers.proposal_arguments import (
+    _overrides_from_proposal_changes,
+    _require_editable_rerun_target,
+    _canonicalize_data_columns_cast_arguments,
+    _canonicalize_workflow_arguments,
+    _clustered_analysis_loop_intent,
+    _precheck_model_options,
+)
 from .workflow import (
     WorkflowDraft,
     WorkflowExecutionState,
@@ -518,87 +528,6 @@ class _OrchestratorOperationHandler:
         return record.agent_session_id
 
 
-def _overrides_from_proposal_changes(changes: dict[str, Any]) -> dict[str, Any]:
-    """Translate proposal old/new evidence into the rerun wire payload."""
-
-    return {
-        key: value["new"]
-        if (
-            key != "model_options"
-            and isinstance(value, dict)
-            and {"old", "new"}.issubset(value)
-        )
-        else value
-        for key, value in changes.items()
-    }
-
-
-def _require_editable_rerun_target(
-    run_root: Path, run_id: str, arguments: dict[str, Any]
-) -> None:
-    """Refuse a rerun aimed at a node execution will refuse as not editable.
-
-    Labels and missing codes belong to the data, so an Agent naturally
-    targets the data node; execution only reruns from an editable (model)
-    node. Saying so here, with the node to use, lets it re-plan.
-    """
-
-    from ..services.rerun_service import editable_rerun_nodes
-
-    node_ref = (arguments.get("target") or {}).get("node_ref")
-    if not isinstance(node_ref, str) or not node_ref:
-        return
-    try:
-        candidates = editable_rerun_nodes(run_root.parent.parent, run_id)
-        from ..graph_store import GraphStore
-
-        known = GraphStore(runs_root=run_root.parent).read(run_id).nodes
-    except Exception:
-        return
-    if node_ref not in known or node_ref in candidates:
-        return
-    from .tools import ToolVisibleError
-
-    raise ToolVisibleError(
-        f"MODEL_RERUN_TARGET_NOT_EDITABLE: {node_ref} cannot be rerun. model.rerun "
-        "edits a model node; target "
-        + (", ".join(candidates) if candidates else "a model node")
-        + ". Labels and missing codes declared there apply to the whole run."
-    )
-
-
-_UPDATE_PLAN_SCHEMA: dict[str, Any] = {
-    "type": "object",
-    "required": ["question", "steps"],
-    "properties": {
-        "question": {"type": "string"},
-        "criteria": {"type": "array", "items": {"type": "string"}, "maxItems": 12},
-        "steps": {
-            "type": "array",
-            "minItems": 1,
-            "maxItems": 40,
-            "items": {
-                "type": "object",
-                "required": ["step_id", "title", "operation_ids"],
-                "properties": {
-                    "step_id": {"type": "string"},
-                    "title": {"type": "string"},
-                    "operation_ids": {"type": "array", "items": {"type": "string"}},
-                    "depends_on": {"type": "array", "items": {"type": "string"}},
-                    "expected_outputs": {"type": "array", "items": {"type": "string"}},
-                    "status": {"type": "string", "enum": ["pending", "running", "awaiting", "done", "skipped", "failed"]},
-                },
-                "additionalProperties": False,
-            },
-        },
-        "budget": {"type": "object", "properties": {"steps": {"type": "integer"}, "wall_s": {"type": "integer"},
-                                                     "inferential": {"type": "integer"}}, "additionalProperties": False},
-        "allowed_classes": {"type": "array", "items": {"type": "string", "enum": ["analyze", "derive", "modify"]}},
-    },
-    "additionalProperties": False,
-}
-
-
 class WorkbenchOrchestrator:
     """Bind Main/Chain roles to AgentCore without leaking Workbench state into it."""
 
@@ -871,50 +800,49 @@ class WorkbenchOrchestrator:
         # Deterministic UI actions need a durable Chain identity, not an LLM.
         # The session is server-selected and must satisfy the same scope check
         # used by register_chain before any proposal or event is persisted.
-        if session_id is None:
-            session_id, _agent = self._chain(chain_id)
-        metadata = self.repository.get_metadata(session_id)
-        if metadata.get("role") != "chain" or metadata.get("chain_id") != chain_id:
-            raise ValueError("proposal session must be a matching chain session")
-        definition = self.operation_registry.require(operation_id, operation_version)
-        definition.validate(target=target, preconditions=preconditions, changes=changes)
-        proposal = self.proposal_store.create(
-            session_id=session_id,
+        """Compatibility adapter for callers with the original proposal fields."""
+
+        return self.admit_operation_request(
+            OperationRequest(
+                operation_id=operation_id,
+                operation_version=operation_version,
+                target=target,
+                preconditions=preconditions,
+                changes=changes,
+                evidence_refs=evidence_refs,
+                expected_effect=expected_effect,
+                risks=risks,
+            ),
             chain_id=chain_id,
-            operation_id=operation_id,
-            operation_version=operation_version,
-            target=target,
-            preconditions=preconditions,
-            changes=changes,
-            evidence_refs=evidence_refs,
-            expected_effect=expected_effect,
-            risks=risks,
+            session_id=session_id,
             command_id=command_id,
             proposal_id=proposal_id,
-        )
-        self.repository.append(
-            session_id,
-            "custom_message",
-            {
-                "message_type": "operation_proposal",
-                "audience": "model",
-                "content": json.dumps(proposal.to_dict(), ensure_ascii=False, sort_keys=True),
-                "proposal": proposal.to_dict(),
-            },
-        )
-        self.events.emit(
-            session_id,
-            "proposal_ready",
-            proposal.to_dict(),
+        ).proposal
+
+    def admit_operation_request(
+        self,
+        request: OperationRequest,
+        *,
+        chain_id: str,
+        session_id: str | None = None,
+        command_id: str | None = None,
+        proposal_id: str | None = None,
+    ) -> OperationReceipt:
+        """Admit a typed request under a server-selected Chain session."""
+
+        if session_id is None:
+            session_id, _agent = self._chain(chain_id)
+        return operation_requests.admit(
+            request,
+            chain_id=chain_id,
+            session_id=session_id,
             command_id=command_id,
+            proposal_id=proposal_id,
+            repository=self.repository,
+            operation_registry=self.operation_registry,
+            proposal_store=self.proposal_store,
+            events=self.events,
         )
-        self.events.emit(
-            session_id,
-            "needs_confirmation",
-            {"proposal_id": proposal.proposal_id, "revision": proposal.revision},
-            command_id=command_id,
-        )
-        return proposal
 
     def revise_proposal(
         self,
@@ -2541,128 +2469,17 @@ class WorkbenchOrchestrator:
         self,
         arguments: dict[str, Any],
     ) -> dict[str, Any]:
-        """Bind the backend facts a model must never supply for a data cast.
-
-        The model contributes the intent — which run, which node, which columns
-        become which dtype. Everything else is a fact only the backend can
-        state truthfully:
-
-          * `artifact_id` — the durable identity of the data behind the node.
-            A model naming it could aim a confirmed operation at data the user
-            never selected.
-          * `context_fingerprint` — this is the *preview* fingerprint, and the
-            preview is computed here, from the real data. The live smoke showed
-            a model inventing a fingerprint; execution rejected it, which is
-            correct but useless. Binding it means a confirmable proposal is an
-            executable one.
-
-        `preview_project_root` must be resolvable; without it (pure contract
-        tests) the arguments pass through unchanged and execution still
-        revalidates.
-        """
-
-        project_root = self.data_operation_project_root
-        if project_root is None:
-            return arguments
-        from ..data_operations import (
-            DataCastItem,
-            DataColumnCastValidationError,
-            DataColumnsCastSpecV1,
-            preview_data_columns_cast,
-            resolve_data_column_cast_context,
+        return _canonicalize_data_columns_cast_arguments(
+            arguments, project_root=self.data_operation_project_root
         )
-
-        target = dict(arguments.get("target") or {})
-        preconditions = dict(arguments.get("preconditions") or {})
-        run_id = str(target.get("run_id") or "")
-        node_ref = str(target.get("node_ref") or "")
-        casts = target.get("casts")
-        if not run_id or not node_ref or not isinstance(casts, list) or not casts:
-            # Leave a structurally malformed proposal to the operation validator,
-            # which owns the error vocabulary the Agent already knows to react to.
-            return arguments
-        try:
-            context = resolve_data_column_cast_context(
-                project_root,
-                source_run_id=run_id,
-                source_node_id=node_ref,
-            )
-            spec = DataColumnsCastSpecV1(
-                source_run_id=run_id,
-                source_node_id=node_ref,
-                source_artifact_id=str(context["source_artifact_id"]),
-                casts=tuple(
-                    DataCastItem(str(item["column"]), str(item["target_dtype"]))
-                    for item in casts
-                    if isinstance(item, dict)
-                ),
-                output_format=str(target.get("output_format", "csv")),
-            )
-            preview = preview_data_columns_cast(project_root, spec)
-        except (DataColumnCastValidationError, KeyError, TypeError, ValueError):
-            # The proposal cannot be resolved against the real data (bad column,
-            # unknown node, wrong dtype). Pass it through unbound so the operation
-            # validator produces its actionable error. NB: OSError is deliberately
-            # NOT caught — a filesystem fault is a real problem the user must see,
-            # not something to disguise as "your proposal was malformed".
-            return arguments
-
-        target["artifact_id"] = spec.source_artifact_id
-        target["casts"] = [item.to_dict() for item in spec.casts]
-        target["output_format"] = spec.output_format
-        preconditions["context_version"] = "data-columns-cast.v1"
-        preconditions["context_fingerprint"] = preview.fingerprint
-        preconditions["active_head_run_id"] = run_id
-        preconditions["owner_resolution"] = "typed_data_node"
-        changes = {
-            "casts": target["casts"],
-            "output_format": spec.output_format,
-        }
-        return {
-            **arguments,
-            "target": target,
-            "preconditions": preconditions,
-            "changes": changes,
-        }
 
     def _canonicalize_workflow_arguments(
         self,
         arguments: dict[str, Any],
     ) -> dict[str, Any]:
-        """Bind a workflow proposal to the artifact owned by its source node.
-
-        The Agent may identify the selected node, but it must not choose the
-        durable artifact identity behind that node. The workflow executor
-        resolves the same ownership witness again at confirmation; binding it
-        here keeps a valid proposal executable instead of persisting a node
-        hash copied from the graph projection as ``artifact_id``.
-        """
-
-        project_root = self.data_operation_project_root
-        if project_root is None:
-            return arguments
-        target = dict(arguments.get("target") or {})
-        run_id = str(target.get("run_id") or "")
-        node_ref = str(target.get("node_ref") or "")
-        if not run_id or not node_ref:
-            return arguments
-        from ..data_operations import (
-            DataColumnCastValidationError,
-            resolve_data_column_cast_context,
+        return _canonicalize_workflow_arguments(
+            arguments, project_root=self.data_operation_project_root
         )
-
-        try:
-            context = resolve_data_column_cast_context(
-                project_root,
-                source_run_id=run_id,
-                source_node_id=node_ref,
-            )
-        except (DataColumnCastValidationError, KeyError, TypeError, ValueError):
-            # Leave malformed intent to the typed operation validator, which
-            # owns the user-visible error vocabulary.
-            return arguments
-        target["artifact_id"] = str(context["source_artifact_id"])
-        return {**arguments, "target": target}
 
     def _bind_workflow_preconditions(
         self, arguments: dict[str, Any], *, session_id: str
@@ -2858,25 +2675,7 @@ class WorkbenchOrchestrator:
             },
         }
 
-    @staticmethod
-    def _clustered_analysis_loop_intent(arguments: dict[str, Any]) -> str | None:
-        """Extract an exact cluster field from a legacy generic proposal."""
-
-        def new_value(value: Any) -> Any:
-            return value.get("new") if isinstance(value, dict) and "new" in value else value
-
-        changes = arguments.get("changes")
-        if not isinstance(changes, dict):
-            return None
-        covariance = new_value(changes.get("covariance"))
-        if covariance != "clustered":
-            return None
-        cluster = new_value(changes.get("cluster_variable"))
-        if cluster is None:
-            cluster = new_value(changes.get("entity_col"))
-        if type(cluster) is not str or not cluster:
-            raise ValueError("analysis_loop_cluster_variable_required")
-        return cluster
+    _clustered_analysis_loop_intent = staticmethod(_clustered_analysis_loop_intent)
 
     def _canonicalize_proposal_arguments(
         self,
@@ -2953,45 +2752,11 @@ class WorkbenchOrchestrator:
     def _precheck_model_options(
         self, *, owner_run_id: str, changes: Any
     ) -> None:
-        """Let the owning pack reject an unexecutable patch before confirmation.
-
-        The generic rerun validator can only check that model_options is an
-        object; the field names, closed value sets, and cross-field rules belong
-        to the pack. Deferring that to execution would mean the user confirms a
-        proposal that cannot run.
-        """
-
-        if not isinstance(changes, dict):
-            return
-        patch = changes.get("model_options")
-        if not isinstance(patch, dict) or not patch:
-            return
-        precheck = getattr(self.context_provider, "precheck_model_options_patch", None)
-        if precheck is None:
-            return
-        # The proposal's own model_type is part of the patch: a run fitted
-        # with model_type "auto" needs it, and checking the patch against the
-        # source form alone refused every correct proposal (user review 6).
-        model_type = changes.get("model_type")
-        if isinstance(model_type, dict):
-            model_type = model_type.get("new")
-        try:
-            precheck(owner_run_id=owner_run_id, patch=patch,
-                     model_type=model_type if isinstance(model_type, str) and model_type else None)
-        except ContractError as exc:
-            code = getattr(exc, "code", "MODEL_OPTIONS_REJECTED")
-            hint = (
-                " The source run chose its model automatically: also set changes.model_type to the "
-                "executed family (for example \"ols\") as a plain string."
-                if code == "MODEL_OPTIONS_EXPLICIT_MODEL_REQUIRED" else ""
-            )
-            # Visible on purpose: the code and the reason are what let an Agent
-            # correct the patch instead of guessing at why it was refused.
-            raise ToolVisibleError(
-                f"model_options rejected by the model pack ({code}): {exc}.{hint} "
-                "Fix the patch against the contract's option_vocabulary and "
-                "cross_field_rules, then propose again."
-            ) from exc
+        _precheck_model_options(
+            owner_run_id=owner_run_id,
+            changes=changes,
+            context_provider=self.context_provider,
+        )
 
     def tool_registry(self, chain_id: str) -> ToolRegistry:
         """Return the allowlisted Workbench tools scoped to one chain."""
@@ -3000,15 +2765,14 @@ class WorkbenchOrchestrator:
         if existing is not None:
             return existing
         session_id, _agent = self._chain(chain_id)
-        registry = ToolRegistry()
+        context_tools = ()
 
         if self.context_provider is not None:
-            for definition in self.context_provider.tool_definitions(
+            context_tools = self.context_provider.tool_definitions(
                 chain_id=chain_id,
                 session_id=session_id,
                 operation_registry=self.operation_registry,
-            ):
-                registry.register(definition)
+            )
 
         async def propose_operation(arguments: dict[str, Any], context) -> dict[str, Any]:
             if context.session_id != session_id:
@@ -3056,18 +2820,12 @@ class WorkbenchOrchestrator:
                 self._preflight_model_rerun_declarations(
                     arguments, metadata_edit=operation_id == "metadata.edit"
                 )
-            proposal = self.create_proposal(
+            receipt = self.admit_operation_request(
+                OperationRequest.from_arguments({**arguments, "operation_id": operation_id}),
                 chain_id=chain_id,
-                operation_id=operation_id,
-                operation_version=arguments.get("operation_version", "v1"),
-                target=arguments["target"],
-                preconditions=arguments["preconditions"],
-                changes=arguments["changes"],
-                evidence_refs=arguments["evidence_refs"],
-                expected_effect=arguments["expected_effect"],
-                risks=arguments["risks"],
                 command_id=command_id,
             )
+            proposal = receipt.proposal
             return await self._run_or_await_confirmation(proposal, session_id=session_id)
 
         def propose_analysis_loop(arguments: dict[str, Any], context) -> dict[str, Any]:
@@ -3086,33 +2844,6 @@ class WorkbenchOrchestrator:
                 metadata=metadata,
             )
 
-        registry.register(
-            ToolDefinition(
-                tool_id="propose_analysis_loop",
-                version="v1",
-                input_schema={
-                    "type": "object",
-                    "required": [
-                        "source_run_id",
-                        "source_node_ref",
-                        "active_head_run_id",
-                        "cluster_variable",
-                    ],
-                    "properties": {
-                        "source_run_id": {"type": "string", "minLength": 1},
-                        "source_node_ref": {"type": "string", "minLength": 1},
-                        "active_head_run_id": {"type": "string", "minLength": 1},
-                        "cluster_variable": {"type": "string", "minLength": 1},
-                        "result_id": {"type": "string", "minLength": 1},
-                    },
-                    "additionalProperties": False,
-                },
-                side_effect="proposal",
-                scope_requirements=("chain", "active_head"),
-                max_output_budget=24_000,
-                handler=propose_analysis_loop,
-            )
-        )
 
         async def update_plan(arguments: dict[str, Any], context) -> dict[str, Any]:
             from . import plans as plan_module
@@ -3150,34 +2881,14 @@ class WorkbenchOrchestrator:
                 ),
             }
 
-        registry.register(
-            ToolDefinition(
-                tool_id="update_plan",
-                version="v1",
-                input_schema=_UPDATE_PLAN_SCHEMA,
-                side_effect="proposal",
-                scope_requirements=("chain",),
-                handler=update_plan,
-                description=(
-                    "Write or revise the analysis plan: the research question, the judgement criteria fixed "
-                    "before any result is seen, and typed steps (workflow operation ids, dependencies, expected "
-                    "outputs, statuses). In Auto mode the person approves it once and planned steps then run "
-                    "without a card."
-                ),
-            )
-        )
 
-        registry.register(
-            ToolDefinition(
-                tool_id="propose_operation",
-                version="v1",
-                input_schema=self.operation_registry.proposal_tool_schema(),
-                side_effect="proposal",
-                scope_requirements=("chain",),
-                handler=propose_operation,
-            )
+        return build_chain_tool_registry(
+            context_tools=context_tools,
+            proposal_tool_schema=lambda: self.operation_registry.proposal_tool_schema(),
+            propose_analysis_loop=propose_analysis_loop,
+            update_plan=update_plan,
+            propose_operation=propose_operation,
         )
-        return registry
 
     @property
     def plan_store(self):

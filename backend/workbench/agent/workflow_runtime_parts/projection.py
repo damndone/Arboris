@@ -375,4 +375,3 @@ def _result_row_counts(result: Mapping[str, Any]) -> dict[str, int]:
     if result.get("correlation_n") is not None:
         counts["correlation_n"] = int(result["correlation_n"])
     return counts
-

@@ -97,4 +97,3 @@ def _execute_workflow_report(
         row_counts={"steps": len(steps)},
         payload={"collection_id": collection_id},
     )
-

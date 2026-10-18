@@ -77,4 +77,3 @@ InspectionExecutor = Callable[
     "DataEvidencePackV1 | Awaitable[DataEvidencePackV1]",
 ]
 ProposalValidator = Callable[[NotebookPlanningContextV1, AgentOptionSubmission], None]
-
