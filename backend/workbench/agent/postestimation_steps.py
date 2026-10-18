@@ -93,7 +93,7 @@ def postestimation_operation_id(operation: str) -> str:
 
 
 def postestimation_step_contracts() -> dict[str, Any]:
-    from .workflow_contracts import StepSpecContract
+    from .workflow_contract_parts.contracts import StepSpecContract
 
     contracts = {}
     for operation in OPERATIONS:

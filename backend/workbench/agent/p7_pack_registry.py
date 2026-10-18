@@ -1411,7 +1411,7 @@ p7_pack_registry.assert_covers(P7_FAMILY_DECLARATIONS)
 def p7_workflow_step_contracts() -> dict[str, object]:
     """Project every registered adapter into the P3 workflow-step seam."""
 
-    from .workflow_contracts import pack_step_contract
+    from .workflow_contract_parts.contracts import pack_step_contract
 
     contracts: dict[str, object] = {}
     for declaration in P7_FAMILY_DECLARATIONS:

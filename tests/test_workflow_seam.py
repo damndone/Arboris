@@ -548,7 +548,9 @@ def test_an_unreplayable_producer_upstream_of_a_sourceless_step_is_rejected(
     moment it registers a reshape without wiring it into the replay path.
     """
 
-    monkeypatch.setattr(workflow_contracts, "STEP_REPLAYABLE_BY_RECIPE", frozenset())
+    from workbench.agent.workflow_contract_parts import registry
+
+    monkeypatch.setattr(registry, "STEP_REPLAYABLE_BY_RECIPE", frozenset())
 
     downstream = _numeric_step("second", "scaled")
     downstream["depends_on"] = ["first"]
@@ -2218,18 +2220,20 @@ def test_the_published_sets_track_the_declarations_they_are_read_from(
     the failure mode it exists to catch.
     """
 
+    from workbench.agent.workflow_contract_parts import registry
+
     monkeypatch.setattr(
-        workflow_contracts,
+        registry,
         "STEP_PRODUCES_DATASET",
         frozenset({*workflow_contracts.STEP_PRODUCES_DATASET, "data.future_reshape"}),
     )
     monkeypatch.setattr(
-        workflow_contracts,
+        registry,
         "STEP_CONSUMES_INPUT_FRAME",
         frozenset({*workflow_contracts.STEP_CONSUMES_INPUT_FRAME, "data.future_reshape"}),
     )
     monkeypatch.setattr(
-        workflow_contracts,
+        registry,
         "SUPPORTED_STEP_OUTPUTS",
         frozenset({*workflow_contracts.SUPPORTED_STEP_OUTPUTS, "produced_summary"}),
     )

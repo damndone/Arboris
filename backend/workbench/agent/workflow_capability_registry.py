@@ -258,7 +258,7 @@ def workflow_capability_registry() -> WorkflowCapabilityRegistry:
 def workflow_capability_step_contracts() -> dict[str, Any]:
     """Project the live adapter declarations into workflow step contracts."""
 
-    from .workflow_contracts import StepSpecContract
+    from .workflow_contract_parts.contracts import StepSpecContract
 
     contracts: dict[str, StepSpecContract] = {}
     for operation in workflow_capability_registry()._operations.values():

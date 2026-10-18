@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from ..context_compiler import NotebookPlanningContextV1
 from .evidence import DataEvidencePackV1
-from .planning_agent import (
+from ..planning.types import (
     AgentOptionSubmission,
     NotebookPlanningContractError,
     NotebookPlanningUnavailable,

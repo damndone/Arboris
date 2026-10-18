@@ -281,7 +281,7 @@ def test_post_estimation_projection_refuses_to_silently_truncate(
     tmp_path: Path,
 ) -> None:
     """A bounded projection reports overflow instead of hiding later evidence."""
-    from workbench.agent import workflow_runtime
+    from workbench.agent.workflow_runtime_parts import projection
 
     records = [
         {"artifact_id": "first", "artifact_type": "post_estimation"},
@@ -289,12 +289,12 @@ def test_post_estimation_projection_refuses_to_silently_truncate(
     ]
     (tmp_path / "runs" / "source").mkdir(parents=True)
     monkeypatch.setattr(
-        workflow_runtime,
+        projection,
         "_read_artifacts_index",
         lambda _run_dir: {"artifacts": records},
     )
     monkeypatch.setattr(
-        workflow_runtime,
+        projection,
         "_read_post_estimation_entry",
         lambda _run_dir, record: {
             "artifact_id": record["artifact_id"],
