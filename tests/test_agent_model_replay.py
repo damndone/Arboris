@@ -388,3 +388,75 @@ def test_file_replacement_or_hardlink_is_rejected_without_modifying_the_replacem
     os.link(tmp_path / "original.jsonl", tmp_path / "hardlinked.jsonl")
     with pytest.raises(api.RecordingError):
         api.ReplayAdapter(root=tmp_path, name="hardlinked.jsonl")
+
+
+def test_public_completion_checks_reject_unconsumed_and_incomplete_streams(tmp_path):
+    api = _api()
+    _record(tmp_path)
+    replay = api.ReplayAdapter(root=tmp_path, name='provider.jsonl')
+    replay.assert_complete()
+    with pytest.raises(api.ReplayError, match='unconsumed'):
+        replay.assert_consumed()
+    asyncio.run(_collect(replay, _request()))
+    replay.assert_consumed()
+    incomplete = tmp_path / 'incomplete'
+    incomplete.mkdir()
+    recorder = api.RecordingAdapter(FakeModel([]), root=incomplete, name='provider.jsonl')
+    with pytest.raises(api.RecordingError):
+        asyncio.run(_collect(recorder, _request()))
+    replay = api.ReplayAdapter(root=incomplete, name='provider.jsonl')
+    with pytest.raises(api.ReplayIncomplete, match='incomplete'):
+        replay.assert_complete()
+    with pytest.raises(api.ReplayIncomplete, match='incomplete'):
+        replay.assert_consumed()
+
+
+def test_public_consumption_check_rejects_early_closed_replay(tmp_path):
+    request = _request()
+    _record(tmp_path, request, FakeModel([
+        ModelStreamEvent.text_delta(request.request_id, 'partial'),
+        ModelStreamEvent.done(request.request_id),
+    ]))
+    api = _api()
+    replay = api.ReplayAdapter(root=tmp_path, name='provider.jsonl')
+    async def close_early():
+        stream = replay.stream(request)
+        assert (await anext(stream)).type == 'text_delta'
+        await stream.aclose()
+    asyncio.run(close_early())
+    assert replay.remaining == 0
+    with pytest.raises(api.ReplayError, match='unconsumed'):
+        replay.assert_consumed()
+
+
+def test_public_consumption_check_rejects_abort_after_partial_replay(tmp_path):
+    request = _request()
+    _record(tmp_path, request, FakeModel([
+        ModelStreamEvent.text_delta(request.request_id, 'partial'),
+        ModelStreamEvent.done(request.request_id),
+    ]))
+    api = _api()
+    replay = api.ReplayAdapter(root=tmp_path, name='provider.jsonl')
+    async def abort_early():
+        abort = asyncio.Event()
+        stream = replay.stream(replace(request, abort_event=abort))
+        assert (await anext(stream)).type == 'text_delta'
+        abort.set()
+        assert (await anext(stream)).error == 'aborted'
+        await stream.aclose()
+    asyncio.run(abort_early())
+    assert replay.remaining == 0
+    with pytest.raises(api.ReplayError, match='unconsumed'):
+        replay.assert_consumed()
+
+
+def test_public_consumption_check_accepts_close_immediately_after_terminal(tmp_path):
+    request = _request()
+    _record(tmp_path, request)
+    replay = _api().ReplayAdapter(root=tmp_path, name='provider.jsonl')
+    async def terminal_then_close():
+        stream = replay.stream(request)
+        assert (await anext(stream)).type == 'done'
+        await stream.aclose()
+    asyncio.run(terminal_then_close())
+    replay.assert_consumed()

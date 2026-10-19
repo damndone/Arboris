@@ -13,6 +13,7 @@ from typing import Any, Iterable
 from uuid import uuid4
 
 from ..jsonl_store import _exclusive_jsonl_lock, append_jsonl_atomic, read_jsonl
+from .business_identity import identity_value
 
 
 def _now() -> str:
@@ -313,7 +314,14 @@ class ProposalStore:
         command_id: str | None = None,
         proposal_id: str | None = None,
     ) -> ProposalRevision:
-        proposal_id = proposal_id or f"proposal_{uuid4().hex}"
+        evidence_refs, expected_effect, risks = tuple(evidence_refs), tuple(expected_effect), tuple(risks)
+        proposal_id = proposal_id or identity_value(
+            owner="agent.proposal.create", slot="proposal_id",
+            inputs={"session_id": session_id, "chain_id": chain_id, "operation_id": operation_id,
+                    "operation_version": operation_version, "command_id": command_id, "target": target,
+                    "preconditions": preconditions, "changes": changes, "evidence_refs": list(evidence_refs),
+                    "expected_effect": list(expected_effect), "risks": list(risks)},
+            create=lambda: f"proposal_{uuid4().hex}")
         with self._creation_lock():
             path = self._path(proposal_id)
             if path.exists():
@@ -387,7 +395,10 @@ class ProposalStore:
                     raise ProposalAdmissionConflict("prepared proposal request or scope conflict")
                 proposal = self._verified_prepared_revision(row["revision"], request)
             else:
-                revision_request = {**request, "proposal_id": proposal_id or f"proposal_{uuid4().hex}"}
+                revision_request = {**request, "proposal_id": proposal_id or identity_value(
+                    owner="agent.proposal.prepare", slot="proposal_id",
+                    inputs={"invocation": invocation.to_dict(), "request": request},
+                    create=lambda: f"proposal_{uuid4().hex}")}
                 self._path(revision_request["proposal_id"])
                 proposal = self._build_revision(**revision_request, revision=1)
                 row = {"schema_version": "agent.prepared_proposal.v1", "invocation": invocation.to_dict(),
@@ -461,6 +472,7 @@ class ProposalStore:
                 evidence_refs=latest.evidence_refs,
                 expected_effect=expected_effect or latest.expected_effect,
                 risks=risks or latest.risks,
+                _identity_previous=latest.to_dict(),
             )
             append_jsonl_atomic(self._path(proposal_id), revised.to_dict())
             return revised
@@ -491,6 +503,9 @@ class ProposalStore:
 
             expected_context = latest.preconditions.get("context_fingerprint")
             expected_head = latest.preconditions.get("active_head_run_id")
+            identity_inputs = {"previous": latest.to_dict(), "revision": revision, "fingerprint": fingerprint,
+                               "actor_type": actor_type, "current_context_fingerprint": current_context_fingerprint,
+                               "current_active_head_run_id": current_active_head_run_id}
             if (
                 expected_context is not None
                 and current_context_fingerprint != expected_context
@@ -510,7 +525,8 @@ class ProposalStore:
                     target=latest.target,
                     preconditions=latest.preconditions,
                     actor_type=actor_type,
-                    confirmed_at=_now(),
+                    confirmed_at=identity_value(owner="agent.proposal.confirm_stale", slot="confirmed_at",
+                                                inputs=identity_inputs, create=_now),
                     status="stale",
                     changes=latest.changes,
                 )
@@ -529,7 +545,8 @@ class ProposalStore:
                 target=latest.target,
                 preconditions=latest.preconditions,
                 actor_type=actor_type,
-                confirmed_at=_now(),
+                confirmed_at=identity_value(owner="agent.proposal.confirm", slot="confirmed_at",
+                                            inputs=identity_inputs, create=_now),
                 status="confirmed",
                 changes=latest.changes,
             )
@@ -564,7 +581,9 @@ class ProposalStore:
                 target=latest.target,
                 preconditions=latest.preconditions,
                 actor_type=actor_type,
-                decided_at=_now(),
+                decided_at=identity_value(owner="agent.proposal.decline", slot="decided_at",
+                                          inputs={"previous": latest.to_dict(), "actor_type": actor_type,
+                                                  "reason": reason}, create=_now),
                 status="declined",
                 reason=reason,
             )
@@ -669,6 +688,7 @@ class ProposalStore:
         evidence_refs: Iterable[str],
         expected_effect: Iterable[str],
         risks: Iterable[str],
+        _identity_previous: dict[str, Any] | None = None,
     ) -> ProposalRevision:
         evidence = tuple(str(item) for item in evidence_refs)
         effects = tuple(str(item) for item in expected_effect)
@@ -701,6 +721,9 @@ class ProposalStore:
             evidence_refs=evidence,
             expected_effect=effects,
             risks=risk_items,
-            created_at=_now(),
+            created_at=identity_value(owner="agent.proposal.revision", slot="created_at",
+                                      inputs={"revision": {**json.loads(canonical), "session_id": session_id,
+                                                           "chain_id": chain_id, "command_id": command_id},
+                                              "previous": _identity_previous}, create=_now),
             fingerprint=fingerprint,
         )

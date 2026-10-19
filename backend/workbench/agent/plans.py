@@ -23,6 +23,7 @@ from typing import Any, Callable
 from uuid import uuid4
 
 from ..jsonl_store import _exclusive_jsonl_lock
+from .business_identity import identity_value
 from .permissions import PermissionClass, permission_class, strictest
 
 STEP_STATUSES = ("pending", "running", "awaiting", "done", "skipped", "failed")
@@ -151,12 +152,19 @@ def merge(previous: Plan | None, *, question: str, criteria: list[str], steps: t
 
     classes = sorted({step.permission_class.value for step in steps if step.permission_class in PLANNABLE})
     allowed = sorted(set(allowed_classes or classes) & {c.value for c in PLANNABLE})
+    identity_inputs = {"previous": previous.to_dict() if previous else None,
+                       "question": question, "criteria": list(criteria),
+                       "steps": [step.to_dict() for step in steps], "budget": budget,
+                       "allowed_classes": allowed_classes}
     if previous is None or previous.approved_version is None:
         # Before any approval a revision is simply a new draft.
-        return Plan(plan_id=previous.plan_id if previous else f"plan_{uuid4().hex[:12]}",
+        return Plan(plan_id=previous.plan_id if previous else identity_value(
+                        owner="agent.plan.merge", slot="plan_id", inputs=identity_inputs,
+                        create=lambda: f"plan_{uuid4().hex[:12]}"),
                     version=(previous.version + 1) if previous else 1, status="draft", question=question,
                     criteria=tuple(criteria), steps=steps, allowed_classes=tuple(allowed),
-                    budget=dict(budget or {}), updated_at=_now())
+                    budget=dict(budget or {}), updated_at=identity_value(
+                        owner="agent.plan.merge", slot="updated_at", inputs=identity_inputs, create=_now))
     old_ids = {step.step_id for step in previous.steps}
     marked = tuple(replace(step, added_after_results=step.step_id not in old_ids or
                            next((s.added_after_results for s in previous.steps if s.step_id == step.step_id), False))
@@ -167,7 +175,8 @@ def merge(previous: Plan | None, *, question: str, criteria: list[str], steps: t
     return replace(previous, version=previous.version + 1, status=status, question=question, criteria=tuple(criteria),
                    steps=marked, allowed_classes=tuple(sorted(set(allowed) | set(previous.allowed_classes)))
                    if status == "needs_approval" else previous.allowed_classes,
-                   budget=dict(budget or previous.budget), updated_at=_now())
+                   budget=dict(budget or previous.budget), updated_at=identity_value(
+                       owner="agent.plan.merge", slot="updated_at", inputs=identity_inputs, create=_now))
 
 
 def _bigger(new: dict[str, int] | None, old: dict[str, int]) -> bool:
@@ -177,7 +186,11 @@ def _bigger(new: dict[str, int] | None, old: dict[str, int]) -> bool:
 def approve(plan: Plan) -> Plan:
     if plan.status not in {"draft", "needs_approval"}:
         raise PlanError(f"a {plan.status} plan cannot be approved")
-    return replace(plan, status="approved", approved_version=plan.version, approved_at=_now(), updated_at=_now())
+    return replace(plan, status="approved", approved_version=plan.version,
+                   approved_at=identity_value(owner="agent.plan.approve", slot="approved_at",
+                                              inputs=plan.to_dict(), create=_now),
+                   updated_at=identity_value(owner="agent.plan.approve", slot="updated_at",
+                                             inputs=plan.to_dict(), create=_now))
 
 
 def _ready_step_index(plan: Plan, operation_ids: list[str]) -> int | None:
@@ -216,7 +229,9 @@ def mark_executed(plan: Plan, operation_ids: list[str], status: str) -> Plan:
         steps[index] = replace(steps[index], status="done" if status == "completed" else "failed")
     finished = all(step.status in {"done", "skipped"} for step in steps)
     return replace(plan, steps=tuple(steps), status="completed" if finished and plan.status == "approved" else plan.status,
-                   updated_at=_now())
+                   updated_at=identity_value(owner="agent.plan.mark_executed", slot="updated_at",
+                                             inputs={"previous": plan.to_dict(), "operation_ids": operation_ids,
+                                                     "status": status}, create=_now))
 
 
 class PlanStore:

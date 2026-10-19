@@ -378,11 +378,24 @@ class ReplayAdapter:
     def __init__(self, *, root: Path | str, name: str):
         self._turns = _load(_Journal(root, name, create=False).read())
         self._cursor = 0
+        self._delivered_terminals = 0
         self._active = None
 
     @property
     def remaining(self) -> int:
         return len(self._turns) - self._cursor
+
+    def assert_complete(self) -> None:
+        """Reject any incomplete recorded stream before executing a replay."""
+        for turn in self._turns:
+            if not turn['complete']:
+                raise ReplayIncomplete(f"recorded stream is incomplete: {turn['termination']}")
+
+    def assert_consumed(self) -> None:
+        """Require a complete journal and no unused provider requests."""
+        self.assert_complete()
+        if self._active is not None or self.remaining or self._delivered_terminals != len(self._turns):
+            raise ReplayError('provider recording has unconsumed requests')
 
     async def stream(self, request: ModelRequest) -> AsyncIterator[ModelStreamEvent]:
         if self._active is not None:
@@ -409,6 +422,7 @@ class ReplayAdapter:
                     return
                 if index == len(turn["events"]) - 1:
                     self._active = None
+                    self._delivered_terminals += 1
                 # Clone nested values so a consumer cannot mutate later replays.
                 copy = _json_snapshot({field.name: getattr(event, field.name) for field in fields(event)})
                 yield replace(_event(copy), request_id=request.request_id)

@@ -89,7 +89,10 @@ def workflow_proposal_schema() -> dict[str, Any]:
                                 "step_id": {"type": "string", "minLength": 1},
                                 "operation_id": {
                                     "type": "string",
-                                    "enum": list(workflow_step_operations()),
+                                    # The registry contains set-derived P7
+                                    # declarations. Publish stable order across
+                                    # interpreter restarts without changing IDs.
+                                    "enum": sorted(workflow_step_operations()),
                                 },
                                 "spec": {"type": "object"},
                                 "depends_on": {
