@@ -1,4 +1,6 @@
 """HTTP waiters do not own accepted in-process Agent work."""
+from workbench.http import agent_turn_routes
+from workbench.http import agent_route_runtime
 
 import asyncio
 import logging
@@ -46,8 +48,8 @@ def test_cancelled_http_waiter_keeps_one_owned_turn_and_live_controls(tmp_path, 
                 yield ModelStreamEvent.text_delta(request.request_id, "Completed.")
                 yield ModelStreamEvent.done(request.request_id)
 
-        monkeypatch.setattr(routes, "load_llm_config", lambda: replace(_config(), context_window_tokens=128_000))
-        monkeypatch.setattr(routes, "OpenAICompatibleModelAdapter", BlockingProvider)
+        monkeypatch.setattr(agent_route_runtime, "load_llm_config", lambda: replace(_config(), context_window_tokens=128_000))
+        monkeypatch.setattr(agent_route_runtime, "OpenAICompatibleModelAdapter", BlockingProvider)
         project = tmp_path / "project"
         project.mkdir()
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1") as client:
@@ -110,7 +112,7 @@ def test_owned_route_failure_is_observed_and_releases_reservation(tmp_path, monk
             started.set()
             await release.wait()
             raise failure
-        monkeypatch.setattr(routes, "_run_reserved_agent_turn", failing_setup)
+        monkeypatch.setattr(agent_turn_routes, "_run_reserved_agent_turn", failing_setup)
         project = tmp_path / "project"
         project.mkdir()
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1") as client:

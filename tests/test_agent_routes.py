@@ -1,4 +1,5 @@
 from __future__ import annotations
+from workbench.http import agent_route_context, agent_route_runtime, agent_turn_routes
 
 import json
 from collections.abc import AsyncIterator
@@ -70,8 +71,8 @@ def test_agent_session_turn_is_durable_and_replayable(
     from workbench.http import agent_routes
 
     FakeAgentAdapter.instances.clear()
-    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
-    monkeypatch.setattr(agent_routes, "OpenAICompatibleModelAdapter", FakeAgentAdapter)
+    monkeypatch.setattr(agent_route_runtime, "load_llm_config", _config)
+    monkeypatch.setattr(agent_route_runtime, "OpenAICompatibleModelAdapter", FakeAgentAdapter)
     project_root = tmp_path / "project"
     project_root.mkdir()
 
@@ -285,7 +286,7 @@ def test_agent_turn_abort_rejects_when_the_session_has_no_active_turn(
 
     from workbench.http import agent_routes
 
-    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
+    monkeypatch.setattr(agent_route_runtime, "load_llm_config", _config)
     project_root = tmp_path / "project"
     project_root.mkdir()
 
@@ -325,7 +326,7 @@ def test_agent_turn_abort_targets_only_the_live_session_turn(
         async def abort(self) -> None:
             self.aborted = True
 
-    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
+    monkeypatch.setattr(agent_route_runtime, "load_llm_config", _config)
     project_root = tmp_path / "project"
     project_root.mkdir()
     live = ActiveAgent()
@@ -366,8 +367,8 @@ def test_chain_turn_receives_structured_proposal_protocol(
     from workbench.http import agent_routes
 
     FakeAgentAdapter.instances.clear()
-    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
-    monkeypatch.setattr(agent_routes, "OpenAICompatibleModelAdapter", FakeAgentAdapter)
+    monkeypatch.setattr(agent_route_runtime, "load_llm_config", _config)
+    monkeypatch.setattr(agent_route_runtime, "OpenAICompatibleModelAdapter", FakeAgentAdapter)
     project_root = tmp_path / "project"
     project_root.mkdir()
 
@@ -431,7 +432,7 @@ def test_agent_session_rejects_oversized_context_and_unknown_session(tmp_path: P
 def test_agent_session_never_returns_provider_secret(tmp_path: Path, monkeypatch) -> None:
     from workbench.http import agent_routes
 
-    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
+    monkeypatch.setattr(agent_route_runtime, "load_llm_config", _config)
     project_root = tmp_path / "project"
     project_root.mkdir()
     with TestClient(app) as client:
@@ -691,8 +692,8 @@ def test_graph_fork_proposal_route_confirms_into_child_agent_without_child_run(
     def no_provider(*args, **kwargs):
         raise AssertionError("Manual graph fork must not construct a provider")
 
-    monkeypatch.setattr("workbench.http.agent_routes.OpenAICompatibleModelAdapter", no_provider)
-    monkeypatch.setattr("workbench.http.agent_routes.load_llm_config", no_provider)
+    monkeypatch.setattr("workbench.http.agent_route_runtime.OpenAICompatibleModelAdapter", no_provider)
+    monkeypatch.setattr("workbench.http.agent_route_runtime.load_llm_config", no_provider)
     project_root = tmp_path / "project"
     project_root.mkdir()
     _write_inspectable_run(project_root)
@@ -942,8 +943,8 @@ def test_chain_turn_persists_structured_proposal_from_tool_call(
     from workbench.http import agent_routes
 
     ProposalCallingAdapter.instances.clear()
-    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
-    monkeypatch.setattr(agent_routes, "OpenAICompatibleModelAdapter", ProposalCallingAdapter)
+    monkeypatch.setattr(agent_route_runtime, "load_llm_config", _config)
+    monkeypatch.setattr(agent_route_runtime, "OpenAICompatibleModelAdapter", ProposalCallingAdapter)
     project_root = tmp_path / "project"
     project_root.mkdir()
     _write_inspectable_run(project_root)
@@ -1032,7 +1033,7 @@ def test_proposal_is_listed_and_confirmation_is_pending_without_rerun_mutation(
 ) -> None:
     from workbench.http import agent_routes
 
-    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
+    monkeypatch.setattr(agent_route_runtime, "load_llm_config", _config)
     project_root = tmp_path / "project"
     project_root.mkdir()
     _write_inspectable_run(project_root)
@@ -1091,7 +1092,7 @@ def test_proposal_confirmation_is_scoped_and_stale_context_fails_closed(
 ) -> None:
     from workbench.http import agent_routes
 
-    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
+    monkeypatch.setattr(agent_route_runtime, "load_llm_config", _config)
     project_root = tmp_path / "project"
     project_root.mkdir()
     _write_inspectable_run(project_root)
@@ -1159,7 +1160,7 @@ def test_proposal_confirmation_uses_chain_store_active_head(
     """A request must not replace the ChainStore's authoritative active head."""
     from workbench.http import agent_routes
 
-    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
+    monkeypatch.setattr(agent_route_runtime, "load_llm_config", _config)
     project_root = tmp_path / "project"
     project_root.mkdir()
     _write_inspectable_run(project_root)
@@ -1206,7 +1207,7 @@ def test_proposal_decline_is_a_scoped_append_only_decision(
     """Declining a proposal records the user's decision without executing it."""
     from workbench.http import agent_routes
 
-    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
+    monkeypatch.setattr(agent_route_runtime, "load_llm_config", _config)
     project_root = tmp_path / "project"
     project_root.mkdir()
     _write_inspectable_run(project_root)
@@ -1258,7 +1259,7 @@ def test_proposal_revision_route_preserves_scope_and_rejects_stale_revision(
     """Revision edits only the allowlisted proposal payload, never its target."""
     from workbench.http import agent_routes
 
-    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
+    monkeypatch.setattr(agent_route_runtime, "load_llm_config", _config)
     project_root = tmp_path / "project"
     project_root.mkdir()
     _write_inspectable_run(project_root)
@@ -1315,15 +1316,15 @@ def test_chain_turn_wires_scoped_read_only_tools_without_mutation(
     from workbench.http import agent_routes
 
     constructed = []
-    original_orchestrator = agent_routes.WorkbenchOrchestrator
+    original_orchestrator = agent_turn_routes.WorkbenchOrchestrator
     def capture_orchestrator(*args, **kwargs):
         instance = original_orchestrator(*args, **kwargs)
         constructed.append(instance)
         return instance
-    monkeypatch.setattr(agent_routes, "WorkbenchOrchestrator", capture_orchestrator)
+    monkeypatch.setattr(agent_turn_routes, "WorkbenchOrchestrator", capture_orchestrator)
     ToolCallingAdapter.instances.clear()
-    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
-    monkeypatch.setattr(agent_routes, "OpenAICompatibleModelAdapter", ToolCallingAdapter)
+    monkeypatch.setattr(agent_route_runtime, "load_llm_config", _config)
+    monkeypatch.setattr(agent_route_runtime, "OpenAICompatibleModelAdapter", ToolCallingAdapter)
     project_root = tmp_path / "project"
     project_root.mkdir()
     _write_inspectable_run(project_root)
@@ -1415,8 +1416,8 @@ def test_main_role_turn_exposes_only_read_only_project_evidence_tool(
     from workbench.http import agent_routes
 
     FakeAgentAdapter.instances.clear()
-    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
-    monkeypatch.setattr(agent_routes, "OpenAICompatibleModelAdapter", FakeAgentAdapter)
+    monkeypatch.setattr(agent_route_runtime, "load_llm_config", _config)
+    monkeypatch.setattr(agent_route_runtime, "OpenAICompatibleModelAdapter", FakeAgentAdapter)
     project_root = tmp_path / "project"
     project_root.mkdir()
 
@@ -1512,8 +1513,8 @@ def test_main_turn_refreshes_protocol_for_existing_session(
     from workbench.http import agent_routes
 
     FakeAgentAdapter.instances.clear()
-    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
-    monkeypatch.setattr(agent_routes, "OpenAICompatibleModelAdapter", FakeAgentAdapter)
+    monkeypatch.setattr(agent_route_runtime, "load_llm_config", _config)
+    monkeypatch.setattr(agent_route_runtime, "OpenAICompatibleModelAdapter", FakeAgentAdapter)
     project_root = tmp_path / "project"
     project_root.mkdir()
 
@@ -1526,9 +1527,9 @@ def test_main_turn_refreshes_protocol_for_existing_session(
         session_id = created.json()["session_id"]
         marker = "PROTOCOL_UPGRADE_MARKER"
         monkeypatch.setattr(
-            agent_routes,
+            agent_route_context,
             "MAIN_AGENT_PROTOCOL",
-            f"{agent_routes.MAIN_AGENT_PROTOCOL}\n- {marker}",
+            f"{agent_route_context.MAIN_AGENT_PROTOCOL}\n- {marker}",
         )
         turn = client.post(
             f"/agent/sessions/{session_id}/turns",
@@ -1580,8 +1581,8 @@ def test_natural_language_turn_can_propose_registry_enabled_graph_fork(
     from workbench.http import agent_routes
 
     ProposingAdapter.instances.clear()
-    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
-    monkeypatch.setattr(agent_routes, "OpenAICompatibleModelAdapter", ProposingAdapter)
+    monkeypatch.setattr(agent_route_runtime, "load_llm_config", _config)
+    monkeypatch.setattr(agent_route_runtime, "OpenAICompatibleModelAdapter", ProposingAdapter)
     project_root = tmp_path / "project"
     project_root.mkdir()
     _write_inspectable_run(project_root)
@@ -1665,8 +1666,8 @@ def test_unsupported_natural_language_operation_creates_no_proposal_or_effect(
     from workbench.http import agent_routes
 
     ProposingAdapter.instances.clear()
-    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
-    monkeypatch.setattr(agent_routes, "OpenAICompatibleModelAdapter", ProposingAdapter)
+    monkeypatch.setattr(agent_route_runtime, "load_llm_config", _config)
+    monkeypatch.setattr(agent_route_runtime, "OpenAICompatibleModelAdapter", ProposingAdapter)
     project_root = tmp_path / "project"
     project_root.mkdir()
     _write_inspectable_run(project_root)
@@ -1735,8 +1736,8 @@ def test_confirmed_proposal_executes_rerun_and_reconciles_to_completion(
     from workbench.projects import create_project
 
     ProposingAdapter.instances.clear()
-    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
-    monkeypatch.setattr(agent_routes, "OpenAICompatibleModelAdapter", ProposingAdapter)
+    monkeypatch.setattr(agent_route_runtime, "load_llm_config", _config)
+    monkeypatch.setattr(agent_route_runtime, "OpenAICompatibleModelAdapter", ProposingAdapter)
 
     with TestClient(app) as client:
         project = create_project(tmp_path, "demo")
@@ -1893,8 +1894,8 @@ def test_proposal_canonicalizes_model_supplied_target_references(
     from workbench.projects import create_project
 
     ProposingAdapter.instances.clear()
-    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
-    monkeypatch.setattr(agent_routes, "OpenAICompatibleModelAdapter", ProposingAdapter)
+    monkeypatch.setattr(agent_route_runtime, "load_llm_config", _config)
+    monkeypatch.setattr(agent_route_runtime, "OpenAICompatibleModelAdapter", ProposingAdapter)
 
     with TestClient(app) as client:
         project = create_project(tmp_path, "demo")
@@ -1984,8 +1985,8 @@ def test_metadata_for_a_column_outside_the_model_goes_through_metadata_edit(
     from workbench.projects import create_project
 
     ProposingAdapter.instances.clear()
-    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
-    monkeypatch.setattr(agent_routes, "OpenAICompatibleModelAdapter", ProposingAdapter)
+    monkeypatch.setattr(agent_route_runtime, "load_llm_config", _config)
+    monkeypatch.setattr(agent_route_runtime, "OpenAICompatibleModelAdapter", ProposingAdapter)
 
     with TestClient(app) as client:
         project = create_project(tmp_path, "metadata")
@@ -2116,8 +2117,8 @@ def test_two_turns_sent_at_once_to_one_session_run_one_and_refuse_the_other(
         time.sleep(0.3)  # widen the window between the check and the start
         return _config()
 
-    monkeypatch.setattr(agent_routes, "load_llm_config", slow_config)
-    monkeypatch.setattr(agent_routes, "OpenAICompatibleModelAdapter", FakeAgentAdapter)
+    monkeypatch.setattr(agent_route_runtime, "load_llm_config", slow_config)
+    monkeypatch.setattr(agent_route_runtime, "OpenAICompatibleModelAdapter", FakeAgentAdapter)
     project_root = tmp_path / "project"
     project_root.mkdir()
 

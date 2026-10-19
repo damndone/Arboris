@@ -4,7 +4,8 @@ import asyncio
 
 from workbench.agent.core import AgentCore
 from workbench.agent.events import AgentEventStream
-from workbench.agent.orchestrator import WorkbenchOrchestrator, _workflow_failure_message
+from workbench.agent.orchestrator import WorkbenchOrchestrator
+from workbench.agent.orchestration_audit import _workflow_failure_message
 from workbench.agent.workflow_contracts import workflow_authorization
 from workbench.agent.operations import OperationRecordStore
 from workbench.agent.proposals import ProposalConfirmation
@@ -125,7 +126,7 @@ def test_completed_workflow_persists_authorized_child_records(tmp_path, monkeypa
         "_compile_workflow_record",
         lambda record, project_root: draft,
     )
-    import workbench.agent.orchestrator as orchestrator_module
+    import workbench.agent.orchestration_operation_handler as orchestrator_module
 
     monkeypatch.setattr(orchestrator_module, "execute_workflow", lambda root, compiled: state)
     proposal = orchestrator.create_proposal(

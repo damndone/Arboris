@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from ..agent import instructions
 from ..services.instruction_draft import draft as draft_instructions
 from ..api_errors import WorkbenchAPIError
-from .agent_routes import _project_root
+from .agent_route_context import _project_root
 from .responses.agent import AgentInstructions, AgentInstructionsDraft
 from .typed_routes import TypedAPIRoute
 

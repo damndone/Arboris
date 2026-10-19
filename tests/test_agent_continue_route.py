@@ -1,6 +1,7 @@
 """v1.9.1: the Agent resumes after a confirmation without the person saying "continue"."""
 
 from __future__ import annotations
+from workbench.http import agent_route_permissions, agent_route_runtime
 
 from pathlib import Path
 
@@ -24,8 +25,8 @@ def test_continue_resumes_the_agent_with_a_workbench_note(tmp_path: Path, monkey
     from workbench.http import agent_routes
 
     FakeAgentAdapter.instances.clear()
-    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
-    monkeypatch.setattr(agent_routes, "OpenAICompatibleModelAdapter", FakeAgentAdapter)
+    monkeypatch.setattr(agent_route_runtime, "load_llm_config", _config)
+    monkeypatch.setattr(agent_route_runtime, "OpenAICompatibleModelAdapter", FakeAgentAdapter)
     project_root = tmp_path / "project"
     project_root.mkdir()
     with TestClient(app, base_url="http://127.0.0.1") as client:
@@ -53,8 +54,8 @@ def test_continue_resumes_the_agent_with_a_workbench_note(tmp_path: Path, monkey
 def test_continue_refuses_while_a_turn_is_running(tmp_path: Path, monkeypatch) -> None:
     from workbench.http import agent_routes
 
-    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
-    monkeypatch.setattr(agent_routes, "OpenAICompatibleModelAdapter", FakeAgentAdapter)
+    monkeypatch.setattr(agent_route_runtime, "load_llm_config", _config)
+    monkeypatch.setattr(agent_route_runtime, "OpenAICompatibleModelAdapter", FakeAgentAdapter)
     project_root = tmp_path / "project"
     project_root.mkdir()
     with TestClient(app, base_url="http://127.0.0.1") as client:
@@ -84,14 +85,14 @@ def test_session_grants_and_project_rules_are_read_from_their_stores(tmp_path: P
         "deny": [{"class": "external"}],
         "ask": [],
     }), encoding="utf-8")
-    rules = agent_routes._project_permission_rules(root)
+    rules = agent_route_permissions._project_permission_rules(root)
     assert rules.allow == (Rule(PermissionClass.DERIVE, "model.genesis"),)
     assert rules.deny == (Rule(PermissionClass.EXTERNAL),) and rules.ask == ()
 
     repository = JsonlSessionRepository(root / "workbench")
     repository.create_session("s1", chain_id="c", role="chain")
     repository.update_metadata("s1", permission_grants=[{"class": "derive"}, {"class": "external"}])
-    grants = agent_routes._session_grants(repository, "s1")
+    grants = agent_route_permissions._session_grants(repository, "s1")
     # External is never grantable, whatever the metadata says.
     assert grants.entries == frozenset({Rule(PermissionClass.DERIVE)})
 
@@ -108,8 +109,8 @@ def test_the_turn_budget_follows_the_execution_mode(tmp_path: Path, monkeypatch)
         return await original(self, text, budget=budget, **kwargs)
 
     monkeypatch.setattr(AgentCore, "prompt", recording_prompt)
-    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
-    monkeypatch.setattr(agent_routes, "OpenAICompatibleModelAdapter", FakeAgentAdapter)
+    monkeypatch.setattr(agent_route_runtime, "load_llm_config", _config)
+    monkeypatch.setattr(agent_route_runtime, "OpenAICompatibleModelAdapter", FakeAgentAdapter)
     project_root = tmp_path / "project"
     project_root.mkdir()
     with TestClient(app, base_url="http://127.0.0.1") as client:

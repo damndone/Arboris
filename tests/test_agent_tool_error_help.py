@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 
 from workbench.agent.contract_help import help_for
-from workbench.agent.orchestrator import _UPDATE_PLAN_SCHEMA
+from workbench.agent.toolsets import _UPDATE_PLAN_SCHEMA
 from workbench.agent.tools import ToolDefinition, ToolRegistry, validation_details
 from workbench.contracts.common.errors import OperationValidationError
 

@@ -1,5 +1,6 @@
 """Evaluator transports share policy actions without model or task fixtures."""
 from __future__ import annotations
+from workbench.http import agent_route_runtime
 
 import importlib.util
 from pathlib import Path
@@ -176,8 +177,8 @@ def test_headless_turn_uses_scoped_fake_runtime_without_current_provider(tmp_pat
             yield ModelStreamEvent.done(request.request_id)
     def forbidden(*args, **kwargs):
         raise AssertionError('the evaluator must retain the explicit in-process runtime')
-    monkeypatch.setattr(routes, 'load_llm_config', forbidden)
-    monkeypatch.setattr(routes, 'OpenAICompatibleModelAdapter', forbidden)
+    monkeypatch.setattr(agent_route_runtime, 'load_llm_config', forbidden)
+    monkeypatch.setattr(agent_route_runtime, 'OpenAICompatibleModelAdapter', forbidden)
     config = LLMConfig(base_url='https://example.test', api_key='fake', model='fake')
     with headless_runtime_scope(adapter_factory=lambda _: Model(), config=config):
         session = routes.create_agent_session(str(tmp_path), routes.AgentSessionCreateRequest(role='chain'))['session_id']
@@ -200,8 +201,8 @@ def test_inprocess_headless_retains_existing_provider_tape_without_network(tmp_p
     recorder = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(recorder)
     config = LLMConfig(base_url='https://example.test', api_key='fake', model='fake')
-    monkeypatch.setattr(routes, 'load_llm_config', lambda: config)
-    monkeypatch.setattr(routes, 'OpenAICompatibleModelAdapter', OpenAICompatibleModelAdapter)
+    monkeypatch.setattr(agent_route_runtime, 'load_llm_config', lambda: config)
+    monkeypatch.setattr(agent_route_runtime, 'OpenAICompatibleModelAdapter', OpenAICompatibleModelAdapter)
     def forbidden(*args, **kwargs):
         raise AssertionError('a local tape must not create an upstream transport')
     monkeypatch.setattr(httpx.AsyncHTTPTransport, '__init__', forbidden)

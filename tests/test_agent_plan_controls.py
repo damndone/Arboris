@@ -1,4 +1,5 @@
 """Human plan edits use the same versioned plan and audited authority seam."""
+from workbench.http import agent_route_runtime
 import pytest
 from fastapi.testclient import TestClient
 
@@ -24,7 +25,7 @@ def fixture(tmp_path):
 def test_person_revises_a_draft_without_a_model_call(tmp_path, monkeypatch):
     from workbench.http import agent_routes
     root, repo, store, plan = fixture(tmp_path)
-    monkeypatch.setattr(agent_routes, "load_llm_config", lambda: pytest.fail("plan edit must not load a model"))
+    monkeypatch.setattr(agent_route_runtime, "load_llm_config", lambda: pytest.fail("plan edit must not load a model"))
     with TestClient(app) as client:
         response = client.patch("/agent/sessions/session-a/plan", params={"project_root": str(root)},
                                 json={"version": plan.version, "question": "Compare log wages.",
@@ -142,7 +143,7 @@ def test_completed_step_cannot_be_reassigned_and_mode_survives_session_reload(tm
     root, repo, store, plan = fixture(tmp_path)
     store.update("session-a", lambda previous: replace(previous, steps=(replace(previous.steps[0], status="done"),)))
     repo.update_metadata("session-a", execution_mode="auto")
-    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
+    monkeypatch.setattr(agent_route_runtime, "load_llm_config", _config)
     with TestClient(app) as client:
         assert client.get("/agent/sessions/session-a", params={"project_root": str(root)}).json()["execution_mode"] == "auto"
         response = client.patch("/agent/sessions/session-a/plan", params={"project_root": str(root)},

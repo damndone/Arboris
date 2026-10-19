@@ -1,5 +1,6 @@
 """Explicit headless recovery and strictly offline replay."""
 from __future__ import annotations
+from workbench.http import agent_route_runtime
 
 import asyncio
 import json
@@ -78,8 +79,8 @@ def test_turn_state_reads_real_store_without_config_or_provider(tmp_path, monkey
     record = TurnStore(tmp_path).create('session_saved', 'entry_saved', budget={'max_steps': 4, 'timeout_s': 60}, execution_mode='auto')
     def forbidden(*args, **kwargs):
         raise AssertionError('state is a zero-model read')
-    monkeypatch.setattr(routes, 'load_llm_config', forbidden)
-    monkeypatch.setattr(routes, 'OpenAICompatibleModelAdapter', forbidden)
+    monkeypatch.setattr(agent_route_runtime, 'load_llm_config', forbidden)
+    monkeypatch.setattr(agent_route_runtime, 'OpenAICompatibleModelAdapter', forbidden)
     result = CliRunner().invoke(app, ['agent', 'turn-state', '--project', str(tmp_path),
                                      '--session', 'session_saved'])
     assert result.exit_code == 0, result.output
@@ -95,7 +96,7 @@ def _record_existing_session(tmp_path, monkeypatch, *, command='run', adapter=No
     project.mkdir()
     journal = tmp_path / 'journal'
     journal.mkdir()
-    monkeypatch.setattr(routes, 'load_llm_config', _config)
+    monkeypatch.setattr(agent_route_runtime, 'load_llm_config', _config)
     monkeypatch.setattr(cli_agent, 'OpenAICompatibleModelAdapter', adapter or FakeAgentAdapter, raising=False)
     session = routes.create_agent_session(str(project), routes.AgentSessionCreateRequest(role='chain'))['session_id']
     args = ['agent', command, '--project', str(project), '--session', session]
@@ -129,7 +130,7 @@ def test_replay_refuses_modified_fixture_without_loading_config(tmp_path, monkey
     project, journal, initial, args, result = _record_existing_session(tmp_path, monkeypatch)
     def forbidden(*args, **kwargs):
         raise AssertionError('offline replay must never load the current config')
-    monkeypatch.setattr(routes, 'load_llm_config', forbidden)
+    monkeypatch.setattr(agent_route_runtime, 'load_llm_config', forbidden)
     result = CliRunner().invoke(app, args + ['--replay-journal', str(journal)])
     assert result.exit_code != 0
     assert 'fixture' in result.output
@@ -188,8 +189,8 @@ def test_strict_cli_replay_recomputes_tools_and_has_no_provider(tmp_path, monkey
     copytree(initial, project)
     def forbidden(*args, **kwargs):
         raise AssertionError('strict replay must not load config or construct an upstream')
-    monkeypatch.setattr(routes, 'load_llm_config', forbidden)
-    monkeypatch.setattr(routes, 'OpenAICompatibleModelAdapter', forbidden)
+    monkeypatch.setattr(agent_route_runtime, 'load_llm_config', forbidden)
+    monkeypatch.setattr(agent_route_runtime, 'OpenAICompatibleModelAdapter', forbidden)
     monkeypatch.setattr(cli_agent, 'OpenAICompatibleModelAdapter', forbidden)
     replayed = CliRunner().invoke(app, args + ['--replay-journal', str(journal)])
     assert replayed.exit_code == 0, (replayed.output, replayed.exception)
@@ -216,8 +217,8 @@ def test_cli_resume_missing_receipt_never_reexecutes_or_calls_provider(tmp_path,
         effects.append(values)
         raise ProcessLost()
     monkeypatch.setattr(numeric_grounding, 'calculate', lose_after_effect)
-    monkeypatch.setattr(routes, 'load_llm_config', _config)
-    monkeypatch.setattr(routes, 'OpenAICompatibleModelAdapter', ArithmeticAdapter)
+    monkeypatch.setattr(agent_route_runtime, 'load_llm_config', _config)
+    monkeypatch.setattr(agent_route_runtime, 'OpenAICompatibleModelAdapter', ArithmeticAdapter)
     session = routes.create_agent_session(str(tmp_path), routes.AgentSessionCreateRequest(role='chain'))['session_id']
     with pytest.raises(ProcessLost):
         asyncio.run(cli_agent.run_headless(tmp_path, 'Inspect evidence.', session_id=session, on_event=lambda _: None))
@@ -230,7 +231,7 @@ def test_cli_resume_missing_receipt_never_reexecutes_or_calls_provider(tmp_path,
         async def stream(self, request):
             raise AssertionError('an unknown receipt must not consume provider budget')
             yield
-    monkeypatch.setattr(routes, 'OpenAICompatibleModelAdapter', NoProvider)
+    monkeypatch.setattr(agent_route_runtime, 'OpenAICompatibleModelAdapter', NoProvider)
     result = CliRunner().invoke(app, ['agent', 'resume', '--project', str(tmp_path),
                                      '--session', session, '--turn', record.turn_id])
     assert result.exit_code != 0
@@ -270,7 +271,7 @@ def test_incomplete_recording_is_not_a_successful_cli_journal(tmp_path, monkeypa
     project.mkdir()
     journal = tmp_path / 'journal'
     journal.mkdir()
-    monkeypatch.setattr(routes, 'load_llm_config', _config)
+    monkeypatch.setattr(agent_route_runtime, 'load_llm_config', _config)
     monkeypatch.setattr(cli_agent, 'OpenAICompatibleModelAdapter', TruncatedAdapter)
     result = CliRunner().invoke(app, ['agent', 'run', '--project', str(project),
                                      '--prompt', 'Inspect.', '--record-journal', str(journal)])

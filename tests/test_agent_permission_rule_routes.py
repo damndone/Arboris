@@ -1,4 +1,6 @@
 """A broken permission document must never become an unrestricted document."""
+from workbench.http import agent_turn_routes
+from workbench.http import agent_route_permissions, agent_route_runtime
 
 from pathlib import Path
 
@@ -23,7 +25,7 @@ def test_invalid_rules_stop_before_provider_or_session_mutation(tmp_path, monkey
 
     project = tmp_path / "project"
     project.mkdir()
-    monkeypatch.setattr(routes, "load_llm_config", _config)
+    monkeypatch.setattr(agent_route_runtime, "load_llm_config", _config)
     with TestClient(app, base_url="http://127.0.0.1", raise_server_exceptions=False) as client:
         session = _session(client, project)
         directory = project / "workbench" / "agent-sessions"
@@ -32,8 +34,8 @@ def test_invalid_rules_stop_before_provider_or_session_mutation(tmp_path, monkey
 
         def must_not_run(*args, **kwargs):
             raise AssertionError("invalid permissions must stop before provider setup or outcome writes")
-        monkeypatch.setattr(routes, "load_llm_config", must_not_run)
-        monkeypatch.setattr(routes, "_tell_agent_finished_outcomes", must_not_run)
+        monkeypatch.setattr(agent_route_runtime, "load_llm_config", must_not_run)
+        monkeypatch.setattr(agent_turn_routes, "_tell_agent_finished_outcomes", must_not_run)
         body = {"execution_mode": "auto"}
         if endpoint == "turns":
             body["question"] = "Do not record or execute this request."
@@ -51,12 +53,12 @@ def test_missing_permissions_are_empty_but_unreadable_or_non_file_are_errors(tmp
     from workbench.agent.permissions import Rules
     from workbench.http import agent_routes as routes
 
-    assert routes._project_permission_rules(tmp_path) == Rules()
+    assert agent_route_permissions._project_permission_rules(tmp_path) == Rules()
     path = tmp_path / "workbench" / "agent-permissions.json"
     path.parent.mkdir()
     path.mkdir()
     with pytest.raises(WorkbenchAPIError) as directory:
-        routes._project_permission_rules(tmp_path)
+        agent_route_permissions._project_permission_rules(tmp_path)
     assert directory.value.code == "AGENT_PERMISSION_RULES_INVALID"
     # Use a separate regular file and injected I/O error rather than relying
     # on platform-specific chmod semantics for the current test account.
@@ -71,5 +73,5 @@ def test_missing_permissions_are_empty_but_unreadable_or_non_file_are_errors(tmp
         return original(self, *args, **kwargs)
     monkeypatch.setattr(Path, "read_text", deny_read)
     with pytest.raises(WorkbenchAPIError) as unreadable:
-        routes._project_permission_rules(other)
+        agent_route_permissions._project_permission_rules(other)
     assert unreadable.value.code == "AGENT_PERMISSION_RULES_INVALID"

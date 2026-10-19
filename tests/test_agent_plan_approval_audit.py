@@ -1,4 +1,5 @@
 """Public plan approval fixes exact criteria before granting plan authority."""
+from workbench.http import agent_route_runtime
 
 import json
 from pathlib import Path
@@ -18,7 +19,7 @@ def _fixture(tmp_path, monkeypatch):
     from workbench.http import agent_routes
     root = tmp_path / 'project'
     root.mkdir()
-    monkeypatch.setattr(agent_routes, 'load_llm_config', _config)
+    monkeypatch.setattr(agent_route_runtime, 'load_llm_config', _config)
     client = TestClient(app, base_url='http://127.0.0.1', raise_server_exceptions=False)
     session = _session(client, root)
     store = plans.PlanStore(root / 'workbench')
@@ -28,8 +29,8 @@ def _fixture(tmp_path, monkeypatch):
     store.save(session, draft)
     def no_provider(*args, **kwargs):
         raise AssertionError('Approval never initializes or calls a provider')
-    monkeypatch.setattr(agent_routes, 'load_llm_config', no_provider)
-    monkeypatch.setattr(agent_routes, 'OpenAICompatibleModelAdapter', no_provider)
+    monkeypatch.setattr(agent_route_runtime, 'load_llm_config', no_provider)
+    monkeypatch.setattr(agent_route_runtime, 'OpenAICompatibleModelAdapter', no_provider)
     def approve(version=draft.version):
         return client.post(f'/agent/sessions/{session}/plan/approve',
                            params={'project_root': str(root)}, json={'version': version})

@@ -8,14 +8,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from ..agent.conversations import list_conversations, summary
 from ..agent.session import JsonlSessionRepository, SessionHasBranchesError
 from ..api_errors import WorkbenchAPIError
-from .agent_routes import (
-    _ACTIVE_TURNS,
-    _RESERVED_TURNS,
-    _TURN_RESERVATION_LOCK,
-    _active_turn_key,
-    _get_session,
-    _project_root,
-)
+from .agent_route_runtime import _ACTIVE_TURNS, _RESERVED_TURNS, _TURN_RESERVATION_LOCK
+from ..agent.turn_runtime import active_turn_key as _active_turn_key
+from .agent_route_context import _get_session, _project_root
 from .responses.agent import AgentConversation, AgentConversationDeleted, AgentConversations
 from .typed_routes import TypedAPIRoute
 

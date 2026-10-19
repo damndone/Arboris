@@ -1,0 +1,282 @@
+"""orchestration proposals: methods over the existing shared state."""
+from __future__ import annotations
+import json
+from pathlib import Path
+from typing import Any, Iterable
+from ..lineage.run_inputs import read_run_inputs
+from .chains import ChainStore
+from . import operation_requests
+from .operation_requests import OperationRequest, OperationReceipt
+from .operations import OperationRecord
+from .proposals import ProposalDecision, ProposalInvocation, ProposalRevision, ProposalStaleError
+from .tools import ToolVisibleError
+from .operation_handlers.proposal_arguments import _overrides_from_proposal_changes, _require_editable_rerun_target
+
+class OrchestrationProposals:
+    def _resolve_chain_head(
+        self,
+        chain_id: str,
+        requested_active_head_run_id: str | None,
+    ) -> str | None:
+        """Read a managed Chain head without breaking legacy/unit-only callers."""
+
+        try:
+            return ChainStore(self.repository.root, create=False).resolve_active_head(
+                chain_id,
+                requested_active_head_run_id=requested_active_head_run_id,
+            )
+        except KeyError:
+            return requested_active_head_run_id
+
+
+    def _preflight_model_rerun_declarations(
+        self, arguments: dict[str, Any], *, metadata_edit: bool = False
+    ) -> None:
+        """Refuse, before the user is asked, a rerun that cannot do what it says.
+
+        Execution applies the same shared check; running it here too means the
+        Agent hears the reason while it can still propose the right operation,
+        instead of the user confirming a proposal that is then refused.
+        """
+
+        from ..lineage.upload_store import verify_upload
+        from ..repository.run_repository import _resolve_run_root
+        from ..services.run_service import (
+            RerunDeclarationError,
+            reject_invalid_rerun_declarations,
+        )
+
+        project_root = getattr(self.context_provider, "project_root", None)
+        run_id = (arguments.get("target") or {}).get("run_id")
+        if project_root is None or not isinstance(run_id, str) or not run_id:
+            return
+        try:
+            run_root = _resolve_run_root(str(project_root), run_id)
+        except Exception:
+            return
+        _require_editable_rerun_target(run_root, run_id, arguments)
+        try:
+            inputs = read_run_inputs(run_root)
+            upload_bytes = verify_upload(
+                Path(project_root), str((inputs.get("upload") or {}).get("sha256") or "")
+            ).read_bytes()
+        except Exception:
+            # Unreadable inputs are execution's to report, with its own codes.
+            return
+        try:
+            reject_invalid_rerun_declarations(
+                inputs["form"],
+                _overrides_from_proposal_changes(dict(arguments.get("changes") or {})),
+                upload_bytes,
+                str((inputs.get("upload") or {}).get("filename") or ""),
+                metadata_edit=metadata_edit,
+            )
+        except RerunDeclarationError as exc:
+            from .tools import ToolVisibleError
+
+            # A plain ValueError reaches the model as its type name only; this
+            # message is what lets the Agent re-plan.
+            raise ToolVisibleError(f"{exc.code}: {exc}") from exc
+
+
+    def create_proposal(
+        self,
+        *,
+        chain_id: str,
+        operation_id: str,
+        target: dict[str, Any],
+        preconditions: dict[str, Any],
+        changes: dict[str, Any],
+        evidence_refs: Iterable[str],
+        expected_effect: Iterable[str],
+        risks: Iterable[str],
+        operation_version: str = "v1",
+        command_id: str | None = None,
+        proposal_id: str | None = None,
+        session_id: str | None = None,
+    ) -> ProposalRevision:
+        # Deterministic UI actions need a durable Chain identity, not an LLM.
+        # The session is server-selected and must satisfy the same scope check
+        # used by register_chain before any proposal or event is persisted.
+        """Compatibility adapter for callers with the original proposal fields."""
+
+        return self.admit_operation_request(
+            OperationRequest(
+                operation_id=operation_id,
+                operation_version=operation_version,
+                target=target,
+                preconditions=preconditions,
+                changes=changes,
+                evidence_refs=evidence_refs,
+                expected_effect=expected_effect,
+                risks=risks,
+            ),
+            chain_id=chain_id,
+            session_id=session_id,
+            command_id=command_id,
+            proposal_id=proposal_id,
+        ).proposal
+
+
+    def admit_operation_request(
+        self,
+        request: OperationRequest,
+        *,
+        chain_id: str,
+        session_id: str | None = None,
+        command_id: str | None = None,
+        proposal_id: str | None = None,
+        invocation: ProposalInvocation | None = None,
+    ) -> OperationReceipt:
+        """Admit a typed request under a server-selected Chain session."""
+
+        if session_id is None:
+            session_id, _agent = self._chain(chain_id)
+        return operation_requests.admit(
+            request,
+            chain_id=chain_id,
+            session_id=session_id,
+            command_id=command_id,
+            proposal_id=proposal_id,
+            repository=self.repository,
+            operation_registry=self.operation_registry,
+            proposal_store=self.proposal_store,
+            events=self.events,
+            invocation=invocation,
+        )
+
+
+    def revise_proposal(
+        self,
+        proposal_id: str,
+        *,
+        base_revision: int,
+        changes: dict[str, Any],
+        expected_effect: Iterable[str] | None = None,
+        risks: Iterable[str] | None = None,
+    ) -> ProposalRevision:
+        latest = self.proposal_store.latest_revision(proposal_id)
+        definition = self.operation_registry.require(
+            latest.operation_id,
+            latest.operation_version,
+        )
+        definition.validate(
+            target=latest.target,
+            preconditions=latest.preconditions,
+            changes=changes,
+        )
+        revised = self.proposal_store.revise(
+            proposal_id,
+            base_revision=base_revision,
+            changes=changes,
+            expected_effect=expected_effect,
+            risks=risks,
+        )
+        self.repository.append(
+            revised.session_id,
+            "custom_message",
+            {
+                "message_type": "operation_proposal_revision",
+                "audience": "model",
+                "content": json.dumps(revised.to_dict(), ensure_ascii=False, sort_keys=True),
+                "proposal": revised.to_dict(),
+            },
+        )
+        self.events.emit(
+            revised.session_id,
+            "proposal_revision",
+            revised.to_dict(),
+            command_id=revised.command_id,
+        )
+        return revised
+
+
+    def decline_proposal(
+        self,
+        proposal_id: str,
+        *,
+        actor_type: str,
+        reason: str | None = None,
+    ) -> ProposalDecision:
+        decision = self.proposal_store.decline(
+            proposal_id,
+            actor_type=actor_type,
+            reason=reason,
+        )
+        self.repository.append(
+            decision.session_id,
+            "custom_message",
+            {
+                "message_type": "operation_proposal_declined",
+                "audience": "model",
+                "content": json.dumps(decision.to_dict(), ensure_ascii=False, sort_keys=True),
+                "proposal_id": decision.proposal_id,
+                "decision": decision.to_dict(),
+            },
+        )
+        self.events.emit(
+            decision.session_id,
+            "proposal_declined",
+            decision.to_dict(),
+            command_id=decision.command_id,
+        )
+        return decision
+
+
+    def confirm_proposal(
+        self,
+        proposal_id: str,
+        *,
+        revision: int,
+        fingerprint: str,
+        actor_type: str,
+        current_context_fingerprint: str | None,
+        current_active_head_run_id: str | None,
+    ) -> OperationRecord:
+        latest = self.proposal_store.latest_revision(proposal_id)
+        try:
+            confirmation = self.proposal_store.confirm(
+                proposal_id,
+                revision=revision,
+                fingerprint=fingerprint,
+                actor_type=actor_type,
+                current_context_fingerprint=current_context_fingerprint,
+                current_active_head_run_id=current_active_head_run_id,
+            )
+        except ProposalStaleError:
+            self.events.emit(
+                latest.session_id,
+                "proposal_stale",
+                {"proposal_id": proposal_id, "revision": revision},
+                command_id=latest.command_id,
+            )
+            raise
+
+        record = self.operation_store.create_pending(
+            confirmation,
+            command_id=confirmation.command_id,
+        )
+        self.repository.append(
+            confirmation.session_id,
+            "custom_message",
+            {
+                "message_type": "operation_confirmation",
+                "audience": "model",
+                "content": json.dumps(confirmation.to_dict(), ensure_ascii=False, sort_keys=True),
+                "confirmation": confirmation.to_dict(),
+                "operation_record_id": record.record_id,
+            },
+        )
+        self.events.emit(
+            confirmation.session_id,
+            "proposal_confirmed",
+            {
+                "proposal_id": confirmation.proposal_id,
+                "revision": confirmation.revision,
+                "fingerprint": confirmation.fingerprint,
+                "operation_record_id": record.record_id,
+            },
+            command_id=confirmation.command_id,
+        )
+        return record
+

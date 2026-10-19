@@ -611,7 +611,7 @@ def test_submitted_child_is_reconciled_before_operation_completion(
             )()
 
     monkeypatch.setattr(
-        "workbench.agent.orchestrator.RerunService", CompletedRerunService
+        "workbench.agent.orchestration_reruns.RerunService", CompletedRerunService
     )
     orchestrator = make_orchestrator(tmp_path)
     kwargs = proposal_kwargs()
@@ -687,7 +687,7 @@ def test_reconciled_child_failure_marks_operation_and_branch_failed(
             )()
 
     monkeypatch.setattr(
-        "workbench.agent.orchestrator.RerunService", FailedRerunService
+        "workbench.agent.orchestration_reruns.RerunService", FailedRerunService
     )
     orchestrator = make_orchestrator(tmp_path)
     proposal = orchestrator.create_proposal(**proposal_kwargs())
@@ -746,7 +746,7 @@ def test_recover_operations_reconciles_interrupted_child_without_resubmitting(
             )()
 
     monkeypatch.setattr(
-        "workbench.agent.orchestrator.RerunService", CompletedRerunService
+        "workbench.agent.orchestration_reruns.RerunService", CompletedRerunService
     )
     orchestrator = make_orchestrator(tmp_path)
     proposal = orchestrator.create_proposal(**proposal_kwargs())
@@ -972,7 +972,7 @@ def test_model_rerun_executor_adapts_proposal_changes_and_provenance(
             return type("Result", (), {"run_id": "run-child", "status": "running"})()
 
     monkeypatch.setattr(
-        "workbench.agent.orchestrator.RerunService", RecordingRerunService
+        "workbench.agent.orchestration_reruns.RerunService", RecordingRerunService
     )
     orchestrator = make_orchestrator(tmp_path)
     executor = orchestrator.model_rerun_executor(tmp_path / "project")

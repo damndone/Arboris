@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 
 from workbench.agent.operations import OperationRegistry
 from workbench.contracts.common.errors import OperationValidationError
-from workbench.agent.orchestrator import _overrides_from_proposal_changes
+from workbench.agent.operation_handlers.proposal_arguments import _overrides_from_proposal_changes
 from workbench.analysis_loop.adapters import AnalysisLoopAdapter, AnalysisLoopAdapterRegistry
 from workbench.analysis_loop.compare import ComparePacket
 from workbench.artifacts import read_json

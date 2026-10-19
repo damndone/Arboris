@@ -1,5 +1,6 @@
 """Headless Agent uses the same core, events and refusal path as HTTP."""
 from __future__ import annotations
+from workbench.http import agent_analysis_routes, agent_route_runtime
 
 import json
 
@@ -12,8 +13,8 @@ from workbench.cli import app
 
 def test_headless_agent_persists_and_streams_the_server_events(tmp_path, monkeypatch):
     from workbench.http import agent_routes
-    monkeypatch.setattr(agent_routes, 'load_llm_config', _config)
-    monkeypatch.setattr(agent_routes, 'OpenAICompatibleModelAdapter', FakeAgentAdapter)
+    monkeypatch.setattr(agent_route_runtime, 'load_llm_config', _config)
+    monkeypatch.setattr(agent_route_runtime, 'OpenAICompatibleModelAdapter', FakeAgentAdapter)
     project = tmp_path / 'project'
     project.mkdir()
     event_file = tmp_path / 'events.jsonl'
@@ -63,8 +64,8 @@ def test_headless_returns_pending_approval_without_confirming_it(tmp_path, monke
     fixture = _Fixture(tmp_path)
     pending = fixture.propose([_recode()])
     assert pending['requires_confirmation'] is True
-    monkeypatch.setattr(agent_routes, 'load_llm_config', _config)
-    monkeypatch.setattr(agent_routes, 'OpenAICompatibleModelAdapter', FakeAgentAdapter)
+    monkeypatch.setattr(agent_route_runtime, 'load_llm_config', _config)
+    monkeypatch.setattr(agent_route_runtime, 'OpenAICompatibleModelAdapter', FakeAgentAdapter)
     result = CliRunner().invoke(app, ['agent', 'run', '--project', str(fixture.project_root),
                                      '--session', 'chain-session', '--prompt', 'Inspect.', '--mode', mode])
     assert result.exit_code == 3, result.output
@@ -84,8 +85,8 @@ def test_headless_does_not_report_an_unapproved_auto_plan_as_done(tmp_path, monk
     plan = plans.merge(None, question='q', criteria=['c'], budget=None, allowed_classes=None,
                        steps=(plans.PlanStep('fit', 'Fit model', ('model.genesis',)),))
     fixture.orchestrator.plan_store.save('chain-session', plan)
-    monkeypatch.setattr(agent_routes, 'load_llm_config', _config)
-    monkeypatch.setattr(agent_routes, 'OpenAICompatibleModelAdapter', FakeAgentAdapter)
+    monkeypatch.setattr(agent_route_runtime, 'load_llm_config', _config)
+    monkeypatch.setattr(agent_route_runtime, 'OpenAICompatibleModelAdapter', FakeAgentAdapter)
     result = CliRunner().invoke(app, ['agent', 'run', '--project', str(fixture.project_root),
                                      '--session', 'chain-session', '--prompt', 'Inspect.', '--mode', 'auto'])
     assert result.exit_code == 3, result.output
@@ -107,8 +108,8 @@ def test_headless_plan_approval_checks_version_without_provider_calls(tmp_path, 
     def no_provider(*args, **kwargs):
         raise AssertionError('Explicit plan approval must not load or call a provider')
 
-    monkeypatch.setattr(agent_routes, 'load_llm_config', no_provider)
-    monkeypatch.setattr(agent_routes, 'OpenAICompatibleModelAdapter', no_provider)
+    monkeypatch.setattr(agent_route_runtime, 'load_llm_config', no_provider)
+    monkeypatch.setattr(agent_route_runtime, 'OpenAICompatibleModelAdapter', no_provider)
     arguments = ['agent', 'plan-approve', '--project', str(fixture.project_root), '--session', 'chain-session']
     stale = CliRunner().invoke(app, [*arguments, '--version', str(plan.version + 1)])
     assert stale.exit_code != 0
@@ -124,8 +125,8 @@ def test_headless_plan_approval_checks_version_without_provider_calls(tmp_path, 
 
 def test_headless_continue_streams_events_and_uses_the_server_continuation_note(tmp_path, monkeypatch):
     from workbench.http import agent_routes
-    monkeypatch.setattr(agent_routes, 'load_llm_config', _config)
-    monkeypatch.setattr(agent_routes, 'OpenAICompatibleModelAdapter', FakeAgentAdapter)
+    monkeypatch.setattr(agent_route_runtime, 'load_llm_config', _config)
+    monkeypatch.setattr(agent_route_runtime, 'OpenAICompatibleModelAdapter', FakeAgentAdapter)
     project = tmp_path / 'project'
     project.mkdir()
     runner = CliRunner()
@@ -155,8 +156,8 @@ def test_headless_continue_keeps_pending_cards_unconfirmed(tmp_path, monkeypatch
     from workbench.http import agent_routes
     fixture = _Fixture(tmp_path)
     pending = fixture.propose([_recode()])
-    monkeypatch.setattr(agent_routes, 'load_llm_config', _config)
-    monkeypatch.setattr(agent_routes, 'OpenAICompatibleModelAdapter', FakeAgentAdapter)
+    monkeypatch.setattr(agent_route_runtime, 'load_llm_config', _config)
+    monkeypatch.setattr(agent_route_runtime, 'OpenAICompatibleModelAdapter', FakeAgentAdapter)
     result = CliRunner().invoke(app, ['agent', 'continue', '--project', str(fixture.project_root),
                                      '--session', 'chain-session', '--mode', mode])
     assert result.exit_code == 3, result.output
@@ -175,8 +176,8 @@ def test_headless_continue_does_not_approve_an_auto_plan(tmp_path, monkeypatch):
     plan = plans.merge(None, question='q', criteria=['c'], budget=None, allowed_classes=None,
                        steps=(plans.PlanStep('fit', 'Fit model', ('model.genesis',)),))
     fixture.orchestrator.plan_store.save('chain-session', plan)
-    monkeypatch.setattr(agent_routes, 'load_llm_config', _config)
-    monkeypatch.setattr(agent_routes, 'OpenAICompatibleModelAdapter', FakeAgentAdapter)
+    monkeypatch.setattr(agent_route_runtime, 'load_llm_config', _config)
+    monkeypatch.setattr(agent_route_runtime, 'OpenAICompatibleModelAdapter', FakeAgentAdapter)
     result = CliRunner().invoke(app, ['agent', 'continue', '--project', str(fixture.project_root),
                                      '--session', 'chain-session', '--mode', 'auto'])
     assert result.exit_code == 3, result.output
@@ -196,8 +197,8 @@ def test_headless_continue_retains_project_permission_denials(tmp_path, monkeypa
                                       'evidence_refs', 'expected_effect', 'risks')
     }
     (fixture.project_root / 'workbench/agent-permissions.json').write_text(json.dumps({'deny': [{'class': 'derive'}]}))
-    monkeypatch.setattr(agent_routes, 'load_llm_config', _config)
-    monkeypatch.setattr(agent_routes, 'OpenAICompatibleModelAdapter', ProposingAdapter)
+    monkeypatch.setattr(agent_route_runtime, 'load_llm_config', _config)
+    monkeypatch.setattr(agent_route_runtime, 'OpenAICompatibleModelAdapter', ProposingAdapter)
     result = CliRunner().invoke(app, ['agent', 'continue', '--project', str(fixture.project_root),
                                      '--session', 'chain-session', '--mode', 'auto'])
     assert result.exit_code == 3, result.output
@@ -256,9 +257,9 @@ def test_broken_event_sink_drains_original_owned_turn_despite_repeated_cancellat
                     })
                 yield ModelStreamEvent.done(request.request_id, 'tool_calls' if blocked_at == 'tool' else 'stop')
 
-        monkeypatch.setattr(routes, 'load_llm_config', lambda: replace(_config(), context_window_tokens=128_000))
-        monkeypatch.setattr(routes, 'OpenAICompatibleModelAdapter', BlockingProvider)
-        monkeypatch.setattr(routes.NodeOperationContextProvider, 'tool_definitions', lambda *args, **kwargs: [
+        monkeypatch.setattr(agent_route_runtime, 'load_llm_config', lambda: replace(_config(), context_window_tokens=128_000))
+        monkeypatch.setattr(agent_route_runtime, 'OpenAICompatibleModelAdapter', BlockingProvider)
+        monkeypatch.setattr(agent_analysis_routes.NodeOperationContextProvider, 'tool_definitions', lambda *args, **kwargs: [
             ToolDefinition('inspect_blocking', 'v1', {'type': 'object'}, 'none', blocking_inspection),
         ])
         project = tmp_path / 'project'

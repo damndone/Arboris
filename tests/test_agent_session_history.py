@@ -6,6 +6,7 @@ conversation up to a message; chapters are named messages to jump to.
 """
 
 from __future__ import annotations
+from workbench.http import agent_route_runtime
 
 from pathlib import Path
 
@@ -20,8 +21,8 @@ from workbench.app import app
 def conversation(tmp_path: Path, monkeypatch):
     from workbench.http import agent_routes
 
-    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
-    monkeypatch.setattr(agent_routes, "OpenAICompatibleModelAdapter", FakeAgentAdapter)
+    monkeypatch.setattr(agent_route_runtime, "load_llm_config", _config)
+    monkeypatch.setattr(agent_route_runtime, "OpenAICompatibleModelAdapter", FakeAgentAdapter)
     project_root = tmp_path / "project"
     project_root.mkdir()
     params = {"project_root": str(project_root)}

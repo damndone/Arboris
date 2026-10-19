@@ -1,4 +1,5 @@
 from __future__ import annotations
+from workbench.http import agent_analysis_routes, agent_route_runtime, agent_route_proposals, agent_operation_routes
 
 import asyncio
 import json
@@ -362,7 +363,7 @@ def test_analysis_loop_proposal_route_resolves_persisted_source_without_executio
     def no_provider(*args, **kwargs):
         raise AssertionError("Manual analysis loop must not construct a provider")
 
-    monkeypatch.setattr(agent_routes, "OpenAICompatibleModelAdapter", no_provider)
+    monkeypatch.setattr(agent_route_runtime, "OpenAICompatibleModelAdapter", no_provider)
     project_root = tmp_path / "project"
     project_root.mkdir()
     _write_source(project_root)
@@ -387,7 +388,9 @@ def test_analysis_loop_proposal_route_resolves_persisted_source_without_executio
         def tool_definitions(self, **_kwargs):
             return []
 
-    monkeypatch.setattr(agent_routes, "NodeOperationContextProvider", FakeProvider)
+    monkeypatch.setattr(agent_analysis_routes, "NodeOperationContextProvider", FakeProvider)
+    monkeypatch.setattr(agent_route_proposals, "NodeOperationContextProvider", FakeProvider)
+    monkeypatch.setattr(agent_operation_routes, "NodeOperationContextProvider", FakeProvider)
     with TestClient(app) as client:
         session_id = _create_session(client, project_root)
         response = client.post(
@@ -458,7 +461,9 @@ def test_analysis_loop_confirmation_rejects_tampered_canonical_payload(
         def tool_definitions(self, **_kwargs):
             return []
 
-    monkeypatch.setattr(agent_routes, "NodeOperationContextProvider", FakeProvider)
+    monkeypatch.setattr(agent_analysis_routes, "NodeOperationContextProvider", FakeProvider)
+    monkeypatch.setattr(agent_route_proposals, "NodeOperationContextProvider", FakeProvider)
+    monkeypatch.setattr(agent_operation_routes, "NodeOperationContextProvider", FakeProvider)
     with TestClient(app) as client:
         session_id = _create_session(client, project_root)
         created = client.post(

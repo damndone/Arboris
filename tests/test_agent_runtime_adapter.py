@@ -1,5 +1,6 @@
 """Headless adapter overrides are explicit, isolated, and fail closed offline."""
 from __future__ import annotations
+from workbench.http import agent_route_runtime, agent_turn_routes
 
 import asyncio
 from dataclasses import replace
@@ -13,6 +14,7 @@ from pydantic import ValidationError
 
 from tests.test_agent_routes import FakeAgentAdapter, _config
 from workbench.agent.model import ModelStreamEvent
+from workbench.agent.events import AgentEventStream
 from workbench.agent.model_replay import RecordingAdapter, ReplayAdapter
 from workbench.agent.session import JsonlSessionRepository
 from workbench.http import agent_routes as routes
@@ -40,8 +42,8 @@ def _empty_replay(tmp_path):
 
 def test_route_defaults_preserve_live_monkeypatch_aliases(monkeypatch):
     api=_api();config=_config();seen=[]
-    monkeypatch.setattr(routes,'load_llm_config',lambda:config)
-    monkeypatch.setattr(routes,'OpenAICompatibleModelAdapter',lambda value:seen.append(value) or FakeAgentAdapter(value))
+    monkeypatch.setattr(agent_route_runtime,'load_llm_config',lambda:config)
+    monkeypatch.setattr(agent_route_runtime,'OpenAICompatibleModelAdapter',lambda value:seen.append(value) or FakeAgentAdapter(value))
     assert routes._agent_llm_config() is config
     assert routes._agent_llm_configured(config)
     assert isinstance(routes._agent_model_adapter(config),FakeAgentAdapter)
@@ -50,7 +52,7 @@ def test_route_defaults_preserve_live_monkeypatch_aliases(monkeypatch):
 
 def test_record_scope_uses_default_config_and_one_adapter(monkeypatch):
     api=_api();config=_config();calls=[]
-    monkeypatch.setattr(routes,'load_llm_config',lambda:config)
+    monkeypatch.setattr(agent_route_runtime,'load_llm_config',lambda:config)
     with api.headless_runtime_scope(adapter_factory=lambda value:calls.append(value) or FakeAgentAdapter(value)):
         assert routes._agent_llm_config() is config
         adapter=routes._agent_model_adapter(config)
@@ -60,7 +62,7 @@ def test_record_scope_uses_default_config_and_one_adapter(monkeypatch):
 
 def test_runtime_scope_reaches_tool_threads_and_refuses_use_after_exit(monkeypatch):
     api=_api();config=_config()
-    monkeypatch.setattr(routes,'load_llm_config',_forbidden)
+    monkeypatch.setattr(agent_route_runtime,'load_llm_config',_forbidden)
     async def scenario():
         ready=asyncio.Event()
         async def delayed():
@@ -76,8 +78,8 @@ def test_runtime_scope_reaches_tool_threads_and_refuses_use_after_exit(monkeypat
 
 def test_parallel_runtime_scopes_have_distinct_configs_and_adapters(monkeypatch):
     api=_api()
-    monkeypatch.setattr(routes,'load_llm_config',_forbidden)
-    monkeypatch.setattr(routes,'OpenAICompatibleModelAdapter',_forbidden)
+    monkeypatch.setattr(agent_route_runtime,'load_llm_config',_forbidden)
+    monkeypatch.setattr(agent_route_runtime,'OpenAICompatibleModelAdapter',_forbidden)
     async def one(model):
         config=replace(_config(),model=model)
         with api.headless_runtime_scope(adapter_factory=FakeAgentAdapter,config=config):
@@ -92,18 +94,18 @@ def test_parallel_runtime_scopes_have_distinct_configs_and_adapters(monkeypatch)
 
 def test_one_recording_runtime_rejects_configuration_drift(monkeypatch):
     api=_api();config=_config()
-    monkeypatch.setattr(routes,'load_llm_config',lambda:config)
+    monkeypatch.setattr(agent_route_runtime,'load_llm_config',lambda:config)
     with api.headless_runtime_scope(adapter_factory=FakeAgentAdapter):
         routes._agent_model_adapter(routes._agent_llm_config())
-        monkeypatch.setattr(routes,'load_llm_config',lambda:replace(config,model='changed'))
+        monkeypatch.setattr(agent_route_runtime,'load_llm_config',lambda:replace(config,model='changed'))
         with pytest.raises(api.RuntimeAdapterError,match='changed'):
             routes._agent_llm_config()
 
 
 def test_offline_scope_uses_explicit_keyless_config_and_exact_replay(tmp_path,monkeypatch):
     api=_api();replay=_empty_replay(tmp_path);config=replace(_config(),api_key='');calls=[]
-    monkeypatch.setattr(routes,'load_llm_config',_forbidden)
-    monkeypatch.setattr(routes,'OpenAICompatibleModelAdapter',_forbidden)
+    monkeypatch.setattr(agent_route_runtime,'load_llm_config',_forbidden)
+    monkeypatch.setattr(agent_route_runtime,'OpenAICompatibleModelAdapter',_forbidden)
     with api.headless_runtime_scope(adapter_factory=lambda value:calls.append(value) or replay,config=config,offline=True):
         assert routes._agent_llm_config() is config
         assert routes._agent_llm_configured(config)
@@ -118,7 +120,7 @@ def test_offline_scope_uses_explicit_keyless_config_and_exact_replay(tmp_path,mo
                                    {'model':' '}])
 def test_invalid_offline_config_is_rejected_without_loader_or_factory(changes,monkeypatch):
     api=_api()
-    monkeypatch.setattr(routes,'load_llm_config',_forbidden)
+    monkeypatch.setattr(agent_route_runtime,'load_llm_config',_forbidden)
     config=replace(_config(),api_key='',**changes) if changes and 'api_key' not in changes else (
         replace(_config(),**changes) if changes else None)
     with pytest.raises(api.RuntimeAdapterError) as error:
@@ -143,7 +145,7 @@ def test_offline_rejects_an_adapter_wrapper_or_subclass(tmp_path):
 
 def test_record_scope_cannot_override_a_missing_provider_key(tmp_path,monkeypatch):
     api=_api();config=replace(_config(),api_key='')
-    monkeypatch.setattr(routes,'load_llm_config',lambda:config)
+    monkeypatch.setattr(agent_route_runtime,'load_llm_config',lambda:config)
     root=tmp_path/'project';root.mkdir();repo=JsonlSessionRepository(root/'workbench')
     repo.create_session('s',chain_id='chain',role='chain')
     with api.headless_runtime_scope(adapter_factory=_forbidden):
@@ -163,15 +165,15 @@ def test_record_then_strict_headless_replay_without_current_config_or_upstream(t
     root=tmp_path/'project';root.mkdir()
     repo=JsonlSessionRepository(root/'workbench');repo.create_session('s',chain_id='chain',role='chain')
     initial=tmp_path/'initial';copytree(root,initial)
-    config=_config();monkeypatch.setattr(routes,'load_llm_config',lambda:config)
+    config=_config();monkeypatch.setattr(agent_route_runtime,'load_llm_config',lambda:config)
     record_dir=tmp_path/'recording';record_dir.mkdir()
     recorder=RecordingAdapter(FakeAgentAdapter(config),root=record_dir,name='provider.jsonl')
     with api.headless_runtime_scope(adapter_factory=lambda value:recorder):
         first=asyncio.run(run_headless(root,'Inspect.',session_id='s',on_event=lambda e:None))
     root.rename(tmp_path/'recorded-project');copytree(initial,root)
     replay=ReplayAdapter(root=record_dir,name='provider.jsonl')
-    monkeypatch.setattr(routes,'load_llm_config',_forbidden)
-    monkeypatch.setattr(routes,'OpenAICompatibleModelAdapter',_forbidden)
+    monkeypatch.setattr(agent_route_runtime,'load_llm_config',_forbidden)
+    monkeypatch.setattr(agent_route_runtime,'OpenAICompatibleModelAdapter',_forbidden)
     with api.headless_runtime_scope(adapter_factory=lambda value:replay,config=replace(config,api_key=''),offline=True):
         created=routes.create_agent_session(str(root),routes.AgentSessionCreateRequest(role='main'))
         assert 'api_key' not in json.dumps(created)
@@ -191,7 +193,7 @@ def test_active_durable_turn_is_rejected_before_any_turn_mutation(tmp_path,monke
     TurnStore(root).create('s',entry.entry_id,budget={'max_steps':5,'timeout_s':60})
     before=repo.get_metadata('s');before_entries=[e.to_dict() for e in repo.get_branch('s')]
     for name in ['_tell_agent_finished_outcomes','load_llm_config','OpenAICompatibleModelAdapter','_ensure_current_global_protocol']:
-        monkeypatch.setattr(routes,name,_forbidden)
+        monkeypatch.setattr(agent_route_runtime if name in {'load_llm_config','OpenAICompatibleModelAdapter'} else agent_turn_routes,name,_forbidden)
     with pytest.raises(Exception) as error:
         asyncio.run(routes.run_agent_turn('s',str(root),routes.AgentTurnRequest(question='New turn.',execution_mode='auto')))
     assert error.value.code=='AGENT_TURN_RECOVERY_REQUIRED' and error.value.status_code==409
@@ -206,19 +208,19 @@ def test_resume_keeps_checkpoint_context_and_passes_safe_runtime_identity(tmp_pa
     repo.update_metadata('s',execution_mode='ask')
     repo.append('s','message',{'role':'assistant','content':'Original response.'})
     before=repo.get_metadata('s');before_entries=[e.to_dict() for e in repo.get_branch('s')];seen=[]
-    original=routes.AgentCore
+    original=agent_turn_routes.AgentCore
     class CaptureCore(original):
         def __init__(self,*args,**kwargs): seen.append(kwargs);super().__init__(*args,**kwargs)
         async def resume(self,turn_id,**kwargs): assert turn_id=='original-turn';return 'Original response.'
-    monkeypatch.setattr(routes,'AgentCore',CaptureCore)
-    monkeypatch.setattr(routes,'load_llm_config',lambda:config)
-    monkeypatch.setattr(routes,'OpenAICompatibleModelAdapter',FakeAgentAdapter)
+    monkeypatch.setattr(agent_turn_routes,'AgentCore',CaptureCore)
+    monkeypatch.setattr(agent_route_runtime,'load_llm_config',lambda:config)
+    monkeypatch.setattr(agent_route_runtime,'OpenAICompatibleModelAdapter',FakeAgentAdapter)
     for name in ['_tell_agent_finished_outcomes','_ensure_current_global_protocol','_refresh_main_context']:
-        monkeypatch.setattr(routes,name,_forbidden)
+        monkeypatch.setattr(agent_route_runtime if name in {'load_llm_config','OpenAICompatibleModelAdapter'} else agent_turn_routes,name,_forbidden)
     key=routes._reserve_turn(root,'s')
     asyncio.run(routes.turn_registry.run_owned(key,lambda:routes._run_reserved_agent_turn(
         root,'s',routes.AgentContinueRequest(execution_mode='auto',context_packet={'new':'must not be injected'}),
-        repo,routes.AgentEventStream(root/'workbench'),before,key,resume_turn_id='original-turn')))
+        repo,AgentEventStream(root/'workbench'),before,key,resume_turn_id='original-turn')))
     assert repo.get_metadata('s')==before
     assert [e.to_dict() for e in repo.get_branch('s')]==before_entries
     identity=seen[0]['model_config_identity']

@@ -1,5 +1,6 @@
 """After a confirmed proposal runs, the Agent is told what it produced."""
 from __future__ import annotations
+from workbench.http import agent_operation_routes
 
 import json
 
@@ -78,7 +79,7 @@ def test_a_running_operation_is_told_again_when_it_finishes(tmp_path, monkeypatc
             assert record_id == "oprec_1"
             return type("R", (), {"to_dict": lambda self: RECORD})()
 
-    monkeypatch.setattr(agent_routes, "OperationRecordStore", Store)
+    monkeypatch.setattr(agent_operation_routes, "OperationRecordStore", Store)
     agent_routes._tell_agent_finished_outcomes(tmp_path, "agent_chain_s")
     second = repository.get_branch("agent_chain_s")[-1].payload["content"]
     assert "status completed" in second and "already existed in run(s) r2" in second
