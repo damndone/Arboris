@@ -1210,3 +1210,17 @@
   display: grid;
   gap: 2px;
 }
+
+.wb-agent-plan { box-sizing: border-box; flex: 0 1 auto; min-height: 0; max-height: 42%; overflow: auto; overscroll-behavior: contain; overflow-wrap: anywhere; margin: 10px 0; padding: 12px; border: 1px solid var(--separator, #d8d8d8); border-radius: 8px; font-size: 12px; color: var(--label); }
+.wb-agent-plan header, .wb-agent-plan__actions, .wb-agent-run-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.wb-agent-plan header { justify-content: space-between; }
+.wb-agent-plan__note, .wb-agent-plan li div, .wb-agent-plan small { color: var(--label-secondary); }
+.wb-agent-plan ol { padding-left: 22px; }
+.wb-agent-plan li { margin: 8px 0; }
+.wb-agent-plan label { display: block; margin: 8px 0; }
+.wb-agent-plan textarea, .wb-agent-plan input { box-sizing: border-box; width: 100%; padding: 6px; color: var(--label); background: var(--background, transparent); border: 1px solid var(--separator, #ccc); border-radius: 4px; font: inherit; }
+.wb-agent-plan textarea { min-height: 54px; resize: vertical; }
+.wb-agent-plan button, .wb-agent-run-controls button, .wb-agent-run-controls select { padding: 4px 7px; font: inherit; color: var(--label); background: var(--fill, transparent); border: 1px solid var(--separator, #ccc); border-radius: 4px; }
+.wb-agent-plan button:disabled, .wb-agent-run-controls button:disabled { opacity: .5; }
+.wb-agent-run-controls { padding: 6px 0; font-size: 11px; }
+.wb-agent-run-controls select { max-width: 100%; }

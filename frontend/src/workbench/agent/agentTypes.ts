@@ -24,3 +24,8 @@ export type AgentSessionCreateRequest = Schema<"AgentSessionCreateRequest">;
 
 /** What the client tells the Agent about the current view. */
 export type AgentContextPacket = Record<string, unknown>;
+
+export type AgentPlan = NonNullable<Schema<"AgentPlanResponse">["plan"]>;
+export type AgentPlanVersion = Schema<"AgentPlanResponse">["versions"][number];
+export type AgentPlanPatch = Schema<"AgentPlanPatchRequest">;
+export type AgentDurableTurn = Schema<"AgentTurnStateResponse">["turns"][number];

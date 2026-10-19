@@ -20,6 +20,7 @@ import { useForest } from "../ForestContext";
 import { useWorkbench } from "../WorkbenchStateProvider";
 import { useAgentNavigationOptional } from "./agentNavigation";
 import {
+  approveAgentPlan, getAgentPlan, patchAgentPlan, getAgentTurnState, continueAgentTurn, resumeAgentTurn, queueAgentTurnMessage,
   abortAgentTurn,
   createAgentSession,
   createAgentForkProposal,
@@ -41,6 +42,7 @@ import {
   sendAgentTurn,
 } from "./agentApi";
 import type {
+  AgentPlan, AgentPlanPatch, AgentPlanVersion, AgentDurableTurn,
   AgentChapter,
   AgentSession,
   AgentContextPacket,
@@ -183,6 +185,22 @@ function boundedGlobalProjectContext(
 }
 
 export interface AgentSurfaceContextValue {
+  executionMode?: "ask" | "auto";
+  setExecutionMode?: (mode: "ask" | "auto") => void;
+  plan?: AgentPlan | null;
+  planVersions?: AgentPlanVersion[];
+  planBusy?: boolean;
+  planError?: string | null;
+  refreshPlan?: () => Promise<void>;
+  savePlan?: (draft: AgentPlanPatch) => Promise<void>;
+  approvePlan?: (version: number) => Promise<void>;
+  approveAndRunPlan?: (version: number) => Promise<void>;
+  durableTurns?: AgentDurableTurn[];
+  continueTurn?: () => Promise<void>;
+  resumeTurn?: (turnId: string) => Promise<void>;
+  queueTurnMessage?: (kind: "steer" | "follow_up", text: string) => Promise<void>;
+  queueMessageBusy?: boolean;
+  queueMessageNotice?: string | null;
   messages: AgentMessage[];
   prompt: string;
   setPrompt: (value: string) => void;
@@ -306,6 +324,8 @@ export function AgentSurfaceProvider({
       return "";
     }
   });
+  const latestPromptRef = useRef(prompt);
+  latestPromptRef.current = prompt;
   const setPrompt = useCallback((value: string) => {
     setPromptState(value);
     try {
@@ -316,7 +336,21 @@ export function AgentSurfaceProvider({
     }
   }, [draftKey]);
   const [executionPolicy, setExecutionPolicy] = useState<"auto_read_only" | "proposal_only">("proposal_only");
+  const [executionMode, setExecutionMode] = useState<"ask"|"auto">("ask");
+  const [plan, setPlan] = useState<AgentPlan|null>(null);
+  const latestPlanRef = useRef(plan);
+  latestPlanRef.current = plan;
+  const [planVersions, setPlanVersions] = useState<AgentPlanVersion[]>([]);
+  const [planBusy, setPlanBusy] = useState(false);
+  const [planError, setPlanError] = useState<string|null>(null);
+  const [durableTurns, setDurableTurns] = useState<AgentDurableTurn[]>([]);
+  const [queueMessageBusy, setQueueMessageBusy] = useState(false);
+  const [queueMessageNotice, setQueueMessageNotice] = useState<string|null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const planReadRevisionRef = useRef(0);
+  const turnReadRevisionRef = useRef(0);
+  const currentSessionRef = useRef(sessionId);
+  currentSessionRef.current = sessionId;
   const [sessionStatus, setSessionStatus] = useState("idle");
   // How full the next request is, as the server builds it (tool results and
   // standing instructions included, earlier summarized parts not).
@@ -477,7 +511,11 @@ export function AgentSurfaceProvider({
     activeTurnSessionIdRef.current = null;
     activeScopeRef.current = sessionScope;
     optimisticMessageCounterRef.current = 0;
+    currentSessionRef.current = null;
+    planReadRevisionRef.current += 1;turnReadRevisionRef.current += 1;
     setSessionId(null);
+    setExecutionMode("ask");latestPlanRef.current=null;setPlan(null);setPlanVersions([]);setPlanError(null);setPlanBusy(false);
+    setDurableTurns([]);setQueueMessageNotice(null);setQueueMessageBusy(false);
     setMessages([]);
     setServerContext(null);
     setChapters([]);
@@ -507,6 +545,7 @@ export function AgentSurfaceProvider({
         setChapters(session.chapters ?? []);
         setProposals(session.proposals ?? []);
         setSessionStatus(session.status ?? "idle");
+        setExecutionMode(session.execution_mode ?? "ask");
         await refreshNavigation(session.session_id, sessionScope);
         if (linkedOperationId) {
           try {
@@ -543,12 +582,18 @@ export function AgentSurfaceProvider({
   }, [conversationVersion, linkedDiffFocused, linkedOperationId, linkedSessionId, projectRoot, refreshNavigation, replayEvents, sessionScope, storageKey]);
 
   useEffect(() => {
-    if (!sessionId || !isSubmitting) return;
+    if (!sessionId || (!isSubmitting && !["running","working","cancelling"].includes(sessionStatus))) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const poll = async () => {
       try {
         await replayEvents(sessionId, eventCursor, sessionScope);
+        if (!isSubmitting) {
+          const result = await getAgentSession(projectRoot, sessionId);
+          if (!cancelled && currentSessionRef.current === sessionId && activeScopeRef.current === sessionScope) {
+            setMessages(result.messages);setProposals(result.proposals ?? []);setSessionStatus(result.status ?? "idle");
+          }
+        }
       } catch {
         // The request-response turn remains authoritative if polling fails.
       }
@@ -559,7 +604,7 @@ export function AgentSurfaceProvider({
       cancelled = true;
       if (timer !== undefined) clearTimeout(timer);
     };
-  }, [eventCursor, isSubmitting, replayEvents, sessionId, sessionScope]);
+  }, [eventCursor, isSubmitting, replayEvents, sessionId, sessionScope, sessionStatus, projectRoot]);
 
   useEffect(() => {
     let cancelled = false;
@@ -656,9 +701,123 @@ export function AgentSurfaceProvider({
     }
   }, [activeProvider, llmConfig?.model]);
 
+  const latestAdmissionRef = useRef({isSubmitting, sessionStatus, durableTurns, executionMode});
+  latestAdmissionRef.current = {isSubmitting, sessionStatus, durableTurns, executionMode};
+
+  const refreshPlan = useCallback(async () => {
+    if (!sessionId || activeScopeRef.current !== sessionScope) return;
+    const scope = sessionScope;
+    const revision = ++planReadRevisionRef.current;
+    try {
+      const result = await getAgentPlan(projectRoot, sessionId);
+      if (activeScopeRef.current !== scope || currentSessionRef.current !== sessionId || revision !== planReadRevisionRef.current) return;
+      latestPlanRef.current=result.plan;setPlan(result.plan);setPlanVersions(result.versions);setPlanError(null);
+    } catch (reason) {
+      if (activeScopeRef.current === scope && currentSessionRef.current === sessionId && revision === planReadRevisionRef.current) setPlanError(reason instanceof Error ? reason.message : "Could not load plan.");
+    }
+  }, [projectRoot,sessionId,sessionScope]);
+  const refreshTurnState = useCallback(async () => {
+    if (!sessionId || activeScopeRef.current !== sessionScope) return;
+    const scope = sessionScope;
+    const revision = ++turnReadRevisionRef.current;
+    try {
+      const result = await getAgentTurnState(projectRoot,sessionId);
+      if (activeScopeRef.current === scope && currentSessionRef.current === sessionId && revision === turnReadRevisionRef.current) setDurableTurns(result.turns);
+    } catch (reason) {
+      if (activeScopeRef.current === scope && currentSessionRef.current === sessionId && revision === turnReadRevisionRef.current) setError(reason instanceof Error ? reason.message : "Could not load turn recovery state.");
+    }
+  }, [projectRoot,sessionId,sessionScope]);
+  useEffect(() => { void refreshPlan();void refreshTurnState(); }, [refreshPlan,refreshTurnState,eventCursor,isSubmitting]);
+  const savePlan = useCallback(async (draft: AgentPlanPatch) => {
+    if (!sessionId || planBusy) return;
+    const scope = sessionScope;
+    planReadRevisionRef.current += 1;
+    setPlanBusy(true);setPlanError(null);
+    try {
+      const result = await patchAgentPlan(projectRoot,sessionId,draft);
+      if (activeScopeRef.current === scope && currentSessionRef.current === sessionId) {latestPlanRef.current=result.plan;setPlan(result.plan);await refreshPlan();}
+    } finally { if (activeScopeRef.current === scope && currentSessionRef.current === sessionId) setPlanBusy(false); }
+  }, [projectRoot,sessionId,sessionScope,planBusy,refreshPlan]);
+  const approvePlanVersion = useCallback(async (version: number): Promise<AgentPlan | null> => {
+    if (!sessionId || planBusy) return null;
+    const scope = sessionScope;
+    planReadRevisionRef.current += 1;
+    setPlanBusy(true);setPlanError(null);
+    try {
+      const result = await approveAgentPlan(projectRoot,sessionId,version);
+      if (activeScopeRef.current !== scope || currentSessionRef.current !== sessionId) return null;
+      latestPlanRef.current=result.plan;setPlan(result.plan);
+      await refreshPlan();
+      return result.plan;
+    } catch (reason) {
+      if (activeScopeRef.current === scope && currentSessionRef.current === sessionId) setPlanError(reason instanceof Error ? reason.message : "Could not approve plan.");
+      return null;
+    } finally { if (activeScopeRef.current === scope && currentSessionRef.current === sessionId) setPlanBusy(false); }
+  }, [projectRoot,sessionId,sessionScope,planBusy,refreshPlan]);
+  const approvePlan = useCallback(async (version: number) => { await approvePlanVersion(version); }, [approvePlanVersion]);
+  const queueTurnMessage = useCallback(async (kind: "steer"|"follow_up", text: string) => {
+    if (!sessionId || !text.trim() || queueMessageBusy || activeScopeRef.current !== sessionScope) return;
+    const scope = sessionScope;
+    setQueueMessageBusy(true);setQueueMessageNotice(null);
+    try {
+      await queueAgentTurnMessage(projectRoot,sessionId,kind,text.trim());
+      if (activeScopeRef.current === scope && currentSessionRef.current === sessionId) {if (latestPromptRef.current === text) setPrompt("");setQueueMessageNotice(kind === "steer" ? "Direction queued for the next tool boundary." : "Follow-up queued after this turn.");}
+    } catch(reason) {
+      if (activeScopeRef.current === scope && currentSessionRef.current === sessionId) setError(reason instanceof Error ? reason.message : "Could not queue message.");
+    } finally {if (activeScopeRef.current === scope && currentSessionRef.current === sessionId) setQueueMessageBusy(false);}
+  }, [projectRoot,sessionId,sessionScope,queueMessageBusy,setPrompt]);
+  const runContinuation = useCallback(async (turnId?: string) => {
+    if (!sessionId || isSubmitting || activeTurnControllerRef.current) return;
+    if (!turnId && (["running","working","cancelling"].includes(sessionStatus) || durableTurns.length)) return;
+    const scope = sessionScope;
+    if (activeScopeRef.current !== scope) return;
+    const controller = new AbortController();
+    activeTurnControllerRef.current=controller;activeTurnSessionIdRef.current=sessionId;
+    setIsSubmitting(true);setActiveTurnStartedAt(Date.now());setError(null);
+    try {
+      const result = turnId ? await resumeAgentTurn(projectRoot,sessionId,turnId,controller.signal) : await continueAgentTurn(projectRoot,sessionId,{
+        execution_mode:executionMode,execution_policy:executionPolicy,...(isGlobalScope ? {context_packet:contextPacket} : {}),
+      },controller.signal);
+      if (activeScopeRef.current !== scope || currentSessionRef.current !== sessionId || controller.signal.aborted) return;
+      setMessages(result.session.messages);setServerContext(result.session.context ?? null);
+      setChapters(result.session.chapters ?? []);setProposals(result.session.proposals ?? []);setSessionStatus(result.status ?? "idle");
+      if (result.session.execution_mode) setExecutionMode(result.session.execution_mode);
+      await refreshNavigation(sessionId,scope);await replayEvents(sessionId,eventCursorRef.current,scope);
+    } catch(reason) {
+      if (activeScopeRef.current === scope && currentSessionRef.current === sessionId) setError(controller.signal.aborted ? null : reason instanceof Error ? reason.message : "Could not continue turn.");
+    } finally {
+      if(activeTurnControllerRef.current===controller){activeTurnControllerRef.current=null;activeTurnSessionIdRef.current=null;}
+      if(activeScopeRef.current===scope && currentSessionRef.current===sessionId){setIsSubmitting(false);setActiveTurnStartedAt(null);void refreshTurnState();void refreshPlan();}
+    }
+  }, [projectRoot,sessionId,sessionScope,isSubmitting,sessionStatus,durableTurns,executionMode,executionPolicy,isGlobalScope,contextPacket,refreshNavigation,replayEvents,refreshTurnState,refreshPlan]);
+  const continueTurn = useCallback(() => runContinuation(),[runContinuation]);
+  const resumeTurn = useCallback((turnId: string) => runContinuation(turnId),[runContinuation]);
+
+  const approveAndRunPlan = useCallback(async (version: number) => {
+    const scope = sessionScope;
+    const admissible = () => {
+      const current = latestAdmissionRef.current;
+      return current.executionMode === "auto" && !current.isSubmitting && !activeTurnControllerRef.current
+        && !["running","working","cancelling"].includes(current.sessionStatus) && current.durableTurns.length === 0
+        && activeScopeRef.current === scope && currentSessionRef.current === sessionId;
+    };
+    if (!sessionId || !admissible() || latestPlanRef.current?.version !== version) return;
+    const approved = await approvePlanVersion(version);
+    if (!approved || !admissible()) return;
+    const current = latestPlanRef.current;
+    if (approved.version !== version || approved.approved_version !== version || approved.status !== "approved"
+        || current?.plan_id !== approved.plan_id || current.version !== version
+        || current.approved_version !== version || current.status !== "approved") {
+      setPlanError("The plan changed. Review the current version before running it.");
+      return;
+    }
+    await runContinuation();
+  }, [sessionId,sessionScope,approvePlanVersion,runContinuation]);
+
   const sendPrompt = useCallback(async (value = prompt) => {
     const question = value.trim();
-    if (!question || isSubmitting) return;
+    if (!question || isSubmitting || activeTurnControllerRef.current || ["running","working","cancelling"].includes(sessionStatus)) return;
+    if (durableTurns.length) {setError("An unfinished turn needs recovery. Resume the original turn before sending a new request.");return;}
     const requestScope = sessionScope;
     if (activeScopeRef.current !== requestScope) return;
     optimisticMessageCounterRef.current += 1;
@@ -721,8 +880,9 @@ export function AgentSurfaceProvider({
         controller.signal,
         isGlobalScope ? (contextPacket as Record<string, unknown>) : undefined,
         executionPolicy,
+        executionMode,
       );
-      if (activeScopeRef.current !== requestScope) return;
+      if (activeScopeRef.current !== requestScope || activeTurnControllerRef.current !== controller || controller.signal.aborted) return;
       setMessages(result.session.messages);
       setServerContext(result.session.context ?? null);
       setChapters(result.session.chapters ?? []);
@@ -735,6 +895,7 @@ export function AgentSurfaceProvider({
         // The durable session response still contains the completed turn.
       }
     } catch (requestError) {
+      if (activeScopeRef.current !== requestScope) return;
       if (controller.signal.aborted) {
         setError(null);
         setSessionStatus("cancelled");
@@ -752,12 +913,12 @@ export function AgentSurfaceProvider({
         setActiveTurnStartedAt(null);
       }
     }
-  }, [contextPacket, eventCursor, executionPolicy, forest, isGlobalScope, isSubmitting, linkedSessionId, projectRoot, prompt, refreshNavigation, replayEvents, resolvedFocus, runId, scopeLabel, scopeRunId, sessionId, sessionScope, storageKey]);
+  }, [contextPacket, eventCursor, executionPolicy, executionMode, sessionStatus, durableTurns, forest, isGlobalScope, isSubmitting, linkedSessionId, projectRoot, prompt, refreshNavigation, replayEvents, resolvedFocus, runId, scopeLabel, scopeRunId, sessionId, sessionScope, storageKey]);
 
   const abortTurn = useCallback(async () => {
     const controller = activeTurnControllerRef.current;
-    if (!controller || !isSubmitting) return;
-    const activeSessionId = activeTurnSessionIdRef.current;
+    if (!isSubmitting && !["running","working","cancelling"].includes(sessionStatus)) return;
+    const activeSessionId = activeTurnSessionIdRef.current ?? sessionId;
     setError(null);
     setSessionStatus("cancelling");
     if (activeSessionId) {
@@ -769,9 +930,9 @@ export function AgentSurfaceProvider({
         // misleading provider failure.
       }
     }
-    controller.abort();
-    setSessionStatus("cancelled");
-  }, [isSubmitting, projectRoot]);
+    controller?.abort();
+    if (controller) setSessionStatus("cancelled");
+  }, [isSubmitting, projectRoot, sessionId, sessionStatus]);
 
   const confirmProposal = useCallback(async (proposalId: string) => {
     if (!sessionId || confirmationBusyId !== null) return;
@@ -939,6 +1100,7 @@ export function AgentSurfaceProvider({
     setChapters(session.chapters ?? []);
     setProposals(session.proposals ?? []);
     setSessionStatus(session.status ?? "idle");
+    setExecutionMode(session.execution_mode ?? "ask");
   }, []);
   const historyAction = useCallback(async (run: () => Promise<void>, failure: string) => {
     if (isSubmitting) return;
@@ -999,6 +1161,8 @@ export function AgentSurfaceProvider({
   const openConversation = useCallback((nextSessionId: string) => switchConversation(nextSessionId), [switchConversation]);
 
   const value = useMemo<AgentSurfaceContextValue>(() => ({
+    executionMode,setExecutionMode,plan,planVersions,planBusy,planError,refreshPlan,savePlan,approvePlan,approveAndRunPlan,
+    durableTurns,continueTurn,resumeTurn,queueTurnMessage,queueMessageBusy,queueMessageNotice,
     messages,
     prompt,
     setPrompt,
@@ -1044,6 +1208,8 @@ export function AgentSurfaceProvider({
     activeTurnStartedAt,
     capabilityCatalog,
   }), [
+    executionMode,plan,planVersions,planBusy,planError,refreshPlan,savePlan,approvePlan,approveAndRunPlan,
+    durableTurns,continueTurn,resumeTurn,queueTurnMessage,queueMessageBusy,queueMessageNotice,
     activeOperation,
     contextPercent,
     contextUsedTokens,

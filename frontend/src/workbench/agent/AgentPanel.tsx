@@ -1,3 +1,4 @@
+import { AgentPlanPanel } from "./AgentPlanPanel";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { buildTurns, duration, messageTime } from "./transcript/turns";
 import { MessageActions } from "./transcript/MessageActions";
@@ -428,6 +429,7 @@ export function AgentPanel({
           </a>
         )}
       </header>}
+      <AgentPlanPanel key={agent.sessionId ?? "new"} />
       {terminalFailure && (
         <p
           data-testid="agent-turn-error"

@@ -29,6 +29,7 @@ describe("AgentColumnComposer", () => {
   beforeEach(() => {
     surface.prompt = "";
     surface.isSubmitting = false;
+    surface.sessionStatus = "idle";
     surface.sendPrompt.mockClear();
   });
 
@@ -57,6 +58,15 @@ describe("AgentColumnComposer", () => {
     expect(surface.abortTurn).toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: "Voice input" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add context" })).not.toBeInTheDocument();
+  });
+
+  test("a restored running turn blocks Enter and retains Stop", () => {
+    surface.sessionStatus = "running";
+    surface.prompt = "Do not create a second turn";
+    render(<AgentColumnComposer />);
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Ask Agent" }), {key:"Enter"});
+    expect(surface.sendPrompt).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", {name:"Stop Agent"})).toBeInTheDocument();
   });
 
   test("Review first is a pressed toggle that switches the execution policy", () => {

@@ -189,7 +189,7 @@ def record(project_root: Path | str, entry: LedgerEntry) -> dict[str, Any]:
 
 
 def record_plan_event_once(project_root: Path | str, *, session_id: str, event_type: str,
-                           plan_snapshot: Mapping[str, Any]) -> dict[str, Any]:
+                           plan_snapshot: Mapping[str, Any], actor: str | None = None) -> dict[str, Any]:
     """Fix an exact research intent before plan authority becomes active.
 
     This event records a request, not proof that results were unseen or that
@@ -198,12 +198,15 @@ def record_plan_event_once(project_root: Path | str, *, session_id: str, event_t
     """
     if event_type not in {"criteria_fixed", "question_change"}:
         raise ValueError("unknown plan event type")
+    actor = actor or ("user" if event_type == "criteria_fixed" else "agent")
+    if actor not in {"user", "agent"} or event_type == "criteria_fixed" and actor != "user":
+        raise ValueError("invalid plan event actor")
     snapshot = json.loads(json.dumps(dict(plan_snapshot), ensure_ascii=False, allow_nan=False))
     identity = ["agent.plan-event.v1", session_id, snapshot["plan_id"], snapshot["version"], event_type]
     event_id = hashlib.sha256(json.dumps(identity, ensure_ascii=False).encode("utf-8")).hexdigest()
     payload = {
         "record_type": "research_intent", "event_type": event_type, "event_id": event_id,
-        "actor": "user" if event_type == "criteria_fixed" else "agent", "authorized_by": "user",
+        "actor": actor, "authorized_by": "user",
         "source": f"agent.plan.{event_type}", "status": "completed", "steps": [],
         "inferential_steps": 0, "changes_data": False, "session_id": session_id,
         "plan_id": snapshot["plan_id"], "plan_version": snapshot["version"], "plan_snapshot": snapshot,

@@ -1,3 +1,4 @@
+import { AgentRunControls, agentTurnActive } from "../../workbench/agent/AgentRunControls";
 // v1.9.0 — the Agent column's composer (design spec §8.3 #9). What the Agent
 // is about sits above the text; the text grows with what is typed; one row
 // below holds capabilities, context use, the model and send. Controls that do
@@ -48,16 +49,17 @@ export function AgentColumnComposer() {
   } = agent;
   const canSend = prompt.trim().length > 0;
   const reviewFirst = agent.executionPolicy === "proposal_only";
-  const busy = isSubmitting || sessionStatus.toLowerCase() === "running";
+  const busy = agentTurnActive(agent);
 
   return (
     <div className="ws-composer-wrap">
+      <AgentRunControls />
       <form
         className="ws-composer"
         data-testid="agent-composer"
         onSubmit={(event) => {
           event.preventDefault();
-          if (canSend && !isSubmitting) void sendPrompt(prompt);
+          if (canSend && !busy) void sendPrompt(prompt);
         }}
       >
         <div className="ws-composer__focus">
@@ -81,7 +83,7 @@ export function AgentColumnComposer() {
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
               event.preventDefault();
-              if (canSend && !isSubmitting) void sendPrompt(prompt);
+              if (canSend && !busy) void sendPrompt(prompt);
             }
           }}
         />
@@ -129,7 +131,7 @@ export function AgentColumnComposer() {
             <select
               aria-label="Agent model"
               value={model}
-              disabled={isSubmitting || modelOptions.length === 0}
+              disabled={busy || modelOptions.length === 0}
               onChange={(event) => void setModel(event.target.value)}
             >
               {modelOptions.length === 0 && <option value={model}>{model}</option>}
@@ -140,7 +142,7 @@ export function AgentColumnComposer() {
               ))}
             </select>
           </label>
-          {isSubmitting ? (
+          {busy ? (
             <button type="button" className="ws-composer__send ws-composer__send--stop" aria-label="Stop Agent" title="Stop" onClick={() => void abortTurn()}>
               <StopIcon />
             </button>

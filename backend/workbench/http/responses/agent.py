@@ -23,6 +23,8 @@ from ...agent.navigation import (
     AgentNavigationRef,
 )
 from ...agent.proposals import ProposalConfirmation, ProposalDecision, ProposalRevision
+from ...agent.plans import Plan, PlanStep
+from ...agent.turn_store import TurnRecord
 from ...analysis_loop.recovery import RecoveryAction
 from ...analysis_loop.validation import PacketStatus
 from .common import JsonSchema, define_view, view_of, viewed
@@ -48,6 +50,28 @@ PublicProposal = view_of(
 ActivityOperationItem = view_of(AgentActivityItem, "ActivityOperationItem", kind=Literal["operation"])
 ActivityEventItem = view_of(AgentActivityEventItem, "ActivityEventItem", kind=Literal["event"])
 IntentDecisionView = view_of(AnalysisLoopDecision, "IntentDecisionView", omit=("packets",))
+AgentPlanStepView = view_of(PlanStep, "AgentPlanStepView", permission_class=str)
+AgentAnalysisPlan = view_of(Plan, "AgentAnalysisPlan", steps=list[AgentPlanStepView])
+AgentTurnRecord = view_of(TurnRecord, "AgentTurnRecord")
+
+
+class AgentPlanVersion(TypedDict):
+    version: int
+    status: str
+    updated_at: str
+
+
+class AgentPlanResponse(TypedDict):
+    plan: AgentAnalysisPlan | None
+    versions: list[AgentPlanVersion]
+
+
+class AgentPlanMutationResponse(TypedDict):
+    plan: AgentAnalysisPlan
+
+
+class AgentTurnStateResponse(TypedDict):
+    turns: list[AgentTurnRecord]
 
 
 class HierarchyNodeView(TypedDict):
@@ -113,6 +137,7 @@ class AgentMessage(TypedDict):
 
 class AgentSession(TypedDict):
     session_id: str
+    execution_mode: NotRequired[Literal["ask", "auto"]]
     role: Literal["main", "chain"] | None
     chain_id: str | None
     status: str | None
@@ -148,6 +173,12 @@ class AgentTurn(TypedDict):
 
 class AgentTurnCancelling(TypedDict):
     status: Literal["cancelling"]
+    session_id: str
+
+
+class AgentMessageQueued(TypedDict):
+    status: Literal["queued"]
+    queue: Literal["steer", "follow_up"]
     session_id: str
 
 

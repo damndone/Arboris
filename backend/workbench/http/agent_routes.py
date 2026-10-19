@@ -56,6 +56,9 @@ from ..agent.instructions import INSTRUCTIONS_NAME, compose as compose_instructi
 from ..agent.operation_outcome import OUTCOME_NAME, TERMINAL as OUTCOME_TERMINAL, outcome as operation_outcome, outcome_text as operation_outcome_text, unfinished_outcomes
 from ..agent.recall import RECALL_NAME, conversation_index, index_text as recall_index_text
 from ..agent.core import AgentCore
+from ..agent.plan_control import PlanControl, PlanControlError
+from .agent_plan_requests import AgentPlanApproveRequest, AgentPlanPatchRequest
+from .responses.agent import AgentPlanResponse, AgentPlanMutationResponse, AgentTurnStateResponse
 from ..agent.events import AgentEventStream
 from ..agent.model import OpenAICompatibleModelAdapter
 from ..agent.runtime_adapter import (
@@ -101,6 +104,7 @@ from .responses.agent import (
     AgentAuditExport,
     AgentCapabilities,
     AgentEvents,
+    AgentMessageQueued,
     AgentOperationProjection,
     AgentProposalList,
     AgentSession,
@@ -744,6 +748,7 @@ def _public_session(
     proposal_store = ProposalStore(repository.root)
     return {
         "session_id": session_id,
+        "execution_mode": metadata.get("execution_mode", "ask"),
         "role": metadata.get("role"),
         "chain_id": metadata.get("chain_id"),
         "status": metadata.get("status"),
@@ -2438,70 +2443,40 @@ async def run_agent_turn(
     ))
 
 
-class AgentPlanApproveRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    #: The version the person saw; a newer version must be looked at first.
-    version: int = Field(gt=0)
-
-
 @router.get("/agent/sessions/{session_id}/plan")
-def get_agent_plan(session_id: str, project_root: str) -> dict[str, Any]:
-    """The conversation's current plan and its version history (v1.9.1)."""
-
-    from ..agent.plans import PlanStore
-
+def get_agent_plan(session_id: str, project_root: str) -> AgentPlanResponse:
+    """The conversation's current plan and version history."""
     root = _project_root(project_root)
     repository, _events, _metadata = _get_session(root, session_id)
-    store = PlanStore(repository.root)
-    plan = store.current(session_id)
-    return {"plan": plan.to_dict() if plan else None,
-            "versions": [{"version": p.version, "status": p.status, "updated_at": p.updated_at}
-                         for p in store.history(session_id)]}
+    return PlanControl(root, repository, session_id).view()
+
+
+def _plan_control_error(error: PlanControlError) -> WorkbenchAPIError:
+    return WorkbenchAPIError(status_code=error.status, code=error.code,
+                             message=str(error), details=error.details)
 
 
 @router.post("/agent/sessions/{session_id}/plan/approve")
-def approve_agent_plan(session_id: str, project_root: str, body: AgentPlanApproveRequest) -> dict[str, Any]:
-    """Approve the plan the person is looking at; its planned steps may then run in Auto mode."""
-
-    from ..agent.plans import PlanError, PlanStore, approve
-
+def approve_agent_plan(session_id: str, project_root: str, body: AgentPlanApproveRequest) -> AgentPlanMutationResponse:
+    """Approve exactly the version the person reviewed, without a model call."""
     root = _project_root(project_root)
     repository, _events, _metadata = _get_session(root, session_id)
-    store = PlanStore(repository.root)
-    from ..analysis_ledger import read as read_ledger, record_plan_event_once
-
-    def approve_current(plan):
-        if plan is None:
-            raise WorkbenchAPIError(status_code=404, code="AGENT_PLAN_NOT_FOUND", message="This conversation has no plan.")
-        if plan.version != body.version:
-            raise WorkbenchAPIError(status_code=409, code="AGENT_PLAN_CHANGED",
-                                    message="The plan changed since it was shown; review the new version.",
-                                    details={"current_version": plan.version})
-        if plan.status == "approved" and plan.approved_version == body.version:
-            # Repair a failed session notice only for approvals already audited
-            # by this path. Never backdate evidence for legacy approvals.
-            if any(entry.get("event_type") == "criteria_fixed" and entry.get("session_id") == session_id
-                   and entry.get("plan_id") == plan.plan_id and entry.get("plan_version") == plan.version
-                   for entry in read_ledger(root)):
-                return plan
-        if plan.status not in {"draft", "needs_approval"}:
-            raise PlanError(f"a {plan.status} plan cannot be approved")
-        record_plan_event_once(root, session_id=session_id, event_type="criteria_fixed", plan_snapshot=plan.to_dict())
-        return approve(plan)
-
     try:
-        approved = store.update(session_id, approve_current)
-    except PlanError as exc:
-        raise WorkbenchAPIError(status_code=409, code="AGENT_PLAN_NOT_APPROVABLE", message=str(exc)) from exc
-    repository.append_once(session_id, "custom_message", {
-        "message_type": "agent_plan_approved",
-        "audience": "model",
-        "name": "workbench_plan",
-        "content": (f"Workbench: the person approved plan {approved.plan_id} version {approved.version}. "
-                    "Its question and criteria are now fixed; planned steps of the allowed kinds run without a card."),
-    }, key=f"{approved.plan_id}:{approved.version}", stage="plan_approved")
-    return {"plan": approved.to_dict()}
+        return PlanControl(root, repository, session_id).approve(body.version)
+    except PlanControlError as exc:
+        raise _plan_control_error(exc) from exc
+
+
+@router.patch("/agent/sessions/{session_id}/plan")
+def revise_agent_plan(session_id: str, project_root: str, body: AgentPlanPatchRequest) -> AgentPlanMutationResponse:
+    """Apply a versioned human edit; execution state is server-owned."""
+    root = _project_root(project_root)
+    repository, _events, _metadata = _get_session(root, session_id)
+    try:
+        return PlanControl(root, repository, session_id).revise(
+            body.version, body.model_dump(exclude_unset=True, exclude={"version"}))
+    except PlanControlError as exc:
+        raise _plan_control_error(exc) from exc
 
 
 @router.post("/agent/sessions/{session_id}/continue")
@@ -2664,7 +2639,7 @@ class AgentResumeRequest(BaseModel):
 
 
 @router.get("/agent/sessions/{session_id}/turn-state")
-def get_agent_turn_state(session_id: str, project_root: str) -> dict[str, Any]:
+def get_agent_turn_state(session_id: str, project_root: str) -> AgentTurnStateResponse:
     """Inspect compact durable state without executing tools or a provider."""
     from ..agent.turn_store import TurnStore
 
@@ -2723,14 +2698,14 @@ class AgentSteerRequest(BaseModel):
 
 
 @router.post("/agent/sessions/{session_id}/steer")
-async def steer_agent_turn(session_id: str, project_root: str, body: AgentSteerRequest) -> dict[str, Any]:
+async def steer_agent_turn(session_id: str, project_root: str, body: AgentSteerRequest) -> AgentMessageQueued:
     """Change direction mid-turn: the text reaches the model at the next tool boundary (v1.9.1)."""
 
     return await _queue_for_active_turn(project_root, session_id, body.text, "steer")
 
 
 @router.post("/agent/sessions/{session_id}/follow_up")
-async def follow_up_agent_turn(session_id: str, project_root: str, body: AgentSteerRequest) -> dict[str, Any]:
+async def follow_up_agent_turn(session_id: str, project_root: str, body: AgentSteerRequest) -> AgentMessageQueued:
     """Queue a request to run after the current turn finishes (v1.9.1)."""
 
     return await _queue_for_active_turn(project_root, session_id, body.text, "follow_up")

@@ -1,3 +1,4 @@
+import { AgentRunControls, agentTurnActive } from "./AgentRunControls";
 import { useEffect, useRef, useState } from "react";
 import { useAgentSurfaceOptional } from "./AgentSurfaceContext";
 import { AgentCapabilityPopover } from "./AgentCapabilityPopover";
@@ -41,7 +42,7 @@ function CompactAgentComposer({
   const remainingTokens = agent.contextWindowTokens === null
     ? 0
     : Math.max(0, agent.contextWindowTokens - agent.contextUsedTokens);
-  const isActive = agent.isSubmitting || ["running", "working"].includes(agent.sessionStatus.toLowerCase());
+  const isActive = agentTurnActive(agent);
   const activityStartAt = agent.activeTurnStartedAt ?? compactTurn?.startedAt ?? null;
   const activityEndAt = isActive ? now : compactTurn?.completedAt ?? now;
   const elapsedSeconds = activityStartAt === null
@@ -94,6 +95,7 @@ function CompactAgentComposer({
           <span aria-hidden="true">›</span>
         </button>
       )}
+      <AgentRunControls />
       <div className="wb-agent-compact-composer-row">
         <div
           data-testid="agent-compact-composer"
@@ -231,6 +233,7 @@ function AgentComposerContent({
       data-testid="agent-composer"
       className={`wb-agent-composer${variant === "terminal" ? " wb-agent-terminal-composer" : ""}`}
     >
+      <AgentRunControls />
       <div className="wb-agent-composer-input-row">
         {variant === "terminal" && (
           <span
@@ -251,7 +254,7 @@ function AgentComposerContent({
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault();
-              void sendPrompt(prompt);
+              if (!agentTurnActive(agent)) void sendPrompt(prompt);
             }
           }}
         />
@@ -291,7 +294,7 @@ function AgentComposerContent({
               role="listbox"
               aria-label="Agent model"
               value={model}
-              disabled={isSubmitting || modelOptions.length === 0}
+              disabled={agentTurnActive(agent) || modelOptions.length === 0}
               onChange={(event) => void setModel(event.target.value)}
             >
               {modelOptions.length === 0 && <option value={model}>{model}</option>}
@@ -320,7 +323,7 @@ function AgentComposerContent({
           >
             <span aria-hidden="true">⌁</span>
           </button>
-          {isSubmitting ? (
+          {agentTurnActive(agent) ? (
             <button
               type="button"
               aria-label="Stop Agent"
@@ -336,7 +339,7 @@ function AgentComposerContent({
               aria-label="Send to Agent"
               className="wb-agent-send"
               disabled={prompt.trim().length === 0}
-              onClick={() => void sendPrompt(prompt)}
+              onClick={() => { if (!agentTurnActive(agent)) void sendPrompt(prompt); }}
             >
               <span aria-hidden="true">↑</span>
             </button>

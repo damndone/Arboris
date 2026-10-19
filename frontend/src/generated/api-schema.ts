@@ -503,7 +503,7 @@ export interface paths {
         };
         /**
          * Get Agent Plan
-         * @description The conversation's current plan and its version history (v1.9.1).
+         * @description The conversation's current plan and version history.
          */
         get: operations["get_agent_plan_agent_sessions__session_id__plan_get"];
         put?: never;
@@ -511,7 +511,11 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Revise Agent Plan
+         * @description Apply a versioned human edit; execution state is server-owned.
+         */
+        patch: operations["revise_agent_plan_agent_sessions__session_id__plan_patch"];
         trace?: never;
     };
     "/agent/sessions/{session_id}/plan/approve": {
@@ -525,7 +529,7 @@ export interface paths {
         put?: never;
         /**
          * Approve Agent Plan
-         * @description Approve the plan the person is looking at; its planned steps may then run in Auto mode.
+         * @description Approve exactly the version the person reviewed, without a model call.
          */
         post: operations["approve_agent_plan_agent_sessions__session_id__plan_approve_post"];
         delete?: never;
@@ -619,6 +623,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/agent/sessions/{session_id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resume Agent Turn
+         * @description Resume the original command, not a new prompt/continuation budget.
+         */
+        post: operations["resume_agent_turn_agent_sessions__session_id__resume_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/agent/sessions/{session_id}/rewind": {
         parameters: {
             query?: never;
@@ -656,6 +680,26 @@ export interface paths {
          * @description Change direction mid-turn: the text reaches the model at the next tool boundary (v1.9.1).
          */
         post: operations["steer_agent_turn_agent_sessions__session_id__steer_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent/sessions/{session_id}/turn-state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Agent Turn State
+         * @description Inspect compact durable state without executing tools or a provider.
+         */
+        get: operations["get_agent_turn_state_agent_sessions__session_id__turn_state_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2772,6 +2816,33 @@ export interface components {
             events: components["schemas"]["ActivityEventItem"][];
             hierarchy: components["schemas"]["HierarchyNodeView"] | null;
         };
+        /** AgentAnalysisPlan */
+        AgentAnalysisPlan: {
+            /** Allowed Classes */
+            allowed_classes: string[];
+            /** Approved At */
+            approved_at: string | null;
+            /** Approved Version */
+            approved_version: number | null;
+            /** Budget */
+            budget: {
+                [key: string]: number;
+            };
+            /** Criteria */
+            criteria: string[];
+            /** Plan Id */
+            plan_id: string;
+            /** Question */
+            question: string;
+            /** Status */
+            status: string;
+            /** Steps */
+            steps: components["schemas"]["AgentPlanStepView"][];
+            /** Updated At */
+            updated_at: string;
+            /** Version */
+            version: number;
+        };
         /**
          * AgentAuditExport
          * @description The session audit (a versioned audit document) with its renderings.
@@ -3077,6 +3148,21 @@ export interface components {
             /** Stop Reason */
             stop_reason: string | null;
         };
+        /** AgentMessageQueued */
+        AgentMessageQueued: {
+            /**
+             * Queue
+             * @enum {string}
+             */
+            queue: "steer" | "follow_up";
+            /** Session Id */
+            session_id: string;
+            /**
+             * Status
+             * @constant
+             */
+            status: "queued";
+        };
         /** AgentNavigationRef */
         AgentNavigationRef: {
             /** Available */
@@ -3106,6 +3192,68 @@ export interface components {
         };
         /** AgentPlanApproveRequest */
         AgentPlanApproveRequest: {
+            /** Version */
+            version: number;
+        };
+        /** AgentPlanMutationResponse */
+        AgentPlanMutationResponse: {
+            plan: components["schemas"]["AgentAnalysisPlan"];
+        };
+        /** AgentPlanPatchRequest */
+        AgentPlanPatchRequest: {
+            /** Criteria */
+            criteria?: string[] | null;
+            /** Question */
+            question?: string | null;
+            /** Steps */
+            steps?: components["schemas"]["AgentPlanStepEdit"][] | null;
+            /** Version */
+            version: number;
+        };
+        /** AgentPlanResponse */
+        AgentPlanResponse: {
+            plan: components["schemas"]["AgentAnalysisPlan"] | null;
+            /** Versions */
+            versions: components["schemas"]["AgentPlanVersion"][];
+        };
+        /** AgentPlanStepEdit */
+        AgentPlanStepEdit: {
+            /** Depends On */
+            depends_on?: string[];
+            /** Expected Outputs */
+            expected_outputs?: string[];
+            /** Operation Ids */
+            operation_ids: string[];
+            /** Step Id */
+            step_id: string;
+            /** Title */
+            title: string;
+        };
+        /** AgentPlanStepView */
+        AgentPlanStepView: {
+            /** Added After Results */
+            added_after_results: boolean;
+            /** Depends On */
+            depends_on: string[];
+            /** Expected Outputs */
+            expected_outputs: string[];
+            /** Operation Ids */
+            operation_ids: string[];
+            /** Permission Class */
+            permission_class: string;
+            /** Status */
+            status: string;
+            /** Step Id */
+            step_id: string;
+            /** Title */
+            title: string;
+        };
+        /** AgentPlanVersion */
+        AgentPlanVersion: {
+            /** Status */
+            status: string;
+            /** Updated At */
+            updated_at: string;
             /** Version */
             version: number;
         };
@@ -3148,6 +3296,11 @@ export interface components {
             /** Risks */
             risks?: string[] | null;
         };
+        /** AgentResumeRequest */
+        AgentResumeRequest: {
+            /** Turn Id */
+            turn_id: string;
+        };
         /** AgentSession */
         AgentSession: {
             /** Chain Id */
@@ -3159,6 +3312,11 @@ export interface components {
             context_fingerprint: string | null;
             /** Context Window Tokens */
             context_window_tokens: number | null;
+            /**
+             * Execution Mode
+             * @enum {string}
+             */
+            execution_mode?: "ask" | "auto";
             /** Messages */
             messages: components["schemas"]["AgentMessage"][];
             /** Model */
@@ -3223,6 +3381,61 @@ export interface components {
              */
             status: "cancelling";
         };
+        /** AgentTurnRecord */
+        AgentTurnRecord: {
+            /** Budget */
+            budget: {
+                [key: string]: number;
+            };
+            /** Cancel Requested */
+            cancel_requested: boolean;
+            /** Checkpoint */
+            checkpoint: {
+                [key: string]: string;
+            } | null;
+            /** Command Id */
+            command_id: string;
+            /** Execution Mode */
+            execution_mode: string;
+            /** Input Entry Id */
+            input_entry_id: string;
+            /** Lease Epoch */
+            lease_epoch: number;
+            /** Lease Expires At */
+            lease_expires_at: number | null;
+            /** Lease Owner */
+            lease_owner: string | null;
+            /** Queue */
+            queue: {
+                [key: string]: unknown;
+            }[] | null;
+            /** Reconciliation */
+            reconciliation: {
+                [key: string]: string;
+            } | null;
+            /** Requires Reconcile */
+            requires_reconcile: boolean;
+            /** Schema Version */
+            schema_version: string;
+            /** Session Id */
+            session_id: string;
+            /** Status */
+            status: string;
+            /** Steps Used */
+            steps_used: number;
+            /** Tool Calls */
+            tool_calls: {
+                [key: string]: {
+                    [key: string]: unknown;
+                };
+            } | null;
+            /** Turn Id */
+            turn_id: string;
+            /** Version */
+            version: number;
+            /** Wall S Used */
+            wall_s_used: number;
+        };
         /** AgentTurnRequest */
         AgentTurnRequest: {
             /** Context Packet */
@@ -3243,6 +3456,11 @@ export interface components {
             execution_policy?: "auto_read_only" | "proposal_only";
             /** Question */
             question: string;
+        };
+        /** AgentTurnStateResponse */
+        AgentTurnStateResponse: {
+            /** Turns */
+            turns: components["schemas"]["AgentTurnRecord"][];
         };
         /** AiReportList */
         AiReportList: {
@@ -11194,9 +11412,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["AgentMessageQueued"];
                 };
             };
             /** @description Validation Error */
@@ -11334,9 +11550,44 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["AgentPlanResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revise_agent_plan_agent_sessions__session_id__plan_patch: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentPlanPatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentPlanMutationResponse"];
                 };
             };
             /** @description Validation Error */
@@ -11373,9 +11624,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["AgentPlanMutationResponse"];
                 };
             };
             /** @description Validation Error */
@@ -11569,6 +11818,43 @@ export interface operations {
             };
         };
     };
+    resume_agent_turn_agent_sessions__session_id__resume_post: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentResumeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentTurn"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     rewind_agent_session_agent_sessions__session_id__rewind_post: {
         parameters: {
             query: {
@@ -11629,9 +11915,40 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["AgentMessageQueued"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_agent_turn_state_agent_sessions__session_id__turn_state_get: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentTurnStateResponse"];
                 };
             };
             /** @description Validation Error */

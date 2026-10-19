@@ -30,6 +30,7 @@ EXEMPT: dict[tuple[str, str], str] = {
     ("POST", "/agent/sessions/{session_id}/steer"): NO_ANALYSIS,
     ("POST", "/agent/sessions/{session_id}/follow_up"): NO_ANALYSIS,
     ("POST", "/agent/sessions/{session_id}/plan/approve"): "records criteria_fixed before plan activation; no analysis executes, and planned executions are recorded by the lifecycle",
+    ("PATCH", "/agent/sessions/{session_id}/plan"): "records human plan revisions and question-change intent; analyses still use the recorded operation lifecycle",
     ("POST", "/agent/sessions/{session_id}/continue"): "a turn like /turns: read-only workflows it runs are recorded by the lifecycle",
     ("POST", "/agent/sessions/{session_id}/resume"): "repairs original receipts without recounting analyses; any subsequent execution is recorded by the shared lifecycle",
     # Conversation management (v1.9.0): the conversation log and its display

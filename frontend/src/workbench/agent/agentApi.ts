@@ -309,13 +309,14 @@ export async function sendAgentTurn(
   signal?: AbortSignal,
   contextPacket?: Record<string, unknown>,
   executionPolicy: "auto_read_only" | "proposal_only" = "auto_read_only",
+  executionMode: "ask" | "auto" = "ask",
 ): Promise<ResponseOf<"/agent/sessions/{session_id}/turns", "post">> {
   return request(
     agentPath(projectRoot, `/agent/sessions/${encodeURIComponent(sessionId)}/turns`),
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({question, execution_policy: executionPolicy, ...(contextPacket ? {context_packet: contextPacket} : {})}),
+      body: JSON.stringify({question, execution_policy: executionPolicy, execution_mode: executionMode, ...(contextPacket ? {context_packet: contextPacket} : {})}),
       signal,
     },
   );
@@ -347,4 +348,27 @@ export function fallbackProjectContext(runId: string, selectedKey: string | null
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init);
   return readResponse<T>(response);
+}
+
+
+export function getAgentPlan(projectRoot: string, sessionId: string): Promise<ResponseOf<"/agent/sessions/{session_id}/plan", "get">> {
+  return request(agentPath(projectRoot, sessionPath(sessionId, "/plan")));
+}
+export function patchAgentPlan(projectRoot: string, sessionId: string, body: RequestOf<"/agent/sessions/{session_id}/plan", "patch">): Promise<ResponseOf<"/agent/sessions/{session_id}/plan", "patch">> {
+  return request(agentPath(projectRoot, sessionPath(sessionId, "/plan")), {method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+}
+export function approveAgentPlan(projectRoot: string, sessionId: string, version: number): Promise<ResponseOf<"/agent/sessions/{session_id}/plan/approve", "post">> {
+  return request(agentPath(projectRoot, sessionPath(sessionId, "/plan/approve")), {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({version})});
+}
+export function getAgentTurnState(projectRoot: string, sessionId: string): Promise<ResponseOf<"/agent/sessions/{session_id}/turn-state", "get">> {
+  return request(agentPath(projectRoot, sessionPath(sessionId, "/turn-state")));
+}
+export function continueAgentTurn(projectRoot: string, sessionId: string, body: RequestOf<"/agent/sessions/{session_id}/continue", "post">, signal?: AbortSignal): Promise<ResponseOf<"/agent/sessions/{session_id}/continue", "post">> {
+  return request(agentPath(projectRoot, sessionPath(sessionId, "/continue")), {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body),signal});
+}
+export function resumeAgentTurn(projectRoot: string, sessionId: string, turnId: string, signal?: AbortSignal): Promise<ResponseOf<"/agent/sessions/{session_id}/resume", "post">> {
+  return request(agentPath(projectRoot, sessionPath(sessionId, "/resume")), {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({turn_id:turnId}),signal});
+}
+export function queueAgentTurnMessage(projectRoot: string, sessionId: string, kind: "steer"|"follow_up", text: string): Promise<ResponseOf<"/agent/sessions/{session_id}/steer", "post">> {
+  return request(agentPath(projectRoot, sessionPath(sessionId, `/${kind}`)), {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text})});
 }

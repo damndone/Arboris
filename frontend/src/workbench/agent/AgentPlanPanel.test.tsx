@@ -1,0 +1,139 @@
+import "@testing-library/jest-dom/vitest";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { beforeEach, expect, it, vi } from "vitest";
+import { AgentPlanPanel } from "./AgentPlanPanel";
+import { AgentRunControls } from "./AgentRunControls";
+const state = vi.hoisted(() => ({ agent: {} as Record<string, any> }));
+vi.mock("./AgentSurfaceContext", () => ({ useAgentSurfaceOptional: () => state.agent }));
+const plan = () => ({ plan_id:"p1",version:3,status:"draft",question:"Compare groups",criteria:["Report uncertainty"],steps:[
+  {step_id:"a",title:"Inspect",status:"done",operation_ids:["stat.describe"],depends_on:[],expected_outputs:["summary"]},
+  {step_id:"b",title:"Compare",status:"pending",operation_ids:["stat.test"],depends_on:["a"],expected_outputs:[]}],approved_version:null });
+beforeEach(() => { state.agent = {plan:plan(),planVersions:[{version:3,status:"draft",updated_at:"today"}],planBusy:false,planError:null,
+  approvePlan:vi.fn().mockResolvedValue(undefined),savePlan:vi.fn().mockResolvedValue(undefined),refreshPlan:vi.fn().mockResolvedValue(undefined),
+  executionMode:"ask",setExecutionMode:vi.fn(),isSubmitting:false,sessionStatus:"idle",prompt:"new direction",queueTurnMessage:vi.fn().mockResolvedValue(undefined),sendPrompt:vi.fn(),continueTurn:vi.fn(),durableTurns:[]}; });
+it("shows server states and dependencies; approves exactly the displayed version without continuing", () => {
+  render(<AgentPlanPanel />);
+  expect(screen.getByText("Compare groups")).toBeInTheDocument();
+  expect(screen.getByText("Depends on: a")).toBeInTheDocument();
+  expect(screen.getByText("done")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button",{name:"Approve plan v3"}));
+  expect(state.agent.approvePlan).toHaveBeenCalledWith(3);
+  expect(state.agent.sendPrompt).not.toHaveBeenCalled();
+  expect(state.agent.continueTurn).not.toHaveBeenCalled();
+});
+it("sends the version and editable envelope without step status", async () => {
+  render(<AgentPlanPanel />);
+  fireEvent.click(screen.getByRole("button",{name:"Edit plan"}));
+  fireEvent.change(screen.getByRole("textbox",{name:"Plan question"}),{target:{value:"Edited question"}});
+  fireEvent.change(screen.getByRole("textbox",{name:"Step b title"}),{target:{value:"Edited title"}});
+  fireEvent.click(screen.getByRole("button",{name:"Save plan"}));
+  await waitFor(() => expect(state.agent.savePlan).toHaveBeenCalledWith({version:3,question:"Edited question",criteria:["Report uncertainty"],steps:[
+    {step_id:"a",title:"Inspect",operation_ids:["stat.describe"],depends_on:[],expected_outputs:["summary"]},
+    {step_id:"b",title:"Edited title",operation_ids:["stat.test"],depends_on:["a"],expected_outputs:[]}]}));
+});
+it("retains drafts on conflict and server refresh", async () => {
+  state.agent.savePlan.mockRejectedValue(Object.assign(new Error("Plan changed; reload the current plan."),{status:409}));
+  const view=render(<AgentPlanPanel />);
+  fireEvent.click(screen.getByRole("button",{name:"Edit plan"}));
+  fireEvent.change(screen.getByRole("textbox",{name:"Plan question"}),{target:{value:"My draft"}});
+  fireEvent.click(screen.getByRole("button",{name:"Save plan"}));
+  expect(await screen.findByRole("alert")).toHaveTextContent(/reload/i);
+  fireEvent.click(screen.getByRole("button",{name:"Reload current plan"}));
+  state.agent.plan={...plan(),version:4,question:"Another edit"};view.rerender(<AgentPlanPanel />);
+  expect(screen.getByRole("textbox",{name:"Plan question"})).toHaveValue("My draft");
+  expect(state.agent.refreshPlan).toHaveBeenCalled();
+});
+it("requires explicit delivery selection during an active turn", () => {
+  state.agent.isSubmitting=true;render(<AgentRunControls />);
+  expect(screen.getByRole("combobox",{name:"Agent execution mode"})).toBeDisabled();
+  expect(screen.getByRole("button",{name:"Send active-turn message"})).toBeDisabled();
+  fireEvent.change(screen.getByRole("combobox",{name:"Active-turn message delivery"}),{target:{value:"steer"}});
+  fireEvent.click(screen.getByRole("button",{name:"Send active-turn message"}));
+  expect(state.agent.queueTurnMessage).toHaveBeenCalledWith("steer","new direction");
+  expect(state.agent.sendPrompt).not.toHaveBeenCalled();
+});
+
+it("continues only after an explicit model-request action", () => {
+  state.agent.sessionId="saved";
+  render(<AgentRunControls />);
+  expect(state.agent.continueTurn).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button",{name:"Continue Agent"}));
+  expect(state.agent.continueTurn).toHaveBeenCalledTimes(1);
+  expect(state.agent.approvePlan).not.toHaveBeenCalled();
+});
+
+it("discards the local editor when moving to another session", () => {
+  state.agent.sessionId="session-a";
+  const view=render(<AgentPlanPanel />);
+  fireEvent.click(screen.getByRole("button",{name:"Edit plan"}));
+  fireEvent.change(screen.getByRole("textbox",{name:"Plan question"}),{target:{value:"A draft"}});
+  state.agent.sessionId="session-b";
+  state.agent.plan={...plan(),plan_id:"b",question:"B question"};
+  view.rerender(<AgentPlanPanel />);
+  expect(screen.queryByRole("textbox",{name:"Plan question"})).not.toBeInTheDocument();
+  expect(screen.getByText("B question")).toBeInTheDocument();
+  expect(state.agent.savePlan).not.toHaveBeenCalled();
+});
+it("shows approval failures without an unhandled rejection", async () => {
+  state.agent.approvePlan.mockRejectedValue(new Error("Version changed"));
+  render(<AgentPlanPanel />);
+  fireEvent.click(screen.getByRole("button",{name:"Approve plan v3"}));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Version changed");
+});
+
+it("offers non-local running turn recovery and explains server ownership validation", () => {
+  state.agent.sessionId="saved";
+  state.agent.sessionStatus="running";
+  state.agent.durableTurns=[{turn_id:"orphan",status:"running",requires_reconcile:false}];
+  state.agent.resumeTurn=vi.fn().mockResolvedValue(undefined);
+  render(<AgentRunControls />);
+  fireEvent.click(screen.getByRole("button",{name:"Resume original turn"}));
+  expect(state.agent.resumeTurn).toHaveBeenCalledWith("orphan");
+  expect(screen.getByText(/server verifies.*still running/i)).toBeInTheDocument();
+  expect(screen.queryByRole("button",{name:"Continue Agent"})).not.toBeInTheDocument();
+});
+it("hides recovery during a local submission", () => {
+  state.agent.isSubmitting=true;
+  state.agent.durableTurns=[{turn_id:"local",status:"running",requires_reconcile:false}];
+  render(<AgentRunControls />);
+  expect(screen.queryByRole("button",{name:"Resume original turn"})).not.toBeInTheDocument();
+});
+
+it("keeps edits made while an earlier draft save is pending without rebasing them", async () => {
+  let finishSave!: () => void;
+  state.agent.savePlan.mockReturnValue(new Promise<void>(resolve => { finishSave=resolve; }));
+  const view=render(<AgentPlanPanel />);
+  fireEvent.click(screen.getByRole("button",{name:"Edit plan"}));
+  fireEvent.change(screen.getByRole("textbox",{name:"Plan question"}),{target:{value:"Submitted A"}});
+  fireEvent.click(screen.getByRole("button",{name:"Save plan"}));
+  state.agent.planBusy=true;view.rerender(<AgentPlanPanel />);
+  fireEvent.change(screen.getByRole("textbox",{name:"Plan question"}),{target:{value:"Unsubmitted B"}});
+  state.agent.plan={...plan(),version:4,question:"Submitted A"};
+  state.agent.planBusy=false;
+  await act(async () => { finishSave(); });
+  view.rerender(<AgentPlanPanel />);
+  expect(screen.getByRole("textbox",{name:"Plan question"})).toHaveValue("Unsubmitted B");
+  expect(screen.getByRole("status")).toHaveTextContent("A newer plan is available");
+  expect(screen.getByRole("button",{name:"Save plan"})).toBeDisabled();
+  expect(state.agent.savePlan).toHaveBeenCalledTimes(1);
+  expect(state.agent.savePlan).toHaveBeenCalledWith(expect.objectContaining({version:3,question:"Submitted A"}));
+});
+
+it("offers a single explicit Auto approve-and-run action while retaining approval only", () => {
+  state.agent.executionMode="auto";
+  state.agent.approveAndRunPlan=vi.fn().mockResolvedValue(undefined);
+  render(<AgentPlanPanel />);
+  expect(screen.getByRole("button",{name:"Approve plan v3"})).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button",{name:"Approve and run plan v3"}));
+  expect(state.agent.approveAndRunPlan).toHaveBeenCalledWith(3);
+  expect(state.agent.approvePlan).not.toHaveBeenCalled();
+  expect(state.agent.continueTurn).not.toHaveBeenCalled();
+});
+it("hides approve-and-run in Ask mode and while editing a draft", () => {
+  state.agent.approveAndRunPlan=vi.fn();
+  const view=render(<AgentPlanPanel />);
+  expect(screen.queryByRole("button",{name:/Approve and run/})).not.toBeInTheDocument();
+  state.agent.executionMode="auto";view.rerender(<AgentPlanPanel />);
+  fireEvent.click(screen.getByRole("button",{name:"Edit plan"}));
+  expect(screen.queryByRole("button",{name:/Approve and run/})).not.toBeInTheDocument();
+});
