@@ -12,17 +12,21 @@ Every tool the Agent can call, and the class of content its result contains. The
 | `aggregate` | yes | yes |
 | `model_result` | yes | yes |
 | `rows` | no | yes |
+| `skill` | no | yes |
 | `unclassified` | no | yes |
 
 | Tool | Content class |
 |---|---|
 | `calculate` | `workbench_state` |
+| `check_model_claims` | `model_result` |
 | `decline_notebook_plan` | `workbench_state` |
 | `export_analysis_script` | `workbench_state` |
 | `export_dataset` | `metadata` |
 | `inspect_analysis_loop_context` | `model_result` |
 | `inspect_artifact_preview` | `aggregate` |
+| `inspect_builtin_skills` | `workbench_state` |
 | `inspect_completed_operations` | `workbench_state` |
+| `inspect_custom_skills` | `skill` |
 | `inspect_data_schema` | `metadata` |
 | `inspect_design_advisories` | `aggregate` |
 | `inspect_diagnostics` | `model_result` |
