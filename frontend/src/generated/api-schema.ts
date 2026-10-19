@@ -2738,7 +2738,7 @@ export interface components {
         /** ActiveProviderEgress */
         ActiveProviderEgress: {
             /** Allowed Classes */
-            allowed_classes: ("workbench_state" | "schema" | "metadata" | "aggregate" | "model_result" | "rows" | "unclassified")[];
+            allowed_classes: ("workbench_state" | "schema" | "metadata" | "aggregate" | "model_result" | "rows" | "skill" | "unclassified")[];
             /**
              * Locality
              * @enum {string}
@@ -6025,7 +6025,7 @@ export interface components {
              * Content Class
              * @enum {string}
              */
-            content_class: "workbench_state" | "schema" | "metadata" | "aggregate" | "model_result" | "rows" | "unclassified";
+            content_class: "workbench_state" | "schema" | "metadata" | "aggregate" | "model_result" | "rows" | "skill" | "unclassified";
             /** Decision */
             decision: string;
             /** Index */
@@ -6044,9 +6044,9 @@ export interface components {
         /** EgressDefaults */
         EgressDefaults: {
             /** Local */
-            local: ("workbench_state" | "schema" | "metadata" | "aggregate" | "model_result" | "rows" | "unclassified")[];
+            local: ("workbench_state" | "schema" | "metadata" | "aggregate" | "model_result" | "rows" | "skill" | "unclassified")[];
             /** Remote */
-            remote: ("workbench_state" | "schema" | "metadata" | "aggregate" | "model_result" | "rows" | "unclassified")[];
+            remote: ("workbench_state" | "schema" | "metadata" | "aggregate" | "model_result" | "rows" | "skill" | "unclassified")[];
         };
         /** EgressPolicyDocument */
         EgressPolicyDocument: {
@@ -6065,7 +6065,7 @@ export interface components {
         EgressPolicyView: {
             active_provider: components["schemas"]["ActiveProviderEgress"] | null;
             /** Content Classes */
-            content_classes: ("workbench_state" | "schema" | "metadata" | "aggregate" | "model_result" | "rows" | "unclassified")[];
+            content_classes: ("workbench_state" | "schema" | "metadata" | "aggregate" | "model_result" | "rows" | "skill" | "unclassified")[];
             defaults: components["schemas"]["EgressDefaults"];
             policy: components["schemas"]["EgressPolicyDocument"];
             /** Policy Source */
@@ -9382,7 +9382,7 @@ export interface components {
         /** ProviderAllowance */
         ProviderAllowance: {
             /** Allow */
-            allow: ("workbench_state" | "schema" | "metadata" | "aggregate" | "model_result" | "rows" | "unclassified")[];
+            allow: ("workbench_state" | "schema" | "metadata" | "aggregate" | "model_result" | "rows" | "skill" | "unclassified")[];
         };
         /** ProviderList */
         ProviderList: {

@@ -45,7 +45,7 @@ where = ["backend"]
 
 [tool.setuptools.package-data]
 # The Agent's built-in analysis guide and instruction templates.
-workbench = ["agent/guides/*.md"]
+workbench = ["agent/guides/*.md", "agent/builtin_skills/*/SKILL.md", "agent/builtin_skills/LICENSE", "agent/builtin_skills/NOTICE.md"]
 
 [tool.pytest.ini_options]
 pythonpath = ["backend", "."]

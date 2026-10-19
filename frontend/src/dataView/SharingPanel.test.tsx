@@ -30,9 +30,9 @@ function egressView(overrides: Partial<EgressView> = {}): EgressView {
     project_root: "/p",
     policy: { version: 1, providers: {}, columns: {} },
     policy_source: "default",
-    content_classes: [...REMOTE_DEFAULT, "rows", "unclassified"],
+    content_classes: [...REMOTE_DEFAULT, "rows", "skill", "unclassified"],
     sensitivity_levels: ["public", "internal", "sensitive", "restricted"],
-    defaults: { remote: REMOTE_DEFAULT, local: [...REMOTE_DEFAULT, "rows", "unclassified"] },
+    defaults: { remote: REMOTE_DEFAULT, local: [...REMOTE_DEFAULT, "rows", "skill", "unclassified"] },
     active_provider: { provider_id: "deepseek", provider_name: "DeepSeek", locality: "remote", allowed_classes: REMOTE_DEFAULT },
     ...overrides,
   };
@@ -52,6 +52,22 @@ beforeEach(() => {
 });
 
 describe("SharingPanel", () => {
+  it("shares custom skill content only through its explicit class", async () => {
+    const allowed: ContentClass[] = [...REMOTE_DEFAULT, "skill"];
+    api.replaceEgressPolicy.mockResolvedValueOnce(egressView({
+      policy: { version: 1, providers: { deepseek: { allow: allowed } }, columns: {} },
+      active_provider: { provider_id: "deepseek", provider_name: "DeepSeek", locality: "remote", allowed_classes: allowed },
+    }));
+    render(<SharingPanel projectRoot="/p" />);
+    const skill = await screen.findByLabelText("Send Personal and project skill content");
+    expect(skill).not.toBeChecked();
+    fireEvent.click(skill);
+    fireEvent.click(screen.getByRole("button", { name: "Save for this project" }));
+    await waitFor(() => expect(api.replaceEgressPolicy).toHaveBeenCalledTimes(1));
+    expect(api.replaceEgressPolicy.mock.calls[0][1].providers.deepseek.allow).toEqual(allowed);
+    expect(screen.getByLabelText("Send Individual rows")).not.toBeChecked();
+  });
+
   it("shows what the active provider may receive and what was withheld", async () => {
     render(<SharingPanel projectRoot="/p" />);
     const panel = await screen.findByTestId("sharing-panel");

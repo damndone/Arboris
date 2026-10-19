@@ -52,6 +52,7 @@ ContentClass = Literal[
     "aggregate",  # summary statistics, frequency tables, test statistics
     "model_result",  # coefficients, standard errors, fit statistics
     "rows",  # row-level records
+    "skill",  # arbitrary personal/project skill metadata and reference text; opt in remotely
     "unclassified",  # not declared: handled as the most restrictive class
 ]
 CONTENT_CLASSES: tuple[ContentClass, ...] = get_args(ContentClass)
@@ -73,6 +74,9 @@ TOOL_CONTENT_CLASSES: Mapping[str, str] = {
     "read_project_conversation": "workbench_state",
     "propose_operation": "workbench_state",
     "update_plan": "workbench_state",
+    "inspect_builtin_skills": "workbench_state",
+    "inspect_custom_skills": "skill",
+    "check_model_claims": "model_result",
     "submit_analysis_loop_intent": "workbench_state",
     "inspect_completed_operations": "workbench_state",
     "inspect_operation_contract": "workbench_state",
