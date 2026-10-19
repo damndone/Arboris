@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-from contextlib import aclosing
+from contextlib import aclosing, nullcontext
 from collections import deque
 from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass
@@ -22,6 +22,7 @@ from .model import ModelAdapter, ModelRequest
 from .phases import CorePhase
 from .session import JsonlSessionRepository
 from .step_observation import observe_provider
+from .business_identity import identity_value
 from .tools import ToolResult, ToolRuntime
 from .turn_messages import (
     budget_exhausted_message,
@@ -116,6 +117,8 @@ class AgentCore:
         tool_runtime: ToolRuntime | None = None,
         compaction_policy: CompactionPolicy | None = None,
         model_name: str | None = None,
+        model_config_identity: Mapping[str, Any] | None = None,
+        turn_journal=None,
     ) -> None:
         self.repository = repository
         self.events = events
@@ -146,12 +149,14 @@ class AgentCore:
         # Compaction (agent/compaction.py): None keeps the whole conversation.
         self.compaction_policy = compaction_policy
         self.model_name = model_name
+        self.model_config_identity = dict(model_config_identity or {})
         self._overflow_retried = False
         self._core_phase: CorePhase | None = None
         self._phase_messages: list[dict[str, Any]] = []
         self._phase_result: Any = None
         self._phase_completed = False
         self._standalone_phase = False
+        self.turn_journal = turn_journal
 
     def enter_phase(self, phase: CorePhase) -> None:
         """Schedule a deterministic phase on this running Core's next step.
@@ -265,17 +270,7 @@ class AgentCore:
         tool_context: dict[str, Any] | None = None,
         budget: AgentRunBudget | Mapping[str, Any] | None = None,
     ) -> str:
-        normalized_budget = AgentRunBudget.from_value(budget)
-        self._begin(normalized_budget, command_id=(tool_context or {}).get("command_id"))
-        self._user_text = text
-        try:
-            return await self._run_with_budget(
-                text,
-                append_user=True,
-                tool_context=tool_context,
-            )
-        finally:
-            self._end()
+        return await self._command(text, budget=budget, tool_context=tool_context, continuation=False)
 
     async def continue_(
         self,
@@ -283,18 +278,82 @@ class AgentCore:
         budget: AgentRunBudget | Mapping[str, Any] | None = None,
         tool_context: dict[str, Any] | None = None,
     ) -> str:
-        normalized_budget = AgentRunBudget.from_value(budget)
-        self._begin(normalized_budget, command_id=(tool_context or {}).get("command_id"))
-        try:
-            self._assert_continuable()
-            return await self._run_with_budget(None, append_user=False, tool_context=tool_context)
-        finally:
-            self._end()
+        return await self._command(None, budget=budget, tool_context=tool_context, continuation=True)
+
+    async def _command(self, text, *, budget, tool_context, continuation):
+        journal = self.turn_journal
+        with journal.ownership() if journal else nullcontext():
+            self._begin(AgentRunBudget.from_value(budget), command_id=(tool_context or {}).get("command_id"))
+            self._user_text = text
+            started = False
+            try:
+                if continuation:
+                    self._assert_continuable()
+                if journal:
+                    journal.start(self, text, continuation=continuation)
+                    started = True
+                result = await self._run_with_budget(text, append_user=not continuation, tool_context=tool_context)
+                self._durable_response = result
+                if journal:
+                    journal.finish(self)
+                return result
+            except BaseException:
+                if journal and started:
+                    journal.interrupted(self)
+                raise
+            finally:
+                self._end()
+
+    async def resume(self, turn_id, *, tool_context=None):
+        """Continue an existing command, preserving its identity and budget."""
+        journal = self.turn_journal
+        if journal is None:
+            raise AgentCoreContinuationError("resume requires a durable turn journal")
+        with journal.ownership() as guard:
+            record = journal.store.get(turn_id)
+            self._begin(AgentRunBudget.from_value(record.budget), command_id=record.command_id)
+            try:
+                state, exhausted, cancelled = journal.recover(self, turn_id, guard)
+                if state["stage"] == "terminal":
+                    self._final_status = state["final_status"]
+                    result = state["response"]
+                elif exhausted or cancelled:
+                    result = self._persist_terminal_error("agent_aborted" if cancelled else "max_steps_exceeded"
+                        if self._steps_used >= self._budget.max_steps else "agent_timeout")
+                else:
+                    self._resume_assistant = state if state["stage"] == "assistant" else None
+                    self._resume_repair = state if state["stage"] == "repair" else None
+                    self._resume_input = state if state["stage"] == "input" else None
+                    resume_text = state.get("text") if state["stage"] in {"initial", "input"} else None
+                    append_user = state["stage"] == "input" or state["stage"] == "initial" and not state["continuation"]
+                    if state["stage"] == "input" and state["queue_kind"]:
+                        queue = self._steer_queue if state["queue_kind"] == "steer" else self._follow_up_queue
+                        if state["text"] in queue:
+                            queue.remove(state["text"])
+                    if state["stage"] in {"provider", "ready"} and self._steer_queue:
+                        resume_text, append_user = self._steer_queue.popleft(), True
+                    result = await self._run_with_budget(
+                        resume_text, append_user=append_user,
+                        tool_context=tool_context)
+                self._durable_response = result
+                journal.finish(self)
+                return result
+            except BaseException:
+                if journal.record is not None:
+                    journal.interrupted(self)
+                raise
+            finally:
+                self._resume_assistant = None
+                self._resume_repair = None
+                self._resume_input = None
+                self._end()
 
     async def abort(self) -> None:
         if self.phase == "idle":
             return
         self._abort_requested = True
+        if self.turn_journal and self.turn_journal.record:
+            self.turn_journal.cancel()
         if self._abort_event is not None:
             self._abort_event.set()
         if self._active_tool_task is not None and not self._active_tool_task.done():
@@ -303,6 +362,8 @@ class AgentCore:
     async def steer(self, text: str) -> None:
         if self.phase == "idle":
             raise AgentCoreBusyError("steer requires an active agent run")
+        if self.turn_journal:
+            self.turn_journal.enqueue("steer", text)
         self._steer_queue.append(text)
         self.events.emit(
             self.session_id,
@@ -314,6 +375,8 @@ class AgentCore:
     async def follow_up(self, text: str) -> None:
         if self.phase == "idle":
             raise AgentCoreBusyError("follow_up requires an active agent run")
+        if self.turn_journal:
+            self.turn_journal.enqueue("follow_up", text)
         self._follow_up_queue.append(text)
         self.events.emit(
             self.session_id,
@@ -333,7 +396,9 @@ class AgentCore:
         self.phase = "running"
         self._abort_requested = False
         self._timeout_requested = False
-        self._active_command_id = command_id if command_id is not None else uuid4().hex
+        self._active_command_id = identity_value(owner="agent.core.command", slot="command_id",
+            inputs={"session_id": self.session_id, "command_id": command_id},
+            create=lambda: command_id if command_id is not None else uuid4().hex)
         self._budget = budget
         self._steps_used = 0
         self._turn_started_at = asyncio.get_running_loop().time()
@@ -491,8 +556,12 @@ class AgentCore:
                 append_user=append_user,
                 tool_context=tool_context,
             )
+        remaining = max(0, self._budget.timeout_s - (asyncio.get_running_loop().time() - self._turn_started_at))
+        if remaining <= 0:
+            self._mark_timeout()
+            return self._persist_terminal_error("agent_timeout")
         timeout_handle = asyncio.get_running_loop().call_later(
-            self._budget.timeout_s,
+            remaining,
             self._mark_timeout,
         )
         try:
@@ -502,7 +571,7 @@ class AgentCore:
                     append_user=append_user,
                     tool_context=tool_context,
                 ),
-                timeout=self._budget.timeout_s,
+                timeout=remaining,
             )
         except asyncio.TimeoutError:
             self._mark_timeout()
@@ -517,6 +586,18 @@ class AgentCore:
         append_user: bool,
         tool_context: dict[str, Any] | None = None,
     ) -> str:
+        repair = getattr(self, "_resume_repair", None)
+        if repair is not None:
+            self._resume_repair = None
+            return await self._finish_numeric_repair(repair["repair"],
+                command_id=self._active_command_id, tool_context=tool_context)
+        recovery = getattr(self, "_resume_assistant", None)
+        if recovery is not None:
+            self._resume_assistant = None
+            entry = self.turn_journal.assistant_message(recovery["assistant"], self._steps_used)
+            return await self._finish_assistant(recovery["assistant"], entry,
+                request_id=recovery["request_id"], context_fingerprint=recovery["context_fingerprint"],
+                tool_context=tool_context)
         command_id = self._active_command_id or uuid4().hex
         self.events.emit(
             self.session_id,
@@ -534,11 +615,13 @@ class AgentCore:
         if append_user:
             if text is None:
                 raise ValueError("prompt text is required")
-            self.repository.append(
-                self.session_id,
-                "message",
-                {"role": "user", "content": text, "command_id": command_id},
-            )
+            if self.turn_journal:
+                self.turn_journal.append_user(self, text)
+            else:
+                self.repository.append(
+                    self.session_id, "message",
+                    {"role": "user", "content": text, "command_id": command_id},
+                )
 
         active_phase = self._core_phase
         context = self.context_builder.build(self.session_id)
@@ -580,6 +663,8 @@ class AgentCore:
             abort_event=self._new_abort_event(),
         )
         self._active_request_id = request.request_id
+        if self.turn_journal:
+            self.turn_journal.save(self, "provider")
         self.events.emit(
             self.session_id,
             "message_start",
@@ -701,19 +786,31 @@ class AgentCore:
             payload["tool_calls"] = list(tool_calls.values())
         if error is not None:
             payload["error"] = error
-        entry = self.repository.append(self.session_id, "message", payload)
+        if self.turn_journal:
+            entry = self.turn_journal.assistant(self, payload, request_id=request.request_id,
+                                                context_fingerprint=context.fingerprint)
+        else:
+            entry = self.repository.append(self.session_id, "message", payload)
+        return await self._finish_assistant(payload, entry, request_id=request.request_id,
+                                            context_fingerprint=context.fingerprint, tool_context=tool_context)
+
+    async def _finish_assistant(self, payload, entry, *, request_id, context_fingerprint, tool_context):
+        command_id = self._active_command_id
+        content, finish_reason = payload["content"], payload["stop_reason"]
+        error = payload.get("error")
+        tool_calls = {str(call.get("tool_call_id", "")): call for call in payload.get("tool_calls", [])}
         if finish_reason == "aborted":
             self.events.emit(
                 self.session_id,
                 "aborted",
-                {"request_id": request.request_id},
+                {"request_id": request_id},
                 command_id=command_id,
             )
         elif finish_reason == "error":
             self.events.emit(
                 self.session_id,
                 "error",
-                {"request_id": request.request_id, "error": error},
+                {"request_id": request_id, "error": error},
                 command_id=command_id,
             )
         self.events.emit(
@@ -747,101 +844,115 @@ class AgentCore:
                         {"tool_call_id": tool_call_id, "tool_id": tool_id},
                         command_id=command_id,
                     )
-                    tool_task = asyncio.create_task(
-                        self.tool_runtime.execute(
-                            tool_call,
-                            session_id=self.session_id,
-                            metadata={
-                                **(tool_context or {}),
-                                "command_id": command_id,
-                                "provider_step": self._steps_used,
-                                "tool_call_id": tool_call_id,
-                                "invocation_id": "invocation_" + hashlib.sha256(
-                                    json.dumps([
-                                        "workbench.agent.invocation.v1", self.session_id,
-                                        command_id, self._steps_used, tool_call_id,
-                                    ], separators=(",", ":")).encode("utf-8")
-                                ).hexdigest(),
-                            },
+                    recovered = self.turn_journal.original_receipt(self, tool_call) if self.turn_journal else None
+                    if recovered is not None:
+                        payload = recovered
+                        result = ToolResult(tool_call_id=tool_call_id, tool_id=tool_id,
+                            ok=payload["ok"], output=payload.get("output"), error=payload.get("error"),
+                            error_details=payload.get("error_details"))
+                        if result.ok:
+                            self._answered_tool_calls[self._tool_call_fingerprint(tool_call)] = result.tool_id
+                    else:
+                        if self.turn_journal:
+                            self.turn_journal.before_tool(self, tool_call)
+                        tool_task = asyncio.create_task(
+                            self.tool_runtime.execute(
+                                tool_call,
+                                session_id=self.session_id,
+                                metadata={
+                                    **(tool_context or {}),
+                                    "command_id": command_id,
+                                    "provider_step": self._steps_used,
+                                    "tool_call_id": tool_call_id,
+                                    "invocation_id": "invocation_" + hashlib.sha256(
+                                        json.dumps([
+                                            "workbench.agent.invocation.v1", self.session_id,
+                                            command_id, self._steps_used, tool_call_id,
+                                        ], separators=(",", ":")).encode("utf-8")
+                                    ).hexdigest(),
+                                },
+                            )
                         )
-                    )
-                    self._active_tool_task = tool_task
-                    try:
-                        result = await tool_task
-                    except asyncio.CancelledError:
-                        if self._timeout_requested:
+                        self._active_tool_task = tool_task
+                        try:
+                            result = await tool_task
+                        except asyncio.CancelledError:
+                            if self._timeout_requested:
+                                result = ToolResult(
+                                    tool_call_id=tool_call_id,
+                                    tool_id=tool_id,
+                                    ok=False,
+                                    error="agent_timeout",
+                                )
+                            elif self._abort_requested:
+                                result = ToolResult(
+                                    tool_call_id=tool_call_id,
+                                    tool_id=tool_id,
+                                    ok=False,
+                                    error="agent_aborted",
+                                )
+                            else:
+                                raise
+                        except Exception:
                             result = ToolResult(
                                 tool_call_id=tool_call_id,
                                 tool_id=tool_id,
                                 ok=False,
-                                error="agent_timeout",
+                                error="tool_runtime_error",
                             )
-                        elif self._abort_requested:
-                            result = ToolResult(
-                                tool_call_id=tool_call_id,
-                                tool_id=tool_id,
-                                ok=False,
-                                error="agent_aborted",
+                        finally:
+                            if self._active_tool_task is tool_task:
+                                self._active_tool_task = None
+                        # A turn that re-asks a question it already answered learns
+                        # nothing and spends a provider step doing it. The guard above
+                        # only catches *consecutive* repeats, so an agent alternating
+                        # between two inspections loops until the budget is gone. Hand
+                        # the same evidence back with an explicit "you already have
+                        # this" so the loop converges instead of erroring out.
+                        payload = result.to_payload()
+                        repeat_fingerprint = self._tool_call_fingerprint(tool_call)
+                        if result.ok and repeat_fingerprint in self._answered_tool_calls:
+                            if isinstance(payload, dict):
+                                payload = {
+                                    **payload,
+                                    "already_answered_this_turn": True,
+                                    "guidance": (
+                                        "This exact inspection was already answered in "
+                                        "this turn; its evidence is unchanged. Stop "
+                                        "inspecting and either submit a proposal or "
+                                        "answer the user."
+                                    ),
+                                }
+                            self.events.emit(
+                                self.session_id,
+                                "loop_guard",
+                                {
+                                    "tool_id": result.tool_id,
+                                    "reason": "repeated_inspection_replayed",
+                                },
+                                command_id=command_id,
                             )
-                        else:
-                            raise
-                    except Exception:
-                        result = ToolResult(
-                            tool_call_id=tool_call_id,
-                            tool_id=tool_id,
-                            ok=False,
-                            error="tool_runtime_error",
-                        )
-                    finally:
-                        if self._active_tool_task is tool_task:
-                            self._active_tool_task = None
-                    # A turn that re-asks a question it already answered learns
-                    # nothing and spends a provider step doing it. The guard above
-                    # only catches *consecutive* repeats, so an agent alternating
-                    # between two inspections loops until the budget is gone. Hand
-                    # the same evidence back with an explicit "you already have
-                    # this" so the loop converges instead of erroring out.
-                    payload = result.to_payload()
-                    repeat_fingerprint = self._tool_call_fingerprint(tool_call)
-                    if result.ok and repeat_fingerprint in self._answered_tool_calls:
-                        if isinstance(payload, dict):
-                            payload = {
-                                **payload,
-                                "already_answered_this_turn": True,
-                                "guidance": (
-                                    "This exact inspection was already answered in "
-                                    "this turn; its evidence is unchanged. Stop "
-                                    "inspecting and either submit a proposal or "
-                                    "answer the user."
-                                ),
-                            }
-                        self.events.emit(
+                        elif result.ok:
+                            self._answered_tool_calls[repeat_fingerprint] = result.tool_id
+                        payload = self._annotate_step_budget(payload)
+                    if self.turn_journal:
+                        result_entry = self.turn_journal.result_message(self, tool_call, payload)
+                    else:
+                        result_entry = self.repository.append(
                             self.session_id,
-                            "loop_guard",
+                            "message",
                             {
-                                "tool_id": result.tool_id,
-                                "reason": "repeated_inspection_replayed",
+                                "role": "tool",
+                                "tool_call_id": result.tool_call_id,
+                                "name": result.tool_id,
+                                "command_id": command_id,
+                                "content": json.dumps(
+                                    payload,
+                                    ensure_ascii=False,
+                                    sort_keys=True,
+                                ),
                             },
-                            command_id=command_id,
                         )
-                    elif result.ok:
-                        self._answered_tool_calls[repeat_fingerprint] = result.tool_id
-                    payload = self._annotate_step_budget(payload)
-                    result_entry = self.repository.append(
-                        self.session_id,
-                        "message",
-                        {
-                            "role": "tool",
-                            "tool_call_id": result.tool_call_id,
-                            "name": result.tool_id,
-                            "command_id": command_id,
-                            "content": json.dumps(
-                                payload,
-                                ensure_ascii=False,
-                                sort_keys=True,
-                            ),
-                        },
-                    )
                     self.events.emit(
                         self.session_id,
                         "tool_execution_end",
@@ -910,7 +1021,7 @@ class AgentCore:
                 self.events.emit(
                     self.session_id,
                     "save_point",
-                    {"entry_id": entry.entry_id, "context_fingerprint": context.fingerprint},
+                    {"entry_id": entry.entry_id, "context_fingerprint": context_fingerprint},
                     command_id=command_id,
                 )
                 if confirmation_ready:
@@ -938,7 +1049,8 @@ class AgentCore:
                         content = "\n\n".join(
                             part for part in (narration, summary) if part
                         ) or "proposal is ready for confirmation"
-                        summary_entry = self.repository.append(
+                        summary_writer = self.repository.append_once if self.turn_journal else self.repository.append
+                        summary_entry = summary_writer(
                             self.session_id,
                             "message",
                             {
@@ -947,6 +1059,8 @@ class AgentCore:
                                 "stop_reason": "proposal_ready",
                                 "command_id": command_id,
                             },
+                            **({"key": command_id, "stage": f"proposal_summary:{self._steps_used}"}
+                               if self.turn_journal else {}),
                         )
                         self.events.emit(
                             self.session_id,
@@ -993,7 +1107,7 @@ class AgentCore:
         self.events.emit(
             self.session_id,
             "save_point",
-            {"entry_id": entry.entry_id, "context_fingerprint": context.fingerprint},
+            {"entry_id": entry.entry_id, "context_fingerprint": context_fingerprint},
             command_id=command_id,
         )
         self.events.emit(
@@ -1081,8 +1195,17 @@ class AgentCore:
         failed and their closest real values, and ask for the answer again."""
 
         self._numeric_repairs_left -= 1
-        unverified = [finding.to_dict() for finding in findings]
-        entry = self.repository.append(
+        repair = {"content": content, "unverified": [finding.to_dict() for finding in findings],
+                  "correction": numeric_grounding.correction_message(findings),
+                  "context_fingerprint": context.fingerprint}
+        if self.turn_journal:
+            self.turn_journal.save(self, "repair", repair=repair)
+        return await self._finish_numeric_repair(repair, command_id=command_id, tool_context=tool_context)
+
+    async def _finish_numeric_repair(self, repair, *, command_id, tool_context):
+        content, unverified = repair["content"], repair["unverified"]
+        writer = self.repository.append_once if self.turn_journal else self.repository.append
+        entry = writer(
             self.session_id,
             "message",
             {
@@ -1092,6 +1215,7 @@ class AgentCore:
                 "command_id": command_id,
                 "numeric_check": {"unverified": unverified},
             },
+            **({"key": command_id, "stage": f"withdrawn:{self._steps_used}"} if self.turn_journal else {}),
         )
         self.events.emit(
             self.session_id,
@@ -1099,7 +1223,7 @@ class AgentCore:
             {"entry_id": entry.entry_id, "content": content, "stop_reason": "revised", "error": None},
             command_id=command_id,
         )
-        self.repository.append(
+        writer(
             self.session_id,
             "custom_message",
             {
@@ -1107,9 +1231,10 @@ class AgentCore:
                 "audience": "model",
                 "model_role": "user",
                 "name": numeric_grounding.CHECK_MESSAGE_NAME,
-                "content": numeric_grounding.correction_message(findings),
+                "content": repair["correction"],
                 "metadata": {"unverified": unverified},
             },
+            **({"key": command_id, "stage": f"numeric_correction:{self._steps_used}"} if self.turn_journal else {}),
         )
         self.events.emit(
             self.session_id,
@@ -1121,12 +1246,14 @@ class AgentCore:
         self.events.emit(
             self.session_id,
             "save_point",
-            {"entry_id": entry.entry_id, "context_fingerprint": context.fingerprint},
+            {"entry_id": entry.entry_id, "context_fingerprint": repair["context_fingerprint"]},
             command_id=command_id,
         )
         self._active_request_id = None
         self._active_message_started = False
         self._active_turn_started = False
+        if self.turn_journal:
+            self.turn_journal.save(self, "ready")
         return await self._run_turn(None, append_user=False, tool_context=tool_context)
 
     def _persist_terminal_error(self, error: str) -> str:
@@ -1177,7 +1304,8 @@ class AgentCore:
             if error == "agent_timeout"
             else ""
         )
-        entry = self.repository.append(
+        writer = self.repository.append_once if self.turn_journal else self.repository.append
+        entry = writer(
             self.session_id,
             "message",
             {
@@ -1185,7 +1313,9 @@ class AgentCore:
                 "content": content,
                 "stop_reason": "error",
                 "error": error,
+                **({"command_id": command_id} if self.turn_journal else {}),
             },
+            **({"key": command_id, "stage": "terminal_error"} if self.turn_journal else {}),
         )
         if error in {"agent_timeout", "agent_aborted"}:
             self.events.emit(

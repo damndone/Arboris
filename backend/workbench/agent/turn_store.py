@@ -9,6 +9,7 @@ descriptor-anchored O_NOFOLLOW/atomic-replace pattern in local_preferences.
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
 import math
 import os
@@ -27,7 +28,7 @@ TRANSITIONS = {
     "accepted": frozenset({"running", "failed", "cancelled"}),
     "running": frozenset({"awaiting_approval", "interrupted", *TERMINAL}),
     "awaiting_approval": frozenset({"running", "failed", "cancelled"}),
-    "interrupted": frozenset({"running", "failed", "cancelled"}),
+    "interrupted": frozenset({"running", "completed", "failed", "cancelled"}),
     **{status: frozenset() for status in TERMINAL},
 }
 _MAX_BYTES = 128 * 1024
@@ -48,6 +49,21 @@ class TurnStoreWriteError(TurnStoreError):
     def __init__(self, *, replacement_visible: bool) -> None:
         self.replacement_visible = replacement_visible
         super().__init__("turn write failed; reload durable state before retrying")
+
+
+@dataclass(eq=False)
+class TurnExecutionGuard:
+    """Opaque live local-process ownership, issued only by execution_guard."""
+
+    _store: Any
+    session_id: str
+    _directory_identity: tuple[int, int]
+    _pid: int
+    _fd: int
+    _directory_fd: int
+    _file_identity: tuple[int, int]
+    _filename: str
+    _active: bool = True
 
 
 def _identifier(value: str) -> str:
@@ -197,6 +213,7 @@ class TurnStore:
         self._clock = clock
         self._lock = RLock()
         self._identity: tuple[int, int] | None = None
+        self._execution_guards: dict[str, TurnExecutionGuard] = {}
         with self._locked():
             pass
 
@@ -247,6 +264,77 @@ class TurnStore:
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
             raise TurnStoreError("turn storage requires a single-link regular file")
+
+    @contextmanager
+    def execution_guard(self, session_id: str) -> Iterator[TurnExecutionGuard]:
+        """Hold a nonblocking per-session OS lock, independently of JSON leases.
+
+        Only acquisition uses the short state lock. The stable lock file is
+        never unlinked, and retained descriptors anchor the guard to its inode.
+        This is local execution ownership, not a distributed authority boundary.
+        """
+        session_id = _identifier(session_id)
+        filename = f".execution.{hashlib.sha256(session_id.encode('utf-8')).hexdigest()}.lock"
+        lock_fd = directory_copy = None
+        guard = None
+        try:
+            try:
+                with self._locked() as directory_fd:
+                    if session_id in self._execution_guards:
+                        raise TurnStoreError("session execution is already owned")
+                    flags = os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK
+                    try:
+                        lock_fd = os.open(filename, flags | os.O_CREAT | os.O_EXCL, 0o600, dir_fd=directory_fd)
+                        os.fsync(directory_fd)
+                    except FileExistsError:
+                        lock_fd = os.open(filename, flags, dir_fd=directory_fd)
+                    self._regular(lock_fd)
+                    try:
+                        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    except BlockingIOError as exc:
+                        raise TurnStoreError("session execution is already owned") from exc
+                    directory_copy = os.dup(directory_fd)
+                    info = os.fstat(lock_fd)
+                    guard = TurnExecutionGuard(self, session_id, self._identity, os.getpid(), lock_fd,
+                                               directory_copy, (info.st_dev, info.st_ino), filename)
+                    self._execution_guards[session_id] = guard
+            except (OSError, UnicodeError) as exc:
+                raise TurnStoreError("session execution guard could not be safely acquired") from exc
+            yield guard
+        finally:
+            with self._lock:
+                if guard is not None:
+                    guard._active = False
+                    if self._execution_guards.get(session_id) is guard:
+                        self._execution_guards.pop(session_id)
+                # Closing, rather than explicitly unlocking, cannot unlock the
+                # parent's shared open-file description from a forked child.
+                for fd in (lock_fd, directory_copy):
+                    if fd is not None:
+                        try:
+                            os.close(fd)
+                        except OSError:
+                            pass
+
+    def _validate_execution_guard(self, guard: TurnExecutionGuard, session_id: str) -> None:
+        """Caller holds _locked, which has revalidated the current directory."""
+        if (type(guard) is not TurnExecutionGuard or guard._store is not self
+                or guard.session_id != session_id or guard._pid != os.getpid() or not guard._active
+                or self._execution_guards.get(session_id) is not guard
+                or guard._directory_identity != self._identity):
+            raise TurnStoreError("invalid or inactive session execution guard")
+        try:
+            directory = os.fstat(guard._directory_fd)
+            self._regular(guard._fd)
+            info = os.fstat(guard._fd)
+            linked = os.stat(guard._filename, dir_fd=guard._directory_fd, follow_symlinks=False)
+            if ((directory.st_dev, directory.st_ino) != guard._directory_identity
+                    or (info.st_dev, info.st_ino) != guard._file_identity
+                    or (linked.st_dev, linked.st_ino) != guard._file_identity):
+                raise TurnStoreError("session execution guard inode changed")
+            fcntl.flock(guard._fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            raise TurnStoreError("session execution guard descriptor is invalid") from exc
 
     def _read(self, directory_fd: int, turn_id: str) -> TurnRecord:
         name = f"{_identifier(turn_id)}.json"
@@ -311,17 +399,20 @@ class TurnStore:
             return [record for record in self._records(directory_fd) if record.status not in TERMINAL]
 
     def create(self, session_id: str, input_entry_id: str, *, budget: dict[str, int | float],
-               execution_mode: str = "ask", turn_id: str | None = None) -> TurnRecord:
+               execution_mode: str = "ask", turn_id: str | None = None,
+               command_id: str | None = None) -> TurnRecord:
         record = _record(TurnRecord(turn_id=_identifier(f"turn_{uuid4().hex}" if turn_id is None else turn_id),
-                                    command_id=f"command_{uuid4().hex}", session_id=_identifier(session_id),
+                                    command_id=_identifier(f"command_{uuid4().hex}" if command_id is None else command_id),
+                                    session_id=_identifier(session_id),
                                     input_entry_id=input_entry_id, execution_mode=execution_mode,
                                     budget=dict(budget), checkpoint={}, reconciliation={}, tool_calls={}, queue=[]).to_dict())
         with self._locked() as directory_fd:
             records = self._records(directory_fd)
             for previous in records:
                 if previous.turn_id == record.turn_id:
-                    if (previous.session_id, previous.input_entry_id, previous.budget, previous.execution_mode) != (
-                            record.session_id, record.input_entry_id, record.budget, record.execution_mode):
+                    if ((previous.session_id, previous.input_entry_id, previous.budget, previous.execution_mode) != (
+                            record.session_id, record.input_entry_id, record.budget, record.execution_mode)
+                            or command_id is not None and previous.command_id != record.command_id):
                         raise TurnStoreError("turn identity is already bound to another input")
                     return previous
             if any(item.session_id == session_id and item.status not in TERMINAL for item in records):
@@ -386,6 +477,8 @@ class TurnStore:
         def change(value):
             if status not in TRANSITIONS[value["status"]]:
                 raise TurnStoreError("turn status transition is invalid")
+            if status == "completed" and value["requires_reconcile"]:
+                raise TurnStoreError("reconcile interrupted execution before completing")
             if status == "running":
                 if value["requires_reconcile"] or self._pending(value):
                     raise TurnStoreError("reconcile pending execution before resuming")
@@ -407,6 +500,31 @@ class TurnStore:
             if value["status"] != "running" or value["lease_expires_at"] > self._now():
                 raise TurnStoreError("only expired running turns can be recovered")
             value.update(status="interrupted", requires_reconcile=True)
+            self._release(value)
+        return self._edit(turn_id, expected_version, change)
+
+    def interrupt_orphaned(self, turn_id: str, *, expected_version: int,
+                          guard: TurnExecutionGuard) -> TurnRecord:
+        """Interrupt a running local orphan after acquiring its execution lock.
+
+        The guard proves exclusion only for runtimes using this local lock;
+        legacy APIs and arbitrary external writers are not fenced by it.
+        """
+        def change(value):
+            self._validate_execution_guard(guard, value["session_id"])
+            if value["status"] != "running":
+                raise TurnStoreError("only running turns can be recovered as local orphans")
+            value.update(status="interrupted", requires_reconcile=True)
+            self._release(value)
+        return self._edit(turn_id, expected_version, change)
+
+    def release_orphaned_claim(self, turn_id: str, *, expected_version: int,
+                               guard: TurnExecutionGuard) -> TurnRecord:
+        """Release a local orphan's nonrunning claim without discarding recovery state."""
+        def change(value):
+            self._validate_execution_guard(guard, value["session_id"])
+            if value["status"] in {"running", *TERMINAL} or value["lease_owner"] is None:
+                raise TurnStoreError("only claimed nonrunning turns can release an orphaned claim")
             self._release(value)
         return self._edit(turn_id, expected_version, change)
 
