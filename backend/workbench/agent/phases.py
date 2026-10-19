@@ -8,6 +8,14 @@ from .model import ModelStreamEvent
 T = TypeVar("T")
 
 
+class RecordedProviderError(Exception):
+    """A persisted provider failure retains its original type without importing it."""
+
+    def __init__(self, original_type):
+        self.original_type = original_type
+        super().__init__(original_type)
+
+
 @dataclass(frozen=True)
 class PhaseRequest:
     messages: list[dict[str, Any]]

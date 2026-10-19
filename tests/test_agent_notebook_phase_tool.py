@@ -74,7 +74,8 @@ def test_run_operation_and_legacy_name_share_the_same_admission_handler(tmp_path
     assert fixture.orchestrator.operation_store.list_records() == []
 
 
-@pytest.mark.parametrize("scenario", ["complete", "changed_source", "preparation_failure"])
+@pytest.mark.parametrize("scenario", ["complete", "changed_source", "preparation_failure",
+    "restart_provider", "restart_correction", "restart_source_change", "restart_after_publish", "restart_provider_error"])
 def test_uploaded_source_plans_on_main_turn_and_executes_one_common_receipt(tmp_path, monkeypatch, scenario):
     from fastapi.testclient import TestClient
     from tests.test_notebook_routes import make_project, store_upload_bytes
@@ -108,6 +109,15 @@ def test_uploaded_source_plans_on_main_turn_and_executes_one_common_receipt(tmp_
     class Model:
         async def stream(self, request):
             requests.append(request)
+            if scenario == "restart_provider_error" and len(requests) == 2:
+                raise OSError("offline provider stream interrupted")
+            if scenario == "restart_correction" and len(requests) == 2:
+                yield ModelStreamEvent.text_delta(request.request_id, "An untyped answer needs correction.")
+                yield ModelStreamEvent.done(request.request_id)
+                return
+            if scenario in {"restart_provider", "restart_correction", "restart_source_change"} and len(requests) == (3 if scenario == "restart_correction" else 2):
+                from tests.test_agent_core_restart import ProcessLost
+                raise ProcessLost()
             if len(requests) == 1:
                 arguments = {"notebook_id":notebook.notebook_id, "question":"Fit y on x and report the result."}
                 tool = "plan_analysis"
@@ -128,13 +138,63 @@ def test_uploaded_source_plans_on_main_turn_and_executes_one_common_receipt(tmp_
                 "tool_call_id":f"call-{len(requests)}", "tool_id":tool, "arguments":arguments})
             yield ModelStreamEvent.done(request.request_id, "tool_calls")
 
-    core = AgentCore(repository, events, Model(), session_id="main", model_name="offline-model")
+    from workbench.agent.turn_journal import TurnJournal, TurnRecoveryRequired
+    from workbench.agent.turn_store import TurnStore
+    from tests.test_agent_core_restart import ProcessLost
+    turns = TurnStore(project)
+    core = AgentCore(repository, events, Model(), session_id="main", model_name="offline-model",
+        turn_journal=TurnJournal(turns, repository, session_id="main"))
     orchestrator = WorkbenchOrchestrator(repository, events, main_session_id="main",
         context_provider=NodeOperationContextProvider(project))
     orchestrator.register_main("main", core)
-    result = asyncio.run(core.prompt("Fit the uploaded dataset.", budget={"max_steps":3}))
+    if scenario.startswith("restart_"):
+        if scenario == "restart_provider_error":
+            original_save = core.turn_journal.save
+            def lose_after_error_receipt(*args, **kwargs):
+                saved = original_save(*args, **kwargs)
+                if args[1] == "phase_received":
+                    raise ProcessLost()
+                return saved
+            monkeypatch.setattr(core.turn_journal, "save", lose_after_error_receipt)
+        if scenario == "restart_after_publish":
+            original_append = repository.append_once
+            def lose_before_summary(session_id, entry_type, payload, **kwargs):
+                if entry_type == "message" and payload.get("stop_reason") == "proposal_ready":
+                    raise ProcessLost()
+                return original_append(session_id, entry_type, payload, **kwargs)
+            monkeypatch.setattr(repository, "append_once", lose_before_summary)
+        with pytest.raises(ProcessLost):
+            asyncio.run(core.prompt("Fit the uploaded dataset.", budget={"max_steps":2 if scenario == "restart_after_publish" else 5, "timeout_s":60}))
+        [turn] = turns.list_active()
+        saved_request = requests[-1]
+        if scenario == "restart_source_change":
+            service.set_focus(notebook.notebook_id, user_focus={"goal":"A different research question."})
+        repository = JsonlSessionRepository(project / "workbench")
+        events = AgentEventStream(repository.root)
+        core = AgentCore(repository, events, Model(), session_id="main", model_name="offline-model",
+            turn_journal=TurnJournal(TurnStore(project), repository, session_id="main"))
+        orchestrator = WorkbenchOrchestrator(repository, events, main_session_id="main",
+            context_provider=NodeOperationContextProvider(project))
+        orchestrator.register_main("main", core)
+        if scenario == "restart_provider_error":
+            from workbench.agent.notebook.planning_agent import NotebookPlanningUnavailable
+            with pytest.raises(NotebookPlanningUnavailable, match="model provider failed: OSError"):
+                asyncio.run(core.resume(turn.turn_id))
+            assert requests[-1] is saved_request
+            return
+        if scenario == "restart_source_change":
+            with pytest.raises(TurnRecoveryRequired, match="source"):
+                asyncio.run(core.resume(turn.turn_id))
+            assert requests[-1] is saved_request
+            return
+        result = asyncio.run(core.resume(turn.turn_id))
+        assert requests[-1].messages == saved_request.messages
+        assert turns.get(turn.turn_id).steps_used == len(requests)
+        assert turns.get(turn.turn_id).status == "completed"
+    else:
+        result = asyncio.run(core.prompt("Fit the uploaded dataset.", budget={"max_steps":3, "timeout_s":60}))
     assert result and core._ready_proposal is not None, result
-    assert len(requests) == 2
+    assert len(requests) == (4 if scenario == "restart_correction" else 3 if scenario in {"restart_provider", "restart_source_change"} else 2)
     assert not (project / "runs" / pin["target"]["run_id"]).exists()
     proposal = core._ready_proposal
     if scenario == "changed_source":

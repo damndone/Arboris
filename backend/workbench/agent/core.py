@@ -18,8 +18,8 @@ from .compaction import CompactionPolicy, compact as compact_session, estimate_m
 from .context import ContextBuilder
 from .events import AgentEventStream
 from . import numeric_grounding
-from .model import ModelAdapter, ModelRequest
-from .phases import CorePhase
+from .model import ModelAdapter, ModelRequest, ModelStreamEvent
+from .phases import CorePhase, PhaseStep, RecordedProviderError
 from .session import JsonlSessionRepository
 from .step_observation import observe_provider
 from .business_identity import identity_value
@@ -156,6 +156,7 @@ class AgentCore:
         self._phase_result: Any = None
         self._phase_completed = False
         self._standalone_phase = False
+        self.phase_restorer = None
         self.turn_journal = turn_journal
 
     def enter_phase(self, phase: CorePhase) -> None:
@@ -197,21 +198,37 @@ class AgentCore:
         )
 
     def _phase_checkpoint(self, phase, status):
-        self.repository.append(self.session_id, "phase_state", {
+        writer = self.repository.append_once if self.turn_journal else self.repository.append
+        stage = f"phase:{phase.episode_id}:{self._steps_used}:{status}"
+        if self.turn_journal:
+            original = next((entry for entry in self.repository.get_branch(self.session_id)
+                if entry.idempotency and entry.idempotency["key"] == self._active_command_id
+                and entry.idempotency["stage"] == stage), None)
+            if original is not None:
+                return writer(self.session_id, "phase_state", original.payload,
+                    key=self._active_command_id, stage=stage)
+        writer(self.session_id, "phase_state", {
             "episode_id": phase.episode_id, "status": status,
             "command_id": self._active_command_id, "steps_used": self._steps_used,
             "wall_used_s": asyncio.get_running_loop().time() - self._turn_started_at,
             "phase": phase.checkpoint(),
-        })
+        }, **({"key":self._active_command_id, "stage":stage}
+              if self.turn_journal else {}))
 
-    async def _consume_phase(self, phase, events, error, *, tool_context):
-        self.repository.append(self.session_id, "phase_provider_result", {
-            "episode_id": phase.episode_id, "events": [asdict(event) for event in events],
-            "error": type(error).__name__ if error is not None else None,
-        })
+    async def _consume_phase(self, phase, events, error, *, tool_context, replay=False):
+        if not replay:
+            self.repository.append(self.session_id, "phase_provider_result", {
+                "episode_id": phase.episode_id, "events": [asdict(event) for event in events],
+                "error": type(error).__name__ if error is not None else None,
+            })
+            if self.turn_journal:
+                self.turn_journal.save(self, "phase_received", phase_events=[asdict(event) for event in events],
+                    phase_error=type(error).__name__ if error else None)
         if self._abort_requested:
             self._phase_checkpoint(phase, "interrupted")
             return self._persist_terminal_error("agent_timeout" if self._timeout_requested else "agent_aborted")
+        if self.turn_journal:
+            self.turn_journal.save(self, "phase_consuming")
         task = asyncio.create_task(phase.consume(events, error=error))
         self._active_tool_task = task
         try:
@@ -230,14 +247,24 @@ class AgentCore:
                 self._active_tool_task = None
         if step.next not in {"continue", "completed", "refused"}:
             raise ValueError("phase returned an invalid transition")
-        for message in step.append_messages:
+        if self.turn_journal:
+            self.turn_journal.save(self, "phase_applied", phase_step={
+                "next":step.next, "append_messages":list(step.append_messages),
+                "public_result":dict(step.public_result)})
+        return await self._apply_phase_step(phase, step, episode_id=phase.episode_id, tool_context=tool_context)
+
+    async def _apply_phase_step(self, phase, step, *, episode_id, tool_context):
+        for index, message in enumerate(step.append_messages):
             self._phase_messages.append(dict(message))
-            self.repository.append(self.session_id, "phase_message", {
-                "episode_id": phase.episode_id, "message": message,
-            })
+            writer = self.repository.append_once if self.turn_journal else self.repository.append
+            writer(self.session_id, "phase_message", {
+                "episode_id": episode_id, "message": message,
+            }, **({"key":self._active_command_id, "stage":f"phase_message:{episode_id}:{self._steps_used}:{index}"}
+                  if self.turn_journal else {}))
         self._active_request_id = None
         self._active_message_started = False
-        self._phase_checkpoint(phase, step.next)
+        if phase is not None:
+            self._phase_checkpoint(phase, step.next)
         if step.next == "continue":
             return await self._run_turn(None, append_user=False, tool_context=tool_context)
         self._phase_result = step.result
@@ -251,10 +278,12 @@ class AgentCore:
         result_text = json.dumps(dict(step.public_result), ensure_ascii=False, sort_keys=True)
         if len(result_text) > 24_000:
             raise ValueError("phase_public_result_exceeds_24000_characters")
-        self.repository.append(self.session_id, "custom_message", {
+        writer = self.repository.append_once if self.turn_journal else self.repository.append
+        writer(self.session_id, "custom_message", {
             "audience": "model", "model_role": "user", "name": "workbench_phase_result",
             "content": result_text,
-        })
+        }, **({"key":self._active_command_id, "stage":f"phase_result:{episode_id}"}
+              if self.turn_journal else {}))
         return await self._run_turn(None, append_user=False, tool_context=tool_context)
 
     def _finish_proposal_ready(self, content: str, command_id: str | None) -> str:
@@ -384,6 +413,15 @@ class AgentCore:
                 elif exhausted or cancelled:
                     result = self._persist_terminal_error("agent_aborted" if cancelled else "max_steps_exceeded"
                         if self._steps_used >= self._budget.max_steps else "agent_timeout")
+                elif state["stage"] == "phase_applied":
+                    step = PhaseStep(**state["phase_step"])
+                    result = await self._apply_phase_step(self._core_phase, step,
+                        episode_id=state["phase_checkpoint"]["episode_id"], tool_context=tool_context)
+                elif state["stage"] == "phase_received":
+                    error_type = state["phase_error"]
+                    error = (TimeoutError() if error_type == "TimeoutError" else RecordedProviderError(error_type)) if error_type else None
+                    result = await self._consume_phase(self._core_phase,
+                        [ModelStreamEvent(**event) for event in state["phase_events"]], error, tool_context=tool_context, replay=True)
                 else:
                     self._resume_assistant = state if state["stage"] == "assistant" else None
                     self._resume_repair = state if state["stage"] == "repair" else None

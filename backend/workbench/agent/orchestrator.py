@@ -627,6 +627,9 @@ class WorkbenchOrchestrator(OrchestrationWorkflows, OrchestrationProposals, Orch
             self._tool_registries.pop(chain_id, None)
             raise
         self._tool_registries[chain_id] = registry
+        from .planning.agent_phase import restore_phase
+        agent.phase_restorer = lambda checkpoint: restore_phase(core=agent, orchestrator=self,
+            chain_id=chain_id, checkpoint=checkpoint)
 
 
     def _chain(self, chain_id: str) -> tuple[str, AgentCore]:

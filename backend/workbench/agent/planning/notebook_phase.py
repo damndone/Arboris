@@ -7,7 +7,7 @@ import time
 from typing import Any
 from uuid import uuid4
 
-from ..phases import PhaseRequest, PhaseStep
+from ..phases import PhaseRequest, PhaseStep, RecordedProviderError
 from ..context_compiler import (
     freshness_dependency_fingerprint,
     generation_context_hash,
@@ -270,7 +270,8 @@ class NotebookPlanningPhase:
             return NotebookPlanningContractError("planning loop did not submit an option batch")
         if isinstance(error, NotebookPlanningUnavailable):
             return error
-        return NotebookPlanningUnavailable(f"model provider failed: {type(error).__name__}")
+        error_type = error.original_type if isinstance(error, RecordedProviderError) else type(error).__name__
+        return NotebookPlanningUnavailable(f"model provider failed: {error_type}")
 
     def checkpoint(self):
         return {"schema_version": 1, "episode_id": self.episode_id, "context_id": self.context.context_id,
@@ -278,12 +279,38 @@ class NotebookPlanningPhase:
             "batch_id": f"batch_agent_{self.context.context_id}_{self.episode_id}",
             "catalog": self.catalog, "request_config": dict(self.request_config),
             "model_timeout_s": self.model_timeout_s, "planning_timeout_s": self.planning_timeout_s,
+            "max_inspection_rounds":self.max_inspection_rounds,
+            "max_contract_corrections":self.max_contract_corrections,
+            "available_inspections":sorted(self.available_inspections),
+            "checkpointed_at":time.time(),
             "remaining_wall_s": None if self.deadline is None else max(0.0, self.deadline - time.monotonic()),
             "rounds": self.round_number, "inspection_rounds": self.inspection_rounds,
             "contract_corrections": self.contract_corrections, "evidence": self.evidence.to_dict(),
             "requests_seen": [{"inspection_id": r.inspection_id, "target_ref": r.target_ref,
                 "arguments": dict(r.arguments)} for r in self.requests_seen],
             "terminal_inspection_ids": sorted(self.terminal_inspection_ids)}
+
+    def restore_checkpoint(self, checkpoint):
+        """Restore counters and original evidence; never repeat baseline inspections."""
+        from ..notebook.evidence import EvidenceRecord
+
+        current = self.checkpoint()
+        for key in ("catalog", "request_config", "model_timeout_s", "planning_timeout_s",
+                    "max_inspection_rounds", "max_contract_corrections", "available_inspections"):
+            if current[key] != checkpoint[key]:
+                raise NotebookPlanningContractError("planning runtime contract changed: " + key)
+        self.round_number = checkpoint["rounds"]
+        self.inspection_rounds = checkpoint["inspection_rounds"]
+        self.contract_corrections = checkpoint["contract_corrections"]
+        pack = checkpoint["evidence"]
+        self.evidence = DataEvidencePackV1(source_id=pack["source_id"],
+            records=tuple(EvidenceRecord(**record) for record in pack["records"]),
+            pack_omissions=tuple(pack["pack_omissions"]))
+        self.requests_seen = [InspectionRequest(**request) for request in checkpoint["requests_seen"]]
+        self.terminal_inspection_ids = set(checkpoint["terminal_inspection_ids"])
+        remaining = checkpoint["remaining_wall_s"]
+        if remaining is not None:
+            self.deadline = time.monotonic() + max(0, remaining - (time.time() - checkpoint["checkpointed_at"]))
 
     def _finish(self, state, messages, result):
         return PhaseStep(state, tuple(messages), result, {

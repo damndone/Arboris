@@ -85,6 +85,8 @@ class TurnJournal:
                    "budget": asdict(core._budget), "user_text": getattr(core, "_user_text", None),
                    "runtime_contract": _runtime_contract(core),
                    "phase_active": core._core_phase is not None,
+                   "phase_checkpoint": core._core_phase.checkpoint() if core._core_phase else None,
+                   "phase_messages": core._phase_messages,
                    "state": {name: getattr(core, name) for name in _STATE_FIELDS}, **details}
         # Match the existing message JSON boundary (e.g. domain StrEnum values)
         # before the private WAL's strict JSON-only validation.
@@ -170,6 +172,8 @@ class TurnJournal:
         if pending and pending["status"] == "pending":
             self._edit(self.store.resolve_tool_call, tool_call_id=identity["invocation_id"],
                        operation_key=identity["invocation_id"], evidence={"receipt_entry_id": receipt.entry_id})
+        if core._core_phase is not None:
+            self.save(core, "phase_ready")
         return message
 
     def finish(self, core):
@@ -229,15 +233,25 @@ class TurnJournal:
                     or entry.idempotency != {"key": self.record.command_id, "stage": f"checkpoint:{index}",
                                              "payload_sha256": _payload_digest(entry.entry_type, entry.payload)}):
                 raise TurnRecoveryRequired("Core checkpoint identity or content digest is invalid")
-        if state.get("schema_version") != "agent.core_checkpoint.v1" or state.get("phase_active"):
-            raise TurnRecoveryRequired("phase checkpoint requires a registered phase restorer")
-        if (state.get("stage") not in {"initial", "input", "provider", "assistant", "repair", "ready", "terminal"}
+        if state.get("schema_version") != "agent.core_checkpoint.v1":
+            raise TurnRecoveryRequired("unsupported Core checkpoint schema")
+        if (state.get("stage") not in {"initial", "input", "provider", "assistant", "repair", "ready", "terminal",
+                                      "phase_ready", "phase_received", "phase_consuming", "phase_applied"}
                 or state.get("command_id") != self.record.command_id or state.get("turn_id") != turn_id
                 or set(state.get("state", {})) != set(_STATE_FIELDS)
                 or state["runtime_contract"] != _runtime_contract(core)
                 or {key: state["budget"][key] for key in ("max_steps", "timeout_s")} != self.record.budget
                 or state["state"]["_steps_used"] < self.record.steps_used):
             raise TurnRecoveryRequired("Core checkpoint runtime contract or cumulative budget changed")
+        if state["stage"] == "phase_consuming":
+            raise TurnRecoveryRequired("phase has no durable original transition receipt; do not reexecute")
+        if state.get("phase_active"):
+            applied = state.get("phase_step")
+            if not (applied and applied["next"] in {"completed", "refused"}):
+                if core.phase_restorer is None or state.get("phase_checkpoint") is None:
+                    raise TurnRecoveryRequired("phase checkpoint requires a registered phase restorer")
+                core._core_phase = core.phase_restorer(state["phase_checkpoint"])
+                core._phase_messages = list(state["phase_messages"])
         self.started_at = state["started_at"]
         receipts = []
         for call_key, call in self.record.tool_calls.items():
@@ -271,9 +285,9 @@ class TurnJournal:
             queue.extend(self.repository.get_entry(EntryRef(self.session_id, q["entry_id"])).payload["text"]
                          for q in self.record.queue if not q["consumed"] and q["kind"] == kind)
         exhausted = elapsed >= core._budget.timeout_s or (core._steps_used >= core._budget.max_steps
-                                                         and state["stage"] not in {"assistant", "terminal"})
-        settle_only = state["stage"] == "assistant" and core._steps_used >= core._budget.max_steps
-        if settle_only:
+                                                         and state["stage"] not in {"assistant", "terminal", "phase_received", "phase_applied"})
+        settle_only = state["stage"] in {"assistant", "phase_received", "phase_applied"} and core._steps_used >= core._budget.max_steps
+        if settle_only and state["stage"] == "assistant":
             # Settle an already returned final answer / original receipts
             # without re-entering execution or granting another provider step.
             for call in state["assistant"].get("tool_calls", []):
