@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { useAgentSurfaceOptional } from "./AgentSurfaceContext";
 
-export function agentTurnActive(agent: {isSubmitting:boolean;sessionStatus:string}) {
-  return agent.isSubmitting || ["running","working","cancelling"].includes(agent.sessionStatus.toLowerCase());
+export function agentTurnActive(agent: {isSubmitting:boolean;sessionStatus:string;confirmationBusyId?:string|null}) {
+  return agent.isSubmitting || agent.confirmationBusyId != null || ["running","working","cancelling"].includes(agent.sessionStatus.toLowerCase());
 }
 export function AgentRunControls() {
   const agent = useAgentSurfaceOptional();
@@ -28,8 +28,7 @@ export function AgentRunControls() {
       <button onClick={() => void agent.resumeTurn?.(turn.turn_id)}>Resume original turn</button>
       <small>The server verifies whether the original owner is still running before recovery.</small>
     </div>)}
-    {!active && !turns.length && agent.sessionId && agent.continueTurn && <button onClick={() => void agent.continueTurn?.()}>Continue Agent</button>}
-    {(!active || (!agent.isSubmitting && turns.length > 0)) && agent.sessionId && <small>Continue or resume starts a model request.</small>}
+    {!agent.isSubmitting && turns.length > 0 && agent.sessionId && <small>Resuming starts a model request.</small>}
     {agent.queueMessageNotice && <span role="status">{agent.queueMessageNotice}</span>}
   </div>;
 }

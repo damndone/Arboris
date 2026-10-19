@@ -53,12 +53,11 @@ it("requires explicit delivery selection during an active turn", () => {
   expect(state.agent.sendPrompt).not.toHaveBeenCalled();
 });
 
-it("continues only after an explicit model-request action", () => {
+it("does not offer manual continuation for an idle session", () => {
   state.agent.sessionId="saved";
   render(<AgentRunControls />);
   expect(state.agent.continueTurn).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button",{name:"Continue Agent"}));
-  expect(state.agent.continueTurn).toHaveBeenCalledTimes(1);
+  expect(screen.queryByRole("button",{name:"Continue Agent"})).not.toBeInTheDocument();
   expect(state.agent.approvePlan).not.toHaveBeenCalled();
 });
 

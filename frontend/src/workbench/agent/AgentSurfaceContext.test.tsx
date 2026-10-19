@@ -936,6 +936,60 @@ describe("AgentSurfaceProvider", () => {
     expect(screen.queryByRole("button", { name: "Confirm proposal proposal-1" })).toBeNull();
   });
 
+  it("continues exactly once after a successful confirmation in both Ask and Auto", async () => {
+    for (const mode of ["ask", "auto"]) {
+      mocks.continueAgentTurn.mockClear();
+      mocks.confirmAgentProposal.mockClear();
+      sessionStorage.setItem("workbench:agent-session:/proj:run-a:project%3Arun-a%3Anone", "agent_chain_saved");
+      mocks.getAgentSession.mockResolvedValue(session("agent_chain_saved", [], [pendingProposal]));
+      let finish!: (value: unknown) => void;
+      mocks.confirmAgentProposal.mockReturnValue(new Promise(resolve => { finish = resolve; }));
+      mocks.continueAgentTurn.mockResolvedValue({session:session("agent_chain_saved"),status:"idle"});
+      const view = mount();
+      const confirm = await screen.findByRole("button", {name:"Confirm proposal proposal-1"});
+      fireEvent.change(screen.getByRole("combobox", {name:"Agent execution mode"}), {target:{value:mode}});
+      fireEvent.click(confirm);
+      fireEvent.click(confirm);
+      expect(mocks.continueAgentTurn).not.toHaveBeenCalled();
+      await act(async () => finish({proposal:{...pendingProposal,status:"confirmed"},
+        operation:{record_id:"record-1",operation_id:"model.rerun",status:"completed"}}));
+      await waitFor(() => expect(mocks.continueAgentTurn).toHaveBeenCalledTimes(1));
+      expect(mocks.confirmAgentProposal).toHaveBeenCalledTimes(1);
+      expect(mocks.continueAgentTurn).toHaveBeenCalledWith("/proj", "agent_chain_saved",
+        expect.objectContaining({execution_mode:mode}), expect.any(AbortSignal));
+      expect(screen.queryByRole("button", {name:"Continue Agent"})).not.toBeInTheDocument();
+      view.unmount();
+    }
+  });
+
+  it("does not continue after the user stops a pending confirmation", async () => {
+    sessionStorage.setItem("workbench:agent-session:/proj:run-a:project%3Arun-a%3Anone", "agent_chain_saved");
+    mocks.getAgentSession.mockResolvedValue(session("agent_chain_saved", [], [pendingProposal]));
+    let finish!: (value: unknown) => void;
+    mocks.confirmAgentProposal.mockReturnValue(new Promise(resolve => { finish = resolve; }));
+    mount();
+    fireEvent.click(await screen.findByRole("button", {name:"Confirm proposal proposal-1"}));
+    fireEvent.click(await screen.findByRole("button", {name:"Stop Agent"}));
+    await act(async () => finish({proposal:{...pendingProposal,status:"confirmed"},
+      operation:{record_id:"record-1",operation_id:"model.rerun",status:"completed"}}));
+    expect(mocks.continueAgentTurn).not.toHaveBeenCalled();
+  });
+
+  it("does not continue a confirmed proposal after switching sessions", async () => {
+    sessionStorage.setItem("workbench:agent-session:/proj:run-a:project%3Arun-a%3Anone", "agent_chain_saved");
+    sessionStorage.setItem("workbench:agent-session:/proj:run-b:project%3Arun-b%3Anone", "session-b");
+    mocks.getAgentSession.mockImplementation((_root, id) => Promise.resolve(session(id, [], id === "agent_chain_saved" ? [pendingProposal] : [])));
+    let finish!: (value: unknown) => void;
+    mocks.confirmAgentProposal.mockReturnValue(new Promise(resolve => { finish = resolve; }));
+    const view = mount();
+    fireEvent.click(await screen.findByRole("button", {name:"Confirm proposal proposal-1"}));
+    view.rerender(<MemoryRouter><AgentSurfaceProvider projectRoot="/proj" runId="run-b"><AgentPanel projectRoot="/proj" runId="run-b" /></AgentSurfaceProvider></MemoryRouter>);
+    await waitFor(() => expect(mocks.getAgentSession).toHaveBeenCalledWith("/proj", "session-b"));
+    await act(async () => finish({proposal:{...pendingProposal,status:"confirmed"},
+      operation:{record_id:"record-1",operation_id:"model.rerun",status:"completed"}}));
+    expect(mocks.continueAgentTurn).not.toHaveBeenCalled();
+  });
+
   it("confirms a linked proposal against its bound chain rather than another visible run", async () => {
     const proposal = {...pendingProposal, preconditions: {active_head_run_id: "run-source"}};
     mocks.getAgentSession.mockResolvedValue(session("agent_linked", [], [proposal]));

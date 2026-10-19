@@ -374,6 +374,7 @@ export function AgentSurfaceProvider({
   const [capabilityCatalog, setCapabilityCatalog] = useState<AgentCapabilityCatalog | null>(null);
   const activeTurnControllerRef = useRef<AbortController | null>(null);
   const activeTurnSessionIdRef = useRef<string | null>(null);
+  const confirmationControllerRef = useRef<AbortController | null>(null);
 
   const selectedKey = workbench.state.selectedKey;
   const graphNodes = Array.isArray(graphModel?.nodes) ? graphModel.nodes : [];
@@ -509,6 +510,8 @@ export function AgentSurfaceProvider({
     activeTurnControllerRef.current?.abort();
     activeTurnControllerRef.current = null;
     activeTurnSessionIdRef.current = null;
+    confirmationControllerRef.current?.abort();
+    confirmationControllerRef.current = null;
     activeScopeRef.current = sessionScope;
     optimisticMessageCounterRef.current = 0;
     currentSessionRef.current = null;
@@ -816,7 +819,7 @@ export function AgentSurfaceProvider({
 
   const sendPrompt = useCallback(async (value = prompt) => {
     const question = value.trim();
-    if (!question || isSubmitting || activeTurnControllerRef.current || ["running","working","cancelling"].includes(sessionStatus)) return;
+    if (!question || isSubmitting || activeTurnControllerRef.current || confirmationControllerRef.current || ["running","working","cancelling"].includes(sessionStatus)) return;
     if (durableTurns.length) {setError("An unfinished turn needs recovery. Resume the original turn before sending a new request.");return;}
     const requestScope = sessionScope;
     if (activeScopeRef.current !== requestScope) return;
@@ -917,6 +920,12 @@ export function AgentSurfaceProvider({
 
   const abortTurn = useCallback(async () => {
     const controller = activeTurnControllerRef.current;
+    // Stopping confirmation suppresses the next model request; the operation's
+    // durable receipt still determines whether its effect completed.
+    if (confirmationControllerRef.current) {
+      confirmationControllerRef.current.abort();
+      if (!controller) return;
+    }
     if (!isSubmitting && !["running","working","cancelling"].includes(sessionStatus)) return;
     const activeSessionId = activeTurnSessionIdRef.current ?? sessionId;
     setError(null);
@@ -935,7 +944,7 @@ export function AgentSurfaceProvider({
   }, [isSubmitting, projectRoot, sessionId, sessionStatus]);
 
   const confirmProposal = useCallback(async (proposalId: string) => {
-    if (!sessionId || confirmationBusyId !== null) return;
+    if (!sessionId || confirmationBusyId !== null || confirmationControllerRef.current) return;
     const requestScope = sessionScope;
     if (activeScopeRef.current !== requestScope) return;
     const proposal = proposals.find((item) => item.proposal_id === proposalId);
@@ -949,6 +958,8 @@ export function AgentSurfaceProvider({
       ? proposalHead
       : typeof activeHead === "string" && activeHead ? activeHead
       : forest?.activeRunId ?? runId;
+    const controller = new AbortController();
+    confirmationControllerRef.current = controller;
     setConfirmationBusyId(proposalId);
     setError(null);
     try {
@@ -979,13 +990,18 @@ export function AgentSurfaceProvider({
         setActiveOperation(operation);
       }
       await refreshNavigation(sessionId, requestScope);
+      if (operation.status === "completed" && !controller.signal.aborted
+          && activeScopeRef.current === requestScope && currentSessionRef.current === sessionId) {
+        await runContinuation();
+      }
     } catch (requestError) {
       if (activeScopeRef.current !== requestScope) return;
       setError(requestError instanceof Error ? requestError.message : "Proposal confirmation failed");
     } finally {
+      if (confirmationControllerRef.current === controller) confirmationControllerRef.current = null;
       if (activeScopeRef.current === requestScope) setConfirmationBusyId(null);
     }
-  }, [confirmationBusyId, contextPacket, forest?.activeRunId, linkedSessionId, projectRoot, proposals, refreshNavigation, runId, sessionId, sessionScope]);
+  }, [confirmationBusyId, contextPacket, forest?.activeRunId, linkedSessionId, projectRoot, proposals, refreshNavigation, runContinuation, runId, sessionId, sessionScope]);
 
   const declineProposal = useCallback(async (proposalId: string, reason?: string) => {
     if (!sessionId || confirmationBusyId !== null) return false;
