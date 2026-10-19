@@ -480,6 +480,12 @@ def test_dataset_notebook_confirmation_executes_a_source_pinned_composed_workflo
     assert confirmed.status_code == 200, confirmed.text
     workflow = confirmed.json()["workflow_execution"]
     assert workflow["status"] == "completed"
+    # Notebook execution uses the same durable operation record as Agent cards.
+    operation = confirmed.json()["operation"]
+    assert operation["operation_id"] == "operation.multi_step"
+    assert operation["status"] == "completed"
+    from workbench.agent.operations import OperationRecordStore
+    assert OperationRecordStore(project / "workbench").get(operation["record_id"]).to_dict() == operation
     assert len(workflow["branch_runs"]) == 2
     assert {item["branch_id"] for item in workflow["branch_runs"]} == {
         "linear",

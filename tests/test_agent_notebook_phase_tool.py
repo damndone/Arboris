@@ -1,0 +1,174 @@
+"""Planning and execution tools stay on the current scoped Core command."""
+import asyncio
+import importlib
+import pytest
+
+from tests.test_read_only_analysis import _Fixture, _recode, FINGERPRINT
+from workbench.agent.model import ModelStreamEvent
+from workbench.agent.phases import PhaseRequest, PhaseStep
+
+
+@pytest.mark.parametrize("approval", [False, True])
+def test_notebook_planning_tool_uses_the_current_core_model_and_budget(tmp_path, monkeypatch, approval):
+    module = importlib.import_module("workbench.agent.planning.agent_phase")
+    fixture = _Fixture(tmp_path)
+    core = fixture.orchestrator._chain("chain-a")[1]
+    entered = []
+
+    class Phase:
+        episode_id = "shared-episode"
+        def request(self, transcript):
+            return PhaseRequest([{"role":"user", "content":"Plan from the bound source."}], [])
+        async def consume(self, events, *, error=None):
+            assert error is None
+            return PhaseStep("completed", result="planned", public_result=({"requires_confirmation":True, "proposal":{"operation_id":"operation.multi_step", "changes":{"steps":[]}}} if approval else {"planned":True}))
+        def checkpoint(self):
+            return {"episode_id":self.episode_id}
+        def failure(self, reason, error=None):
+            return RuntimeError(reason)
+
+    def factory(**kwargs):
+        entered.append(kwargs)
+        return Phase()
+    monkeypatch.setattr(module, "create_phase", factory)
+
+    class Model:
+        def __init__(self): self.requests = []; self.steps = []
+        async def stream(self, request):
+            self.requests.append(request)
+            self.steps.append(core._steps_used)
+            if len(self.requests) == 1:
+                yield ModelStreamEvent.tool_call_delta(request.request_id, {
+                    "tool_call_id":"plan", "tool_id":"plan_analysis",
+                    "arguments":{"notebook_id":"source-notebook", "question":"Plan the analysis."}})
+                yield ModelStreamEvent.done(request.request_id, "tool_calls")
+            else:
+                yield ModelStreamEvent.text_delta(request.request_id, "Planned.")
+                yield ModelStreamEvent.done(request.request_id)
+
+    model = Model()
+    core.adapter = model
+    result = asyncio.run(core.prompt("Plan the analysis.", budget={"max_steps":3}))
+    assert result
+    assert len(model.requests) == (2 if approval else 3)
+    assert model.steps == ([1, 2] if approval else [1, 2, 3])
+    assert entered[0]["core"] is core
+    assert entered[0]["orchestrator"] is fixture.orchestrator
+    assert {m["session_id"] for m in fixture.repository.list_metadata()} == {"main-session", "chain-session"}
+
+
+def test_run_operation_and_legacy_name_share_the_same_admission_handler(tmp_path):
+    fixture = _Fixture(tmp_path)
+    registry = fixture.orchestrator.tool_registry("chain-a")
+    descriptors = {tool["tool_id"]:tool for tool in registry.descriptors()}
+    assert descriptors["run_operation"]["input_schema"] == descriptors["propose_operation"]["input_schema"]
+    request = {"operation_id":"operation.multi_step", "target":{
+        "run_id":fixture.run_id, "node_ref":"stage:source", "artifact_id":fixture.artifact_id},
+        "preconditions":{"context_version":"node-operation-context/v1", "context_fingerprint":FINGERPRINT,
+                         "active_head_run_id":fixture.run_id, "owner_resolution":"single_candidate"},
+        "changes":{"steps":[_recode()]}, "evidence_refs":[], "expected_effect":["Derive a column."], "risks":[]}
+    result = asyncio.run(registry.execute({"tool_id":"run_operation", "tool_call_id":"run", "arguments":request}, session_id="chain-session"))
+    assert result.ok and result.output["requires_confirmation"] is True
+    proposal = fixture.orchestrator.proposal_store.latest_revision(result.output["proposal"]["proposal_id"])
+    assert proposal.session_id == "chain-session"
+    assert fixture.orchestrator.operation_store.list_records() == []
+
+
+@pytest.mark.parametrize("scenario", ["complete", "changed_source", "preparation_failure"])
+def test_uploaded_source_plans_on_main_turn_and_executes_one_common_receipt(tmp_path, monkeypatch, scenario):
+    from fastapi.testclient import TestClient
+    from tests.test_notebook_routes import make_project, store_upload_bytes
+    from tests.test_agent_workflow_integration import IdleAdapter
+    from workbench.agent.core import AgentCore
+    from workbench.agent.events import AgentEventStream
+    from workbench.agent.session import JsonlSessionRepository
+    from workbench.agent.orchestrator import WorkbenchOrchestrator
+    from workbench.agent.context_tools import NodeOperationContextProvider
+    from workbench.agent.notebook import NotebookService
+    from workbench.agent.notebook.planning_agent import NotebookPlanningAgent
+    from workbench.app import app
+
+    project = make_project(tmp_path)
+    csv = "y,x\n" + "\n".join(f"{3+i*2+(i%3)*.2},{i}" for i in range(30))
+    upload = store_upload_bytes(project, csv.encode(), filename="data.csv")
+    service = NotebookService(project)
+    notebook = service.ensure_default_projection(dataset={"kind":"dataset", "upload_sha256":upload,
+        "filename":"data.csv", "sheet_names":[]}, created_by="test", available_capabilities=["ols"])
+    from workbench.agent.planning.factory import _baseline_planning_evidence
+    from tests.test_notebook_routes import _trace
+    pack = _baseline_planning_evidence(service, notebook.notebook_id,
+        service.compile_context(notebook.notebook_id), _trace(project, notebook.notebook_id, notebook.run_family_id))
+    evidence = pack.records[0]
+    pin = NotebookPlanningAgent._execution_pins(service.compile_context(notebook.notebook_id))["workflow_source"]
+    repository = JsonlSessionRepository(project / "workbench")
+    repository.create_session("main", chain_id="project", role="main")
+    events = AgentEventStream(repository.root)
+    requests = []
+
+    class Model:
+        async def stream(self, request):
+            requests.append(request)
+            if len(requests) == 1:
+                arguments = {"notebook_id":notebook.notebook_id, "question":"Fit y on x and report the result."}
+                tool = "plan_analysis"
+            else:
+                arguments = {"options":[{"rank":1, "rationale":"Estimate the requested model.",
+                    "assumptions":[], "capability_id":"ols", "option_id":"ols",
+                    "proposal":{"proposal_id":"ols", "proposal_revision":1,
+                        "operation_id":"operation.multi_step", "operation_version":"v1",
+                        "target":pin["target"], "preconditions":pin["preconditions"],
+                        "changes":{"steps":[{"step_id":"estimate", "operation_id":"model.genesis",
+                            "spec":{"model_family":"ols", "covariance":"unadjusted",
+                                "branches":[{"branch_id":"main", "outcome":"y", "predictors":["x"]}]}}]}},
+                    "expected_artifacts":[{"artifact_id":"ols_1", "artifact_type":"model_result", "required":True,
+                                           "count":1, "step":None}], "evidence_refs":[{"evidence_id":evidence.evidence_id,
+                        "result_hash":evidence.result_hash, "source_refs":list(evidence.source_refs)}], "comparative_claims":[]}]}
+                tool = "submit_notebook_option_batch"
+            yield ModelStreamEvent.tool_call_delta(request.request_id, {
+                "tool_call_id":f"call-{len(requests)}", "tool_id":tool, "arguments":arguments})
+            yield ModelStreamEvent.done(request.request_id, "tool_calls")
+
+    core = AgentCore(repository, events, Model(), session_id="main", model_name="offline-model")
+    orchestrator = WorkbenchOrchestrator(repository, events, main_session_id="main",
+        context_provider=NodeOperationContextProvider(project))
+    orchestrator.register_main("main", core)
+    result = asyncio.run(core.prompt("Fit the uploaded dataset.", budget={"max_steps":3}))
+    assert result and core._ready_proposal is not None, result
+    assert len(requests) == 2
+    assert not (project / "runs" / pin["target"]["run_id"]).exists()
+    proposal = core._ready_proposal
+    if scenario == "changed_source":
+        from workbench.lineage.upload_store import verify_upload
+        verify_upload(project, upload).write_bytes(b"y,x\n999,1\n")
+    if scenario == "preparation_failure":
+        from workbench.agent.notebook import service_workflow
+        def broken_source(*args, **kwargs):
+            raise OSError("source unavailable at compilation")
+        monkeypatch.setattr(service_workflow, "resolve_data_column_cast_context", broken_source)
+    with TestClient(app) as client:
+        response = client.post(f"/agent/sessions/main/proposals/{proposal['proposal_id']}/confirm",
+            params={"project_root":str(project)}, json={"revision":proposal["revision"],
+                "fingerprint":proposal["fingerprint"], "active_head_run_id":pin["target"]["run_id"]})
+    if scenario == "changed_source":
+        assert response.status_code == 409, response.text
+        assert not orchestrator.operation_store.list_records()
+        return
+    assert response.status_code == 200, response.text
+    record = response.json()["operation"]
+    if scenario == "preparation_failure":
+        assert record["status"] == "failed", record
+        assert record["error"]["code"] == "WORKFLOW_EXECUTION_FAILED"
+        return
+    assert record["status"] == "completed", record
+    parents = [r for r in orchestrator.operation_store.list_records() if r.operation_id == "operation.multi_step"]
+    assert len(parents) == 1 and parents[0].record_id == record["record_id"]
+    assert parents[0].agent_session_id == "main"
+    assert service.store.read_option(notebook.notebook_id, "ols").lifecycle_status == "executed"
+    assert {m["session_id"] for m in repository.list_metadata()} == {"main"}
+    with TestClient(app) as client:
+        repeat = client.post(f"/agent/sessions/main/proposals/{proposal['proposal_id']}/confirm",
+            params={"project_root":str(project)}, json={"revision":proposal["revision"],
+                "fingerprint":proposal["fingerprint"], "active_head_run_id":pin["target"]["run_id"]})
+    assert repeat.status_code == 200, repeat.text
+    assert repeat.json()["operation"]["record_id"] == record["record_id"]
+    assert len([r for r in orchestrator.operation_store.list_records() if r.operation_id == "operation.multi_step"]) == 1

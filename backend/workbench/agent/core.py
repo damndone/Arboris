@@ -245,11 +245,75 @@ class AgentCore:
         self._core_phase = None
         if self._standalone_phase:
             return ""
+        if step.public_result.get("requires_confirmation") is True:
+            self._ready_proposal = step.public_result["proposal"]
+            return self._finish_proposal_ready("", self._active_command_id)
+        result_text = json.dumps(dict(step.public_result), ensure_ascii=False, sort_keys=True)
+        if len(result_text) > 24_000:
+            raise ValueError("phase_public_result_exceeds_24000_characters")
         self.repository.append(self.session_id, "custom_message", {
             "audience": "model", "model_role": "user", "name": "workbench_phase_result",
-            "content": json.dumps(dict(step.public_result), ensure_ascii=False, sort_keys=True),
+            "content": result_text,
         })
         return await self._run_turn(None, append_user=False, tool_context=tool_context)
+
+    def _finish_proposal_ready(self, content: str, command_id: str | None) -> str:
+        # A proposal is already persisted, reviewable, and gated by
+        # explicit user confirmation. Requiring a further provider
+        # completion turn can only waste budget and turn a usable
+        # proposal into a misleading max-steps failure.
+        # The model's pre-tool narration is often in another
+        # language than the question; the reply the user reads is
+        # written from the persisted proposal instead.
+        language = detect_language(getattr(self, "_user_text", None))
+        summary = (
+            proposal_summary(self._ready_proposal, language)
+            if self._ready_proposal is not None
+            else ""
+        )
+        if summary or not content:
+            narration = content if matches_language(content, language) else ""
+            if narration and numeric_grounding.check(
+                narration, self.context_builder.build(self.session_id).messages
+            ):
+                # The proposal summary is written from the proposal
+                # itself; narration with an unsupported number is dropped.
+                narration = ""
+            content = "\n\n".join(
+                part for part in (narration, summary) if part
+            ) or "proposal is ready for confirmation"
+            summary_writer = self.repository.append_once if self.turn_journal else self.repository.append
+            summary_entry = summary_writer(
+                self.session_id,
+                "message",
+                {
+                    "role": "assistant",
+                    "content": content,
+                    "stop_reason": "proposal_ready",
+                    "command_id": command_id,
+                },
+                **({"key": command_id, "stage": f"proposal_summary:{self._steps_used}"}
+                   if self.turn_journal else {}),
+            )
+            self.events.emit(
+                self.session_id,
+                "message_end",
+                {
+                    "entry_id": summary_entry.entry_id,
+                    "content": content,
+                    "stop_reason": "proposal_ready",
+                    "error": None,
+                },
+                command_id=command_id,
+            )
+        self.events.emit(
+            self.session_id,
+            "agent_end",
+            {"stop_reason": "proposal_ready"},
+            command_id=command_id,
+        )
+        self._active_turn_started = False
+        return content
 
     def attach_tools(
         self,
@@ -1025,62 +1089,7 @@ class AgentCore:
                     command_id=command_id,
                 )
                 if confirmation_ready:
-                    # A proposal is already persisted, reviewable, and gated by
-                    # explicit user confirmation. Requiring a further provider
-                    # completion turn can only waste budget and turn a usable
-                    # proposal into a misleading max-steps failure.
-                    # The model's pre-tool narration is often in another
-                    # language than the question; the reply the user reads is
-                    # written from the persisted proposal instead.
-                    language = detect_language(getattr(self, "_user_text", None))
-                    summary = (
-                        proposal_summary(self._ready_proposal, language)
-                        if self._ready_proposal is not None
-                        else ""
-                    )
-                    if summary or not content:
-                        narration = content if matches_language(content, language) else ""
-                        if narration and numeric_grounding.check(
-                            narration, self.context_builder.build(self.session_id).messages
-                        ):
-                            # The proposal summary is written from the proposal
-                            # itself; narration with an unsupported number is dropped.
-                            narration = ""
-                        content = "\n\n".join(
-                            part for part in (narration, summary) if part
-                        ) or "proposal is ready for confirmation"
-                        summary_writer = self.repository.append_once if self.turn_journal else self.repository.append
-                        summary_entry = summary_writer(
-                            self.session_id,
-                            "message",
-                            {
-                                "role": "assistant",
-                                "content": content,
-                                "stop_reason": "proposal_ready",
-                                "command_id": command_id,
-                            },
-                            **({"key": command_id, "stage": f"proposal_summary:{self._steps_used}"}
-                               if self.turn_journal else {}),
-                        )
-                        self.events.emit(
-                            self.session_id,
-                            "message_end",
-                            {
-                                "entry_id": summary_entry.entry_id,
-                                "content": content,
-                                "stop_reason": "proposal_ready",
-                                "error": None,
-                            },
-                            command_id=command_id,
-                        )
-                    self.events.emit(
-                        self.session_id,
-                        "agent_end",
-                        {"stop_reason": "proposal_ready"},
-                        command_id=command_id,
-                    )
-                    self._active_turn_started = False
-                    return content
+                    return self._finish_proposal_ready(content, command_id)
                 self._active_turn_started = False
                 if self._steer_queue:
                     # The person steered while tools ran: their words go in now,

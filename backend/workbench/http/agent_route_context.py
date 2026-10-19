@@ -329,8 +329,7 @@ def _refresh_main_context(
             "name": "workbench_context",
             "content": (
                 "Workbench read-only context, refreshed: this supersedes every earlier context "
-                "message; runs listed here are the project's current ones. Do not invent facts "
-                "or execute actions.\n" + serialized
+                "message; runs listed here are the project's current ones. Do not invent facts.\n" + serialized
             ),
             "metadata": {"context_fingerprint": fingerprint, "refreshed": True},
         },

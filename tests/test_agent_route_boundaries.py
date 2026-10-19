@@ -21,11 +21,11 @@ def _boundary(name: str):
     return importlib.import_module(module)
 
 
-def test_protocol_service_preserves_the_exact_existing_prompt_text() -> None:
+def test_protocol_service_preserves_the_current_approved_prompt_contract() -> None:
     protocol = _boundary("protocol")
     expected = {
         "CHAIN_AGENT_PROTOCOL": "bdf72b48490efeadd57238ab7bf32aed25b76af44bb78c06c1810ff2188b9baa",
-        "MAIN_AGENT_PROTOCOL": "0961c1eb8cd71100bb566df26f76d73dc54673316d4376ec5b14320f787a6cf4",
+        "MAIN_AGENT_PROTOCOL": "a32ad013a644c64594f428ba92ce86685abc4cab4d2c4936374f5be6f7fc3f36",
         "CONTINUATION_NOTE": "472088888439a73be1782e92ab48d0e2118d84c668ac85e549331fbb08afa75c",
     }
     for name, digest in expected.items():

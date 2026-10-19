@@ -146,7 +146,7 @@ async def _run_reserved_agent_turn(
         _ensure_current_global_protocol(repository, session_id)
         if body.context_packet:
             _refresh_main_context(repository, session_id, body.context_packet)
-    if metadata.get("role") == "chain":
+    if metadata.get("role") in {"chain", "main"}:
         # Handoff §7 slice: the ROUTE registers the chain-scoped read-only
         # tools through the existing orchestrator boundary — the model never
         # discovers Workbench capabilities on its own, and a plain inspection
@@ -156,7 +156,7 @@ async def _run_reserved_agent_turn(
         orchestrator = WorkbenchOrchestrator(
             repository,
             events,
-            main_session_id=_ensure_main_session(repository, root),
+            main_session_id=session_id if metadata["role"] == "main" else _ensure_main_session(repository, root),
             operation_registry=operation_registry,
             context_provider=NodeOperationContextProvider(root),
         )
@@ -178,7 +178,10 @@ async def _run_reserved_agent_turn(
             })
         orchestrator.permission_rules = permission_rules
         orchestrator.session_grants = _session_grants(repository, session_id)
-        orchestrator.register_chain(str(metadata.get("chain_id")), session_id, agent)
+        if metadata["role"] == "main":
+            orchestrator.register_main(session_id, agent)
+        else:
+            orchestrator.register_chain(str(metadata.get("chain_id")), session_id, agent)
         orchestrator.read_only_runner = lambda proposal, actor=None: _run_read_only_proposal(
             root, orchestrator, proposal, actor
         )

@@ -35,6 +35,7 @@ from ...contracts.agent.notebook_option import (
 )
 from .common import define_view, view_of
 from .drafts import PipelineDraft
+from .data_operations import OperationRecordView
 
 
 # to_dict omits source_kind for the default run_artifact.
@@ -130,6 +131,7 @@ class WorkflowConfirmed(TypedDict):
     execution: NotRequired[ExecutionView]
     outcome: NotRequired[ExecutionOutcomeView]
     workflow_execution: NotRequired[dict[str, Any]]
+    operation: NotRequired[OperationRecordView]
     trace_id: str
 
 

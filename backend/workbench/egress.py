@@ -73,6 +73,8 @@ TOOL_CONTENT_CLASSES: Mapping[str, str] = {
     "search_project_conversations": "workbench_state",
     "read_project_conversation": "workbench_state",
     "propose_operation": "workbench_state",
+    "run_operation": "workbench_state",
+    "plan_analysis": "workbench_state",
     "update_plan": "workbench_state",
     "inspect_builtin_skills": "workbench_state",
     "inspect_custom_skills": "skill",

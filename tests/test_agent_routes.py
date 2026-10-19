@@ -1409,7 +1409,7 @@ def test_chain_turn_wires_scoped_read_only_tools_without_mutation(
     assert _snapshot(project_root) == before
 
 
-def test_main_role_turn_exposes_only_read_only_project_evidence_tool(
+def test_main_role_turn_exposes_project_evidence_and_permissioned_operation_tools(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -1437,7 +1437,7 @@ def test_main_role_turn_exposes_only_read_only_project_evidence_tool(
     tool_ids = {
         tool["tool_id"] for tool in FakeAgentAdapter.instances[-1].requests[0].tools
     }
-    assert tool_ids == {
+    evidence_tools = {
         # Rows go to the user's screen; the provider sees them only if the
         # project's sharing policy allows rows (workbench.egress).
         "show_dataset_rows",
@@ -1459,7 +1459,11 @@ def test_main_role_turn_exposes_only_read_only_project_evidence_tool(
         "inspect_custom_skills",
         "check_model_claims",
     }
-    assert all(tool["side_effect"] == "none" for tool in FakeAgentAdapter.instances[-1].requests[0].tools)
+    operation_tools = {"run_operation", "propose_operation", "propose_analysis_loop", "update_plan", "plan_analysis"}
+    source_tools = {"list_project_datasets", "inspect_data_schema", "inspect_node_context", "inspect_operation_contract"}
+    assert tool_ids == evidence_tools | source_tools | operation_tools
+    for tool in FakeAgentAdapter.instances[-1].requests[0].tools:
+        assert tool["side_effect"] == ("proposal" if tool["tool_id"] in operation_tools else "none")
     descriptor = next(
         tool
         for tool in FakeAgentAdapter.instances[-1].requests[0].tools
@@ -1473,7 +1477,7 @@ def test_main_role_turn_exposes_only_read_only_project_evidence_tool(
         if message.get("name") == "workbench_global_agent_protocol"
     ]
     assert len(protocol_messages) == 1
-    assert "project-level advisory Agent" in protocol_messages[0]["content"]
+    assert "project-level research Agent" in protocol_messages[0]["content"]
     assert "never invent" in protocol_messages[0]["content"].lower()
     assert "inspect_project_model_coefficients" in protocol_messages[0]["content"]
     assert "at most four exact persisted term names per call" in protocol_messages[0]["content"]

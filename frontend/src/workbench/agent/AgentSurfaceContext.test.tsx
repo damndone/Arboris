@@ -990,6 +990,16 @@ describe("AgentSurfaceProvider", () => {
     expect(mocks.continueAgentTurn).not.toHaveBeenCalled();
   });
 
+  it("confirms a project Main proposal against its source rather than the visible run", async () => {
+    sessionStorage.setItem("workbench:agent-session:/proj:run-a:project%3Arun-a%3Anone", "agent_main_saved");
+    const proposal = {...pendingProposal, preconditions:{active_head_run_id:"run-source"}};
+    mocks.getAgentSession.mockResolvedValue({...session("agent_main_saved", [], [proposal]), role:"main"});
+    mount();
+    fireEvent.click(await screen.findByRole("button", {name:"Confirm proposal proposal-1"}));
+    await waitFor(() => expect(mocks.confirmAgentProposal).toHaveBeenCalledWith("/proj", "agent_main_saved", "proposal-1",
+      {revision:1, fingerprint:"fingerprint-1", active_head_run_id:"run-source"}));
+  });
+
   it("confirms a linked proposal against its bound chain rather than another visible run", async () => {
     const proposal = {...pendingProposal, preconditions: {active_head_run_id: "run-source"}};
     mocks.getAgentSession.mockResolvedValue(session("agent_linked", [], [proposal]));

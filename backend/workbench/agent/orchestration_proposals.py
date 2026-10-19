@@ -13,6 +13,21 @@ from .tools import ToolVisibleError
 from .operation_handlers.proposal_arguments import _overrides_from_proposal_changes, _require_editable_rerun_target
 
 class OrchestrationProposals:
+    def _operation_chain(self, session_id: str, target: dict[str, Any]) -> str:
+        """Bind Main operations to a project-owned source without changing its role."""
+        import hashlib
+        from .chains import ensure_chain_root
+
+        metadata = self.repository.get_metadata(session_id)
+        if metadata["role"] == "chain":
+            return str(metadata["chain_id"])
+        source_run_id = str(target["run_id"])
+        identity = hashlib.sha256(f"{session_id}:{source_run_id}".encode()).hexdigest()[:24]
+        chain_id = f"main_source_{identity}"
+        ensure_chain_root(self.repository.root, runs_root=self.data_operation_project_root / "runs",
+            chain_id=chain_id, active_head_run_id=source_run_id, agent_session_id=session_id)
+        return chain_id
+
     def _resolve_chain_head(
         self,
         chain_id: str,

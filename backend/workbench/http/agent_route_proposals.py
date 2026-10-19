@@ -119,6 +119,24 @@ def _current_proposal_context_fingerprint(
         chain_id=str(proposal.chain_id),
         requested_active_head_run_id=active_head_run_id,
     )
+    from ..agent.session import JsonlSessionRepository
+    from ..agent.notebook.agent_bridge import find_binding, current_binding_context
+    from ..agent.notebook import NotebookService
+    from ..agent.notebook.errors import NotebookOptionError
+    from ..lineage.upload_store import UploadHashMismatch, UploadBlobMissing
+
+    binding = find_binding(JsonlSessionRepository(root / "workbench", create=False), proposal)
+    if binding is not None:
+        try:
+            current_binding_context(NotebookService(root), binding, proposal)
+        except NotebookOptionError as exc:
+            raise WorkbenchAPIError(status_code=exc.status_code, code=exc.code,
+                message=str(exc), details=exc.details) from exc
+        except (UploadHashMismatch, UploadBlobMissing) as exc:
+            raise WorkbenchAPIError(status_code=409, code="AGENT_PROPOSAL_STALE",
+                message="The uploaded Notebook source changed or is unavailable.",
+                details={"proposal_id":proposal.proposal_id}) from exc
+        return str(proposal.preconditions["context_fingerprint"])
     if proposal.operation_id == "data.columns.cast":
         return _current_data_columns_cast_fingerprint(root, proposal)
     if proposal.operation_id not in {"model.rerun", "metadata.edit", "graph.fork", "operation.multi_step"}:

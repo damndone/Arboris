@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 from ..agent.context_tools import NodeOperationContextProvider
+from ..agent.chains import session_owns_chain
 from ..analysis_loop.lifecycle import confirm_analysis_loop_proposal
 from ..analysis_loop.plan import PlanBindingError
 from ..analysis_loop.resolver import resolve_analysis_loop_inputs
@@ -44,7 +45,7 @@ def get_agent_operation_projection(
             message="Agent operation projection was not found.",
             details={"record_id": record_id},
         ) from exc
-    if record.agent_session_id != session_id or record.chain_id != metadata.get("chain_id"):
+    if record.agent_session_id != session_id or not session_owns_chain(repository, session_id=session_id, chain_id=record.chain_id):
         raise WorkbenchAPIError(
             status_code=404,
             code="AGENT_NAVIGATION_NOT_FOUND",
@@ -69,12 +70,12 @@ def decline_agent_proposal(
         store,
         proposal_id=proposal_id,
         session_id=session_id,
-        chain_id=metadata.get("chain_id"),
+        chain_id=metadata.get("chain_id") if metadata["role"] == "chain" else None,
     )
     orchestrator = WorkbenchOrchestrator(
         repository,
         events,
-        main_session_id=_ensure_main_session(repository, root),
+        main_session_id=session_id if metadata["role"] == "main" else _ensure_main_session(repository, root),
         context_provider=NodeOperationContextProvider(root),
     )
     try:
@@ -110,12 +111,12 @@ def revise_agent_proposal(
         store,
         proposal_id=proposal_id,
         session_id=session_id,
-        chain_id=metadata.get("chain_id"),
+        chain_id=metadata.get("chain_id") if metadata["role"] == "chain" else None,
     )
     orchestrator = WorkbenchOrchestrator(
         repository,
         events,
-        main_session_id=_ensure_main_session(repository, root),
+        main_session_id=session_id if metadata["role"] == "main" else _ensure_main_session(repository, root),
         context_provider=NodeOperationContextProvider(root),
     )
     try:
@@ -194,7 +195,7 @@ async def confirm_agent_proposal(
         store,
         proposal_id=proposal_id,
         session_id=session_id,
-        chain_id=metadata.get("chain_id"),
+        chain_id=metadata.get("chain_id") if metadata["role"] == "chain" else None,
     )
     authoritative_active_head_run_id = _authoritative_active_head(
         root,
@@ -209,7 +210,7 @@ async def confirm_agent_proposal(
     orchestrator = WorkbenchOrchestrator(
         repository,
         events,
-        main_session_id=_ensure_main_session(repository, root),
+        main_session_id=session_id if metadata["role"] == "main" else _ensure_main_session(repository, root),
         context_provider=NodeOperationContextProvider(root),
     )
     is_analysis_loop = isinstance(proposal.preconditions.get("analysis_loop"), dict)
@@ -282,12 +283,24 @@ async def confirm_agent_proposal(
     # selects the request-independent operation handler; no model text
     # participates in execution.
     try:
-        record = await orchestrator.execute_confirmed_operation(
-            record.record_id,
-            project_root=root,
-            current_context_fingerprint=current_context_fingerprint,
-            current_active_head_run_id=authoritative_active_head_run_id,
-        )
+        from ..agent.notebook.agent_bridge import find_binding, execute_binding
+        from ..agent.notebook import NotebookService
+        import asyncio
+
+        binding = find_binding(repository, proposal)
+        if binding is not None and record.status not in {"completed", "failed", "stale", "cancelled"}:
+            result = await asyncio.to_thread(execute_binding, NotebookService(root), binding, record)
+            record = orchestrator.operation_store.get(record.record_id)
+            if record.status == "pending" and result["outcome"]["execution_status"] == "failed":
+                record = orchestrator._fail_operation(record, error={
+                    "type":"NotebookWorkflowPreparation", "phase":"prepare", "code":"WORKFLOW_EXECUTION_FAILED"})
+        else:
+            record = await orchestrator.execute_confirmed_operation(
+                record.record_id,
+                project_root=root,
+                current_context_fingerprint=current_context_fingerprint,
+                current_active_head_run_id=authoritative_active_head_run_id,
+            )
     except ProposalStaleError as exc:
         raise WorkbenchAPIError(
             status_code=409,
@@ -362,7 +375,7 @@ async def reconcile_agent_operation(
     failed) record, and the child chain/fork activation. Safe to poll.
     """
     root = _project_root(project_root)
-    repository, events, _metadata = _get_session(root, session_id)
+    repository, events, metadata = _get_session(root, session_id)
     store = OperationRecordStore(repository.root)
     try:
         record = store.get(record_id)
@@ -383,7 +396,7 @@ async def reconcile_agent_operation(
     orchestrator = WorkbenchOrchestrator(
         repository,
         events,
-        main_session_id=_ensure_main_session(repository, root),
+        main_session_id=session_id if metadata["role"] == "main" else _ensure_main_session(repository, root),
         context_provider=NodeOperationContextProvider(root),
     )
     if record.operation_id != "graph.fork":

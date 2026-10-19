@@ -504,7 +504,7 @@ class WorkbenchOrchestrator(OrchestrationWorkflows, OrchestrationProposals, Orch
                     continue
                 if not record.execution.get("execution_key"):
                     recovered.append(
-                        self._fail_recovered_operation(
+                        self._fail_operation(
                             record,
                             error={"type": "ChildRunMissing", "phase": "submit"},
                         )
@@ -525,7 +525,7 @@ class WorkbenchOrchestrator(OrchestrationWorkflows, OrchestrationProposals, Orch
                 )
             except Exception as exc:
                 recovered.append(
-                    self._fail_recovered_operation(
+                    self._fail_operation(
                         record,
                         error={"type": type(exc).__name__, "message": str(exc)},
                     )
@@ -533,13 +533,13 @@ class WorkbenchOrchestrator(OrchestrationWorkflows, OrchestrationProposals, Orch
         return recovered
 
 
-    def _fail_recovered_operation(
+    def _fail_operation(
         self,
         record: OperationRecord,
         *,
         error: dict[str, Any],
     ) -> OperationRecord:
-        """Persist a restart-recovery failure and preserve its evidence."""
+        """Persist a failed operation and preserve its original evidence."""
 
         execution = record.execution
         child_chain_id = execution.get("child_chain_id")
@@ -583,19 +583,28 @@ class WorkbenchOrchestrator(OrchestrationWorkflows, OrchestrationProposals, Orch
         return record
 
 
+    def register_main(self, session_id: str, agent: AgentCore) -> None:
+        metadata = self.repository.get_metadata(session_id)
+        if metadata.get("role") != "main" or session_id != self.main_session_id:
+            raise ValueError("registered session must be the project Main session")
+        self._register_session(str(metadata["chain_id"]), session_id, agent)
+
     def register_chain(
         self,
         chain_id: str,
         session_id: str,
         agent: AgentCore,
     ) -> None:
+        metadata = self.repository.get_metadata(session_id)
+        if metadata.get("role") != "chain" or metadata.get("chain_id") != chain_id:
+            raise ValueError("registered session must be a matching chain session")
+        self._register_session(chain_id, session_id, agent)
+
+    def _register_session(self, chain_id: str, session_id: str, agent: AgentCore) -> None:
         if chain_id in self._chains:
             raise ValueError(f"chain already registered: {chain_id}")
         if agent.session_id != session_id:
             raise ValueError("chain session and AgentCore session must match")
-        metadata = self.repository.get_metadata(session_id)
-        if metadata.get("role") != "chain" or metadata.get("chain_id") != chain_id:
-            raise ValueError("registered session must be a matching chain session")
         self._chains[chain_id] = (session_id, agent)
         try:
             registry = self.tool_registry(chain_id)

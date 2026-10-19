@@ -57,6 +57,19 @@ def ensure_chain_root(
         )
 
 
+def session_owns_chain(repository, *, session_id: str, chain_id: str) -> bool:
+    """Check persisted session ownership at proposal and HTTP boundaries."""
+    metadata = repository.get_metadata(session_id)
+    if metadata.get("role") == "chain":
+        return metadata.get("chain_id") == chain_id
+    if metadata.get("role") == "main":
+        try:
+            return ChainStore(repository.root, create=False).get(chain_id).get("agent_session_id") == session_id
+        except KeyError:
+            return False
+    return False
+
+
 @dataclass(frozen=True)
 class RerunExecutionRequest:
     operation_id: str

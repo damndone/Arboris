@@ -48,10 +48,12 @@ Every tool the Agent can call, and the class of content its result contains. The
 | `inspect_statistical_evidence` | `model_result` |
 | `inspect_time_series_summary` | `aggregate` |
 | `list_project_datasets` | `metadata` |
+| `plan_analysis` | `workbench_state` |
 | `propose_analysis_loop` | `workbench_state` |
 | `propose_operation` | `workbench_state` |
 | `read_project_conversation` | `workbench_state` |
 | `request_notebook_inspections` | `aggregate` |
+| `run_operation` | `workbench_state` |
 | `search_project_conversations` | `workbench_state` |
 | `show_dataset_rows` | `rows` |
 | `submit_analysis_loop_intent` | `workbench_state` |

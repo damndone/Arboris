@@ -47,6 +47,7 @@ def build_chain_tool_registry(
     propose_analysis_loop: ToolHandler,
     update_plan: ToolHandler,
     propose_operation: ToolHandler,
+    plan_analysis: ToolHandler,
 ) -> ToolRegistry:
     """Keep context reads first, followed by the three proposal tools.
 
@@ -107,10 +108,25 @@ def build_chain_tool_registry(
         ToolDefinition(
             tool_id="propose_operation",
             version="v1",
+            max_output_budget=24_000,
             input_schema=proposal_tool_schema(),
             side_effect="proposal",
             scope_requirements=("chain",),
             handler=propose_operation,
         )
     )
+    registry.register(ToolDefinition(
+        tool_id="run_operation", version="v1", input_schema=proposal_tool_schema(), max_output_budget=24_000,
+        side_effect="proposal", scope_requirements=("chain",), handler=propose_operation,
+        description="Run one typed operation under the current permissions, or return its reviewable proposal."
+    ))
+    registry.register(ToolDefinition(
+        tool_id="plan_analysis", version="v1", side_effect="proposal", scope_requirements=("chain",),
+        max_output_budget=24_000,
+        input_schema={"type":"object", "required":["notebook_id", "question"], "properties":{
+            "notebook_id":{"type":"string", "minLength":1, "maxLength":200},
+            "question":{"type":"string", "minLength":1, "maxLength":4000}}, "additionalProperties":False},
+        handler=plan_analysis,
+        description="Plan a source-bound Notebook analysis on this same Agent turn and budget; return ordinary proposal cards."
+    ))
     return registry

@@ -1231,8 +1231,7 @@ class RegistrationMixin:
     def global_tool_definitions(self, *, session_id: str) -> list[ToolDefinition]:
         """Expose bounded project evidence readers to the Main Agent.
 
-        The Main Agent remains unable to mutate a graph or run.  It may only
-        inspect server-persisted aggregate evidence, without transferring model
+        These tools inspect server-persisted aggregate evidence without transferring model
         payloads into its context. It can show data rows to the user; they
         reach the model only when the project's sharing policy allows rows.
         """

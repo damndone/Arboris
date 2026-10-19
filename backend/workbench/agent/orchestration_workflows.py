@@ -1,5 +1,6 @@
 """orchestration workflows: methods over the existing shared state."""
 from __future__ import annotations
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 from .operations import OperationRecord
@@ -36,7 +37,7 @@ class OrchestrationWorkflows:
             or record.execution.get("workflow_id")
             or f"workflow_{record.record_id}"
         )
-        return compile_workflow(
+        workflow = compile_workflow(
             workflow_id=str(workflow_id),
             target=record.target,
             preconditions={
@@ -46,6 +47,7 @@ class OrchestrationWorkflows:
             steps=composed_steps,
             available_columns=[str(column) for column in frame.columns],
         )
+        return replace(workflow, bindings=dict(record.execution.get("workflow_bindings", {})))
 
 
     def _workflow_post_estimation_results(

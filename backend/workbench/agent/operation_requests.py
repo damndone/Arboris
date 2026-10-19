@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from .events import AgentEventStream
+from .chains import session_owns_chain
 from .operations import OperationDefinition, OperationRegistry
 from .proposals import ProposalInvocation, ProposalRevision, ProposalStore
 from .session import JsonlSessionRepository
@@ -83,8 +84,7 @@ def admit(
 ) -> OperationReceipt:
     """Validate scope and the declaration before persisting the original records."""
 
-    metadata = repository.get_metadata(session_id)
-    if metadata.get("role") != "chain" or metadata.get("chain_id") != chain_id:
+    if not session_owns_chain(repository, session_id=session_id, chain_id=chain_id):
         raise ValueError("proposal session must be a matching chain session")
     definition = operation_registry.require(request.operation_id, request.operation_version)
     validate(request, definition)
@@ -104,6 +104,11 @@ def admit(
         proposal_id=proposal_id,
         **({"invocation": invocation} if invocation is not None else {}),
     )
+    proposal_content = json.dumps(proposal.to_dict(), ensure_ascii=False, sort_keys=True)
+    if len(proposal_content) > 24_000:
+        proposal_content = json.dumps({"proposal_id":proposal.proposal_id, "revision":proposal.revision,
+            "operation_id":proposal.operation_id, "fingerprint":proposal.fingerprint, "status":"pending",
+            "details_omitted":"Proposal exceeds the conversation budget; full details remain in its review card and audit record."})
     append = repository.append if invocation is None else repository.append_once
     append(
         session_id,
@@ -111,7 +116,7 @@ def admit(
         {
             "message_type": "operation_proposal",
             "audience": "model",
-            "content": json.dumps(proposal.to_dict(), ensure_ascii=False, sort_keys=True),
+            "content": proposal_content,
             "proposal": proposal.to_dict(),
         },
         **({"key": invocation.invocation_id, "stage": "operation_proposal"}

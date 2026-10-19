@@ -954,7 +954,7 @@ export function AgentSurfaceProvider({
       ? (ownership as { active_head_run_id?: unknown }).active_head_run_id
       : undefined;
     const proposalHead = proposal.preconditions.active_head_run_id;
-    const activeHeadRunId = linkedSessionId && typeof proposalHead === "string" && proposalHead
+    const activeHeadRunId = typeof proposalHead === "string" && proposalHead
       ? proposalHead
       : typeof activeHead === "string" && activeHead ? activeHead
       : forest?.activeRunId ?? runId;

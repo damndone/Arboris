@@ -18,6 +18,7 @@ from .errors import OptionExecutionReceiptRequired, OptionLifecycleTransitionInv
 from .freshness import assert_executable
 from .store import RECORD_EXECUTION, RECORD_EXECUTION_RESULT
 from .workflow_artifacts import p7_capability_ids_from_steps, persist_workflow_result_manifest, workflow_result_artifact_id
+from .operation_adapter import execute_workflow_option
 
 class ServiceWorkflow:
     def confirm_and_execute_workflow(
@@ -30,6 +31,7 @@ class ServiceWorkflow:
         proposal_revision: int,
         context: NotebookPlanningContextV1,
         trace: TraceWriter | None = None,
+        operation_record=None,
     ) -> dict[str, Any]:
         """Run one confirmed ``operation.multi_step`` with server-owned facts.
 
@@ -160,6 +162,7 @@ class ServiceWorkflow:
             )
 
         receipt: dict[str, Any] | None = None
+        operation = None
         try:
             source_context = resolve_data_column_cast_context(
                 self.project_root,
@@ -201,7 +204,9 @@ class ServiceWorkflow:
                     "workflow_plan_fingerprint": workflow.plan_fingerprint,
                 },
             )
-            state = execute_workflow(self.project_root, workflow)
+            executed = execute_workflow_option(self, notebook=notebook, option_id=option_id,
+                revision=current, proposal=proposal, workflow=workflow, operation_record=operation_record)
+            operation, state = executed.operation, executed.state
             receipt = self._workflow_execution_receipt(workflow, state)
             produced = self._workflow_produced_artifacts(workflow, state)
             if (
@@ -267,6 +272,8 @@ class ServiceWorkflow:
         }
         if receipt is not None:
             result["workflow_execution"] = receipt
+        if operation is not None:
+            result["operation"] = operation.to_dict()
         return result
 
 

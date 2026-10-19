@@ -47,7 +47,7 @@ class OrchestrationTools:
 
 
     def _bind_workflow_preconditions(
-        self, arguments: dict[str, Any], *, session_id: str
+        self, arguments: dict[str, Any], *, session_id: str, chain_id: str | None = None
     ) -> dict[str, Any]:
         """Derive a workflow's preconditions from the node it actually targets.
 
@@ -67,7 +67,7 @@ class OrchestrationTools:
         from .context_tools import InspectNodeContextRequest
 
         try:
-            chain_id = self.repository.get_metadata(session_id).get("chain_id")
+            chain_id = chain_id or self.repository.get_metadata(session_id).get("chain_id")
         except (KeyError, FileNotFoundError, ValueError):
             chain_id = None
         active_head = str(preconditions.get("active_head_run_id") or target["run_id"])
@@ -185,6 +185,7 @@ class OrchestrationTools:
         proposal = create_analysis_loop_proposal(
             orchestrator=self,
             chain_id=chain_id,
+            session_id=session_id,
             command_id=(metadata or {}).get("command_id"),
             plan_store=PlanDiffStore(self.repository.root, create=False),
             source=resolved.source,
@@ -248,6 +249,7 @@ class OrchestrationTools:
         arguments: dict[str, Any],
         *,
         session_id: str,
+        chain_id: str | None = None,
     ) -> dict[str, Any]:
         """Re-derive canonical target/precondition facts from the backend.
 
@@ -264,7 +266,7 @@ class OrchestrationTools:
             return self._canonicalize_data_columns_cast_arguments(arguments)
         if operation_id == "operation.multi_step":
             return self._bind_workflow_preconditions(
-                self._canonicalize_workflow_arguments(arguments), session_id=session_id
+                self._canonicalize_workflow_arguments(arguments), session_id=session_id, chain_id=chain_id
             )
         if self.context_provider is None or operation_id not in {*RERUN_OPERATIONS, "graph.fork"}:
             return arguments
@@ -276,7 +278,7 @@ class OrchestrationTools:
         target = dict(arguments.get("target") or {})
         preconditions = dict(arguments.get("preconditions") or {})
         metadata = self.repository.get_metadata(session_id)
-        chain_id = metadata.get("chain_id")
+        chain_id = chain_id or metadata.get("chain_id")
         if isinstance(chain_id, str) and chain_id:
             try:
                 preconditions["active_head_run_id"] = self._resolve_chain_head(
@@ -341,14 +343,20 @@ class OrchestrationTools:
                 operation_registry=self.operation_registry,
             )
 
+        if self.repository.get_metadata(session_id)["role"] == "main":
+            source_tools = {"list_project_datasets", "inspect_data_schema", "inspect_node_context", "inspect_operation_contract"}
+            context_tools = (*self.context_provider.global_tool_definitions(session_id=session_id),
+                             *(tool for tool in context_tools if tool.tool_id in source_tools))
+
         async def propose_operation(arguments: dict[str, Any], context) -> dict[str, Any]:
             if context.session_id != session_id:
                 raise ValueError("tool session is outside the registered chain scope")
             operation_id = str(arguments["operation_id"])
+            operation_chain = self._operation_chain(session_id, arguments["target"])
             arguments = self._canonicalize_proposal_arguments(
                 operation_id,
                 arguments,
-                session_id=session_id,
+                session_id=session_id, chain_id=operation_chain,
             )
             metadata = context.metadata
             if "allowed_operations" in metadata:
@@ -370,7 +378,7 @@ class OrchestrationTools:
             cluster_variable = self._clustered_analysis_loop_intent(arguments)
             if operation_id == "model.rerun" and cluster_variable is not None:
                 return self._create_analysis_loop_proposal_from_agent_arguments(
-                    chain_id=chain_id,
+                    chain_id=operation_chain,
                     session_id=session_id,
                     arguments={
                         **arguments,
@@ -389,7 +397,8 @@ class OrchestrationTools:
                 )
             receipt = self.admit_operation_request(
                 OperationRequest.from_arguments({**arguments, "operation_id": operation_id}),
-                chain_id=chain_id,
+                chain_id=operation_chain,
+                session_id=session_id,
                 command_id=command_id,
                 invocation=(ProposalInvocation(
                     invocation_id=metadata["invocation_id"],
@@ -409,8 +418,9 @@ class OrchestrationTools:
                 str(item) for item in (allowed_operations or [])
             }:
                 raise PermissionError("operation_not_allowed")
+            operation_chain = self._operation_chain(session_id, {"run_id":arguments["source_run_id"]})
             return self._create_analysis_loop_proposal_from_agent_arguments(
-                chain_id=chain_id,
+                chain_id=operation_chain,
                 session_id=session_id,
                 arguments=arguments,
                 metadata=metadata,
@@ -466,11 +476,22 @@ class OrchestrationTools:
             }
 
 
+        def plan_analysis(arguments, context):
+            from .planning.agent_phase import create_phase
+
+            if context.session_id != session_id:
+                raise ValueError("tool session is outside the registered chain scope")
+            core = self._chain(chain_id)[1]
+            phase = create_phase(core=core, orchestrator=self, chain_id=chain_id, arguments=arguments)
+            core.enter_phase(phase)
+            return {"phase_started":True, "episode_id":phase.episode_id}
+
         return build_chain_tool_registry(
             context_tools=context_tools,
             proposal_tool_schema=lambda: self.operation_registry.proposal_tool_schema(),
             propose_analysis_loop=propose_analysis_loop,
             update_plan=update_plan,
             propose_operation=propose_operation,
+            plan_analysis=plan_analysis,
         )
 
