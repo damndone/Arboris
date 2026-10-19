@@ -58,6 +58,12 @@ from ..agent.recall import RECALL_NAME, conversation_index, index_text as recall
 from ..agent.core import AgentCore
 from ..agent.events import AgentEventStream
 from ..agent.model import OpenAICompatibleModelAdapter
+from ..agent.runtime_adapter import (
+    make_adapter as _runtime_model_adapter,
+    resolve_config as _runtime_llm_config,
+    runtime_configured as _runtime_configured,
+    runtime_config_identity,
+)
 from ..agent.navigation import AgentNavigationProjector, AgentNavigationRef
 from ..agent.operations import OperationRecordStore, OperationRegistry
 from ..contracts.common.errors import OperationValidationError
@@ -124,6 +130,19 @@ _RESERVED_TURNS = turn_registry.reserved
 _TURN_RESERVATION_LOCK = turn_registry.lock
 _reserve_turn = turn_registry.reserve
 _release_turn = turn_registry.release
+
+
+def _agent_llm_config():
+    # Resolve aliases at call time to preserve existing route injection callers.
+    return _runtime_llm_config(load_llm_config)
+
+
+def _agent_model_adapter(config):
+    return _runtime_model_adapter(config, default_factory=OpenAICompatibleModelAdapter)
+
+
+def _agent_llm_configured(config):
+    return _runtime_configured(config)
 
 
 class AgentFocus(BaseModel):
@@ -987,7 +1006,7 @@ def create_agent_session(
     )
     from ..agent.identity import identity_text
 
-    identity_config = load_llm_config()
+    identity_config = _agent_llm_config()
     repository.append(
         session_id,
         "custom_message",
@@ -1073,7 +1092,7 @@ def create_agent_session(
         repository,
         session_id,
         repository.get_metadata(session_id),
-        load_llm_config(),
+        _agent_llm_config(),
     )
 
 
@@ -1142,7 +1161,7 @@ def rewind_agent_session(session_id: str, project_root: str, body: AgentEntryReq
         raise WorkbenchAPIError(status_code=409, code="AGENT_REWIND_REFUSED", message=str(exc), details={}) from exc
     events.emit(session_id, "session_rewound", {"to_entry": target.to_dict(), "undone_entry_id": entry.entry_id})
     metadata = repository.get_metadata(session_id)
-    return {"session": _public_session(repository, session_id, metadata, load_llm_config()),
+    return {"session": _public_session(repository, session_id, metadata, _agent_llm_config()),
             "restored_prompt": str(entry.payload.get("content") or "")}
 
 
@@ -1166,7 +1185,7 @@ def fork_agent_session(session_id: str, project_root: str, body: AgentEntryReque
     events.emit(session_id, "session_forked", {"fork_session_id": fork_id, "at_entry": point.to_dict()})
     events.emit(fork_id, "session_created", {"role": role, "chain_id": metadata.get("chain_id"),
                                              "forked_from": {"session_id": session_id, **point.to_dict()}})
-    return {"session": _public_session(repository, fork_id, repository.get_metadata(fork_id), load_llm_config()),
+    return {"session": _public_session(repository, fork_id, repository.get_metadata(fork_id), _agent_llm_config()),
             "restored_prompt": str(entry.payload.get("content") or "") if from_user else None}
 
 
@@ -1182,7 +1201,7 @@ def pin_agent_chapter(session_id: str, project_root: str, body: AgentChapterRequ
     chapters.sort(key=lambda chapter: order.get(chapter["entry_id"], 0))
     metadata = repository.set_chapters(session_id, chapters)
     events.emit(session_id, "chapter_pinned", {"entry_id": entry.entry_id, "title": body.title.strip()})
-    return _public_session(repository, session_id, metadata, load_llm_config())
+    return _public_session(repository, session_id, metadata, _agent_llm_config())
 
 
 @router.delete("/agent/sessions/{session_id}/chapters/{entry_id}")
@@ -1192,14 +1211,14 @@ def unpin_agent_chapter(session_id: str, entry_id: str, project_root: str) -> Ag
     chapters = [chapter for chapter in metadata.get("chapters") or [] if chapter.get("entry_id") != entry_id]
     metadata = repository.set_chapters(session_id, chapters)
     events.emit(session_id, "chapter_unpinned", {"entry_id": entry_id})
-    return _public_session(repository, session_id, metadata, load_llm_config())
+    return _public_session(repository, session_id, metadata, _agent_llm_config())
 
 
 @router.get("/agent/sessions/{session_id}")
 def get_agent_session(session_id: str, project_root: str) -> AgentSession:
     root = _project_root(project_root)
     repository, _events, metadata = _get_session(root, session_id)
-    return _public_session(repository, session_id, metadata, load_llm_config())
+    return _public_session(repository, session_id, metadata, _agent_llm_config())
 
 
 @router.get("/agent/sessions/{session_id}/audit", response_model=None)
@@ -2309,8 +2328,8 @@ async def compact_agent_session(
     _refuse_while_running(metadata, "compact the conversation")
     turn_key = _reserve_turn(root, session_id)
     try:
-        config = load_llm_config()
-        if not config.is_configured():
+        config = _agent_llm_config()
+        if not _agent_llm_configured(config):
             raise WorkbenchAPIError(status_code=503, code="LLM_NOT_CONFIGURED",
                                     message=config.configuration_error_message())
         policy = CompactionPolicy.from_config(config.context_window_tokens, supports_1m=config.supports_1m)
@@ -2318,7 +2337,7 @@ async def compact_agent_session(
         events.emit(session_id, "compaction_start", {"trigger": "manual", "tokens_before": tokens, **policy.to_dict()})
         try:
             entry = await compact_session(
-                repository, session_id, OpenAICompatibleModelAdapter(config), policy,
+                repository, session_id, _agent_model_adapter(config), policy,
                 trigger="manual", tokens_before=tokens, focus=body.focus, model=config.model,
             )
         except CompactionError as exc:
@@ -2511,11 +2530,22 @@ async def _run_reserved_agent_turn(
     turn_key: tuple[str, str],
     *,
     continuation: bool = False,
+    resume_turn_id: str | None = None,
 ) -> dict[str, Any]:
+    from ..agent.turn_journal import TurnJournal
+    from ..agent.turn_store import TurnStore, TurnStoreError
+
     permission_rules = _project_permission_rules(root)
-    _tell_agent_finished_outcomes(root, session_id)
-    config = load_llm_config()
-    if not config.is_configured():
+    if resume_turn_id is None:
+        if any(record.session_id == session_id for record in TurnStore(root).list_active()):
+            raise WorkbenchAPIError(
+                status_code=409, code="AGENT_TURN_RECOVERY_REQUIRED",
+                message="This conversation has an unfinished durable turn; resume or reconcile it before starting another.",
+                details={"session_id": session_id},
+            )
+        _tell_agent_finished_outcomes(root, session_id)
+    config = _agent_llm_config()
+    if not _agent_llm_configured(config):
         raise WorkbenchAPIError(
             status_code=503,
             code="LLM_NOT_CONFIGURED",
@@ -2527,13 +2557,16 @@ async def _run_reserved_agent_turn(
     agent = AgentCore(
         repository,
         events,
-        OpenAICompatibleModelAdapter(config),
+        _agent_model_adapter(config),
         session_id=session_id,
         compaction_policy=CompactionPolicy.from_config(config.context_window_tokens, supports_1m=config.supports_1m),
         model_name=config.model,
+        model_config_identity=runtime_config_identity(config),
+        turn_journal=TurnJournal(TurnStore(root), repository, session_id=session_id,
+                                 execution_mode=body.execution_mode or "ask"),
     )
     tool_context: dict[str, Any] | None = None
-    if metadata.get("role") == "main":
+    if metadata.get("role") == "main" and resume_turn_id is None:
         _ensure_current_global_protocol(repository, session_id)
         if body.context_packet:
             _refresh_main_context(repository, session_id, body.context_packet)
@@ -2553,7 +2586,7 @@ async def _run_reserved_agent_turn(
         )
         orchestrator.execution_policy = body.execution_policy
         orchestrator.execution_mode = body.execution_mode
-        if metadata.get("execution_mode") != body.execution_mode:
+        if resume_turn_id is None and metadata.get("execution_mode") != body.execution_mode:
             repository.update_metadata(session_id, execution_mode=body.execution_mode)
             repository.append(session_id, "custom_message", {
                 "message_type": "agent_execution_mode",
@@ -2588,7 +2621,9 @@ async def _run_reserved_agent_turn(
     try:
         with egress_project(root):
             budget = turn_budget(body.execution_mode)
-            if continuation:
+            if resume_turn_id is not None:
+                await agent.resume(resume_turn_id, tool_context=tool_context)
+            elif continuation:
                 repository.append(session_id, "custom_message", {
                     "message_type": "agent_continuation",
                     "audience": "model",
@@ -2599,6 +2634,10 @@ async def _run_reserved_agent_turn(
                 await agent.continue_(budget=budget, tool_context=tool_context)
             else:
                 await agent.prompt(body.question.strip(), budget=budget, tool_context=tool_context)
+    except TurnStoreError as exc:
+        raise WorkbenchAPIError(status_code=409, code="AGENT_TURN_RECOVERY_REQUIRED",
+            message="The durable turn needs recovery or reconciliation before continuing.",
+            details={"reason": str(exc), "session_id": session_id}) from exc
     finally:
         turn_registry.deactivate(turn_key, agent)
     messages = _messages(repository, session_id)
@@ -2617,6 +2656,43 @@ async def _run_reserved_agent_turn(
         "assistant": assistant,
         "status": repository.get_metadata(session_id).get("status"),
     }
+
+
+class AgentResumeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    turn_id: str = Field(min_length=1, max_length=200)
+
+
+@router.get("/agent/sessions/{session_id}/turn-state")
+def get_agent_turn_state(session_id: str, project_root: str) -> dict[str, Any]:
+    """Inspect compact durable state without executing tools or a provider."""
+    from ..agent.turn_store import TurnStore
+
+    root = _project_root(project_root)
+    _get_session(root, session_id)
+    return {"turns": [record.to_dict() for record in TurnStore(root).list_active()
+                      if record.session_id == session_id]}
+
+
+@router.post("/agent/sessions/{session_id}/resume")
+async def resume_agent_turn(session_id: str, project_root: str, body: AgentResumeRequest) -> AgentTurn:
+    """Resume the original command, not a new prompt/continuation budget."""
+    from ..agent.turn_store import TurnStore, TurnStoreError
+
+    root = _project_root(project_root)
+    repository, events, metadata = _get_session(root, session_id)
+    try:
+        record = TurnStore(root).get(body.turn_id)
+    except (TurnStoreError, OSError) as exc:
+        raise WorkbenchAPIError(status_code=404, code="AGENT_TURN_NOT_FOUND",
+                                message="The durable turn was not found.") from exc
+    if record.session_id != session_id:
+        raise WorkbenchAPIError(status_code=404, code="AGENT_TURN_NOT_FOUND",
+                                message="The durable turn was not found.")
+    turn_key = _reserve_turn(root, session_id)
+    request = AgentContinueRequest(execution_mode=record.execution_mode)
+    return await turn_registry.run_owned(turn_key, lambda: _run_reserved_agent_turn(
+        root, session_id, request, repository, events, metadata, turn_key, resume_turn_id=body.turn_id))
 
 
 @router.post("/agent/sessions/{session_id}/abort")

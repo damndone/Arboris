@@ -1,4 +1,4 @@
-"""Drive one evaluation task through the real Agent HTTP path.
+"""Drive one evaluation task through an explicit Agent transport.
 
 The simulated user is deterministic and never uses a model:
 
@@ -16,6 +16,7 @@ analysis, which is what v1.9.1 sets out to reduce.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from dataclasses import dataclass
@@ -42,6 +43,8 @@ class Policy:
     #: "ask" (confirm, then the Workbench resumes the Agent) or "auto"
     #: (approve the plan once, then the Workbench resumes the Agent).
     mode: str = "legacy"
+    #: Candidate turns use the same headless entry as the CLI; HTTP is explicit reproduction.
+    transport: str = "headless"
 
 
 def _session_entries(root: Path, session_id: str) -> list[dict[str, Any]]:
@@ -113,28 +116,67 @@ def _approve_plan_if_waiting(client, root: Path, session_id: str) -> bool:
 
 
 def _turn(client, root: Path, session_id: str, text: str | None, execution_policy: str,
-          mode: str = "legacy") -> dict[str, Any]:
-    """One person turn (text), or a Workbench continuation (text None, v1.9.1)."""
+          mode: str = "legacy", *, transport: str = "headless") -> dict[str, Any]:
+    """One person turn, with transport measurements kept distinct from policy."""
+    if transport not in {"http", "headless"}:
+        raise ValueError(f"unknown Agent evaluation transport: {transport}")
     started = time.monotonic()
-    body: dict[str, Any] = {"execution_policy": execution_policy}
-    if mode in {"ask", "auto"}:
-        body["execution_mode"] = mode
-    if text is None:
-        response = client.post(f"/agent/sessions/{session_id}/continue", params={"project_root": str(root)}, json=body)
+    record: dict[str, Any] = {
+        "user": text if text is not None else "<workbench continuation>",
+        "transport": transport, "requested_mode": mode,
+        "execution_mode_request": mode if mode in {"ask", "auto"} else "server_default",
+        "execution_policy": execution_policy,
+    }
+    if transport == "headless":
+        from workbench.cli_agent import continue_headless, run_headless
+        from workbench.api_errors import WorkbenchAPIError
+
+        events: list[dict[str, Any]] = []
+        try:
+            kwargs = {"mode": mode if mode in {"ask", "auto"} else None,
+                      "execution_policy": execution_policy, "on_event": events.append}
+            if text is None:
+                body = asyncio.run(continue_headless(root, session_id, **kwargs))
+            else:
+                body = asyncio.run(run_headless(root, text, session_id=session_id, **kwargs))
+            record["headless_result"] = body
+            record["transport_metrics"] = {"kind": "in_process"}
+        except Exception as exc:
+            error: dict[str, Any] = {"type": type(exc).__name__, "message": str(exc)}
+            metrics: dict[str, Any] = {"kind": "in_process", "error_type": type(exc).__name__}
+            if isinstance(exc, WorkbenchAPIError):
+                error.update(code=exc.code, details=exc.details)
+                metrics["api_status_code"] = exc.status_code
+            body = {"status": "transport_error", "error": error}
+            record["transport_error"] = metrics
+            record["transport_metrics"] = metrics
+        # Events delivered before an exception are evidence too. No alternate
+        # transport or current-provider fallback is attempted after a failure.
+        record.update(http_status=None, raw_events=events, raw_events_scope="session_from_seq_0")
     else:
-        response = client.post(f"/agent/sessions/{session_id}/turns", params={"project_root": str(root)},
-                               json={"question": text, **body})
-    body = response.json() if response.headers.get("content-type", "").startswith("application/json") else {"raw": response.text}
+        body: dict[str, Any] = {"execution_policy": execution_policy}
+        if mode in {"ask", "auto"}:
+            body["execution_mode"] = mode
+        if text is None:
+            response = client.post(f"/agent/sessions/{session_id}/continue", params={"project_root": str(root)}, json=body)
+        else:
+            response = client.post(f"/agent/sessions/{session_id}/turns", params={"project_root": str(root)},
+                                   json={"question": text, **body})
+        body = response.json() if response.headers.get("content-type", "").startswith("application/json") else {"raw": response.text}
+        record.update(http_status=response.status_code,
+                      transport_metrics={"kind": "http", "http_status": response.status_code})
     assistant = body.get("assistant")
     reply = (assistant or {}).get("content") if isinstance(assistant, dict) else (assistant or "")
-    return {"user": text if text is not None else "<workbench continuation>", "http_status": response.status_code,
-            "status": body.get("status"),
-            "reply": reply or "", "error": body.get("error") or body.get("detail"),
-            "elapsed_s": round(time.monotonic() - started, 1)}
+    record.update(status=body.get("status"), reply=reply or "",
+                  error=body.get("error") or body.get("detail"),
+                  elapsed_s=round(time.monotonic() - started, 1))
+    return record
 
 
 def run_conversation(client, root: Path, run_id: str, prompt: str, policy: Policy,
                      *, focus_node: str = "model:ols_1") -> dict[str, Any]:
+    if policy.transport not in {"http", "headless"}:
+        raise ValueError(f"unknown Agent evaluation transport: {policy.transport}")
     # As the UI does after an import: a chain session on the run, focused on
     # its model node. The UI also sends a client-built node context packet;
     # the harness sends none, for every version alike.
@@ -149,7 +191,7 @@ def run_conversation(client, root: Path, run_id: str, prompt: str, policy: Polic
     nudge = NUDGE_ZH if policy.language == "zh" else NUDGE_EN
     confirmed_note = CONFIRMED_ZH if policy.language == "zh" else CONFIRMED_EN
     started = time.monotonic()
-    turn = lambda text: _turn(client, root, session_id, text, policy.execution_policy, policy.mode)  # noqa: E731
+    turn = lambda text: _turn(client, root, session_id, text, policy.execution_policy, policy.mode, transport=policy.transport)  # noqa: E731
     turns: list[dict[str, Any]] = [turn(prompt)]
     confirmations: list[dict[str, Any]] = []
     plan_approvals = 0
@@ -193,6 +235,10 @@ def run_conversation(client, root: Path, run_id: str, prompt: str, policy: Polic
         stop_reason = "wall_clock"
     return {
         "session_id": session_id,
+        "transport": policy.transport,
+        "requested_mode": policy.mode,
+        "execution_mode_request": policy.mode if policy.mode in {"ask", "auto"} else "server_default",
+        "execution_policy": policy.execution_policy,
         "turns": turns,
         "confirmations": confirmations,
         "plan_approvals": plan_approvals,

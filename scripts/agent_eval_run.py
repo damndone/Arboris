@@ -74,6 +74,8 @@ def main() -> int:
     parser.add_argument("--label", default="", help="round label, e.g. baseline-v190")
     parser.add_argument("--mode", choices=("legacy", "ask", "auto"), default="legacy",
                         help="legacy = v1.9.0 flow; ask / auto = v1.9.1 execution modes")
+    parser.add_argument("--transport", choices=("headless", "http"), default="headless",
+                        help="headless = candidate CLI entry; http = explicit legacy HTTP reproduction")
     parser.add_argument("--suite", choices=("dev", "heldout", "external"), default="dev",
                         help="heldout is run once, at the final evaluation only")
     args = parser.parse_args()
@@ -103,7 +105,10 @@ def main() -> int:
         "model": config.model,
         "base_url_host": config.base_url.split("/")[2] if "//" in config.base_url else config.base_url,
         "repeat": args.repeat,
-        "policy": {"max_nudges": args.max_nudges, "max_wall_s": args.max_wall_s, "mode": args.mode},
+        "transport": args.transport,
+        "policy": {"max_nudges": args.max_nudges, "max_wall_s": args.max_wall_s, "mode": args.mode,
+                   "execution_policy": "proposal_only", "transport": args.transport,
+                   "execution_mode_request": args.mode if args.mode in {"ask", "auto"} else "server_default"},
         "suite": args.suite,
         "tasks": [task.id for task in tasks],
     }
@@ -125,7 +130,8 @@ def main() -> int:
             directory.mkdir(parents=True, exist_ok=True)
             started = time.monotonic()
             external = isinstance(task, ExternalTask)
-            record = {"task_id": task.id, "repeat": rep, "language": task.language, "prompt": task.prompt}
+            record = {"task_id": task.id, "repeat": rep, "language": task.language, "prompt": task.prompt,
+                      "transport": args.transport}
             if external:
                 record.update({"suite": "external", "source": task.source, "answer": task.answer,
                                "question_type": task.question_type, "reference": task.reference})
@@ -145,7 +151,7 @@ def main() -> int:
                 record["seed_run_id"] = run_id = _seed(project.root, dataset, seed_form)
                 record["project_root"] = str(project.root)
                 policy = Policy(max_nudges=args.max_nudges, max_wall_s=args.max_wall_s, language=task.language,
-                                mode=args.mode)
+                                mode=args.mode, transport=args.transport)
                 with provider_tape(directory / "provider_tape.jsonl") as tape:
                     tape.context = {"task": name}
                     record["conversation"] = run_conversation(client, project.root, run_id, task.prompt, policy)
