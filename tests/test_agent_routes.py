@@ -1453,6 +1453,10 @@ def test_main_role_turn_exposes_only_read_only_project_evidence_tool(
         # Earlier conversations of this project (agent/recall.py), read-only.
         "search_project_conversations",
         "read_project_conversation",
+        # Reference discovery and checks read evidence without changing it.
+        "inspect_builtin_skills",
+        "inspect_custom_skills",
+        "check_model_claims",
     }
     assert all(tool["side_effect"] == "none" for tool in FakeAgentAdapter.instances[-1].requests[0].tools)
     descriptor = next(
