@@ -332,6 +332,8 @@ def test_operation_record_state_is_append_only_and_cannot_move_backwards(
         current_active_head_run_id="run-1",
     )
 
+    path = tmp_path / "workbench" / "operation-records" / f"{record.record_id}.jsonl"
+    original_lines = path.read_text().splitlines()
     completed = orchestrator.operation_store.append_status(
         record.record_id,
         "completed",
@@ -343,7 +345,9 @@ def test_operation_record_state_is_append_only_and_cannot_move_backwards(
     with pytest.raises(OperationRecordTransitionError):
         orchestrator.operation_store.append_status(record.record_id, "pending")
 
-    assert len((tmp_path / "workbench" / "operation-records" / f"{record.record_id}.jsonl").read_text().splitlines()) == 2
+    final_lines = path.read_text().splitlines()
+    assert final_lines[:-1] == original_lines
+    assert json.loads(final_lines[-1])["status"] == "completed"
 
 
 def test_operation_record_idempotency_does_not_depend_on_dispatch_command_id(

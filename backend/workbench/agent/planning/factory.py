@@ -170,7 +170,10 @@ def build_planner(
                 else server_manifest[capability]
             ),
             "model_type": server_model_types.get(capability, capability),
-            "notebook_proposal_adapters": [proposal_adapter],
+            "notebook_proposal_adapters": (
+                server_manifest[capability]["notebook_proposal_adapters"]
+                if capability in server_manifest and "model.custom" in server_manifest[capability].get("notebook_proposal_adapters", [])
+                else [proposal_adapter]),
             **_model_options_catalog_metadata(root, context, capability),
         }
         for capability in candidate_capabilities
@@ -184,6 +187,7 @@ def build_planner(
         )
         and (
             capability not in server_manifest
+            or "model.custom" in server_manifest[capability].get("notebook_proposal_adapters", [])
             or proposal_adapter in server_manifest[capability].get(
                 "notebook_proposal_adapters", [proposal_adapter]
             )

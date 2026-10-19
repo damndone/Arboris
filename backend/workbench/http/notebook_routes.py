@@ -229,34 +229,8 @@ def _project_root(raw: str) -> Path:
 
 def _service(request: Request, project_root: str) -> tuple[Path, NotebookService]:
     root = _project_root(project_root)
-    runtime = getattr(request.app.state, "capability_factory_runtime", None)
-    catalog = (
-        runtime.catalog
-        if runtime is not None
-        else getattr(request.app.state, "notebook_capability_bindings", None)
-    )
-    if catalog is not None and not isinstance(catalog, CapabilityBindingCatalog):
-        raise WorkbenchAPIError(
-            status_code=500,
-            code="NOTEBOOK_CAPABILITY_BINDING_PROVIDER_INVALID",
-            message="The server-owned Notebook capability binding provider is invalid.",
-        )
-    gateway = (
-        runtime.execution_gateway
-        if runtime is not None
-        else getattr(request.app.state, "notebook_execution_gateway", None)
-    )
-    if gateway is not None and not isinstance(gateway, AuthorizedCapabilityExecutionGateway):
-        raise WorkbenchAPIError(
-            status_code=500,
-            code="NOTEBOOK_EXECUTION_GATEWAY_PROVIDER_INVALID",
-            message="The server-owned Notebook execution gateway is invalid.",
-        )
-    return root, NotebookService(
-        root,
-        capability_bindings=catalog,
-        execution_gateway=gateway,
-    )
+    from .notebook_runtime import notebook_service_from_state
+    return root, notebook_service_from_state(root, request.app.state)
 
 
 def _trace(
@@ -1586,6 +1560,8 @@ def confirm_and_execute_option_endpoint(
             steps=["run.submit"], summary=f"notebook={notebook_id} option={option_id}",
         )
         return {"dispatch": dispatch.to_dict(), "trace_id": trace.trace_id}
+    except PermissionError as exc:
+        raise WorkbenchAPIError(status_code=403, code="OPERATION_PERMISSION_DENIED", message=str(exc)) from exc
     except NotebookOptionError as exc:
         raise _notebook_error(exc) from exc
     except (OSError, ValueError, KeyError) as exc:

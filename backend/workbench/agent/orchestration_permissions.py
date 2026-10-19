@@ -36,33 +36,9 @@ class OrchestrationPermissions:
     def _permission_request(self, proposal: Any, *, within_budget: bool):
         from . import permissions
 
-        operation_id = str(proposal.operation_id)
-        if operation_id == "operation.multi_step":
-            steps = proposal.changes.get("steps") or ()
-            cls = permissions.strictest(
-                permissions.permission_class(str(step.get("operation_id", "")))
-                for step in steps if isinstance(step, dict)
-            ) if steps else permissions.PermissionClass.MODIFY
-        else:
-            try:
-                risk = self.operation_registry.require(operation_id, proposal.operation_version).risk_level
-            except Exception:  # noqa: BLE001 - an unknown operation fails closed below
-                risk = None
-            cls = permissions.permission_class(operation_id, risk_level=risk)
-        # Operations that edit the dataset or labels a run already has.
-        touches_source = operation_id in {"metadata.edit", "data.column.cast", "data.columns.cast"}
-        scope = self.plan_scope or {}
-        if scope.get("within_budget") is False:
-            within_budget = False
-        return permissions.Request(
-            operation_id=operation_id,
-            permission_class=cls,
-            touches_source=touches_source,
-            in_plan=bool(scope.get("in_plan")),
-            class_allowed_by_plan=cls.value in set(scope.get("allowed_classes") or ()),
-            named_in_plan=bool(scope.get("named")),
-            within_budget=within_budget,
-        )
+        definition = self.operation_registry.require(proposal.operation_id, proposal.operation_version)
+        return permissions.request_for_operation(proposal.operation_id, proposal.changes,
+            risk_level=definition.risk_level, within_budget=within_budget, scope=self.plan_scope)
 
 
     async def _run_or_await_confirmation(self, proposal: Any, *, session_id: str) -> dict[str, Any]:

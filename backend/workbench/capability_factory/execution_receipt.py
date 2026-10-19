@@ -812,36 +812,42 @@ class CapabilityDispatchCoordinator:
         terminate = getattr(executor, "terminate", None)
         if not callable(spawn) or not callable(terminate):
             raise ExecutionReceiptError("trusted executor lacks spawn/terminate lifecycle")
-        spawned = None
-        try:
-            spawned = spawn(request, policy, canary)
-            process_handle_ref = _identifier(getattr(spawned, "handle_ref"), "process_handle_ref")
-            return self.acknowledge_executor(
-                receipt,
-                owner_id=owner_id,
-                process_handle_ref=process_handle_ref,
-            )
-        except Exception as error:
-            if spawned is not None:
-                try:
-                    terminate(spawned)
-                except Exception:
-                    pass
-            self._mark_dispatch_unknown(
-                authorization,
-                attempt,
-                reason="trusted executor spawn or acknowledgement was uncertain",
-            )
-            return CapabilityDispatchReceipt(
-                authorization_id=receipt.authorization_id,
-                authorization_payload_digest=receipt.authorization_payload_digest,
-                intent_digest=receipt.intent_digest,
-                reservation_id=receipt.reservation_id,
-                attempt_id=receipt.attempt_id,
-                lease_epoch=receipt.lease_epoch,
-                status="dispatch_unknown",
-                plan_digest=receipt.plan_digest,
-            )
+        from ..operation_approvals import OperationApprovalStore
+
+        self.authorization_store.require_operation_approval(authorization)
+        with OperationApprovalStore(self.authorization_store.root / "workbench").dispatch_permit(
+            authorization.approval_id, execution_key=authorization.approval_execution_key,
+            credential_digest=authorization.payload_digest):
+            spawned = None
+            try:
+                spawned = spawn(request, policy, canary)
+                process_handle_ref = _identifier(getattr(spawned, "handle_ref"), "process_handle_ref")
+                return self.acknowledge_executor(
+                    receipt,
+                    owner_id=owner_id,
+                    process_handle_ref=process_handle_ref,
+                )
+            except Exception as error:
+                if spawned is not None:
+                    try:
+                        terminate(spawned)
+                    except Exception:
+                        pass
+                self._mark_dispatch_unknown(
+                    authorization,
+                    attempt,
+                    reason="trusted executor spawn or acknowledgement was uncertain",
+                )
+                return CapabilityDispatchReceipt(
+                    authorization_id=receipt.authorization_id,
+                    authorization_payload_digest=receipt.authorization_payload_digest,
+                    intent_digest=receipt.intent_digest,
+                    reservation_id=receipt.reservation_id,
+                    attempt_id=receipt.attempt_id,
+                    lease_epoch=receipt.lease_epoch,
+                    status="dispatch_unknown",
+                    plan_digest=receipt.plan_digest,
+                )
 
     def take_over_lease(
         self,

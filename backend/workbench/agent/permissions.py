@@ -79,6 +79,23 @@ def permission_class(operation_id: str, *, risk_level: str | None = None) -> Per
     return _CATEGORY_CLASS.get(step_category(operation_id), PermissionClass.MODIFY)
 
 
+def request_for_operation(operation_id, changes, *, risk_level=None, within_budget=True, scope=None):
+    """Classify the declaration once for every execution entry point."""
+    if operation_id == "operation.multi_step":
+        from .workflow_contracts import WORKFLOW_STEP_SPEC_CONTRACTS
+        steps = changes.get("steps") or ()
+        cls = strictest(permission_class(step["operation_id"],
+            risk_level=WORKFLOW_STEP_SPEC_CONTRACTS[step["operation_id"]].risk_level)
+            for step in steps) if steps else PermissionClass.MODIFY
+    else:
+        cls = permission_class(operation_id, risk_level=risk_level)
+    scope = scope or {}
+    return Request(operation_id=operation_id, permission_class=cls,
+        touches_source=operation_id in {"metadata.edit", "data.column.cast", "data.columns.cast"},
+        in_plan=bool(scope.get("in_plan")), class_allowed_by_plan=cls.value in set(scope.get("allowed_classes") or ()),
+        named_in_plan=bool(scope.get("named")), within_budget=within_budget and scope.get("within_budget") is not False)
+
+
 def strictest(classes: Iterable[PermissionClass]) -> PermissionClass:
     """The class of a multi-step request: its most restrictive step."""
     order = list(PermissionClass)

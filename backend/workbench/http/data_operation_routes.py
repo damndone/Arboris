@@ -759,7 +759,7 @@ async def confirm_column_cast(
         operation_registry=registry,
     )
     try:
-        confirmation = proposal_store.confirm(
+        record = orchestrator.confirm_proposal(
             proposal_id,
             revision=proposal.revision,
             fingerprint=proposal.fingerprint,
@@ -767,16 +767,14 @@ async def confirm_column_cast(
             current_context_fingerprint=preview.fingerprint,
             current_active_head_run_id=spec.source_run_id,
         )
-        record = orchestrator.operation_store.create_pending(
-            confirmation,
-            command_id=confirmation.command_id,
-        )
         record = await orchestrator.execute_confirmed_operation(
             record.record_id,
             project_root=root,
             current_context_fingerprint=preview.fingerprint,
             current_active_head_run_id=spec.source_run_id,
         )
+    except PermissionError as exc:
+        raise WorkbenchAPIError(status_code=403, code="OPERATION_PERMISSION_DENIED", message=str(exc)) from exc
     except ProposalStaleError as exc:
         raise WorkbenchAPIError(
             status_code=409,
@@ -904,7 +902,7 @@ async def confirm_columns_cast(
         operation_registry=registry,
     )
     try:
-        confirmation = proposal_store.confirm(
+        record = orchestrator.confirm_proposal(
             proposal_id,
             revision=proposal.revision,
             fingerprint=proposal.fingerprint,
@@ -912,16 +910,14 @@ async def confirm_columns_cast(
             current_context_fingerprint=preview.fingerprint,
             current_active_head_run_id=spec.source_run_id,
         )
-        record = orchestrator.operation_store.create_pending(
-            confirmation,
-            command_id=confirmation.command_id,
-        )
         record = await orchestrator.execute_confirmed_operation(
             record.record_id,
             project_root=root,
             current_context_fingerprint=preview.fingerprint,
             current_active_head_run_id=spec.source_run_id,
         )
+    except PermissionError as exc:
+        raise WorkbenchAPIError(status_code=403, code="OPERATION_PERMISSION_DENIED", message=str(exc)) from exc
     except ProposalStaleError as exc:
         raise WorkbenchAPIError(
             status_code=409,
@@ -1129,7 +1125,7 @@ def authorize_code_execute_risk(
     proposal_store = context["proposal_store"]
     proposal = context["proposal"]
     try:
-        proposal_store.confirm(
+        context["orchestrator"].confirm_proposal(
             proposal.proposal_id,
             revision=proposal.revision,
             fingerprint=proposal.fingerprint,
@@ -1148,6 +1144,8 @@ def authorize_code_execute_risk(
             active_head_run_id=spec.source_run_id,
             actor_type="human_ui",
         )
+    except PermissionError as exc:
+        raise WorkbenchAPIError(status_code=403, code="OPERATION_PERMISSION_DENIED", message=str(exc)) from exc
     except ProposalStaleError as exc:
         raise WorkbenchAPIError(
             status_code=409,
@@ -1183,17 +1181,13 @@ async def confirm_code_execute(
     proposal = context["proposal"]
     orchestrator = context["orchestrator"]
     try:
-        confirmation = proposal_store.confirm(
+        record = orchestrator.confirm_proposal(
             proposal.proposal_id,
             revision=proposal.revision,
             fingerprint=proposal.fingerprint,
             actor_type="human_ui",
             current_context_fingerprint=preview.fingerprint,
             current_active_head_run_id=spec.source_run_id,
-        )
-        record = orchestrator.operation_store.create_pending(
-            confirmation,
-            command_id=confirmation.command_id,
         )
         if not body.risk_authorization_id or not body.risk_authorization_token:
             raise RiskAuthorizationRequired(
@@ -1249,6 +1243,8 @@ async def confirm_code_execute(
             ),
             details={"proposal_id": proposal.proposal_id, "reason": str(exc)},
         ) from exc
+    except PermissionError as exc:
+        raise WorkbenchAPIError(status_code=403, code="OPERATION_PERMISSION_DENIED", message=str(exc)) from exc
     except ProposalStaleError as exc:
         raise WorkbenchAPIError(
             status_code=409,

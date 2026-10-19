@@ -25,6 +25,7 @@ EXEMPT: dict[tuple[str, str], str] = {
     ("POST", "/agent/sessions/{session_id}/proposals/{proposal_id}/revise"): NO_ANALYSIS,
     ("POST", "/agent/sessions/{session_id}/proposals/{proposal_id}/confirm"): LIFECYCLE,
     ("POST", "/agent/sessions/{session_id}/operations/{record_id}/reconcile"): LIFECYCLE,
+    ("POST", "/agent/sessions/{session_id}/operations/{record_id}/revoke-approval"): "revokes an execution approval; does not execute or roll back an analysis",
     ("POST", "/agent/sessions/{session_id}/turns"): "read-only workflows it runs are recorded by the lifecycle",
     ("POST", "/agent/sessions/{session_id}/abort"): NO_ANALYSIS,
     ("POST", "/agent/sessions/{session_id}/steer"): NO_ANALYSIS,

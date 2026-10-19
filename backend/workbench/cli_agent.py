@@ -18,6 +18,13 @@ from .cli_commands import CommandError
 from .agent.model import OpenAICompatibleModelAdapter
 
 
+def _controller_request():
+    """Use the configured in-process controller runtime without an HTTP call."""
+    from starlette.requests import Request
+    from .app import app
+    return Request({"type":"http", "app":app})
+
+
 async def run_headless(
     project_root: Path,
     prompt: str,
@@ -48,7 +55,7 @@ async def run_headless(
         routes.get_agent_session(session_id=session_id, project_root=root)
     return await _stream_headless_turn(
         project_root, session_id, mode=body.execution_mode, on_event=on_event,
-        start_turn=lambda: routes.run_agent_turn(session_id, root, body),
+        start_turn=lambda: routes.run_agent_turn(session_id, root, body, http_request=_controller_request()),
     )
 
 
@@ -73,7 +80,7 @@ async def continue_headless(
     body = routes.AgentContinueRequest(**body_kwargs)
     return await _stream_headless_turn(
         project_root, session_id, mode=body.execution_mode, on_event=on_event,
-        start_turn=lambda: routes.continue_agent_turn(session_id, root, body),
+        start_turn=lambda: routes.continue_agent_turn(session_id, root, body, http_request=_controller_request()),
     )
 
 
@@ -98,7 +105,7 @@ async def resume_headless(
     body = routes.AgentResumeRequest(turn_id=turn_id)
     return await _stream_headless_turn(
         project_root, session_id, mode=mode, on_event=on_event,
-        start_turn=lambda: routes.resume_agent_turn(session_id, root, body),
+        start_turn=lambda: routes.resume_agent_turn(session_id, root, body, http_request=_controller_request()),
     )
 
 

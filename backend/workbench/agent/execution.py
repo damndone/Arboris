@@ -292,6 +292,12 @@ class WorkbenchOperationLifecycle:
             revision=record.proposal_revision,
             fingerprint=record.proposal_fingerprint,
         )
+        from ..operation_approvals import OperationApprovalStore
+
+        OperationApprovalStore(self.operation_store.root).require_binding(
+            record.execution.get("approval_id"), proposal_id=record.proposal_id,
+            fingerprint=record.proposal_fingerprint, execution_key=key,
+            reconcile=bool(record.execution.get("bindings")) or record.effect_status == "committed")
         record = self.operation_store.claim_execution(
             record_id,
             execution_key=key,
@@ -300,26 +306,6 @@ class WorkbenchOperationLifecycle:
         self.failpoint.hit("after_claim", record)
         domain_lease: Any = None
         try:
-            if definition.requires_risk_authorization:
-                authorization_id = record.execution.get("risk_authorization_id")
-                if not authorization_id or self.risk_authorization_store is None:
-                    raise RiskAuthorizationRequired(
-                        "high-risk operation requires a consumed risk authorization"
-                    )
-                self.risk_authorization_store.require_consumed(
-                    str(authorization_id),
-                    operation_id=record.operation_id,
-                    operation_version=record.operation_version,
-                    proposal_id=record.proposal_id,
-                    revision=record.proposal_revision,
-                    fingerprint=record.proposal_fingerprint,
-                    session_id=record.agent_session_id,
-                    chain_id=record.chain_id,
-                    active_head_run_id=str(
-                        record.preconditions.get("active_head_run_id") or ""
-                    ),
-                    execution_key=key,
-                )
             acquire_domain_lease = getattr(handler, "acquire_domain_lease", None)
             if acquire_domain_lease is not None:
                 domain_lease = acquire_domain_lease(
@@ -353,6 +339,7 @@ class WorkbenchOperationLifecycle:
                 )
             else:
                 self.failpoint.hit("before_child_effect", record)
+                OperationApprovalStore(self.operation_store.root).start(record.execution["approval_id"], execution_key=key)
                 effect = handler.execute(
                     record,
                     execution_key=key,

@@ -44,7 +44,9 @@ def test_headless_uses_actual_entry_and_preserves_request_policy(tmp_path, monke
     })
     monkeypatch.setattr(routes, 'get_agent_proposals', lambda *args: {'proposals': []})
     monkeypatch.setattr(routes, 'get_agent_plan', lambda *args: {'plan': None})
-    async def route(session_id, root, body):
+    async def route(session_id, root, body, *, http_request):
+        from workbench.app import app
+        assert http_request.app is app
         seen.append(body)
         return {'status': 'idle', 'assistant': {'content': 'ANALYSIS COMPLETE'}}
     monkeypatch.setattr(routes, 'run_agent_turn', route)

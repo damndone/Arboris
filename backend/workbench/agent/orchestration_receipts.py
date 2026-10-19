@@ -12,6 +12,7 @@ class OrchestrationReceipts:
         record_id: str,
         *,
         project_root: Path | str,
+        notebook_service=None,
     ) -> OperationRecord:
         """Compatibility wrapper around the shared lifecycle reconciler."""
 
@@ -28,6 +29,7 @@ class OrchestrationReceipts:
                 "active_head_run_id"
             ),
             allow_recovery=True,
+            notebook_service=notebook_service,
         )
 
 

@@ -11,9 +11,24 @@ raw parameters remain available next to it.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+import json
 from typing import Any
 
 Labels = Mapping[str, str]
+
+
+def bounded_audit_content(payload: Mapping[str, Any]) -> str:
+    """Bound model-visible prose while retaining the complete structured audit."""
+    content = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    if len(content) <= 24_000:
+        return content
+    summary = {key:payload[key] for key in (
+        "proposal_id", "revision", "operation_id", "fingerprint", "status"
+    ) if key in payload}
+    summary["details_omitted"] = (
+        "Details exceed the conversation budget; full content remains in the review card and audit record."
+    )
+    return json.dumps(summary, ensure_ascii=False, sort_keys=True)
 
 
 def _name(column: Any, labels: Labels) -> str:

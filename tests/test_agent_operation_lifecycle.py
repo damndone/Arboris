@@ -1,3 +1,4 @@
+from tests.operation_approval_fixtures import create_approved_operation
 from pathlib import Path
 import asyncio
 
@@ -41,7 +42,7 @@ def test_claim_execution_is_idempotent_and_rejects_different_key(
     from workbench.agent.execution import OperationClaimConflict
 
     store = OperationRecordStore(tmp_path)
-    record = store.create_pending(_confirmation())
+    record = create_approved_operation(store, _confirmation())
 
     claimed = store.claim_execution(
         record.record_id,
@@ -74,7 +75,7 @@ def test_terminal_operation_cannot_be_claimed_again(tmp_path: Path) -> None:
     from workbench.agent.execution import OperationClaimConflict
 
     store = OperationRecordStore(tmp_path)
-    record = store.create_pending(_confirmation())
+    record = create_approved_operation(store, _confirmation())
     store.claim_execution(
         record.record_id,
         execution_key="execution-1",
@@ -121,7 +122,7 @@ def test_generic_lifecycle_dispatches_by_registry_hook_and_persists_effect(
             )
 
     store = OperationRecordStore(tmp_path)
-    record = store.create_pending(_confirmation())
+    record = create_approved_operation(store, _confirmation())
     handler = Handler()
     lifecycle = WorkbenchOperationLifecycle(
         operation_store=store,
@@ -172,7 +173,7 @@ def test_async_effect_stays_nonterminal_until_reconcile(
             )
 
     store = OperationRecordStore(tmp_path)
-    record = store.create_pending(_confirmation())
+    record = create_approved_operation(store, _confirmation())
     handler = Handler()
     lifecycle = WorkbenchOperationLifecycle(
         operation_store=store,
@@ -240,7 +241,7 @@ def test_generic_lifecycle_commits_domain_state_before_terminalizing(
             )
 
     store = OperationRecordStore(tmp_path)
-    record = store.create_pending(_confirmation())
+    record = create_approved_operation(store, _confirmation())
     handler = Handler()
     lifecycle = WorkbenchOperationLifecycle(
         operation_store=store,
@@ -308,7 +309,7 @@ def test_generic_lifecycle_owns_domain_lease_until_terminal_or_crash(
             return effect
 
     store = OperationRecordStore(tmp_path)
-    record = store.create_pending(_confirmation())
+    record = create_approved_operation(store, _confirmation())
     handler = Handler()
     lifecycle = WorkbenchOperationLifecycle(
         operation_store=store,
@@ -328,7 +329,7 @@ def test_generic_lifecycle_owns_domain_lease_until_terminal_or_crash(
             if point == "before_child_effect":
                 raise InjectedOperationCrash(point)
 
-    crashed_record = store.create_pending(
+    crashed_record = create_approved_operation(store,
         ProposalConfirmation(
             **{
                 **_confirmation().__dict__,
@@ -412,7 +413,7 @@ def test_failpoint_retry_converges_to_one_effect(
             return effect
 
     store = OperationRecordStore(tmp_path)
-    record = store.create_pending(_confirmation())
+    record = create_approved_operation(store, _confirmation())
     handler = IdempotentHandler()
     failpoint = CrashOnce()
     lifecycle = WorkbenchOperationLifecycle(
@@ -475,7 +476,7 @@ def test_effect_commit_and_projection_terminalization_are_separate(
             return effect
 
     store = OperationRecordStore(tmp_path)
-    record = store.create_pending(_confirmation())
+    record = create_approved_operation(store, _confirmation())
     handler = Handler()
     failpoint = CrashAfterCommit()
     lifecycle = WorkbenchOperationLifecycle(
@@ -508,7 +509,7 @@ def test_concurrent_same_execution_claims_fail_closed_across_owners(tmp_path: Pa
     from workbench.agent.execution import OperationClaimConflict
 
     store = OperationRecordStore(tmp_path)
-    record = store.create_pending(_confirmation())
+    record = create_approved_operation(store, _confirmation())
 
     async def claim(owner: str, key: str):
         return store.claim_execution(
@@ -598,8 +599,8 @@ def test_shared_lifecycle_rejects_two_different_proposals_on_one_chain(
         }
     )
     store = OperationRecordStore(tmp_path)
-    first_record = store.create_pending(first_confirmation)
-    second_record = store.create_pending(second_confirmation)
+    first_record = create_approved_operation(store, first_confirmation)
+    second_record = create_approved_operation(store, second_confirmation)
     gate = asyncio.Event()
     started = asyncio.Event()
 

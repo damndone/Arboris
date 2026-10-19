@@ -111,6 +111,7 @@ def _current_proposal_context_fingerprint(
     proposal,
     *,
     active_head_run_id: str,
+    notebook_service=None,
 ) -> str:
     """Re-derive the current node context before creating a confirmation record."""
 
@@ -128,7 +129,7 @@ def _current_proposal_context_fingerprint(
     binding = find_binding(JsonlSessionRepository(root / "workbench", create=False), proposal)
     if binding is not None:
         try:
-            current_binding_context(NotebookService(root), binding, proposal)
+            current_binding_context(notebook_service or NotebookService(root), binding, proposal)
         except NotebookOptionError as exc:
             raise WorkbenchAPIError(status_code=exc.status_code, code=exc.code,
                 message=str(exc), details=exc.details) from exc

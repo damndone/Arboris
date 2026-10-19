@@ -195,7 +195,9 @@ class ServiceAuthorization:
             )
 
         try:
-            return OptionExecutionAuthorizationStore(self.project_root).issue(
+            store = OptionExecutionAuthorizationStore(self.project_root)
+            store.require_operation_approval(authorization)
+            return store.issue(
                 authorization
             )
         except ExecutionAuthorizationError as error:
@@ -214,6 +216,7 @@ class ServiceAuthorization:
         *,
         context: NotebookPlanningContextV1,
         materialized: Any,
+        operation_record,
     ) -> OptionExecutionAuthorization:
         """Create the authorization envelope only from persisted server facts."""
 
@@ -331,7 +334,13 @@ class ServiceAuthorization:
             draft_hash = f"sha256:{draft_hash}"
         issued_at = existing.issued_at if existing is not None else datetime.now(timezone.utc)
         expires_at = existing.expires_at if existing is not None else issued_at + timedelta(minutes=5)
+        from ..execution import execution_key
         authorization = OptionExecutionAuthorization(
+            approval_id=operation_record.execution["approval_id"],
+            approval_proposal_id=operation_record.proposal_id,
+            approval_fingerprint=operation_record.proposal_fingerprint,
+            approval_execution_key=execution_key(proposal_id=operation_record.proposal_id,
+                revision=operation_record.proposal_revision, fingerprint=operation_record.proposal_fingerprint),
             authorization_id=authorization_id,
             notebook_id=notebook_id,
             option_id=option_id,

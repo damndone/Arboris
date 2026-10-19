@@ -16,6 +16,7 @@ from .chains import session_owns_chain
 from .operations import OperationDefinition, OperationRegistry
 from .proposals import ProposalInvocation, ProposalRevision, ProposalStore
 from .session import JsonlSessionRepository
+from .proposal_text import bounded_audit_content
 
 
 @dataclass(frozen=True)
@@ -104,11 +105,7 @@ def admit(
         proposal_id=proposal_id,
         **({"invocation": invocation} if invocation is not None else {}),
     )
-    proposal_content = json.dumps(proposal.to_dict(), ensure_ascii=False, sort_keys=True)
-    if len(proposal_content) > 24_000:
-        proposal_content = json.dumps({"proposal_id":proposal.proposal_id, "revision":proposal.revision,
-            "operation_id":proposal.operation_id, "fingerprint":proposal.fingerprint, "status":"pending",
-            "details_omitted":"Proposal exceeds the conversation budget; full details remain in its review card and audit record."})
+    proposal_content = bounded_audit_content(proposal.to_dict())
     append = repository.append if invocation is None else repository.append_once
     append(
         session_id,

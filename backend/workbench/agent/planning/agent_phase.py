@@ -48,7 +48,7 @@ class AnalysisPlanningPhase:
 
 
 def create_phase(*, core, orchestrator, chain_id, arguments):
-    service = NotebookService(orchestrator.repository.root.parent)
+    service = orchestrator.notebook_service or NotebookService(orchestrator.repository.root.parent)
     notebook = service.get_notebook(arguments["notebook_id"])
     service.set_focus(notebook.notebook_id, user_focus={**notebook.user_focus, "goal":arguments["question"]})
     context = service.compile_context(notebook.notebook_id)

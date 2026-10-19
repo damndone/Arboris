@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from tests.operation_approval_fixtures import create_approved_operation
+
 import asyncio
 import json
 import multiprocessing
@@ -68,7 +70,7 @@ def test_native_worker_and_cancel_drain_keep_chain_exclusive_after_default_ttl(t
             return effect
 
     store = OperationRecordStore(tmp_path)
-    record = store.create_pending(_confirmation())
+    record = create_approved_operation(store, _confirmation())
     lifecycle = WorkbenchOperationLifecycle(operation_store=store, operation_registry=OperationRegistry(),
         handlers={"model.rerun": Handler()}, lease_owner="worker")
 

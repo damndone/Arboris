@@ -9,6 +9,7 @@ from . import operation_requests
 from .operation_requests import OperationRequest, OperationReceipt
 from .operations import OperationRecord
 from .proposals import ProposalDecision, ProposalInvocation, ProposalRevision, ProposalStaleError
+from .proposal_text import bounded_audit_content
 from .tools import ToolVisibleError
 from .operation_handlers.proposal_arguments import _overrides_from_proposal_changes, _require_editable_rerun_target
 
@@ -193,7 +194,7 @@ class OrchestrationProposals:
             {
                 "message_type": "operation_proposal_revision",
                 "audience": "model",
-                "content": json.dumps(revised.to_dict(), ensure_ascii=False, sort_keys=True),
+                "content": bounded_audit_content(revised.to_dict()),
                 "proposal": revised.to_dict(),
             },
         )
@@ -224,7 +225,7 @@ class OrchestrationProposals:
             {
                 "message_type": "operation_proposal_declined",
                 "audience": "model",
-                "content": json.dumps(decision.to_dict(), ensure_ascii=False, sort_keys=True),
+                "content": bounded_audit_content(decision.to_dict()),
                 "proposal_id": decision.proposal_id,
                 "decision": decision.to_dict(),
             },
@@ -249,6 +250,18 @@ class OrchestrationProposals:
         current_active_head_run_id: str | None,
     ) -> OperationRecord:
         latest = self.proposal_store.latest_revision(proposal_id)
+        from . import permissions
+        from .permission_config import project_permission_rules
+        from ..operation_approvals import OperationApprovalStore
+
+        rules = project_permission_rules(self.repository.root.parent)
+        request = self._permission_request(latest, within_budget=True)
+        decision = permissions.decide(permissions.Mode(self.execution_mode), request, rules,
+                                      self.session_grants or permissions.Grants())
+        if decision.outcome == permissions.Outcome.DENY:
+            raise PermissionError(decision.reason)
+        if actor_type not in {"user", "human_ui"} and decision.outcome == permissions.Outcome.ASK:
+            raise PermissionError(decision.reason)
         try:
             confirmation = self.proposal_store.confirm(
                 proposal_id,
@@ -271,13 +284,16 @@ class OrchestrationProposals:
             confirmation,
             command_id=confirmation.command_id,
         )
+        approval = OperationApprovalStore(self.repository.root).issue(confirmation)
+        record = self.operation_store.append_status(record.record_id, record.status,
+            execution={**record.execution, "approval_id":approval["approval_id"]})
         self.repository.append(
             confirmation.session_id,
             "custom_message",
             {
                 "message_type": "operation_confirmation",
                 "audience": "model",
-                "content": json.dumps(confirmation.to_dict(), ensure_ascii=False, sort_keys=True),
+                "content": bounded_audit_content(confirmation.to_dict()),
                 "confirmation": confirmation.to_dict(),
                 "operation_record_id": record.record_id,
             },

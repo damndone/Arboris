@@ -122,6 +122,7 @@ class WorkbenchOrchestrator(OrchestrationWorkflows, OrchestrationProposals, Orch
         operation_store: OperationRecordStore | None = None,
         operation_registry: OperationRegistry | None = None,
         context_provider: WorkbenchContextProvider | None = None,
+        notebook_service=None,
         failpoint: OperationFailpoint | None = None,
         risk_authorization_store: RiskAuthorizationStore | None = None,
     ) -> None:
@@ -132,6 +133,7 @@ class WorkbenchOrchestrator(OrchestrationWorkflows, OrchestrationProposals, Orch
         self.operation_store = operation_store or OperationRecordStore(repository.root)
         self.operation_registry = operation_registry or OperationRegistry()
         self.context_provider = context_provider
+        self.notebook_service = notebook_service
         self.failpoint = failpoint or NoopFailpoint()
         self.risk_authorization_store = risk_authorization_store or RiskAuthorizationStore(
             repository.root
@@ -345,6 +347,7 @@ class WorkbenchOrchestrator(OrchestrationWorkflows, OrchestrationProposals, Orch
         rerun_executor: RerunExecutor | None = None,
         risk_authorization_id: str | None = None,
         risk_authorization_token: str | None = None,
+        notebook_service=None,
     ) -> OperationRecord:
         """Execute one confirmed record through the shared lifecycle entry point."""
 
@@ -420,6 +423,16 @@ class WorkbenchOrchestrator(OrchestrationWorkflows, OrchestrationProposals, Orch
             current_active_head_run_id=current_active_head_run_id,
             rerun_executor=rerun_executor,
         )
+        if record.execution.get("capability_notebook_id"):
+            from .notebook.capability_adapter import CapabilityOperationHandler
+            if notebook_service is None:
+                from .notebook.errors import OptionExecutionGatewayUnavailable
+                raise OptionExecutionGatewayUnavailable("The configured capability execution service is required for recovery.")
+            handler = CapabilityOperationHandler(self, service=notebook_service, executor_key=definition.executor_key,
+                project_root=project_root, current_context_fingerprint=current_context_fingerprint,
+                current_active_head_run_id=current_active_head_run_id)
+            if allow_recovery:
+                record = handler.restore_receipt_binding(record)
         if allow_recovery and record.status != "recovering":
             # Validate before changing the durable state.  A stale context
             # must remain fail-closed and must not become a recoverable

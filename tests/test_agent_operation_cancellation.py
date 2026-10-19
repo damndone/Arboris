@@ -1,3 +1,4 @@
+from tests.operation_approval_fixtures import create_approved_operation
 """Cancellation must not release ownership while a native worker still runs."""
 
 import asyncio
@@ -44,7 +45,7 @@ def test_cancellation_drains_effect_and_commit_before_releasing_lease(
             return effect
 
     store = OperationRecordStore(tmp_path)
-    record = store.create_pending(_confirmation())
+    record = create_approved_operation(store, _confirmation())
     lifecycle = WorkbenchOperationLifecycle(
         operation_store=store,
         operation_registry=OperationRegistry(),

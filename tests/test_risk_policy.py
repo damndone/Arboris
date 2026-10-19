@@ -371,12 +371,9 @@ def test_generic_lifecycle_rejects_high_risk_without_authorization(tmp_path: Pat
         lease_owner="test-worker",
     )
 
-    failed = asyncio.run(lifecycle.execute(record.record_id))
-
-    assert failed.status == "failed"
-    assert failed.error["type"] == "RiskAuthorizationRequired"
-    # The message rides along so the agent can act on the refusal.
-    assert failed.error.get("message")
+    from workbench.operation_approvals import OperationApprovalError
+    with pytest.raises(OperationApprovalError, match="approval"):
+        asyncio.run(lifecycle.execute(record.record_id))
     assert handler.execute_calls == 0
 
 
@@ -395,9 +392,14 @@ def test_generic_lifecycle_consumes_authorization_before_effect(tmp_path: Path) 
         async def reconcile(self, record, *, execution_key, failpoint):
             return OperationEffect(outputs={"effect": True})
 
-    confirmation = _high_confirmation()
+    from dataclasses import replace
+    from workbench.operation_approvals import OperationApprovalStore
+    confirmation = replace(_high_confirmation(), confirmed_at=datetime.now(timezone.utc).isoformat())
     record_store = OperationRecordStore(tmp_path)
     record = record_store.create_pending(confirmation)
+    approval = OperationApprovalStore(tmp_path).issue(confirmation)
+    record = record_store.append_status(record.record_id, record.status,
+        execution={**record.execution, "approval_id":approval["approval_id"]})
     risk_store = RiskAuthorizationStore(tmp_path)
     grant = _grant(risk_store)
     record = record_store.bind_risk_authorization(record.record_id, grant.authorization_id)
@@ -463,9 +465,14 @@ def test_high_risk_failpoint_recovery_does_not_repeat_effect(tmp_path: Path) -> 
         async def reconcile(self, record, *, execution_key, failpoint):
             return OperationEffect(outputs={"effect": True})
 
-    confirmation = _high_confirmation()
+    from dataclasses import replace
+    from workbench.operation_approvals import OperationApprovalStore
+    confirmation = replace(_high_confirmation(), confirmed_at=datetime.now(timezone.utc).isoformat())
     record_store = OperationRecordStore(tmp_path)
     record = record_store.create_pending(confirmation)
+    approval = OperationApprovalStore(tmp_path).issue(confirmation)
+    record = record_store.append_status(record.record_id, record.status,
+        execution={**record.execution, "approval_id":approval["approval_id"]})
     risk_store = RiskAuthorizationStore(tmp_path)
     grant = _grant(risk_store)
     record = record_store.bind_risk_authorization(record.record_id, grant.authorization_id)
@@ -600,3 +607,22 @@ def test_code_execute_risk_authorization_is_explicit_and_durable(
     stored = list((project / "workbench" / "risk-authorizations").glob("*.jsonl"))
     assert len(stored) == 1
     assert authorization["token"] not in stored[0].read_text(encoding="utf-8")
+
+
+def test_code_execute_legacy_risk_entry_respects_common_project_deny(tmp_path, monkeypatch):
+    import json
+    from workbench.http import data_operation_routes
+
+    project, run_id, artifact_id = _source_project(tmp_path, pd.DataFrame({"age":[10, 11]}))
+    monkeypatch.setattr(data_operation_routes, "preview_code_execute", _fake_code_preview)
+    root = project / "workbench"
+    root.mkdir(exist_ok=True)
+    (root / "agent-permissions.json").write_text(json.dumps({"deny":[{"class":"high"}]}))
+    with TestClient(app) as client:
+        response = client.post("/data-operations/code-execute/risk-authorize",
+            params={"project_root":str(project)},
+            json={**_code_request(run_id, artifact_id), "acknowledge_risk":True})
+    assert response.status_code == 403, response.text
+    assert response.json()["error"]["code"] == "OPERATION_PERMISSION_DENIED"
+    assert not list((root / "risk-authorizations").glob("*.jsonl"))
+    assert not list((root / "operation-approvals").glob("*.jsonl"))

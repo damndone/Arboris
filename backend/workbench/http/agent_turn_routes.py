@@ -2,7 +2,7 @@
 from __future__ import annotations
 from pathlib import Path
 from typing import Any
-from fastapi import Query
+from fastapi import Query, Request
 from ..agent.context_tools import NodeOperationContextProvider
 from ..agent.compaction import CompactionPolicy
 from ..agent.core import AgentCore
@@ -35,12 +35,15 @@ async def run_agent_turn(
     session_id: str,
     project_root: str,
     body: AgentTurnRequest,
+    http_request: Request = None,
 ) -> AgentTurn:
     root = _project_root(project_root)
     repository, events, metadata = _get_session(root, session_id)
+    from .notebook_runtime import notebook_service_from_state
+    notebook_service = notebook_service_from_state(root, http_request.app.state if http_request is not None else None)
     turn_key = _reserve_turn(root, session_id)
     return await turn_registry.run_owned(turn_key, lambda: _run_reserved_agent_turn(
-        root, session_id, body, repository, events, metadata, turn_key
+        root, session_id, body, repository, events, metadata, turn_key, notebook_service=notebook_service
     ))
 
 
@@ -85,14 +88,17 @@ async def continue_agent_turn(
     session_id: str,
     project_root: str,
     body: AgentContinueRequest,
+    http_request: Request = None,
 ) -> AgentTurn:
     """Resume the Agent after a confirmed proposal finished (Ask every step)."""
 
     root = _project_root(project_root)
     repository, events, metadata = _get_session(root, session_id)
+    from .notebook_runtime import notebook_service_from_state
+    notebook_service = notebook_service_from_state(root, http_request.app.state if http_request is not None else None)
     turn_key = _reserve_turn(root, session_id)
     return await turn_registry.run_owned(turn_key, lambda: _run_reserved_agent_turn(
-        root, session_id, body, repository, events, metadata, turn_key, continuation=True
+        root, session_id, body, repository, events, metadata, turn_key, continuation=True, notebook_service=notebook_service
     ))
 
 
@@ -107,6 +113,7 @@ async def _run_reserved_agent_turn(
     *,
     continuation: bool = False,
     resume_turn_id: str | None = None,
+    notebook_service=None,
 ) -> dict[str, Any]:
     from ..agent.turn_journal import TurnJournal
     from ..agent.turn_store import TurnStore, TurnStoreError
@@ -158,6 +165,7 @@ async def _run_reserved_agent_turn(
             events,
             main_session_id=session_id if metadata["role"] == "main" else _ensure_main_session(repository, root),
             operation_registry=operation_registry,
+            notebook_service=notebook_service,
             context_provider=NodeOperationContextProvider(root),
         )
         orchestrator.execution_policy = body.execution_policy
@@ -249,7 +257,7 @@ def get_agent_turn_state(session_id: str, project_root: str) -> AgentTurnStateRe
 
 
 @router.post("/agent/sessions/{session_id}/resume")
-async def resume_agent_turn(session_id: str, project_root: str, body: AgentResumeRequest) -> AgentTurn:
+async def resume_agent_turn(session_id: str, project_root: str, body: AgentResumeRequest, http_request: Request = None) -> AgentTurn:
     """Resume the original command, not a new prompt/continuation budget."""
     from ..agent.turn_store import TurnStore, TurnStoreError
 
@@ -263,10 +271,12 @@ async def resume_agent_turn(session_id: str, project_root: str, body: AgentResum
     if record.session_id != session_id:
         raise WorkbenchAPIError(status_code=404, code="AGENT_TURN_NOT_FOUND",
                                 message="The durable turn was not found.")
+    from .notebook_runtime import notebook_service_from_state
+    notebook_service = notebook_service_from_state(root, http_request.app.state if http_request is not None else None)
     turn_key = _reserve_turn(root, session_id)
     request = AgentContinueRequest(execution_mode=record.execution_mode)
     return await turn_registry.run_owned(turn_key, lambda: _run_reserved_agent_turn(
-        root, session_id, request, repository, events, metadata, turn_key, resume_turn_id=body.turn_id))
+        root, session_id, request, repository, events, metadata, turn_key, resume_turn_id=body.turn_id, notebook_service=notebook_service))
 
 
 @router.post("/agent/sessions/{session_id}/abort")

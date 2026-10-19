@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
+from tests.operation_approval_fixtures import with_operation_approval
 
 from workbench.capability_factory.adapter_contract import AdapterContract
 from workbench.capability_factory.contracts import ImplementationRevision, SemanticProfile
@@ -316,6 +317,7 @@ def test_spawn_ack_then_dispatch_reuses_one_trusted_executor_handle(tmp_path) ->
         expires_at=now + timedelta(minutes=5),
     )
     auth_store = OptionExecutionAuthorizationStore(tmp_path, clock=lambda: now)
+    authorization = with_operation_approval(tmp_path, authorization)
     auth_store.issue(authorization)
     control_store = ExecutionControlStore(clock=lambda: now)
     for kind, ref, revision, status in (

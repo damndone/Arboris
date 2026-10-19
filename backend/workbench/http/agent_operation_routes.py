@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 from ..agent.context_tools import NodeOperationContextProvider
+from ..operation_approvals import OperationApprovalStore, OperationApprovalError
+from .responses.agent import OperationApprovalRevoked
 from ..agent.chains import session_owns_chain
 from ..analysis_loop.lifecycle import confirm_analysis_loop_proposal
 from ..analysis_loop.plan import PlanBindingError
@@ -22,7 +24,7 @@ from .agent_route_permissions import (_grant_for_session)
 from .agent_route_proposals import (_current_proposal_context_fingerprint, _proposal_for_session, _public_proposal)
 from .agent_route_requests import (AgentProposalConfirmRequest, AgentProposalDeclineRequest, AgentProposalRevisionRequest)
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from .typed_routes import TypedAPIRoute
 
 router = APIRouter(route_class=TypedAPIRoute)
@@ -54,6 +56,21 @@ def get_agent_operation_projection(
         )
     projection = AgentNavigationProjector(root).operation(record_id)
     return {"operation": record.to_dict(), "projection": projection.to_dict()}
+
+
+@router.post("/agent/sessions/{session_id}/operations/{record_id}/revoke-approval")
+def revoke_operation_approval(session_id: str, record_id: str, project_root: str) -> OperationApprovalRevoked:
+    root = _project_root(project_root)
+    repository, _events, _metadata = _get_session(root, session_id)
+    try:
+        record = OperationRecordStore(repository.root, create=False).get(record_id)
+        if record.agent_session_id != session_id:
+            raise KeyError(record_id)
+        revoked = OperationApprovalStore(repository.root).revoke(record.execution["approval_id"], actor_type="user")
+    except (KeyError, OperationApprovalError) as exc:
+        raise WorkbenchAPIError(status_code=404, code="OPERATION_APPROVAL_NOT_FOUND",
+                                message="The operation approval was not found in this session.") from exc
+    return {"approval_id":revoked["approval_id"], "status":"revoked", "operation_record_id":record_id}
 
 
 @router.post("/agent/sessions/{session_id}/proposals/{proposal_id}/decline")
@@ -183,6 +200,7 @@ async def _run_read_only_proposal(root: Path, orchestrator: WorkbenchOrchestrato
 
 @router.post("/agent/sessions/{session_id}/proposals/{proposal_id}/confirm")
 async def confirm_agent_proposal(
+    request: Request,
     session_id: str,
     proposal_id: str,
     project_root: str,
@@ -202,10 +220,12 @@ async def confirm_agent_proposal(
         chain_id=str(proposal.chain_id),
         requested_active_head_run_id=body.active_head_run_id,
     )
+    from .notebook_runtime import notebook_service_from_state
+    notebook_service = notebook_service_from_state(root, request.app.state)
     current_context_fingerprint = _current_proposal_context_fingerprint(
         root,
         proposal,
-        active_head_run_id=authoritative_active_head_run_id,
+        active_head_run_id=authoritative_active_head_run_id, notebook_service=notebook_service,
     )
     orchestrator = WorkbenchOrchestrator(
         repository,
@@ -256,6 +276,8 @@ async def confirm_agent_proposal(
                 current_context_fingerprint=current_context_fingerprint,
                 current_active_head_run_id=authoritative_active_head_run_id,
             )
+    except PermissionError as exc:
+        raise WorkbenchAPIError(status_code=403, code="OPERATION_PERMISSION_DENIED", message=str(exc)) from exc
     except PlanBindingError as exc:
         raise WorkbenchAPIError(
             status_code=409,
@@ -289,9 +311,9 @@ async def confirm_agent_proposal(
 
         binding = find_binding(repository, proposal)
         if binding is not None and record.status not in {"completed", "failed", "stale", "cancelled"}:
-            result = await asyncio.to_thread(execute_binding, NotebookService(root), binding, record)
+            result = await asyncio.to_thread(execute_binding, notebook_service, binding, record)
             record = orchestrator.operation_store.get(record.record_id)
-            if record.status == "pending" and result["outcome"]["execution_status"] == "failed":
+            if record.status == "pending" and isinstance(result, dict) and result["outcome"]["execution_status"] == "failed":
                 record = orchestrator._fail_operation(record, error={
                     "type":"NotebookWorkflowPreparation", "phase":"prepare", "code":"WORKFLOW_EXECUTION_FAILED"})
         else:
@@ -308,6 +330,8 @@ async def confirm_agent_proposal(
             message="The proposal became stale before execution.",
             details={"proposal_id": proposal_id},
         ) from exc
+    except OperationApprovalError as exc:
+        raise WorkbenchAPIError(status_code=409, code="OPERATION_APPROVAL_INVALID", message=str(exc)) from exc
     except OperationClaimConflict as exc:
         raise WorkbenchAPIError(
             status_code=409,
@@ -364,6 +388,7 @@ def _tell_agent_the_outcome(root: Path, session_id: str, record: dict[str, Any])
 
 @router.post("/agent/sessions/{session_id}/operations/{record_id}/reconcile")
 async def reconcile_agent_operation(
+    request: Request,
     session_id: str,
     record_id: str,
     project_root: str,
@@ -399,9 +424,10 @@ async def reconcile_agent_operation(
         main_session_id=session_id if metadata["role"] == "main" else _ensure_main_session(repository, root),
         context_provider=NodeOperationContextProvider(root),
     )
+    from .notebook_runtime import notebook_service_from_state
     if record.operation_id != "graph.fork":
         record = await orchestrator.reconcile_confirmed_proposal(
-            record_id, project_root=root
+            record_id, project_root=root, notebook_service=notebook_service_from_state(root, request.app.state)
         )
     return {"operation": record.to_dict(), "status": record.status}
 

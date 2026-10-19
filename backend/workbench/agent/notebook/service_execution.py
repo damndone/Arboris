@@ -10,13 +10,19 @@ from .store import RECORD_EXECUTION, RECORD_EXECUTION_RESULT
 from .service_contracts import (_execution_modes_for)
 
 class ServiceExecution:
-    def confirm_and_execute(
+    def confirm_and_execute(self, notebook_id, option_id, *, context, trace=None, operation_record=None):
+        from .capability_adapter import confirm_and_execute
+        return confirm_and_execute(self, notebook_id, option_id, context=context, trace=trace,
+                                   operation_record=operation_record)
+
+    def _dispatch_capability_option(
         self,
         notebook_id: str,
         option_id: str,
         *,
         context: NotebookPlanningContextV1,
         trace: TraceWriter | None = None,
+        operation_record=None,
     ) -> NotebookExecutionDispatch:
         """Run one explicit user confirmation through the trusted CF4 seam.
 
@@ -83,6 +89,7 @@ class ServiceExecution:
             option_id,
             context=context,
             materialized=materialized,
+            operation_record=operation_record,
         )
         try:
             dispatch = self.execution_gateway.dispatch(
@@ -118,6 +125,11 @@ class ServiceExecution:
                 reason="dispatch_receipt_binding",
             )
 
+        self.store.append_option_record(notebook_id, option_id, {
+            "record_type":"capability_dispatch_receipt", "option_id":option_id,
+            "option_revision":current.option_revision, "operation_record_id":operation_record.record_id,
+            "approval_id":operation_record.execution["approval_id"], "dispatch":dispatch.to_dict(),
+        })
         if dispatch.status == "running":
             latest = self.store.read_option(notebook_id, option_id)
             self._transition(

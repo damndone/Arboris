@@ -402,3 +402,9 @@ class AgentConversations(TypedDict):
 class AgentConversationDeleted(TypedDict):
     session_id: str
     deleted: bool
+
+
+class OperationApprovalRevoked(TypedDict):
+    approval_id: str
+    status: Literal["revoked"]
+    operation_record_id: str
