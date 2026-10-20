@@ -108,11 +108,20 @@ def robust_set(y, x, z, w, alpha=.05):
     if x.shape[1] != 1 or q not in range(1, 5) or w.shape[1]+q > 12:
         return method | {'kind': 'unavailable', 'reason': 'outside_exact_certification_envelope'}
     critical = float(stats.chi2.ppf(1-alpha, q))
+    from .ar_verified import VerificationUncertain, verified_set
     try:
-        numerator, denominator = robust_polynomials(y, x, z, w, critical)
-    except ValueError as exc:
-        return method | {'kind': 'unavailable', 'reason': str(exc)}
-    return method | {'critical_value': critical, 'critical_binary64_ratio': str(Q(critical))} | certify_set(numerator, denominator)
+        result = verified_set(y, x, z, w, critical)
+        computation = {'path': 'verified_numpy', 'certification_target': 'original_binary64_observations'}
+    except VerificationUncertain as uncertainty:
+        computation = {'path': 'exact_fallback', 'fallback_reason': str(uncertainty),
+                       'certification_target': 'original_binary64_observations'}
+        try:
+            numerator, denominator = robust_polynomials(y, x, z, w, critical)
+        except ValueError as exc:
+            return method | {'kind': 'unavailable', 'reason': str(exc), 'computation': computation}
+        result = certify_set(numerator, denominator)
+    return method | {'critical_value': critical, 'critical_binary64_ratio': str(Q(critical)),
+                     'computation': computation} | result
 
 
 def homoskedastic_set(y, x, z, w, alpha=.05):

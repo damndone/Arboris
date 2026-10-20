@@ -55,24 +55,24 @@ BUDGETS = {
 }
 
 
-def _dataset(path: Path) -> Path:
+def _dataset(path: Path, rows: int = ROWS) -> Path:
     rng = np.random.default_rng(1)
-    education = rng.integers(9, 21, ROWS)
-    experience = rng.integers(0, 40, ROWS)
-    female = rng.binomial(1, 0.5, ROWS)
-    region = rng.choice(["north", "south", "east", "west"], ROWS)
+    education = rng.integers(9, 21, rows)
+    experience = rng.integers(0, 40, rows)
+    female = rng.binomial(1, 0.5, rows)
+    region = rng.choice(["north", "south", "east", "west"], rows)
     frame = pd.DataFrame(
         {
-            "id": np.arange(ROWS),
-            "wage": np.round(np.exp(1.2 + 0.08 * education + 0.03 * experience - 0.1 * female + rng.normal(0, 0.35, ROWS)), 2),
+            "id": np.arange(rows),
+            "wage": np.round(np.exp(1.2 + 0.08 * education + 0.03 * experience - 0.1 * female + rng.normal(0, 0.35, rows)), 2),
             "education": education,
             "experience": experience,
             "age": np.clip(education + experience + 6, 18, 75),
             "female": female,
             "region": region,
-            "union": rng.binomial(1, 0.25, ROWS),
-            "hours": np.round(rng.normal(40, 6, ROWS), 1),
-            "tenure": rng.integers(0, 30, ROWS),
+            "union": rng.binomial(1, 0.25, rows),
+            "hours": np.round(rng.normal(40, 6, rows), 1),
+            "tenure": rng.integers(0, 30, rows),
         }
     )
     frame.to_csv(path, index=False)
@@ -158,15 +158,17 @@ FAMILY_ROWS = {'ols': 1_000_000, 'panel': 1_000_000, 'iv': 1_000_000,
                'did': 1_000_000, 'cox': 200_000}
 
 
-def family_run(case, out):
+def prepare_family(case, out, *, rows=None):
     import json
-    import resource
-    import platform
     out.mkdir(parents=True, exist_ok=True)
+    manifest = out / 'source.json'
+    if manifest.exists():
+        validate_family_manifest(manifest)
+        return manifest
     rng = np.random.default_rng(7)
-    n = FAMILY_ROWS[case]
+    n = FAMILY_ROWS[case] if rows is None else rows
     if case == 'ols':
-        source = _dataset(out.parent / 'wages.csv')
+        source = _dataset(out / 'wages.csv', n)
         kwargs = dict(model_type='ols', y='wage', x=['education', 'experience', 'female', 'hours'])
     elif case in {'panel', 'did'}:
         unit = np.repeat(np.arange(n//10), 10)
@@ -179,7 +181,7 @@ def family_run(case, out):
             frame['first_treat'] = np.where(unit % 2 == 0, 2005, 0)
             frame['y'] += 2*((unit % 2 == 0) & (year >= 2005))
             kwargs.update(model_type='did', did_mode='cohort', did_cohort_col='first_treat')
-        source = out.parent / f'{case}.csv'
+        source = out / f'{case}.csv'
         frame.to_csv(source, index=False)
         del frame
     elif case == 'iv':
@@ -187,7 +189,7 @@ def family_run(case, out):
         d = .6*z1+.4*z2+.5*u+rng.normal(size=n)
         w = rng.normal(size=n)
         frame = pd.DataFrame({'y': d+.3*w+u+rng.normal(size=n), 'd': d, 'w': w, 'z1': z1, 'z2': z2})
-        source = out.parent / 'iv.csv'
+        source = out / 'iv.csv'
         frame.to_csv(source, index=False)
         del frame
         kwargs = dict(model_type='iv_2sls', y='y', x=['w'], iv_endog=['d'], iv_instruments=['z1', 'z2'])
@@ -197,15 +199,141 @@ def family_run(case, out):
         censor = rng.exponential(2, size=n)
         frame = pd.DataFrame({'duration': np.minimum(duration, censor)+.001,
                               'event': (duration <= censor).astype(int), 'x1': x1, 'x2': x2})
-        source = out.parent / 'cox.csv'
+        source = out / 'cox.csv'
         frame.to_csv(source, index=False)
         del frame
         kwargs = dict(model_type='survival_cox', y='duration', x=['x1', 'x2'],
                       model_options={'event_column': 'event', 'ties': 'breslow'})
+    payload = {'case': case, 'rows': n, 'source': str(source.resolve()),
+               'sha256': source_digest(source),
+               'source_stat': source_identity(source),
+               'kwargs': kwargs, 'generator': 'perf_1m_fixed_input_v2', 'seed': 7}
+    manifest.write_text(json.dumps(payload, indent=2))
+    return manifest
+
+
+def source_digest(source):
+    import hashlib
+    with source.open('rb') as stream:
+        return hashlib.file_digest(stream, 'sha256').hexdigest()
+
+
+def source_identity(source):
+    stat = source.stat()
+    return dict(size=stat.st_size, mtime_ns=stat.st_mtime_ns, inode=stat.st_ino, device=stat.st_dev)
+
+
+def registered_source(payload):
+    source = Path(payload['source'])
+    if source_identity(source) != payload['source_stat']:
+        raise ValueError('registered_source_changed')
+    return source
+
+
+def validate_family_manifest(manifest):
+    import json
+    payload = json.loads(manifest.read_text())
+    digest = source_digest(Path(payload['source']))
+    if digest != payload['sha256']:
+        raise ValueError('source_digest_mismatch')
+    return payload
+
+
+def current_rss():
+    """Current resident bytes, NOT ru_maxrss (whose increments miss releases)."""
+    import os
+    import platform
+    if platform.system() == 'Darwin':
+        import ctypes
+        class Info(ctypes.Structure):
+            _fields_ = [(name, ctypes.c_uint64) for name in
+                        ('virtual', 'resident', 'resident_max', 'user', 'system',
+                         'policy', 'faults', 'pageins', 'cow', 'sent', 'received',
+                         'mach', 'unix', 'switches', 'csw', 'priority')]
+        info = Info()
+        size = ctypes.c_uint32(ctypes.sizeof(info)//4)
+        lib = ctypes.CDLL('/usr/lib/libSystem.B.dylib')
+        port = lib.mach_task_self()
+        if lib.task_info(port, 20, ctypes.byref(info), ctypes.byref(size)):
+            raise RuntimeError('task_info_failed')
+        return info.resident
+    return int(Path('/proc/self/statm').read_text().split()[1])*os.sysconf('SC_PAGE_SIZE')
+
+
+def stage_summary(rows):
+    return {r['stage']: dict(r, rss_delta_bytes=r['rss_after']-r['rss_before']) for r in rows}
+
+
+def compare_stages(baseline, candidate):
+    differences = {}
+    for name in baseline['stages'].keys() | candidate['stages'].keys():
+        a, b = baseline['stages'].get(name), candidate['stages'].get(name)
+        if a is None or b is None:
+            differences[name] = {'reason': 'stage_exists_in_one_version_only', 'over_one_percent': True}
+            continue
+        dt, dm = b['seconds']-a['seconds'], b['rss_delta_bytes']-a['rss_delta_bytes']
+        differences[name] = {
+            'baseline': a, 'candidate': b, 'seconds_delta': dt,
+            'rss_increment_delta_bytes': dm,
+            'time_fraction_of_baseline_workflow': dt/baseline['seconds'],
+            'memory_fraction_of_baseline_peak': dm/baseline['rss_bytes'],
+            'over_one_percent': abs(dt/baseline['seconds']) > .01 or abs(dm/baseline['rss_bytes']) > .01,
+            'cause': 'requires_stage_code/profile_attribution' if abs(dt/baseline['seconds']) > .01 or abs(dm/baseline['rss_bytes']) > .01 else 'below_one_percent',
+        }
+    # Imports, hashing, publication and run setup outside the pipeline must not
+    # disappear merely because stage timings add up to less than the workflow.
+    outside_a = baseline['seconds']-sum(r['seconds'] for r in baseline['stages'].values())
+    outside_b = candidate['seconds']-sum(r['seconds'] for r in candidate['stages'].values())
+    differences['outside_pipeline'] = {'baseline_seconds': outside_a, 'candidate_seconds': outside_b,
+                                        'seconds_delta': outside_b-outside_a,
+                                        'over_one_percent': abs(outside_b-outside_a)/baseline['seconds'] > .01}
+    return differences
+
+
+def instrument_stages(rows):
+    from workbench.engine.stages import PIPELINE
+    import resource
+    for stage in PIPELINE:
+        original = type(stage).run
+        def measured(self, ctx, env, _run=original):
+            before = current_rss()
+            high_before = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+            start = time.perf_counter()
+            result = _run(self, ctx, env)
+            rows.append(dict(stage=type(self).__name__, seconds=time.perf_counter()-start,
+                             rss_before=before, rss_after=current_rss(),
+                             high_water_before=high_before,
+                             high_water_after=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss))
+            return result
+        type(stage).run = measured
+
+
+def family_run(case, out, *, manifest, stage_profile=False, trace_memory=False):
+    import json
+    import resource
+    import platform
+    # Parent validates the file digest before EACH worker. Do not re-read the
+    # source or generate any observations in this measured process.
+    payload = json.loads(manifest.read_text())
+    source, kwargs, n = Path(payload['source']), payload['kwargs'], payload['rows']
+    if case != payload['case']:
+        raise ValueError('manifest_case_mismatch')
+    out.mkdir(parents=True, exist_ok=False)
+    stages = []
+    if stage_profile:
+        instrument_stages(stages)
+    if trace_memory:
+        import tracemalloc
+        tracemalloc.start()
     project = create_project(out, 'benchmark')
     started = time.perf_counter()
     outcome = run_workflow(project.root, [source], mode='auto', **kwargs)
     elapsed = time.perf_counter()-started
+    rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    traced_peak = None
+    if trace_memory:
+        traced_peak = tracemalloc.get_traced_memory()[1]
+        tracemalloc.stop()
     run = project.root / 'runs' / outcome['run_id']
     primary_id = {'ols': 'ols_1', 'panel': 'panel_ols_1', 'iv': 'iv_2sls_1', 'did': 'did_1', 'cox': 'survival_cox_1'}[case]
     packet_path = run / 'model_results' / f'{primary_id}.json'
@@ -218,9 +346,12 @@ def family_run(case, out):
         if isinstance(value, list):
             return [bits(v) for v in value]
         return value
-    signature = bits({k: packet[k] for k in ('coefficients', 'fit_statistics') if k in packet})
-    rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    signature = bits({k: packet[k] for k in ('coefficients', 'fit_statistics', 'nobs',
+                                           'r_squared', 'r_squared_adj', 'df_model',
+                                           'df_resid', 'covariance') if k in packet})
     result = {'case': case, 'rows': n, 'status': outcome['status'], 'seconds': elapsed,
+              'input_sha256': payload['sha256'], 'measurement_scope': 'fresh_worker_without_input_generation',
+              'tracemalloc_peak_bytes': traced_peak, 'stages': stage_summary(stages),
               'ru_maxrss': rss, 'rss_bytes': rss if platform.system() == 'Darwin' else rss*1024,
               'run_bytes': sum(p.stat().st_size for p in run.rglob('*') if p.is_file()),
               'numeric_signature': signature, 'run_root': str(run)}
@@ -229,69 +360,173 @@ def family_run(case, out):
     return 0 if outcome['status'] == 'completed' else 1
 
 
+RESOURCE_METRICS = ('seconds', 'rss_bytes', 'run_bytes')
+
+
+def baseline_noise(runs, *, metrics=RESOURCE_METRICS):
+    """Sample standard deviation / median; preregistered before measuring.
+
+    Every observation stays in the estimate. More samples estimate the noise
+    more accurately; they do NOT divide it by sqrt(n) to conceal variability.
+    """
+    import statistics
+    if len(runs) < 5:
+        raise ValueError('at_least_five_calibration_runs_required')
+    return {key: statistics.stdev(r[key] for r in runs)/statistics.median(r[key] for r in runs)
+            for key in metrics}
+
+
+def noise_accepted(noise):
+    return all(v < .05 for v in noise.values())
+
+
+def idle_processes(out):
+    import os
+    import subprocess
+    processes = subprocess.check_output(['ps', '-Ao', 'pid=,ppid=,command='], text=True)
+    (out / 'processes-before.txt').write_text(processes)
+    others = [line for line in processes.splitlines()
+              if int(line.split()[0]) not in {os.getpid(), os.getppid()}
+              and any(s in line for s in ('-m pytest', '/pytest ', 'bench_families.py', 'scripts/perf_1m.py'))
+              and 'ps -Ao' not in line]
+    if others:
+        raise SystemExit('Other tests/benchmarks active; refusing A/B: '+str(others))
+
+
 def ab_main(argv):
+    import hashlib
     import json
     import os
     import statistics
     import subprocess
-    parser = argparse.ArgumentParser(description='Alternating A/B: baseline, candidate, baseline, candidate; 5% limits.')
+    import shutil
+    parser = argparse.ArgumentParser(description='Fixed source; A-only noise then five alternating pairs; 5% limits.')
     parser.add_argument('--ab', action='store_true')
     parser.add_argument('--baseline-repo', type=Path, required=True)
     parser.add_argument('--out', type=Path, required=True)
+    parser.add_argument('--inputs', type=Path)
     parser.add_argument('--cases', nargs='+', choices=list(FAMILY_ROWS), default=list(FAMILY_ROWS))
+    parser.add_argument('--profile-stages', action='store_true', help='Separate instrumented A/B after acceptance runs')
+    parser.add_argument('--trace-memory', action='store_true', help='Separate tracemalloc lane; timings are NOT acceptance timings')
+    parser.add_argument('--calibration-from', type=Path, help='Reuse completed calibration with the same probe, baseline, threads and source SHA')
     args = parser.parse_args(argv)
     out = args.out.resolve()
     out.mkdir(parents=True, exist_ok=True)
     candidate, baseline = Path.cwd(), args.baseline_repo.resolve()
-    # Preserve the complete process inventory used to establish a clean slot.
-    processes = subprocess.check_output(['ps', '-Ao', 'pid=,command='], text=True)
-    (out / 'processes-before.txt').write_text(processes)
-    others = [line for line in processes.splitlines() if any(s in line for s in ('-m pytest', '/pytest ', 'bench_families.py'))
-              and 'ps -Ao' not in line]
-    if others:
-        raise SystemExit('Other tests/benchmarks active; refusing A/B: '+str(others))
+    if (out/'ab-results.json').exists():
+        raise FileExistsError('Do not overwrite previous measurement evidence; use a fresh --out')
+    idle_processes(out)
     revisions = {name: subprocess.check_output(['git','rev-parse','HEAD'], cwd=repo, text=True).strip()
                  for name,repo in [('baseline',baseline),('candidate',candidate)]}
     if revisions['baseline'] != subprocess.check_output(['git','rev-parse','v1.9.0^{commit}'], cwd=candidate,text=True).strip():
         raise SystemExit('Baseline must be exact v1.9.0')
-    import hashlib
     difference = subprocess.check_output(['git','diff','--binary','HEAD'], cwd=candidate)
-    report = {'candidate_diff_sha256': hashlib.sha256(difference).hexdigest(),
+    (out/'candidate.patch').write_bytes(difference)
+    untracked = subprocess.check_output(['git','ls-files','--others','--exclude-standard'],cwd=candidate,text=True).splitlines()
+    report = {'measurement_version': 2, 'candidate_diff_sha256': hashlib.sha256(difference).hexdigest(),
+              'untracked_source_sha256': {path:source_digest(candidate/path) for path in untracked if (candidate/path).is_file()},
               'thread_environment': {key: os.environ.get(key) for key in ('OMP_NUM_THREADS','OPENBLAS_NUM_THREADS','VECLIB_MAXIMUM_THREADS','MKL_NUM_THREADS','PYTHONHASHSEED')},
-              'revisions': revisions, 'order': ['A1','B1','A2','B2'], 'multiplier': 1.05, 'cases': {}}
+              'revisions': revisions, 'order': [f'{lane}{i}' for i in range(1,6) for lane in 'AB'],
+              'noise_definition': 'sample_standard_deviation/median; all observations; no standard_error_substitution',
+              'multiplier': 1.05, 'trace_memory': args.trace_memory,
+              'time_acceptance_eligible': not args.trace_memory,
+              'memory_metric': 'tracemalloc_peak_bytes' if args.trace_memory else 'rss_bytes', 'cases': {}}
     failed = []
     driver = Path(__file__).resolve()
+    def save():
+        (out/'ab-results.json').write_text(json.dumps(report, indent=2))
     for case in args.cases:
+        inputs = (args.inputs or out/'inputs').resolve()/case
+        manifest = prepare_family(case, inputs)
         records = {'A': [], 'B': []}
-        for label in report['order']:
+        calibration = []
+        input_payload = json.loads(manifest.read_text())
+        if args.calibration_from:
+            prior = json.loads(args.calibration_from.read_text())
+            if (prior['revisions']['baseline'] != revisions['baseline'] or
+                    prior['trace_memory'] != args.trace_memory or
+                    prior['thread_environment'] != report['thread_environment'] or
+                    prior['cases'][case]['input']['sha256'] != input_payload['sha256']):
+                raise ValueError('calibration_provenance_mismatch')
+            calibration.extend(prior['cases'][case]['calibration'])
+        case_report = {'calibration': calibration, 'raw': records,
+                       'input': input_payload, 'calibration_origin': str(args.calibration_from) if args.calibration_from else None}
+        report['cases'][case] = case_report
+        def run(label, *, profile=False):
             repo = baseline if label.startswith('A') else candidate
             destination = out / case / label
-            command = [str(candidate/'.venv/bin/python'), str(driver), '--case', case, '--out', str(destination)]
+            payload = json.loads(manifest.read_text())
+            registered_source(payload)
+            previous = calibration+records['A']+records['B']
+            expected = max([r.get('destination_bytes', 0) for r in previous]+[220*2**20])
+            if shutil.disk_usage(out).free < expected+512*2**20:
+                save()
+                raise SystemExit('Insufficient disk for next run plus 512MiB reserve; evidence preserved')
+            command = [str(candidate/'.venv/bin/python'), str(driver), '--case', case,
+                       '--out', str(destination), '--manifest', str(manifest)]
+            if profile:
+                command += ['--profile-stages']
+            if args.trace_memory:
+                command += ['--trace-memory']
             env = dict(os.environ, PYTHONPATH=str(repo/'backend'), LC_ALL='en_US.UTF-8', LANG='en_US.UTF-8')
             with (out/f'{case}-{label}.log').open('w') as log:
                 result = subprocess.run(command,cwd=repo,env=env,stdout=log,stderr=subprocess.STDOUT)
             if result.returncode:
                 raise SystemExit(f'{case} {label} failed; see log')
+            registered_source(payload)
             value = json.loads((destination/'metrics.json').read_text())
-            records[label[0]].append(value)
-            print(f"{case} {label}: {value['seconds']:.3f}s, RSS {value['rss_bytes']/2**20:.1f} MiB, disk {value['run_bytes']/1e6:.3f} MB", flush=True)
-        medians = {lane:{key:statistics.median(r[key] for r in runs) for key in ('seconds','rss_bytes','run_bytes')}
+            value['destination_bytes'] = sum(p.stat().st_size for p in destination.rglob('*') if p.is_file())
+            if value['input_sha256'] != payload['sha256']:
+                raise SystemExit('worker_input_digest_mismatch')
+            print(f"{case} {label}: {value['seconds']:.6f}s, RSS {value['rss_bytes']/2**20:.3f} MiB, disk {value['run_bytes']/1e6:.6f} MB", flush=True)
+            return value
+        noise_metrics = ('tracemalloc_peak_bytes', 'run_bytes') if args.trace_memory else RESOURCE_METRICS
+        def calibration_ready():
+            if len(calibration) < 5:
+                return False
+            noise = baseline_noise(calibration, metrics=noise_metrics)
+            case_report['noise'] = noise
+            # RSS noise does not justify spending on identical RSS repetitions.
+            # Complete the uninstrumented TIME lane, flag memory unresolved,
+            # and use the separately recorded tracemalloc lane for memory.
+            case_report['rss_noise_requires_trace'] = not args.trace_memory and noise['rss_bytes'] >= .05
+            valid = {k:v for k,v in noise.items() if k != 'rss_bytes' or args.trace_memory}
+            save()
+            return noise_accepted(valid)
+        while not calibration_ready():
+            if len(calibration) >= 30:
+                case_report['failed'] = ['measurement_noise']
+                save()
+                print(f'Noise >=5% after 30 calibration runs: {case_report["noise"]}',flush=True)
+                return 2
+            calibration.append(run(f'A0_{len(calibration)+1:02}'))
+            save()
+        for label in report['order']:
+            records[label[0]].append(run(label))
+            save()
+        observed_metrics = RESOURCE_METRICS + (('tracemalloc_peak_bytes',) if args.trace_memory else ())
+        medians = {lane:{key:statistics.median(r[key] for r in runs) for key in observed_metrics}
                    for lane,runs in records.items()}
-        budgets = {key:value*1.05 for key,value in medians['A'].items()}
+        accepted_metrics = ('tracemalloc_peak_bytes','run_bytes') if args.trace_memory else RESOURCE_METRICS
+        budgets = {key:medians['A'][key]*1.05 for key in accepted_metrics}
         misses = [key for key,limit in budgets.items() if medians['B'][key]>limit]
-        if case in {'panel','iv'}:
-            absolute = {'panel':12.2,'iv':15.1}[case]
-            if medians['B']['seconds']>absolute:
-                misses.append('absolute_seconds')
-        signatures = [r['numeric_signature'] for runs in records.values() for r in runs]
-        # JSON floats have round-trip binary64 precision; exact equality here
-        # includes coefficients, standard errors, tests and reported fit stats.
+        if case_report['rss_noise_requires_trace']:
+            misses.append('rss_noise_requires_trace')
+        if not args.trace_memory and case in {'panel','iv'} and medians['B']['seconds']>{'panel':12.2,'iv':15.1}[case]:
+            misses.append('absolute_seconds')
+        signatures = [r['numeric_signature'] for r in records['A']+records['B']]
         if not signatures[0] or not all(s==signatures[0] for s in signatures):
             misses.append('numeric_bits')
-        report['cases'][case] = {'raw':records,'medians':medians,'budgets':budgets,'failed':misses}
-        (out/'ab-results.json').write_text(json.dumps(report,indent=2))
+        case_report.update(medians=medians, budgets=budgets, failed=misses)
+        if args.profile_stages:
+            case_report['stage_profile'] = {lane:run(lane+'_stages',profile=True) for lane in 'AB'}
+            case_report['stage_comparison'] = compare_stages(case_report['stage_profile']['A'], case_report['stage_profile']['B'])
+            if any(r['over_one_percent'] for r in case_report['stage_comparison'].values()):
+                misses.append('stage_attribution_pending')
+        save()
         failed.extend(f'{case}:{key}' for key in misses)
-    print('PASS' if not failed else 'FAIL '+', '.join(failed),flush=True)
+    label = 'PASS memory-only (instrumented time is ineligible)' if args.trace_memory else 'PASS'
+    print(label if not failed else 'FAIL '+', '.join(failed),flush=True)
     return int(bool(failed))
 
 
@@ -302,8 +537,12 @@ def main():
         parser = argparse.ArgumentParser()
         parser.add_argument('--case', choices=list(FAMILY_ROWS), required=True)
         parser.add_argument('--out', type=Path, required=True)
+        parser.add_argument('--manifest', type=Path, required=True)
+        parser.add_argument('--profile-stages', action='store_true')
+        parser.add_argument('--trace-memory', action='store_true')
         args = parser.parse_args()
-        return family_run(args.case, args.out.resolve())
+        return family_run(args.case, args.out.resolve(), manifest=args.manifest,
+                          stage_profile=args.profile_stages, trace_memory=args.trace_memory)
     return interactive_main()
 
 

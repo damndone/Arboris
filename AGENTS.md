@@ -37,7 +37,9 @@ model, containment, browser, performance, or release acceptance evidence.
   lists for processing, or re-read/copy a whole source merely for validation.
   Use registered import digests, versioned array-byte fingerprints and compact
   summaries; explicit observation inspection may use ranges or binary arrays.
-- Performance acceptance uses an otherwise test-idle host and alternating
-  A/B/A/B runs, two per version, with raw measurements and median comparisons.
+- Performance acceptance uses an otherwise test-idle host, fixed shared input
+  files with SHA256, fresh workers without data generation, baseline-only noise
+  calibration (at least five), then at least five alternating A/B pairs with raw
+  measurements and median comparisons; sampling noise must be below 5%.
   Retain failed measurements. Numerical coefficients, standard errors and test
   statistics must remain bit-identical; do not widen reference tolerances.
