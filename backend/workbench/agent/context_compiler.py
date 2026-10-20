@@ -445,6 +445,13 @@ class VerifiedCompletionArtifact:
     size_bytes: int
 
 
+def read_garch_completion_product(run_root: Path, artifact: VerifiedCompletionArtifact):
+    """Read a source-verified production GARCH child through its owner."""
+    from ..services.time_series_result_adapter import read_garch_completion
+
+    return read_garch_completion(run_root, artifact)
+
+
 def read_arima_completion_product(run_root: Path, artifact: VerifiedCompletionArtifact):
     """Project a native ARIMA result after owner-side source verification."""
     from ..services.time_series_result_adapter import read_arima_completion

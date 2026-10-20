@@ -12,7 +12,8 @@
   },
   "commands": [
     "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 Rscript tests/fixtures/agent_completion/time_series/generate_reference.R",
-    "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 /Applications/Stata/StataMP.app/Contents/MacOS/stata-mp -bq do REPO_ROOT/tests/fixtures/agent_completion/time_series/generate_reference.do REPO_ROOT (scratch cwd)"
+    "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 /Applications/Stata/StataMP.app/Contents/MacOS/stata-mp -bq do REPO_ROOT/tests/fixtures/agent_completion/time_series/generate_reference.do REPO_ROOT (scratch cwd)",
+    "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 Rscript tests/fixtures/agent_completion/time_series/generate_garch_reference.R"
   ],
   "versions": {
     "numpy": "2.5.0",
@@ -25,6 +26,13 @@
     "tests/fixtures/agent_completion/time_series/input.csv": "7263b6974257afa2bece2c13084492603441df1a3c3c919b038f7db51693aec9",
     "tests/fixtures/agent_completion/time_series/generate_reference.do": "228e13d2401e2e5418b5123f917975dcd9bb87d53040c18f448b75081f1278fe",
     "tests/fixtures/agent_completion/time_series/generate_reference.R": "db2271e69e406e9eb1cb654bc985fb921821a00e1cbc6d4213d69b3c8add1de8",
-    "tests/fixtures/agent_completion/time_series/reference_stata.csv": "d1d1f94900b833d89810d21c2efd8a85bb7881c18dc344867b58b4505d7ff285"
-  }
+    "tests/fixtures/agent_completion/time_series/reference_stata.csv": "d1d1f94900b833d89810d21c2efd8a85bb7881c18dc344867b58b4505d7ff285",
+    "tests/fixtures/agent_completion/time_series/generate_garch_reference.R": "184569bd45bed3172eb94c844d6db30d07b572af0a592f814cd0c73e2de13a92",
+    "tests/fixtures/agent_completion/time_series/garch_reference_r.json": "a755e3857f6e343a945c0d1cb9f290971c178ebdbb3a60fa678b671bdc7c78aa",
+    "tests/fixtures/arma_garch_joint/oracle_v1/data_garch11_constant.csv": "5e1f626f3aa247f9c32427b7a709eac6bade0e6e34c8837c158c63f388a3b221",
+    "tests/fixtures/arma_garch_joint/oracle_v1/series_garch11_constant.csv": "16748efad4f302b7ba6c9f3862a4f3008b6c112e1b062043c23a992f5dc868bb",
+    "tests/fixtures/arma_garch_joint/oracle_v1/stata_garch11_constant_opg.json": "63d2bd57baf3159c252a0ec5c99b026699c11b35a7b4e90bd85b14a0bcc2d740"
+  },
+  "garch_diagnostics": "R stats::Box.test on exact standardized Stata residual/variance series; native R lm squared-innovation auxiliary regression (ddof2). Lag10, residual LB df8, squared LB df10. Fixed existing tolerance 1e-7/1e-9. Estimated-GARCH diagnostic p-values remain asymptotic approximations, not coverage certificates.",
+  "garch_estimation": "Existing independent Stata joint likelihood fixtures and unchanged tests/models/arma_garch/test_joint_stata_oracle.py; existing estimation tolerances are not widened. Production diagnostics are collected from the original full-sample fitted object, not from training diagnostics."
 }

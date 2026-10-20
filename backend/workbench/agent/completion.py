@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from ..canonical import sha256_canonical
-from .context_compiler import read_completion_artifact, read_completion_dataset_source, read_arima_completion_product
+from .context_compiler import read_completion_artifact, read_completion_dataset_source, read_arima_completion_product, read_garch_completion_product
 from .completion_profiles import NATIVE_COMPANIONS, companion_model, native_diagnostics, native_findings
 
 VERSION = 'analysis-completion/v1'
@@ -131,10 +131,12 @@ class _Products:
         return self.cache[key]
 
     def model(self, ref, artifact):
-        if artifact is not None and artifact.artifact_type == 'p7_analysis':
+        if artifact is not None and (artifact.artifact_type in {'p7_analysis', 'workflow_capability_result'}
+                or (artifact.payload or {}).get('model_type') == 'time_series.arma_garch'):
             key = (ref['run_id'], ref['artifact_id'])
             if key not in self.native_models:
-                projected = read_arima_completion_product(self.runs / ref['run_id'], artifact)
+                reader = read_arima_completion_product if artifact.artifact_type == 'p7_analysis' else read_garch_completion_product
+                projected = reader(self.runs / ref['run_id'], artifact)
                 self.native_models[key] = projected[0] if projected else None
                 if projected:
                     self.native_diagnostics[key] = projected[1]
@@ -229,7 +231,7 @@ def evaluate(project_root, contract, evidence):
             missing.append(f'{family}:model:{MODEL_NAMES[family]}')
         main_ref, main = matches[0] if len(matches) == 1 else (None, None)
         diagnostic_values = [value for ref, artifact in groups['diagnostics']
-                             if artifact is not None and artifact.artifact_type in {'model_diagnostic', 'lmm_analysis_evidence', 'analysis_completion_evidence', 'p7_analysis'}
+                             if artifact is not None and artifact.artifact_type in {'model_diagnostic', 'lmm_analysis_evidence', 'analysis_completion_evidence', 'p7_analysis', 'workflow_capability_result', 'model_result'}
                              and bound(ref) and main_ref and ref['run_id'] == main_ref['run_id']
                              and (value := products.diagnostic(ref, artifact)) and value.get('model_id') == main.get('model_id')
                              and (family != 'lmm' or artifact.artifact_type == 'lmm_analysis_evidence')
@@ -290,6 +292,24 @@ def claims_completion(content, request_text=None):
 def _missing_label(code, language):
     family, _, requirement = code.partition(':')
     special = {
+        'garch:diagnostics:invalid_variance_parameters': (
+            'Production variance parameters fail their native constraints.',
+            '生产方差参数未通过原生约束，需修正模型。'),
+        'garch:diagnostics:inadmissible_mean_roots': (
+            'Production mean roots are inadmissible; revise the specification.',
+            '生产均值模型的根不满足平稳或可逆条件，需修正设定。'),
+        'garch:diagnostics:calendar_gaps_unverified': (
+            'Regular-calendar gaps remain; revise the time interpretation.',
+            '规则日历存在间隙，需修正时间解释，不能自动填补。'),
+        'garch:diagnostics:stationarity_unresolved': (
+            'Stationarity remains unresolved for the transformed GARCH input.',
+            'GARCH 实际转换序列的平稳性仍未解决。'),
+        'garch:diagnostics:mean_correlation_requires_revision': (
+            'Production standardized innovations retain mean correlation.',
+            '生产标准化创新仍有均值自相关，需修正均值设定。'),
+        'garch:diagnostics:remaining_arch_requires_revision': (
+            'Production standardized innovations retain ARCH.',
+            '生产标准化创新仍有 ARCH，需修正方差设定。'),
         'time_series:diagnostics:irregular_sampling_unverified': (
             'Observed times are irregular; an equal-spacing interpretation needs revision.',
             '观测时间不规则；需修正等间距解释，不能自动填补。'),

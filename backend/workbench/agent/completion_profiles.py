@@ -41,6 +41,17 @@ def companion_model(products, ref, artifact, model):
 
 
 def native_diagnostics(family, values):
+    if family == 'garch':
+        for value in values:
+            diag = (value.get('diagnostics') or {}).get('garch') or {}
+            if (value.get('contract') == 'garch.completion.v1'
+                    and diag.get('method') == 'garch_production_standardized_innovations_v1'
+                    and diag.get('status') == 'computed'
+                    and (diag.get('squared_ljung_box') or {}).get('status') == 'computed'
+                    and all(type((diag.get(test) or {}).get('p_value')) in {int, float}
+                            and 0 <= diag[test]['p_value'] <= 1 for test in ['ljung_box', 'squared_ljung_box', 'arch_lm'])
+                    and all((diag.get('stationarity') or {}).get(test, {}).get('status') == 'computed' for test in ['adf', 'kpss'])):
+                return True
     if family == 'time_series':
         for value in values:
             ts = (value.get('diagnostics') or {}).get('time_series') or {}
@@ -96,6 +107,26 @@ def native_diagnostics(family, values):
 
 
 def native_findings(family, values):
+    if family == 'garch':
+        findings = []
+        for value in values:
+            diag = (value.get('diagnostics') or {}).get('garch') or {}
+            if not diag:
+                continue
+            if diag.get('mean_stationary') is False or diag.get('mean_invertible') is False:
+                findings.append('garch:diagnostics:inadmissible_mean_roots')
+            if not diag.get('variance_parameters_valid'):
+                findings.append('garch:diagnostics:invalid_variance_parameters')
+            if diag.get('time_index_semantics') == 'regular_calendar' and (not diag.get('stable_frequency') or diag.get('internal_gap_count')):
+                findings.append('garch:diagnostics:calendar_gaps_unverified')
+            unit = diag.get('stationarity') or {}
+            if (unit.get('adf') or {}).get('p_value', 1) >= .05 or (unit.get('kpss') or {}).get('p_value', 0) < .05:
+                findings.append('garch:diagnostics:stationarity_unresolved')
+            if (diag.get('ljung_box') or {}).get('p_value', 1) < diag['significance_level']:
+                findings.append('garch:diagnostics:mean_correlation_requires_revision')
+            if any((diag.get(test) or {}).get('p_value', 1) < diag['significance_level'] for test in ['squared_ljung_box', 'arch_lm']):
+                findings.append('garch:diagnostics:remaining_arch_requires_revision')
+        return list(dict.fromkeys(findings))
     if family == 'time_series':
         findings = []
         for value in values:
