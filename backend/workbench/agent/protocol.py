@@ -6,8 +6,8 @@ from .analysis_integrity import ANALYSIS_INTEGRITY_RULES
 from .operations import OperationRegistry
 from .session import JsonlSessionRepository
 
-CHAIN_AGENT_PROTOCOL = """Workbench Chain Agent workflow protocol (agent/v1):
-- You are the Workbench Chain Agent, running on the workbench's configured language-model provider. When asked what you are or which model powers you, identify yourself that way and name the configured provider and model given in your identity context. Never invent a product, brand, or vendor name (there is no product called "Vivistats"), and never deflect a question about your identity or model to external or "official" documentation.
+CHAIN_AGENT_PROTOCOL = """Arboris Agent workflow protocol (agent/v1, selected-chain scope):
+- You are the Arboris Agent, running on the workbench's configured language-model provider. This is your identity in every scope and supersedes earlier scope-specific names. When asked what you are or which model powers you, identify yourself that way and name the configured provider and model given in your identity context. Never invent a product, brand, or vendor name (there is no product called "Vivistats"), and never deflect a question about your identity or model to external or "official" documentation.
 - Reply in the language of the user's most recent message (Chinese when they write Chinese), even when tool results, labels or earlier turns are in another language.
 - Read-only inspection tools are the evidence source for this turn.
 - For an OLS conventional-to-clustered Analysis Loop, call run_operation with model.rerun, the exact source run/node and active head, and covariance/entity_col changes. When the user supplies a result_id, include target.result_id. The server resolves source facts and binds the PlanDiff before applying the common permissions; never drop an explicit result selector.
@@ -44,8 +44,8 @@ CHAIN_AGENT_PROTOCOL = """Workbench Chain Agent workflow protocol (agent/v1):
 """
 CHAIN_AGENT_PROTOCOL += ANALYSIS_INTEGRITY_RULES
 
-MAIN_AGENT_PROTOCOL = """Workbench Global Agent workflow protocol (agent/v1):
-- You are the Workbench Global Agent, running on the workbench's configured language-model provider. When asked what you are or which model powers you, identify yourself that way and name the configured provider and model given in your identity context. Never invent a product, brand, or vendor name (there is no product called "Vivistats"), and never deflect a question about your identity or model to external or "official" documentation.
+MAIN_AGENT_PROTOCOL = """Arboris Agent workflow protocol (agent/v1, project scope):
+- You are the Arboris Agent, running on the workbench's configured language-model provider. This is your identity in every scope and supersedes earlier scope-specific names. When asked what you are or which model powers you, identify yourself that way and name the configured provider and model given in your identity context. Never invent a product, brand, or vendor name (there is no product called "Vivistats"), and never deflect a question about your identity or model to external or "official" documentation.
 - Reply in the language of the user's most recent message (Chinese when they write Chinese), even when tool results, labels or earlier turns are in another language.
 - You are the project-level research Agent. Use the bounded project overview and durable summaries supplied in the context packet.
 - You may summarize families, runs, heads, chains, and visible risks, and suggest questions or evidence-gathering steps.
@@ -154,23 +154,30 @@ def ensure_current_global_protocol(
 ) -> None:
     """Append a protocol revision once when a durable Main session is older."""
 
-    for entry in repository.get_branch(session_id):
+    ensure_standing_message(repository, session_id, name="workbench_global_agent_protocol",
+        content=protocol, message_type="agent_protocol", metadata={"protocol_version": "agent/v1"})
+
+
+def ensure_standing_message(repository, session_id, *, name, content, message_type, metadata=None):
+    """Publish the current identity/protocol without rewriting its audit history."""
+    if len(content) > 128_000:
+        raise ValueError("Agent standing message exceeds its context budget")
+    for entry in reversed(repository.get_branch(session_id)):
         if entry.entry_type != "custom_message":
             continue
         payload = entry.payload
-        if (
-            payload.get("name") == "workbench_global_agent_protocol"
-            and payload.get("content") == protocol
-        ):
-            return
+        if payload.get("name") == name:
+            if payload.get("content") == content:
+                return
+            break
     repository.append(
         session_id,
         "custom_message",
         {
-            "message_type": "agent_protocol",
+            "message_type": message_type,
             "audience": "model",
-            "name": "workbench_global_agent_protocol",
-            "content": protocol,
-            "metadata": {"protocol_version": "agent/v1"},
+            "name": name,
+            "content": content,
+            **({"metadata": metadata} if metadata is not None else {}),
         },
     )

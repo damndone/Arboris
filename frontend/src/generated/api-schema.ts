@@ -494,6 +494,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/agent/sessions/{session_id}/operations/{record_id}/revoke-approval": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Revoke Operation Approval */
+        post: operations["revoke_operation_approval_agent_sessions__session_id__operations__record_id__revoke_approval_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/agent/sessions/{session_id}/plan": {
         parameters: {
             query?: never;
@@ -8183,6 +8200,18 @@ export interface components {
             /** Unverified */
             unverified: components["schemas"]["Finding"][];
         };
+        /** OperationApprovalRevoked */
+        OperationApprovalRevoked: {
+            /** Approval Id */
+            approval_id: string;
+            /** Operation Record Id */
+            operation_record_id: string;
+            /**
+             * Status
+             * @constant
+             */
+            status: "revoked";
+        };
         /** OperationAvailability */
         OperationAvailability: {
             /** Message */
@@ -10600,6 +10629,7 @@ export interface components {
         WorkflowConfirmed: {
             /** Execution */
             execution?: components["schemas"]["ExecutionView"] | components["schemas"]["ExecutionV11View"];
+            operation?: components["schemas"]["OperationRecordView"];
             outcome?: components["schemas"]["ExecutionOutcomeView"];
             /** Trace Id */
             trace_id: string;
@@ -11518,6 +11548,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OperationReconciled"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_operation_approval_agent_sessions__session_id__operations__record_id__revoke_approval_post: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path: {
+                record_id: string;
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperationApprovalRevoked"];
                 };
             };
             /** @description Validation Error */

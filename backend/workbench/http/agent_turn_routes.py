@@ -127,6 +127,8 @@ async def _run_reserved_agent_turn(
                 details={"session_id": session_id},
             )
         _tell_agent_finished_outcomes(root, session_id)
+    from ..agent.startup_recovery import RecoveryProjectCatalog
+    RecoveryProjectCatalog().remember(root)
     config = _agent_llm_config()
     if not _agent_llm_configured(config):
         raise WorkbenchAPIError(
@@ -149,6 +151,15 @@ async def _run_reserved_agent_turn(
                                  execution_mode=body.execution_mode or "ask"),
     )
     tool_context: dict[str, Any] | None = None
+    if resume_turn_id is None:
+        from ..agent.identity import identity_text
+        from ..agent.protocol import ensure_standing_message, chain_agent_protocol
+        ensure_standing_message(repository, session_id, name="workbench_agent_identity",
+            content=identity_text(metadata["role"], config), message_type="agent_identity")
+        if metadata["role"] == "chain":
+            ensure_standing_message(repository, session_id, name="workbench_agent_protocol",
+                content=chain_agent_protocol(OperationRegistry()), message_type="agent_protocol",
+                metadata={"protocol_version": "agent/v1"})
     if metadata.get("role") == "main" and resume_turn_id is None:
         _ensure_current_global_protocol(repository, session_id)
         if body.context_packet:

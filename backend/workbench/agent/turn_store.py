@@ -23,6 +23,8 @@ from threading import RLock
 from typing import Any
 from uuid import uuid4
 
+from ..identity.root import ProjectRootRelocatedError
+
 TERMINAL = frozenset({"completed", "failed", "cancelled"})
 TRANSITIONS = {
     "accepted": frozenset({"running", "failed", "cancelled"}),
@@ -37,6 +39,10 @@ _MAX_ITEMS = 256
 
 class TurnStoreError(ValueError):
     """Invalid, unsafe, stale, unowned or unreconciled durable turn state."""
+
+
+class TurnExecutionBusyError(TurnStoreError):
+    """A live local runtime holds the session execution lock."""
 
 
 class TurnStoreWriteError(TurnStoreError):
@@ -206,11 +212,13 @@ class TurnStore:
     admission and operation reconciliation remain the caller's responsibility.
     """
 
-    def __init__(self, project_root: Path | str, *, clock: Callable[[], float] = time.time) -> None:
+    def __init__(self, project_root: Path | str, *, clock: Callable[[], float] = time.time,
+                 project_identity: tuple[int, int] | None = None) -> None:
         self.root = Path(project_root).expanduser()
         if not self.root.is_absolute() or ".." in self.root.parts:
             raise TurnStoreError("turn store requires an absolute safe project directory")
         self._clock = clock
+        self._project_identity = project_identity
         self._lock = RLock()
         self._identity: tuple[int, int] | None = None
         self._execution_guards: dict[str, TurnExecutionGuard] = {}
@@ -238,6 +246,10 @@ class TurnStore:
                         child_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory_fd)
                     os.close(directory_fd)
                     directory_fd = child_fd
+                    if index == len(self.root.parts) - 2 and self._project_identity is not None:
+                        root_info = os.fstat(directory_fd)
+                        if (root_info.st_dev, root_info.st_ino) != self._project_identity:
+                            raise ProjectRootRelocatedError("registered project root was replaced")
                 info = os.fstat(directory_fd)
                 identity = (info.st_dev, info.st_ino)
                 if self._identity is not None and identity != self._identity:
@@ -281,7 +293,7 @@ class TurnStore:
             try:
                 with self._locked() as directory_fd:
                     if session_id in self._execution_guards:
-                        raise TurnStoreError("session execution is already owned")
+                        raise TurnExecutionBusyError("session execution is already owned")
                     flags = os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK
                     try:
                         lock_fd = os.open(filename, flags | os.O_CREAT | os.O_EXCL, 0o600, dir_fd=directory_fd)
@@ -292,7 +304,7 @@ class TurnStore:
                     try:
                         fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
                     except BlockingIOError as exc:
-                        raise TurnStoreError("session execution is already owned") from exc
+                        raise TurnExecutionBusyError("session execution is already owned") from exc
                     directory_copy = os.dup(directory_fd)
                     info = os.fstat(lock_fd)
                     guard = TurnExecutionGuard(self, session_id, self._identity, os.getpid(), lock_fd,

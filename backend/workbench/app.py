@@ -11,6 +11,7 @@ Extracted from ``api.py`` in v1.6.10 (D1 decomposition, Phase 4).
 from __future__ import annotations
 
 from collections.abc import Callable
+import asyncio
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -63,6 +64,8 @@ from .http.statistical_exploration_routes import router as statistical_explorati
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
     _validate_supported_deployment()
+    from .agent.startup_recovery import RecoveryProjectCatalog
+    _app.state.agent_startup_recovery = await asyncio.to_thread(RecoveryProjectCatalog().reconcile)
     yield
 
 

@@ -32,7 +32,7 @@ def test_resume_uses_saved_mode_and_same_approval_exit(tmp_path, monkeypatch):
         'turns': [{'turn_id': 'turn_saved', 'execution_mode': 'auto'}],
     })
 
-    async def resume(session_id, project_root, body):
+    async def resume(session_id, project_root, body, http_request=None):
         seen['resume'] = (session_id, project_root, body.turn_id)
         return {'assistant': {'content': 'saved'}, 'status': 'completed'}
 

@@ -221,7 +221,7 @@ class OrchestrationProposals:
                                       self.session_grants or permissions.Grants())
         if decision.outcome == permissions.Outcome.DENY:
             raise PermissionError(decision.reason)
-        if actor_type not in {"user", "human_ui"} and decision.outcome == permissions.Outcome.ASK:
+        if actor_type not in {"user", "human_ui", "human_cli"} and decision.outcome == permissions.Outcome.ASK:
             raise PermissionError(decision.reason)
         try:
             confirmation = self.proposal_store.confirm(

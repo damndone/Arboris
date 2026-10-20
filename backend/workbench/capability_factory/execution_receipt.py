@@ -598,7 +598,7 @@ class CapabilityDispatchCoordinator:
     ) -> CapabilityDispatchReceipt:
         from .dispatch import DispatchReservation, PreparedRunIntent
         from .custom_dispatcher import CustomDispatchPlan
-        from .execution_authorization import OptionExecutionAuthorization
+        from .execution_authorization import ExecutionAuthorizationError, OptionExecutionAuthorization
 
         if not isinstance(authorization, OptionExecutionAuthorization):
             raise ExecutionReceiptError("authorization is invalid")

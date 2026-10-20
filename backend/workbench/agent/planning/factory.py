@@ -10,7 +10,8 @@ from workbench.agent.p7_pack_registry import p7_pack_registry
 from workbench.agent.notebook import NotebookService
 from workbench.agent.notebook.evidence import DataEvidencePackV1, INSPECTIONS, InspectionRequest
 from workbench.agent.notebook.errors import OptionValidationFailed
-from workbench.agent.notebook.planning_agent import NotebookNoEligibleCapability, NotebookPlanningAgent, NotebookPlanningContractError, NotebookPlanningUnavailable
+from .agent import NotebookPlanningAgent
+from .types import NotebookNoEligibleCapability, NotebookPlanningContractError, NotebookPlanningUnavailable
 from workbench.agent.trace import TraceWriter
 from workbench.engine.capabilities import build_capabilities
 from workbench.agent.notebook.vocabulary import capability_artifact_types

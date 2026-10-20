@@ -37,7 +37,7 @@ BASELINE = {
     "agent/context_tools_support/model_tools.py": 2,
     "agent/context_tools_support/summaries.py": 1,
     "agent/notebook/materialization.py": 3,
-    "agent/notebook/service.py": 1,
+    "agent/notebook/service_preparation.py": 1,
     "agent/notebook/vocabulary.py": 1,
     "agent/planner_evaluation.py": 2,
     "agent/recipe_contracts.py": 2,

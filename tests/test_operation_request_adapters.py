@@ -53,11 +53,8 @@ def test_analysis_loop_direct_admission_preserves_spec_and_retry_identity(tmp_pa
         admitted.append((request, scope))
         return receipt
 
-    def legacy_forbidden(**kwargs):
-        raise AssertionError("analysis-loop must enter typed admission directly")
-
     monkeypatch.setattr(operation_requests, "admit", observe)
-    monkeypatch.setattr(orchestrator, "create_proposal", legacy_forbidden)
+    assert not hasattr(orchestrator, "create_proposal")
     first = create_analysis_loop_proposal(orchestrator=orchestrator, chain_id="chain-a", command_id="cmd-loop", **kwargs)
     second = create_analysis_loop_proposal(orchestrator=orchestrator, chain_id="chain-a", command_id="cmd-loop", **kwargs)
     assert first.to_dict() == second.to_dict()
