@@ -462,6 +462,13 @@ def read_completion_artifact(run_root: Path, artifact_id: str) -> VerifiedComple
     if len(matches) != 1:
         return None
     entry = matches[0]
+    if entry.get('artifact_type') in {'model_result_packet', 'lmm_analysis_evidence'}:
+        from ..services.lmm_result_adapter import read_lmm_completion_product
+        native = read_lmm_completion_product(run_root, artifact_id)
+        if native is None:
+            return None
+        return VerifiedCompletionArtifact(artifact_id, entry['artifact_type'], native['sha256'],
+            native['inputs'], native['payload'], '.json', native['size_bytes'])
     relative = entry.get("path")
     if not isinstance(relative, str) or Path(relative).is_absolute():
         return None

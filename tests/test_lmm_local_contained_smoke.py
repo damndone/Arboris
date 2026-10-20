@@ -100,3 +100,13 @@ def test_http_lmm_run_completes_under_explicit_local_contained_profile(
     assert payload["status"] == "complete"
     assert payload["converged"] is True
     assert abs(payload["coefficients"]["group_time_interaction"]["estimate"] - 0.9) <= 0.35
+
+    from workbench.agent.context_compiler import read_completion_artifact
+    evidence = read_completion_artifact(run_root, "linear_mixed_effects_1.analysis_evidence")
+    assert evidence is not None
+    assert evidence.payload["status"] == "complete"
+    assert evidence.payload["source"]["artifact_id"] == "cleaned_dataset"
+    assert evidence.payload["nobs"] == payload["nobs"]
+    assert "rows" not in evidence.payload
+    model = read_completion_artifact(run_root, "linear_mixed_effects_1.result")
+    assert model is not None and "cleaned_dataset" in model.inputs

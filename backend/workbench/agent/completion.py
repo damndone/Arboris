@@ -54,7 +54,7 @@ def _test(value):
 
 
 def _model(artifact):
-    if artifact is None or artifact.artifact_type not in {'model_result', 'workflow_result'}:
+    if artifact is None or artifact.artifact_type not in {'model_result', 'workflow_result', 'model_result_packet'}:
         return None
     value = artifact.payload or {}
     # These are the persisted workflow/envelope owners, not arbitrary recursive
@@ -66,6 +66,8 @@ def _model(artifact):
             value = value['payload']
         else:
             break
+    if value.get('model_type') == 'linear_mixed_effects' and artifact.artifact_type != 'model_result_packet':
+        return None
     if value.get('status') in {'failed', 'unavailable', 'not_applicable'} or value.get('converged') is False:
         return None
     if value.get('fit_scope') == 'training_only':
@@ -89,7 +91,9 @@ def _different_estimation(main, alternate):
 def _diagnostics(family, values):
     if family == 'ols':
         return any(_test(v.get('breusch_pagan')) and _test(v.get('cooks_distance')) for v in values)
-    # Native Cox/LMM/time-series packets use distinct contracts, not these
+    if family == 'lmm':
+        return any(v.get('status') == 'complete' and v.get('summary') and v.get('residual_definitions') for v in values)
+    # Native Cox/time-series packets use distinct contracts, not these
     # legacy OLS diagnostic dictionaries. Keep their positive path closed
     # until calibrated against actual producer fixtures, rather than treating
     # generic p-value-shaped JSON as family-specific evidence.
@@ -205,11 +209,12 @@ def evaluate(project_root, contract, evidence):
             missing.append(f'{family}:model:{MODEL_NAMES[family]}')
         main_ref, main = matches[0] if len(matches) == 1 else (None, None)
         diagnostic_values = [artifact.payload for ref, artifact in groups['diagnostics']
-                             if artifact is not None and artifact.artifact_type == 'model_diagnostic'
+                             if artifact is not None and artifact.artifact_type in {'model_diagnostic', 'lmm_analysis_evidence'}
                              and bound(ref) and main_ref and ref['run_id'] == main_ref['run_id']
-                             and artifact.payload and artifact.payload.get('model_id') == main.get('model_id')]
+                             and artifact.payload and artifact.payload.get('model_id') == main.get('model_id')
+                             and (family != 'lmm' or artifact.artifact_type == 'lmm_analysis_evidence')]
         if not _diagnostics(family, diagnostic_values):
-            reason = 'computed_and_model_bound' if family == 'ols' else 'native_profile_unverified'
+            reason = 'computed_and_model_bound' if family in {'ols', 'lmm'} else 'native_profile_unverified'
             missing.append(f'{family}:diagnostics:{reason}')
         alternates = [model for ref, artifact in groups['sensitivity']
                       if (model := _model(artifact)) is not None and model.get('model_type') in names and bound(ref)]

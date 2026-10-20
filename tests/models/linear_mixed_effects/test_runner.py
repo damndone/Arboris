@@ -806,7 +806,12 @@ def test_runner_turns_an_unexpected_fit_exception_into_a_safe_terminal_result(
         }
     ]
     assert "private estimator traceback detail" not in _terminal_result_path(tmp_path).read_text()
-    assert {item["artifact_type"] for item in json.loads((tmp_path / "artifacts_index.json").read_text())["artifacts"]} == {"model_result_packet", "lmm_diagnostic_packet"}
+    assert {item["artifact_type"] for item in json.loads((tmp_path / "artifacts_index.json").read_text())["artifacts"]} == {"model_result_packet", "lmm_diagnostic_packet", "lmm_analysis_evidence"}
+    companion = _indexed_packet(tmp_path, "lmm_analysis_evidence").to_dict()["payload"]
+    assert companion["status"] == "unavailable"
+    assert companion["reason"] == "fit_incomplete"
+    assert companion["rows"] == []
+    assert "private estimator traceback detail" not in json.dumps(companion)
 
 
 def test_runner_uses_canonical_balanced_group_trajectory_context(tmp_path: Path) -> None:

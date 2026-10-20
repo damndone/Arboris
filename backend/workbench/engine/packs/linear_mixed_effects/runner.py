@@ -69,7 +69,7 @@ def _refined(model: Any, reml: bool, fitted: Any) -> Any:
     return fitted
 
 
-def _persist_result_packets(admission: object, result_packet: Mapping[str, Any]) -> None:
+def _persist_result_packets(admission: object, result_packet: Mapping[str, Any], analysis_evidence=None) -> None:
     """Persist result and its C1 diagnostic/recovery companion packets."""
 
     result = PacketEnvelope.from_dict(result_packet).to_dict()
@@ -99,6 +99,10 @@ def _persist_result_packets(admission: object, result_packet: Mapping[str, Any])
                 terminal=terminal,
             )
             break
+
+    if analysis_evidence is not None:
+        from workbench.services.pinned_run_directory import _persist_lmm_analysis_evidence
+        _persist_lmm_analysis_evidence(admission=admission, packet=analysis_evidence, terminal=terminal)
 
 
 def _assert_terminal_result_slot_is_empty(run_root: Path, result_path: Path) -> None:
@@ -249,7 +253,11 @@ def fit_linear_mixed_effects(
         sealed_execution_input=seal,
     )
     _require_live_seal(seal, live_pinned_run, run_root, options, model_options_binding)
-    _persist_result_packets(lmm_execution_admission, result)
+    from .analysis_evidence import build_analysis_evidence, source_binding
+    evidence = build_analysis_evidence(source=source_binding(live_pinned_run, source_frame,
+        csv_sha256=dataset_fingerprint_for_csv(source_path)),
+        prepared=prepared, result=result, fitted=fitted)
+    _persist_result_packets(lmm_execution_admission, result, evidence)
     return result, fitted
 
 
@@ -346,7 +354,11 @@ def fit_from_context(ctx: Any, env: Any) -> tuple[str, dict[str, Any], Any]:
     _require_live_seal(seal, live_pinned_run, env.run_root, options, ctx.artifacts.get("_model_options_binding"))
     ctx.artifacts["_linear_mixed_effects_result"] = result
     _record_fixed_effects_kernel(ctx, fitted, result_status=str(result["payload"]["status"]))
-    _persist_result_packets(admission, result)
+    from .analysis_evidence import build_analysis_evidence, source_binding
+    evidence = build_analysis_evidence(source=source_binding(live_pinned_run, ctx.data.frame,
+        artifact_id=ctx.data.artifact_id),
+        prepared=prepared, result=result, fitted=fitted)
+    _persist_result_packets(admission, result, evidence)
     env.progress("linear_mixed_effects", "Linear Mixed Effects fit completed.")
     env.checkpoint()
     return "linear_mixed_effects_1", result, fitted
