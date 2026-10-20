@@ -71,13 +71,20 @@ class Plan:
     approved_version: int | None = None
     approved_at: str | None = None
     updated_at: str = ""
+    completion: dict[str, Any] | None = None
+    completion_evidence: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {"plan_id": self.plan_id, "version": self.version, "status": self.status, "question": self.question,
+        value = {"plan_id": self.plan_id, "version": self.version, "status": self.status, "question": self.question,
                 "criteria": list(self.criteria), "steps": [step.to_dict() for step in self.steps],
                 "allowed_classes": list(self.allowed_classes), "budget": dict(self.budget),
                 "approved_version": self.approved_version, "approved_at": self.approved_at,
                 "updated_at": self.updated_at}
+        if self.completion is not None:
+            value["completion"] = self.completion
+        if self.completion_evidence is not None:
+            value["completion_evidence"] = self.completion_evidence
+        return value
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "Plan":
@@ -93,6 +100,7 @@ class Plan:
             allowed_classes=tuple(value.get("allowed_classes") or ()), budget=dict(value.get("budget") or {}),
             approved_version=value.get("approved_version"), approved_at=value.get("approved_at"),
             updated_at=value.get("updated_at", ""),
+            completion=value.get("completion"), completion_evidence=value.get("completion_evidence"),
         )
 
 
@@ -147,15 +155,26 @@ def _require_acyclic(steps: tuple[PlanStep, ...] | list[PlanStep]) -> None:
 
 
 def merge(previous: Plan | None, *, question: str, criteria: list[str], steps: tuple[PlanStep, ...],
-          budget: dict[str, int] | None, allowed_classes: list[str] | None) -> Plan:
+          budget: dict[str, int] | None, allowed_classes: list[str] | None,
+          completion: dict[str, Any] | None = None, completion_evidence: dict[str, Any] | None = None) -> Plan:
     """The next version: new steps after approval are exploratory; widening the plan needs approval again."""
 
+    if previous is not None and previous.completion is not None:
+        if completion is not None and completion != previous.completion:
+            raise PlanError("completion requirements and source cannot be changed by an Agent plan revision")
+        completion = previous.completion
+        if completion_evidence is None:
+            completion_evidence = previous.completion_evidence
     classes = sorted({step.permission_class.value for step in steps if step.permission_class in PLANNABLE})
     allowed = sorted(set(allowed_classes or classes) & {c.value for c in PLANNABLE})
     identity_inputs = {"previous": previous.to_dict() if previous else None,
                        "question": question, "criteria": list(criteria),
                        "steps": [step.to_dict() for step in steps], "budget": budget,
                        "allowed_classes": allowed_classes}
+    if completion is not None:
+        identity_inputs["completion"] = completion
+    if completion_evidence is not None:
+        identity_inputs["completion_evidence"] = completion_evidence
     if previous is None or previous.approved_version is None:
         # Before any approval a revision is simply a new draft.
         return Plan(plan_id=previous.plan_id if previous else identity_value(
@@ -163,7 +182,7 @@ def merge(previous: Plan | None, *, question: str, criteria: list[str], steps: t
                         create=lambda: f"plan_{uuid4().hex[:12]}"),
                     version=(previous.version + 1) if previous else 1, status="draft", question=question,
                     criteria=tuple(criteria), steps=steps, allowed_classes=tuple(allowed),
-                    budget=dict(budget or {}), updated_at=identity_value(
+                    budget=dict(budget or {}), completion=completion, completion_evidence=completion_evidence, updated_at=identity_value(
                         owner="agent.plan.merge", slot="updated_at", inputs=identity_inputs, create=_now))
     old_ids = {step.step_id for step in previous.steps}
     marked = tuple(replace(step, added_after_results=step.step_id not in old_ids or
@@ -172,7 +191,8 @@ def merge(previous: Plan | None, *, question: str, criteria: list[str], steps: t
     widened = (set(allowed) - set(previous.allowed_classes)) or question.strip() != previous.question.strip() or \
         tuple(criteria) != previous.criteria or _bigger(budget, previous.budget)
     status = "needs_approval" if previous.status in {"approved", "needs_approval"} and widened else previous.status
-    return replace(previous, version=previous.version + 1, status=status, question=question, criteria=tuple(criteria),
+    return replace(previous, version=previous.version + 1, status=status, completion=completion,
+                   completion_evidence=completion_evidence, question=question, criteria=tuple(criteria),
                    steps=marked, allowed_classes=tuple(sorted(set(allowed) | set(previous.allowed_classes)))
                    if status == "needs_approval" else previous.allowed_classes,
                    budget=dict(budget or previous.budget), updated_at=identity_value(

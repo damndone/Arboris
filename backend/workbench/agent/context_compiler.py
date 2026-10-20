@@ -26,6 +26,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
+import json
 from typing import Any
 from uuid import uuid4
 
@@ -429,6 +430,62 @@ def resolve_registered_artifact(
         return None
     sha256 = entry.get("sha256")
     return artifact_type, (sha256 if isinstance(sha256, str) else None), payload
+
+
+@dataclass(frozen=True)
+class VerifiedCompletionArtifact:
+    """Content-bound artifact facts; no caller-controlled filesystem path."""
+
+    artifact_id: str
+    artifact_type: str
+    sha256: str
+    inputs: tuple[str, ...]
+    payload: dict[str, Any] | None
+
+
+def read_completion_artifact(run_root: Path, artifact_id: str) -> VerifiedCompletionArtifact | None:
+    """Read one unambiguous registered product and verify the exact bytes read.
+
+    Binary sources are hashed without loading a data frame. JSON evidence is
+    bounded here at the external-file boundary and is never sent raw to a model.
+    """
+    import hashlib
+    from ..artifacts import sha256_file
+
+    index = _read_json(run_root / "artifacts_index.json")
+    entries = index.get("artifacts", []) if isinstance(index, dict) else []
+    if not isinstance(entries, list):
+        return None
+    matches = [entry for entry in entries if isinstance(entry, dict) and entry.get("artifact_id") == artifact_id]
+    if len(matches) != 1:
+        return None
+    entry = matches[0]
+    relative = entry.get("path")
+    if not isinstance(relative, str) or Path(relative).is_absolute():
+        return None
+    try:
+        path = (run_root / relative).resolve()
+        path.relative_to(run_root.resolve())
+        if not path.is_file():
+            return None
+        if path.suffix.lower() == ".json":
+            if path.stat().st_size > 16_000_000:
+                return None
+            raw = path.read_bytes()
+            digest = hashlib.sha256(raw).hexdigest()
+            payload = json.loads(raw)
+            if not isinstance(payload, dict):
+                return None
+        else:
+            digest, payload = sha256_file(path), None
+    except (OSError, ValueError):
+        return None
+    inputs = entry.get("inputs")
+    kind = entry.get("artifact_type")
+    if (digest != entry.get("sha256") or not isinstance(kind, str)
+            or not isinstance(inputs, list) or not all(isinstance(item, str) for item in inputs)):
+        return None
+    return VerifiedCompletionArtifact(artifact_id, kind, digest, tuple(inputs), payload)
 
 
 def _digest(value: Any) -> str:

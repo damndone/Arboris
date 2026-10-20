@@ -158,6 +158,7 @@ class AgentCore:
         self._standalone_phase = False
         self.phase_restorer = None
         self.turn_journal = turn_journal
+        self.completion_check = None
 
     def enter_phase(self, phase: CorePhase) -> None:
         """Schedule a deterministic phase on this running Core's next step.
@@ -410,6 +411,12 @@ class AgentCore:
                 if state["stage"] == "terminal":
                     self._final_status = state["final_status"]
                     result = state["response"]
+                    if self.completion_check is not None and result.strip():
+                        final = next(e for e in reversed(self.repository.get_branch(self.session_id))
+                                     if e.entry_type == "message" and e.payload.get("role") == "assistant"
+                                     and e.payload.get("command_id") == self._active_command_id)
+                        reviewed, _ = self._recheck_completion(final.payload, final)
+                        result = reviewed["content"]
                 elif exhausted or cancelled:
                     result = self._persist_terminal_error("agent_aborted" if cancelled else "max_steps_exceeded"
                         if self._steps_used >= self._budget.max_steps else "agent_timeout")
@@ -794,12 +801,12 @@ class AgentCore:
                         break
                     if event.type == "text_delta":
                         chunks.append(event.delta)
-                        self.events.emit(
-                            self.session_id,
-                            "message_update",
-                            {"delta": event.delta, "request_id": request.request_id},
-                            command_id=command_id,
-                        )
+                        if self.completion_check is None:
+                            self.events.emit(
+                                self.session_id, "message_update",
+                                {"delta": event.delta, "request_id": request.request_id},
+                                command_id=command_id,
+                            )
                     elif event.type in {"tool_call_start", "tool_call_delta"}:
                         if event.tool_call is not None:
                             call = dict(event.tool_call)
@@ -858,6 +865,15 @@ class AgentCore:
             content = provider_failure_message(detect_language(getattr(self, "_user_text", None)), str(error))
         elif finish_reason == "error" and content.strip() and error not in {"aborted", "tool_runtime_unavailable"}:
             content = f"{content}\n\n{interrupted_reply_note(detect_language(getattr(self, '_user_text', None)))}"
+        completion_result = None
+        from .completion import claims_completion, publication
+        if (self.completion_check is not None and content.strip()
+                and ((finish_reason == "stop" and not tool_calls) or claims_completion(content))):
+
+            completion_result = self.completion_check()
+            content = publication(content, completion_result, detect_language(getattr(self, "_user_text", None)),
+                                  final=finish_reason == "stop" and not tool_calls,
+                                  request_text=getattr(self, "_user_text", ""))
         numeric_findings: tuple[numeric_grounding.Finding, ...] = ()
         numeric_check_failed = False
         if finish_reason == "stop" and not tool_calls and content.strip():
@@ -880,6 +896,8 @@ class AgentCore:
             "stop_reason": finish_reason,
             "command_id": command_id,
         }
+        if completion_result is not None:
+            payload["completion_check"] = completion_result
         if numeric_findings:
             payload["numeric_check"] = {"unverified": [finding.to_dict() for finding in numeric_findings]}
         elif numeric_check_failed:
@@ -894,10 +912,31 @@ class AgentCore:
         else:
             entry = self.repository.append(self.session_id, "message", payload)
         return await self._finish_assistant(payload, entry, request_id=request.request_id,
-                                            context_fingerprint=context.fingerprint, tool_context=tool_context)
+                                            context_fingerprint=context.fingerprint, tool_context=tool_context, completion_checked=True)
 
-    async def _finish_assistant(self, payload, entry, *, request_id, context_fingerprint, tool_context):
+    def _recheck_completion(self, payload, entry):
+        """An interrupted publication must not reuse an obsolete evidence check."""
+        if self.completion_check is None:
+            return payload, entry
+        from .completion import publication
+
+        result = self.completion_check()
+        if result == payload.get("completion_check"):
+            return payload, entry
+        content = publication(payload["content"], result, detect_language(getattr(self, "_user_text", None)),
+                              request_text=getattr(self, "_user_text", ""))
+        reviewed = {**payload, "content": content, "completion_check": result}
+        if reviewed != payload:
+            digest = hashlib.sha256(json.dumps(reviewed, sort_keys=True).encode()).hexdigest()
+            entry = self.repository.append_once(self.session_id, "message", reviewed,
+                key=self._active_command_id, stage="completion_recheck:" + digest)
+        return reviewed, entry
+
+    async def _finish_assistant(self, payload, entry, *, request_id, context_fingerprint, tool_context,
+                                completion_checked=False):
         command_id = self._active_command_id
+        if not completion_checked and payload["stop_reason"] == "stop" and not payload.get("tool_calls"):
+            payload, entry = self._recheck_completion(payload, entry)
         content, finish_reason = payload["content"], payload["stop_reason"]
         error = payload.get("error")
         tool_calls = {str(call.get("tool_call_id", "")): call for call in payload.get("tool_calls", [])}

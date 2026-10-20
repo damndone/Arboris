@@ -1458,6 +1458,7 @@ def test_main_role_turn_exposes_project_evidence_and_permissioned_operation_tool
         "inspect_builtin_skills",
         "inspect_custom_skills",
         "check_model_claims",
+        "inspect_analysis_completion",
     }
     operation_tools = {"run_operation", "update_plan", "plan_analysis"}
     source_tools = {"list_project_datasets", "inspect_data_schema", "inspect_node_context", "inspect_operation_contract"}

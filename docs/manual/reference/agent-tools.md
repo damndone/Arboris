@@ -22,6 +22,7 @@ Tool-result content classes, including historical persisted tool names. Retired 
 | `decline_notebook_plan` | `workbench_state` |
 | `export_analysis_script` | `workbench_state` |
 | `export_dataset` | `metadata` |
+| `inspect_analysis_completion` | `model_result` |
 | `inspect_analysis_loop_context` | `model_result` |
 | `inspect_artifact_preview` | `aggregate` |
 | `inspect_builtin_skills` | `workbench_state` |

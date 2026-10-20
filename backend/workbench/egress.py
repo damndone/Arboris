@@ -77,6 +77,7 @@ TOOL_CONTENT_CLASSES: Mapping[str, str] = {
     "inspect_builtin_skills": "workbench_state",
     "inspect_custom_skills": "skill",
     "check_model_claims": "model_result",
+    "inspect_analysis_completion": "model_result",
     "submit_analysis_loop_intent": "workbench_state",
     "inspect_completed_operations": "workbench_state",
     "inspect_operation_contract": "workbench_state",

@@ -2845,6 +2845,14 @@ export interface components {
             budget: {
                 [key: string]: number;
             };
+            /** Completion */
+            completion?: {
+                [key: string]: unknown;
+            };
+            /** Completion Evidence */
+            completion_evidence?: {
+                [key: string]: unknown;
+            };
             /** Criteria */
             criteria: string[];
             /** Plan Id */
@@ -3218,6 +3226,10 @@ export interface components {
         };
         /** AgentPlanPatchRequest */
         AgentPlanPatchRequest: {
+            /** Completion */
+            completion?: {
+                [key: string]: unknown;
+            } | null;
             /** Criteria */
             criteria?: string[] | null;
             /** Question */

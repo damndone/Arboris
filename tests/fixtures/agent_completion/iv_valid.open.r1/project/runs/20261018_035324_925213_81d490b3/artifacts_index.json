@@ -1,0 +1,531 @@
+{
+  "schema_version": 1,
+  "artifacts": [
+    {
+      "artifact_id": "raw_iv_valid.csv",
+      "path": "raw_snapshot/iv_valid.csv",
+      "artifact_type": "raw_data",
+      "step": "ingestion",
+      "sha256": "032033b1fe07d05dc1a0fb30d93b86fe50bdf988a2c0fcd454b7afe0185033b1",
+      "inputs": [],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "cleaning_actions",
+      "path": "processed/cleaning_actions.json",
+      "artifact_type": "metadata",
+      "step": "cleaning",
+      "sha256": "5b54599af25ecd0665bf510392710498532a753485325cbf6672f23b88f65288",
+      "inputs": [
+        "raw_iv_valid.csv"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "cleaned_dataset",
+      "path": "processed/cleaned_dataset.parquet",
+      "artifact_type": "processed_data",
+      "step": "cleaning",
+      "sha256": "4100ee81d15ab0c3358898f3fd3ffdafd7e744cf46a8b3c8971f8e4a191c6c9a",
+      "inputs": [
+        "raw_iv_valid.csv"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "data_profile",
+      "path": "staged/data_profile.json",
+      "artifact_type": "profile",
+      "step": "profiling",
+      "sha256": "47d1d336be97472897fdabf4907c1de9478c40e83f6f5a9e9cde28d199eabb72",
+      "inputs": [
+        "cleaned_dataset"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "analysis_router",
+      "path": "staged/analysis_router.json",
+      "artifact_type": "metadata",
+      "step": "analysis_router",
+      "sha256": "936127a191c13c929cb6d42d3a52e3b9b6762443df0dffe6fed51785983ac5e6",
+      "inputs": [
+        "data_profile"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "statistical_tests_correlations",
+      "path": "statistical_tests/correlations.json",
+      "artifact_type": "statistical_test",
+      "step": "statistical_tests",
+      "sha256": "067cb27ad88ccdf18ff1599e8cc101e09218c26a3561c01284e422d41d662a21",
+      "inputs": [
+        "cleaned_dataset"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "statistical_tests_rank_correlations",
+      "path": "statistical_tests/rank_correlations.json",
+      "artifact_type": "statistical_test",
+      "step": "statistical_tests",
+      "sha256": "c46ad1ff8d21a8bd250c3ac5f3a60a456cf53bd220807ba4c571994b1da12931",
+      "inputs": [
+        "cleaned_dataset"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "statistical_tests_t_tests",
+      "path": "statistical_tests/t_tests.json",
+      "artifact_type": "statistical_test",
+      "step": "statistical_tests",
+      "sha256": "a590f7d4d81675a5a5269ed5e844f1903742202c12bdb4a5d9793d2c26d0df51",
+      "inputs": [
+        "cleaned_dataset"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "statistical_tests_anova",
+      "path": "statistical_tests/anova.json",
+      "artifact_type": "statistical_test",
+      "step": "statistical_tests",
+      "sha256": "61e323b23ae348ad7143033482cc5987852ffc4d273e902b1a46574a41ef62e8",
+      "inputs": [
+        "cleaned_dataset"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "statistical_tests_nonparametric",
+      "path": "statistical_tests/nonparametric.json",
+      "artifact_type": "statistical_test",
+      "step": "statistical_tests",
+      "sha256": "1c78129cf811f625a63ed563a5f52b3556beb7bfa186a6ab876603550b46aed8",
+      "inputs": [
+        "cleaned_dataset"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "statistical_tests_chi_square",
+      "path": "statistical_tests/chi_square.json",
+      "artifact_type": "statistical_test",
+      "step": "statistical_tests",
+      "sha256": "46e8361d9ab48c395b0f21597e29f64f3857ec830faf98df2719461253db8b13",
+      "inputs": [
+        "cleaned_dataset"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "statistical_tests_fisher_exact",
+      "path": "statistical_tests/fisher_exact.json",
+      "artifact_type": "statistical_test",
+      "step": "statistical_tests",
+      "sha256": "3e437314aaa2a5db485bb27600d94958c9f88ec9808678a309b376784722a883",
+      "inputs": [
+        "cleaned_dataset"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "statistical_tests_evidence",
+      "path": "statistical_tests/evidence.json",
+      "artifact_type": "statistical_test",
+      "step": "statistical_tests",
+      "sha256": "527f6d72c9cc0f74dcc5fcf93a99600c881ae5f551e05327609f637628e3b0af",
+      "inputs": [
+        "cleaned_dataset"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "ols_1",
+      "path": "model_results/ols_1.json",
+      "artifact_type": "model_result",
+      "step": "econometrics",
+      "sha256": "b6ccf8d73cca3b198634e3f379f20bcaf30f91e902260f99e5b658275ec38483",
+      "inputs": [
+        "cleaned_dataset"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "inference_kernel_ols_1",
+      "path": "model_results/inference_kernels/ols_1.json",
+      "artifact_type": "inference_kernel",
+      "step": "econometrics",
+      "sha256": "6e525ea72e1d26e379833da3b6163c07527c9f4465b5b117e234a5e42aa04db0",
+      "inputs": [
+        "ols_1"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "checks_ols_1",
+      "path": "model_results/checks_ols_1.json",
+      "artifact_type": "model_checks",
+      "step": "checks",
+      "sha256": "893e4eb0881a82f5ca508c28ea2794553a52d0c26e54f5e8e8d281ed95a909de",
+      "inputs": [
+        "cleaned_dataset"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "diagnostics_ols_1",
+      "path": "model_results/diagnostics_ols_1.json",
+      "artifact_type": "model_diagnostic",
+      "step": "econometrics",
+      "sha256": "45c844207f213b2a349999802f7bfaba60768ba6ec22dc14b03f8dda26f2b9a7",
+      "inputs": [
+        "cleaned_dataset"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "histograms",
+      "path": "figures/histograms.png",
+      "artifact_type": "figure",
+      "step": "visualization",
+      "sha256": "b0c095878ff484cc510800bccfa5d04444b964885219f3468b5d87a9ce0ae3e0",
+      "inputs": [],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "kde_plots",
+      "path": "figures/kde_plots.png",
+      "artifact_type": "figure",
+      "step": "visualization",
+      "sha256": "0518febc4d44f2d6fbd0092504149e250967f02af61a1502fd62d7108c25a989",
+      "inputs": [],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "boxplots",
+      "path": "figures/boxplots.png",
+      "artifact_type": "figure",
+      "step": "visualization",
+      "sha256": "aba1cc50105da5940cecd903bea92ce4389aec1a9004adffb1bea39eb97fd616",
+      "inputs": [],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "correlation_heatmap",
+      "path": "figures/correlation_heatmap.png",
+      "artifact_type": "figure",
+      "step": "visualization",
+      "sha256": "505b8503f7906f943bd1c02420a2bef6d193342edfcb7f1224b96e0532cd42a4",
+      "inputs": [],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "scatter_plots",
+      "path": "figures/scatter_plots.png",
+      "artifact_type": "figure",
+      "step": "visualization",
+      "sha256": "a0115d6a667e7aacc2d452a4e3934be6768a73d68bd0e070d6fad1189105d5d8",
+      "inputs": [],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "residuals_fitted",
+      "path": "figures/residuals_fitted.png",
+      "artifact_type": "figure",
+      "step": "visualization",
+      "sha256": "17702707a15759f3aeaf8eb30a75d7e9ba62379cd422c7a460660e1fbdc48948",
+      "inputs": [],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "qq_residuals",
+      "path": "figures/qq_residuals.png",
+      "artifact_type": "figure",
+      "step": "visualization",
+      "sha256": "2f2b572f12592ef5cac5dc7046727babaacd7e96678173578474dbee3dff53be",
+      "inputs": [],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "coef_plot",
+      "path": "figures/coef_plot.png",
+      "artifact_type": "figure",
+      "step": "visualization",
+      "sha256": "5fc20dda0d4d07be6c5a4ae2981f599b10c86868d475bb561a77ea736094bd6c",
+      "inputs": [],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "residuals_vs_education",
+      "path": "figures/residuals_vs_education.png",
+      "artifact_type": "figure",
+      "step": "visualization",
+      "sha256": "8a19f4f306fd50785a8a75d477a5f7b46072ddbd3c64dae9328ea45f46a42ac9",
+      "inputs": [],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "fitted_vs_education",
+      "path": "figures/fitted_vs_education.png",
+      "artifact_type": "figure",
+      "step": "visualization",
+      "sha256": "e97f3051fc11f864c5950d6f9e5d81ce0b53147d188eaef285269ec3c8fc0727",
+      "inputs": [],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "diagnostic_summary",
+      "path": "diagnostic_summary.json",
+      "artifact_type": "metadata",
+      "step": "diagnostics",
+      "sha256": "6d4d6385af27ebe93d446dc4652cb0e663a7abd2b6d2a3da5b53966fa1d44237",
+      "inputs": [],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "report_html",
+      "path": "reports/report.html",
+      "artifact_type": "report",
+      "step": "reporting",
+      "sha256": "0697cab8dee3bc665ca15bf65fb87e5deb6bc10b48d2e22729b42100a87a4388",
+      "inputs": [],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "statistical_exploration_861f49e5527e94db01e10ff0",
+      "path": "artifacts/statistical_exploration/861f49e5527e94db01e10ff069bcf6aaab2824d8f33f225ea94b96d7fa042410.json",
+      "artifact_type": "statistical_exploration",
+      "step": "statistical_exploration",
+      "sha256": "f2f5ea40c6ce066e96ff83a2800e2a682b3e871e01716cf3096366cb53ab7a1e",
+      "inputs": [
+        "cleaned_dataset"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "statistical_exploration_transcript_861f49e5527e94db01e10ff0",
+      "path": "artifacts/statistical_exploration/861f49e5527e94db01e10ff069bcf6aaab2824d8f33f225ea94b96d7fa042410.txt",
+      "artifact_type": "transcript",
+      "step": "statistical_exploration",
+      "sha256": "6fea93840be5258b54da90c6a4a98b4bccea2209ab978fbd27a405161186dcde",
+      "inputs": [
+        "statistical_exploration_861f49e5527e94db01e10ff0"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "statistical_exploration_861f49e5527e94db01e10ff0_html",
+      "path": "reports/statistical_exploration_861f49e5527e94db01e10ff0.html",
+      "artifact_type": "report",
+      "step": "reporting",
+      "sha256": "b4164766367650373561fb91da774e147a533c118e54eb5c6d36acaa0876c41f",
+      "inputs": [
+        "statistical_exploration_861f49e5527e94db01e10ff0"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "statistical_exploration_861f49e5527e94db01e10ff0_pdf",
+      "path": "reports/statistical_exploration_861f49e5527e94db01e10ff0.pdf",
+      "artifact_type": "report",
+      "step": "export",
+      "sha256": "515c39e3edc7512b0e56be694b407958d0f7b84a3682dbe582f1deeba6b7937a",
+      "inputs": [
+        "statistical_exploration_861f49e5527e94db01e10ff0"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "statistical_exploration_861f49e5527e94db01e10ff0_xlsx",
+      "path": "exports/statistical_exploration_861f49e5527e94db01e10ff0.xlsx",
+      "artifact_type": "table_export",
+      "step": "export",
+      "sha256": "14a2e66c0b96ba8cda4ded8bccb1fe0775469a6acb6a349b8b597beb4e1d3543",
+      "inputs": [
+        "statistical_exploration_861f49e5527e94db01e10ff0"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "statistical_exploration_2ce090223692f263c205d3f0",
+      "path": "artifacts/statistical_exploration/2ce090223692f263c205d3f0ca0d5bc1649c3ef23426fefebe8fdafd9c52d216.json",
+      "artifact_type": "statistical_exploration",
+      "step": "statistical_exploration",
+      "sha256": "0b0aa900b17c6a762ff399ac95501e1373c01058ad92112ce793fe8e517b63f4",
+      "inputs": [
+        "cleaned_dataset"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "statistical_exploration_transcript_2ce090223692f263c205d3f0",
+      "path": "artifacts/statistical_exploration/2ce090223692f263c205d3f0ca0d5bc1649c3ef23426fefebe8fdafd9c52d216.txt",
+      "artifact_type": "transcript",
+      "step": "statistical_exploration",
+      "sha256": "7ab0ea648f05a24b4ca10ea6c5622aba87d89b1f028f1720dc07e32d2cd9bcac",
+      "inputs": [
+        "statistical_exploration_2ce090223692f263c205d3f0"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "statistical_exploration_2ce090223692f263c205d3f0_html",
+      "path": "reports/statistical_exploration_2ce090223692f263c205d3f0.html",
+      "artifact_type": "report",
+      "step": "reporting",
+      "sha256": "6dc19124b76bf26161919c22abe0dd5f351a33fc9bac3b7ada4565b13ff6c221",
+      "inputs": [
+        "statistical_exploration_2ce090223692f263c205d3f0"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "statistical_exploration_2ce090223692f263c205d3f0_pdf",
+      "path": "reports/statistical_exploration_2ce090223692f263c205d3f0.pdf",
+      "artifact_type": "report",
+      "step": "export",
+      "sha256": "e87e560c721b8a56ce86ae4362d3919947bc242a33eb35de304715e6a5c25068",
+      "inputs": [
+        "statistical_exploration_2ce090223692f263c205d3f0"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "statistical_exploration_2ce090223692f263c205d3f0_xlsx",
+      "path": "exports/statistical_exploration_2ce090223692f263c205d3f0.xlsx",
+      "artifact_type": "table_export",
+      "step": "export",
+      "sha256": "af4f7c747dc6a286b399ec69d6be5b2a9dddf8580ef6e263f1d1129c7cc9e08f",
+      "inputs": [
+        "statistical_exploration_2ce090223692f263c205d3f0"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "statistical_exploration_9577be0f2cdd4e5802be7597",
+      "path": "artifacts/statistical_exploration/9577be0f2cdd4e5802be75979131ebb4c42bc557ef75dd2c286b0a06ea1474a9.json",
+      "artifact_type": "statistical_exploration",
+      "step": "statistical_exploration",
+      "sha256": "d90f27e3c803b3dc16b3c70734cf1260413b56c27eaaa7291deaf930c4786b0d",
+      "inputs": [
+        "cleaned_dataset"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "statistical_exploration_transcript_9577be0f2cdd4e5802be7597",
+      "path": "artifacts/statistical_exploration/9577be0f2cdd4e5802be75979131ebb4c42bc557ef75dd2c286b0a06ea1474a9.txt",
+      "artifact_type": "transcript",
+      "step": "statistical_exploration",
+      "sha256": "8f8221090bcc38509c9b07f72ab13bdc7462a0cd3a6316e0796621a14dcfa21a",
+      "inputs": [
+        "statistical_exploration_9577be0f2cdd4e5802be7597"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "statistical_exploration_9577be0f2cdd4e5802be7597_html",
+      "path": "reports/statistical_exploration_9577be0f2cdd4e5802be7597.html",
+      "artifact_type": "report",
+      "step": "reporting",
+      "sha256": "c6da944c262d455a047eccf4f9cbef39acbbcb40f7670765d62f95cfb7cb6477",
+      "inputs": [
+        "statistical_exploration_9577be0f2cdd4e5802be7597"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "statistical_exploration_9577be0f2cdd4e5802be7597_pdf",
+      "path": "reports/statistical_exploration_9577be0f2cdd4e5802be7597.pdf",
+      "artifact_type": "report",
+      "step": "export",
+      "sha256": "5275ced1dffe4c6614f9948d491bfc2fec176580a356e1e9be9f3ec5e60146c5",
+      "inputs": [
+        "statistical_exploration_9577be0f2cdd4e5802be7597"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "statistical_exploration_9577be0f2cdd4e5802be7597_xlsx",
+      "path": "exports/statistical_exploration_9577be0f2cdd4e5802be7597.xlsx",
+      "artifact_type": "table_export",
+      "step": "export",
+      "sha256": "62bb4068c87932f894d97dcacfae4c953866e757df12e0c6ab80f28300bab1d1",
+      "inputs": [
+        "statistical_exploration_9577be0f2cdd4e5802be7597"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "workflow_p7_iv_weak_instruments_8952cfc45855fa8a_b96fc6cae21762a16b25a0bd",
+      "path": "artifacts/p7_analysis/workflow_p7_iv_weak_instruments_8952cfc45855fa8a_b96fc6cae21762a16b25a0bd.json",
+      "artifact_type": "p7_analysis",
+      "step": "iv.weak_instruments",
+      "sha256": "9a0d2568cdb6e507bc7ec04205ab05bff3cc0e06b86987f05185ca31526a0b3b",
+      "inputs": [
+        "cleaned_dataset"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "workflow_p7_iv_gmm_8952cfc45855fa8a_3e5a25b2d709b1f0f1bc39f4",
+      "path": "artifacts/p7_analysis/workflow_p7_iv_gmm_8952cfc45855fa8a_3e5a25b2d709b1f0f1bc39f4.json",
+      "artifact_type": "p7_analysis",
+      "step": "iv.gmm",
+      "sha256": "c0ba9c17d0255e65748c5ee57b74b2e1abd4ad6e04004ece554f89e19311527a",
+      "inputs": [
+        "cleaned_dataset"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    }
+  ]
+}

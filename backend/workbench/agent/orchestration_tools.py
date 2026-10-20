@@ -416,10 +416,16 @@ class OrchestrationTools:
 
         async def update_plan(arguments: dict[str, Any], context) -> dict[str, Any]:
             from . import plans as plan_module
+            from .completion import source_receipt
 
             if context.session_id != session_id:
                 raise ValueError("tool session is outside the registered chain scope")
             try:
+                completion = arguments.get("completion")
+                if completion is not None:
+                    root = getattr(self.context_provider, "project_root", self.repository.root.parent)
+                    if source_receipt(root, completion["source"]) != completion["source"]:
+                        raise plan_module.PlanError("completion source is unavailable or changed; inspect_analysis_completion with source first")
                 steps = plan_module.parse_steps(arguments.get("steps"), self.known_plan_operations())
                 def revise(previous):
                     plan = plan_module.merge(
@@ -430,6 +436,8 @@ class OrchestrationTools:
                         budget={k: int(v) for k, v in (arguments.get("budget") or {}).items()
                                 if k in {"steps", "wall_s", "inferential"} and str(v).isdigit()},
                         allowed_classes=arguments.get("allowed_classes"),
+                        completion=arguments.get("completion"),
+                        completion_evidence=arguments.get("completion_evidence"),
                     )
                     if not plan.question:
                         raise plan_module.PlanError("question is required")
@@ -473,11 +481,22 @@ class OrchestrationTools:
             core.enter_phase(phase)
             return {"phase_started":True, "episode_id":phase.episode_id}
 
+        def inspect_analysis_completion(arguments, context):
+            if context.session_id != session_id:
+                raise ValueError("tool session is outside the registered chain scope")
+            result = self._completion_check(session_id)
+            if "source" in arguments:
+                from .completion import source_receipt
+                root = getattr(self.context_provider, "project_root", self.repository.root.parent)
+                result["source"] = source_receipt(root, arguments["source"])
+            return result
+
         return build_chain_tool_registry(
             context_tools=context_tools,
             proposal_tool_schema=lambda: self.operation_registry.proposal_tool_schema(),
             update_plan=update_plan,
             run_operation=run_operation,
             plan_analysis=plan_analysis,
+            inspect_analysis_completion=inspect_analysis_completion,
         )
 

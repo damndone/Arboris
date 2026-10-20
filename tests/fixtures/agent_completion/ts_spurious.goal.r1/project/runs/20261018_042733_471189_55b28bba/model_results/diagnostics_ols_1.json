@@ -1,0 +1,21 @@
+{
+  "model_id": "ols_1",
+  "nobs": 240,
+  "breusch_pagan": {
+    "lm": 47.18890926650047,
+    "p_value": 6.446417485465867e-12
+  },
+  "durbin_watson": 0.034,
+  "jarque_bera": {
+    "statistic": 17.037965945997264,
+    "p_value": 0.00019964236382430988
+  },
+  "cooks_distance": {
+    "max": 0.0184,
+    "threshold": 0.0167,
+    "n_high": 3,
+    "n_severe": 0,
+    "leverage_max": 0.0168
+  },
+  "model_type": "ols"
+}

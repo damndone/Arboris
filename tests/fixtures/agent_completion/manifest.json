@@ -1,0 +1,359 @@
+[
+  {
+    "task": "leverage.goal.r1",
+    "playbook": "ols",
+    "source_task": "local/agent-eval/baseline-v190/tasks/leverage.goal.r1/project",
+    "session_source": "workbench/agent-sessions/agent_chain_66193bb527c44bcc9870434104e928b5.jsonl",
+    "session_sha256": "aa42e67cef913579c7cca91a7b47804d047ea0f934df1d9a8ad06ad03ff8bad9",
+    "final_entry_line": 31,
+    "final_entry_sha256": "c04c03ef728bffc5f7502ca31ee0fdf0b21794a2fdfa1bd19bd9ecf7e9ad2231",
+    "files": {
+      "runs/20261018_052243_525173_383b0ebf/artifacts_index.json": "913944e80dca7cc54481e7977c9a3c463516e1abc12ebf447ee7d700b7ca2ccf",
+      "runs/20261018_052243_525173_383b0ebf/raw_snapshot/leverage.csv": "f1a6918822f273ac1b19d1e02d17b38059608e78ebd5483e88a1542198ce81dd",
+      "runs/20261018_052243_525173_383b0ebf/processed/cleaned_dataset.parquet": "2a8fb0dadc9099d1b5b2ee8877babb40e02fa3e64ee69321c7f41af2fae4749a",
+      "runs/20261018_052243_525173_383b0ebf/model_results/ols_1.json": "e6c9bb2c73f2b9550e5e30e31ff9e5c447fe07c9c81fc86aef8e6bf5fb2e413e",
+      "runs/20261018_052243_525173_383b0ebf/model_results/diagnostics_ols_1.json": "29b596fae365f2f3f0ebb9372a3414191a92fcb2d7cb4b620210f82534d8a4ec",
+      "runs/20261018_052318_621582_b31a9162/artifacts_index.json": "b73955d671601885411b5c607743f3b0d4ea6eff584256e00c81bcaf5b040b90",
+      "runs/20261018_052318_621582_b31a9162/raw_snapshot/leverage.csv": "f1a6918822f273ac1b19d1e02d17b38059608e78ebd5483e88a1542198ce81dd",
+      "runs/20261018_052318_621582_b31a9162/processed/cleaned_dataset.parquet": "2a8fb0dadc9099d1b5b2ee8877babb40e02fa3e64ee69321c7f41af2fae4749a",
+      "runs/20261018_052318_621582_b31a9162/model_results/ols_1.json": "43a8bfe9f051f32ad1b507b1df41a292b9c0a69b8cc6dccd07acda46bbaf3763",
+      "runs/20261018_052318_621582_b31a9162/model_results/diagnostics_ols_1.json": "cbba78344a03ac8ef4bd4a386dc463ed5f2031045b6872f059e8d9ad0c7ec028"
+    },
+    "contract": {
+      "playbooks": [
+        "ols"
+      ],
+      "source": {
+        "run_id": "20261018_052243_525173_383b0ebf",
+        "artifact_id": "cleaned_dataset",
+        "sha256": "2a8fb0dadc9099d1b5b2ee8877babb40e02fa3e64ee69321c7f41af2fae4749a"
+      }
+    },
+    "evidence": {
+      "models": [
+        {
+          "run_id": "20261018_052243_525173_383b0ebf",
+          "artifact_id": "ols_1"
+        }
+      ],
+      "diagnostics": [
+        {
+          "run_id": "20261018_052243_525173_383b0ebf",
+          "artifact_id": "diagnostics_ols_1"
+        },
+        {
+          "run_id": "20261018_052318_621582_b31a9162",
+          "artifact_id": "diagnostics_ols_1"
+        }
+      ],
+      "sensitivity": [
+        {
+          "run_id": "20261018_052318_621582_b31a9162",
+          "artifact_id": "ols_1"
+        }
+      ]
+    },
+    "selection": "Exact registered source/model/diagnostic and workflow bytes; final assistant JSONL line unchanged. Other files in the original index are intentionally not copied."
+  },
+  {
+    "task": "survival.goal.r1",
+    "playbook": "survival",
+    "source_task": "local/agent-eval/baseline-v190/tasks/survival.goal.r1/project",
+    "session_source": "workbench/agent-sessions/agent_chain_2a6d30dce63c47828acb074642fc352d.jsonl",
+    "session_sha256": "5b30aad363b9d65db2ffb7b2b32f4cc4bdc32c2a62a1a757e152b9758dc82714",
+    "final_entry_line": 61,
+    "final_entry_sha256": "464dcd88d531a7f8322ae140addc158fc053feee03a625b013b38b3c7d3d3d03",
+    "files": {
+      "runs/20261018_052806_294416_9f830b23/artifacts_index.json": "d0adf7bc93688d111ec4e8e0b4b1b72fba0b53eadede5f157e453efb7f52d79e",
+      "runs/20261018_052806_294416_9f830b23/raw_snapshot/survival.csv": "57a46005578ef371456dcd1c105184d2a05be14887e7b51690dc2162901201a8",
+      "runs/20261018_052806_294416_9f830b23/processed/cleaned_dataset.parquet": "fe74caba1d02c5a469273b404f80e5bb24386820d62b3e4d90f531c9019995ac",
+      "runs/20261018_052806_294416_9f830b23/model_results/ols_1.json": "4553e3d656a22af8c46d98c9a2a66c2cfa1965281484563d79b52c442bb3fd19",
+      "runs/20261018_052806_294416_9f830b23/model_results/diagnostics_ols_1.json": "d79576c2a9588360e5eff9e8f2788bd45534bd4d17478e27847601ad370d6f93",
+      "runs/20261018_052806_294416_9f830b23/artifacts/p7_analysis/workflow_p7_survival_kaplan_meier_4a27faad83df7613_c693ee3770f05caa71b3fa32.json": "646d179f7e8ab811fd988bbc354050e2a2c9391b88d79f8f770c7b87178550aa",
+      "runs/20261018_052806_294416_9f830b23/artifacts/p7_analysis/workflow_p7_survival_log_rank_4a27faad83df7613_7224d82a18c8be3fa8543873.json": "d795819ebe9ba92bea45bd9e8cd22675f679fb3f8761b3023952ebe1cd0203ad",
+      "runs/20261018_052806_294416_9f830b23/artifacts/p7_analysis/workflow_p7_survival_kaplan_meier_5b4ca93610d53b8b_c693ee3770f05caa71b3fa32.json": "9fd840f5f4696828ead0a14e3da1bb47ff423f915abc1df1577800b2ba017a53",
+      "runs/20261018_052806_294416_9f830b23/artifacts/p7_analysis/workflow_p7_survival_log_rank_5b4ca93610d53b8b_7224d82a18c8be3fa8543873.json": "d58ff5f4b5bdd3ae84a32275842dba517163231d75f70a3d37c8095ee8c029c9",
+      "runs/20261018_052806_294416_9f830b23/artifacts/p7_analysis/workflow_p7_survival_rmst_cbb97387b8b667dc_dcb2d4c3d0f838353eb125cb.json": "27c5ca647a7c1c85bdfe30196b11d97894aba2e21ebb360e1171b0e9f3a41b00",
+      "runs/20261018_052806_294416_9f830b23/artifacts/p7_analysis/workflow_p7_survival_rmst_cbb97387b8b667dc_7c686f8aca9069a0e48eda76.json": "1f75f7bd1f784c86762490547f93020181c455a230562ef24466147210f48404"
+    },
+    "contract": {
+      "playbooks": [
+        "survival"
+      ],
+      "source": {
+        "run_id": "20261018_052806_294416_9f830b23",
+        "artifact_id": "cleaned_dataset",
+        "sha256": "fe74caba1d02c5a469273b404f80e5bb24386820d62b3e4d90f531c9019995ac"
+      }
+    },
+    "evidence": {
+      "models": [
+        {
+          "run_id": "20261018_052806_294416_9f830b23",
+          "artifact_id": "ols_1"
+        }
+      ],
+      "diagnostics": [
+        {
+          "run_id": "20261018_052806_294416_9f830b23",
+          "artifact_id": "diagnostics_ols_1"
+        }
+      ],
+      "sensitivity": [
+        {
+          "run_id": "20261018_052806_294416_9f830b23",
+          "artifact_id": "workflow_p7_survival_kaplan_meier_4a27faad83df7613_c693ee3770f05caa71b3fa32"
+        },
+        {
+          "run_id": "20261018_052806_294416_9f830b23",
+          "artifact_id": "workflow_p7_survival_log_rank_4a27faad83df7613_7224d82a18c8be3fa8543873"
+        },
+        {
+          "run_id": "20261018_052806_294416_9f830b23",
+          "artifact_id": "workflow_p7_survival_kaplan_meier_5b4ca93610d53b8b_c693ee3770f05caa71b3fa32"
+        },
+        {
+          "run_id": "20261018_052806_294416_9f830b23",
+          "artifact_id": "workflow_p7_survival_log_rank_5b4ca93610d53b8b_7224d82a18c8be3fa8543873"
+        },
+        {
+          "run_id": "20261018_052806_294416_9f830b23",
+          "artifact_id": "workflow_p7_survival_rmst_cbb97387b8b667dc_dcb2d4c3d0f838353eb125cb"
+        },
+        {
+          "run_id": "20261018_052806_294416_9f830b23",
+          "artifact_id": "workflow_p7_survival_rmst_cbb97387b8b667dc_7c686f8aca9069a0e48eda76"
+        }
+      ]
+    },
+    "selection": "Exact registered source/model/diagnostic and workflow bytes; final assistant JSONL line unchanged. Other files in the original index are intentionally not copied."
+  },
+  {
+    "task": "lmm_repeated.goal.r1",
+    "playbook": "lmm",
+    "source_task": "local/agent-eval/baseline-v190/tasks/lmm_repeated.goal.r1/project",
+    "session_source": "workbench/agent-sessions/agent_chain_b2a19f4234a447f299278eeefc7ec9ce.jsonl",
+    "session_sha256": "bf7e25c8f118acefc0116900481f8aed6db737b2f40cc1e94b0c4aca61666c1c",
+    "final_entry_line": 34,
+    "final_entry_sha256": "5115b27b54c6abbf45d2a85932ec7ec4d481cdc36608a9db5a31ac9c45d28e71",
+    "files": {
+      "runs/20261018_051128_838601_dac3e963/artifacts_index.json": "97afd27acea0348526be1717eae54e3b2a823b6a8a792c74652e5ad7f8f7b6c5",
+      "runs/20261018_051128_838601_dac3e963/raw_snapshot/lmm_repeated.csv": "523bcc07d94ee6e9f67a7a52e247a5ee97dff03b7a3f96f37d71391b647be06f",
+      "runs/20261018_051128_838601_dac3e963/processed/cleaned_dataset.parquet": "d3c243751ab0b615de55c2b21aeef51b208a221667ea528366ee4005172a2218",
+      "runs/20261018_051128_838601_dac3e963/model_results/ols_1.json": "05dd7cb8128ece58011778c716d0a924e9740f37f7a74b5096118331e9488649",
+      "runs/20261018_051128_838601_dac3e963/model_results/diagnostics_ols_1.json": "ddb3c99e447abe6de761807748d56c7885dc5ce13e08ec24f6eefe0e9c9e55e6"
+    },
+    "contract": {
+      "playbooks": [
+        "lmm"
+      ],
+      "source": {
+        "run_id": "20261018_051128_838601_dac3e963",
+        "artifact_id": "cleaned_dataset",
+        "sha256": "d3c243751ab0b615de55c2b21aeef51b208a221667ea528366ee4005172a2218"
+      }
+    },
+    "evidence": {
+      "models": [
+        {
+          "run_id": "20261018_051128_838601_dac3e963",
+          "artifact_id": "ols_1"
+        }
+      ],
+      "diagnostics": [
+        {
+          "run_id": "20261018_051128_838601_dac3e963",
+          "artifact_id": "diagnostics_ols_1"
+        }
+      ],
+      "sensitivity": []
+    },
+    "selection": "Exact registered source/model/diagnostic and workflow bytes; final assistant JSONL line unchanged. Other files in the original index are intentionally not copied."
+  },
+  {
+    "task": "ts_spurious.goal.r1",
+    "playbook": "time_series",
+    "source_task": "local/agent-eval/baseline-v190/tasks/ts_spurious.goal.r1/project",
+    "session_source": "workbench/agent-sessions/agent_chain_2f349e295f0744f98d6946397edc969f.jsonl",
+    "session_sha256": "c9a22a63e166b4ef18a8671e4e2072b6e651a4ad5c594edeed6f709131cea45d",
+    "final_entry_line": 36,
+    "final_entry_sha256": "c387de31845eaa1120b8a75a0c9a8567f48715e7f6ee1ed083279b550b32748e",
+    "files": {
+      "runs/20261018_042733_471189_55b28bba/artifacts_index.json": "27f678973858efc765d56d94a0cf797621e2bbbe1f8566c1873130e6d1b71aa7",
+      "runs/20261018_042733_471189_55b28bba/raw_snapshot/ts_spurious.csv": "af6008ec7f18e065b08f3a605eaf6330abb9188fc9f585d7880dd892aed6a4b3",
+      "runs/20261018_042733_471189_55b28bba/processed/cleaned_dataset.parquet": "24590b9431ca95fac183e599d932dcad8cc8d5f1d5d8ca334dbf74ccc2b0a911",
+      "runs/20261018_042733_471189_55b28bba/model_results/ols_1.json": "9e4a612ff9d9bf5fde4a66a2221ed9f95b14d258c6b1211cf9c0252dcfacc897",
+      "runs/20261018_042733_471189_55b28bba/model_results/diagnostics_ols_1.json": "9898448a12fcd9f22e7b961582aedbee865818c081243a90052869614f306592",
+      "runs/20261018_042733_471189_55b28bba/model_results/time_series_diagnostics.json": "9241c8faa77bf83b31bc75640f42cf20657ab81952ce1b6a919a0b38e0f4cb34"
+    },
+    "contract": {
+      "playbooks": [
+        "time_series"
+      ],
+      "source": {
+        "run_id": "20261018_042733_471189_55b28bba",
+        "artifact_id": "cleaned_dataset",
+        "sha256": "24590b9431ca95fac183e599d932dcad8cc8d5f1d5d8ca334dbf74ccc2b0a911"
+      }
+    },
+    "evidence": {
+      "models": [
+        {
+          "run_id": "20261018_042733_471189_55b28bba",
+          "artifact_id": "ols_1"
+        }
+      ],
+      "diagnostics": [
+        {
+          "run_id": "20261018_042733_471189_55b28bba",
+          "artifact_id": "diagnostics_ols_1"
+        },
+        {
+          "run_id": "20261018_042733_471189_55b28bba",
+          "artifact_id": "time_series_diagnostics"
+        }
+      ],
+      "sensitivity": []
+    },
+    "selection": "Exact registered source/model/diagnostic and workflow bytes; final assistant JSONL line unchanged. Other files in the original index are intentionally not copied."
+  },
+  {
+    "task": "ts_garch.goal.r1",
+    "playbook": "garch",
+    "source_task": "local/agent-eval/baseline-v190/tasks/ts_garch.goal.r1/project",
+    "session_source": "workbench/agent-sessions/agent_chain_7bf9b72b955c404faf0679a38827612c.jsonl",
+    "session_sha256": "59a743bf2d9400beba7857a4fe44f1008272478c155757456507cc3ff947722f",
+    "final_entry_line": 62,
+    "final_entry_sha256": "2fe9b98d43608be1ab8b136797ef07ec769d6541b9daf966d37a33f80a3bd51b",
+    "files": {
+      "runs/20261018_044038_935580_d2c4e871/artifacts_index.json": "fc5aaceccd9e7940d74330c00800923cabc1c67a5828950f3f5e8eaecc601126",
+      "runs/20261018_044038_935580_d2c4e871/raw_snapshot/ts_garch.csv": "4eba68ff2b426f3d5d65266cfc1fe59b65886cc1379f48c984852f37b3bcfba9",
+      "runs/20261018_044038_935580_d2c4e871/processed/cleaned_dataset.parquet": "33e5e757ea0127e4fa79b7538559a5f0f5605daedab86c62e3406bf75db51932",
+      "runs/20261018_044038_935580_d2c4e871/model_results/ols_1.json": "30d1820fd7a325b100cef33064b46f7315f442194492c37819ea1d461c98b4be",
+      "runs/20261018_044038_935580_d2c4e871/model_results/diagnostics_ols_1.json": "32e8f3a6a7fdf7cc7a2ff8b82bf0bc765d7e146e64c489e096b227dffba406bf",
+      "runs/20261018_044038_935580_d2c4e871/artifacts/p7_analysis/workflow_p7_time_series_acf_865ee2f346f9606a_ca3ec9deca0f5a8b5b9d8925.json": "7952af991d9ca6e199bba43235134f9a6d2022460a115b1c82fdd3a6939d8f28",
+      "runs/20261018_044038_935580_d2c4e871/artifacts/p7_analysis/workflow_p7_time_series_acf_4febefbc7d1441a8_ca3ec9deca0f5a8b5b9d8925.json": "c84456025f7d9c96907cc64fa70d392775b13267d897ee55730397ac1d7fdfda",
+      "runs/20261018_044038_935580_d2c4e871/artifacts/p7_analysis/workflow_p7_time_series_acf_88fa2130545e416f_ca3ec9deca0f5a8b5b9d8925.json": "7d5c343eddb356611873dd322de4c80d4b35ee3d72850f73425cecb067b43550",
+      "runs/20261018_044038_935580_d2c4e871/artifacts/p7_analysis/workflow_p7_time_series_acf_e3fb8b6b07e037c2_ca3ec9deca0f5a8b5b9d8925.json": "39ad157033cf12bc5c203892eeaf067105f64badf7099c577e384a150bc01c6a",
+      "runs/20261018_044038_935580_d2c4e871/artifacts/workflow_capability/workflow_capability_model_time_series_arma_garch_e3fb8b6b07e037c2_fd56126a2a09d393822f9d62.json": "d6eff21b0ab0f87434258bcd943fae57413e8b170715dddc766326089f1dedf0"
+    },
+    "contract": {
+      "playbooks": [
+        "garch"
+      ],
+      "source": {
+        "run_id": "20261018_044038_935580_d2c4e871",
+        "artifact_id": "cleaned_dataset",
+        "sha256": "33e5e757ea0127e4fa79b7538559a5f0f5605daedab86c62e3406bf75db51932"
+      }
+    },
+    "evidence": {
+      "models": [
+        {
+          "run_id": "20261018_044038_935580_d2c4e871",
+          "artifact_id": "ols_1"
+        }
+      ],
+      "diagnostics": [
+        {
+          "run_id": "20261018_044038_935580_d2c4e871",
+          "artifact_id": "diagnostics_ols_1"
+        }
+      ],
+      "sensitivity": [
+        {
+          "run_id": "20261018_044038_935580_d2c4e871",
+          "artifact_id": "workflow_p7_time_series_acf_865ee2f346f9606a_ca3ec9deca0f5a8b5b9d8925"
+        },
+        {
+          "run_id": "20261018_044038_935580_d2c4e871",
+          "artifact_id": "workflow_p7_time_series_acf_4febefbc7d1441a8_ca3ec9deca0f5a8b5b9d8925"
+        },
+        {
+          "run_id": "20261018_044038_935580_d2c4e871",
+          "artifact_id": "workflow_p7_time_series_acf_88fa2130545e416f_ca3ec9deca0f5a8b5b9d8925"
+        },
+        {
+          "run_id": "20261018_044038_935580_d2c4e871",
+          "artifact_id": "workflow_p7_time_series_acf_e3fb8b6b07e037c2_ca3ec9deca0f5a8b5b9d8925"
+        },
+        {
+          "run_id": "20261018_044038_935580_d2c4e871",
+          "artifact_id": "workflow_capability_model_time_series_arma_garch_e3fb8b6b07e037c2_fd56126a2a09d393822f9d62"
+        }
+      ]
+    },
+    "selection": "Exact registered source/model/diagnostic and workflow bytes; final assistant JSONL line unchanged. Other files in the original index are intentionally not copied."
+  },
+  {
+    "task": "iv_valid.open.r1",
+    "playbook": "iv",
+    "source_task": "local/agent-eval/baseline-v190/tasks/iv_valid.open.r1/project",
+    "session_source": "workbench/agent-sessions/agent_chain_ed992d4a745c4e019c3f87356735701c.jsonl",
+    "session_sha256": "9cdf1985d08df12c2f082ded6c0308431edea1e6d3a8f2b364ff581473e4562b",
+    "final_entry_line": 36,
+    "final_entry_sha256": "1f4c3d08b0cf8129af7bd5ac0862e321813ebcbb05828f92071075750c231c89",
+    "files": {
+      "runs/20261018_035324_925213_81d490b3/artifacts_index.json": "59240534dc20eb1940afdcdff4c1406b704d92954f1f654e17b3d35d5f0c1fc5",
+      "runs/20261018_035324_925213_81d490b3/raw_snapshot/iv_valid.csv": "032033b1fe07d05dc1a0fb30d93b86fe50bdf988a2c0fcd454b7afe0185033b1",
+      "runs/20261018_035324_925213_81d490b3/processed/cleaned_dataset.parquet": "4100ee81d15ab0c3358898f3fd3ffdafd7e744cf46a8b3c8971f8e4a191c6c9a",
+      "runs/20261018_035324_925213_81d490b3/model_results/ols_1.json": "b6ccf8d73cca3b198634e3f379f20bcaf30f91e902260f99e5b658275ec38483",
+      "runs/20261018_035324_925213_81d490b3/model_results/diagnostics_ols_1.json": "45c844207f213b2a349999802f7bfaba60768ba6ec22dc14b03f8dda26f2b9a7",
+      "runs/20261018_035324_925213_81d490b3/artifacts/p7_analysis/workflow_p7_iv_weak_instruments_8952cfc45855fa8a_b96fc6cae21762a16b25a0bd.json": "9a0d2568cdb6e507bc7ec04205ab05bff3cc0e06b86987f05185ca31526a0b3b",
+      "runs/20261018_035324_925213_81d490b3/artifacts/p7_analysis/workflow_p7_iv_gmm_8952cfc45855fa8a_3e5a25b2d709b1f0f1bc39f4.json": "c0ba9c17d0255e65748c5ee57b74b2e1abd4ad6e04004ece554f89e19311527a",
+      "runs/20261018_035405_859683_6aef4db1/artifacts_index.json": "50ac90d565ac9479e97c1f5e9ee8ad8e6929bb90b4edf3b31fecb1c5293308b0",
+      "runs/20261018_035405_859683_6aef4db1/raw_snapshot/cleaned_dataset.parquet": "4100ee81d15ab0c3358898f3fd3ffdafd7e744cf46a8b3c8971f8e4a191c6c9a",
+      "runs/20261018_035405_859683_6aef4db1/processed/cleaned_dataset.parquet": "4100ee81d15ab0c3358898f3fd3ffdafd7e744cf46a8b3c8971f8e4a191c6c9a",
+      "runs/20261018_035405_859683_6aef4db1/model_results/iv_2sls_1.json": "0852a911cb07a375e41f25273e76e11acc44ff7fd366c6ddd137dca3b738c841",
+      "runs/20261018_035405_859683_6aef4db1/model_results/diagnostics_iv_2sls_1.json": "477d64e73d7599dda75f03d9215c83468b9b05be46d79312a4f7116a2bf3fb29",
+      "runs/20261018_035405_859683_6aef4db1/iv_diagnostics.json": "49c907c41978bba6fafd5b4800f8e106010165f9589310052a9570adc9e6a111"
+    },
+    "contract": {
+      "playbooks": [
+        "iv"
+      ],
+      "source": {
+        "run_id": "20261018_035324_925213_81d490b3",
+        "artifact_id": "cleaned_dataset",
+        "sha256": "4100ee81d15ab0c3358898f3fd3ffdafd7e744cf46a8b3c8971f8e4a191c6c9a"
+      }
+    },
+    "evidence": {
+      "models": [
+        {
+          "run_id": "20261018_035405_859683_6aef4db1",
+          "artifact_id": "iv_2sls_1"
+        }
+      ],
+      "diagnostics": [
+        {
+          "run_id": "20261018_035324_925213_81d490b3",
+          "artifact_id": "diagnostics_ols_1"
+        },
+        {
+          "run_id": "20261018_035405_859683_6aef4db1",
+          "artifact_id": "diagnostics_iv_2sls_1"
+        },
+        {
+          "run_id": "20261018_035405_859683_6aef4db1",
+          "artifact_id": "iv_diagnostics"
+        }
+      ],
+      "sensitivity": [
+        {
+          "run_id": "20261018_035324_925213_81d490b3",
+          "artifact_id": "ols_1"
+        },
+        {
+          "run_id": "20261018_035324_925213_81d490b3",
+          "artifact_id": "workflow_p7_iv_weak_instruments_8952cfc45855fa8a_b96fc6cae21762a16b25a0bd"
+        },
+        {
+          "run_id": "20261018_035324_925213_81d490b3",
+          "artifact_id": "workflow_p7_iv_gmm_8952cfc45855fa8a_3e5a25b2d709b1f0f1bc39f4"
+        }
+      ]
+    },
+    "selection": "Exact registered source/model/diagnostic and workflow bytes; final assistant JSONL line unchanged. Other files in the original index are intentionally not copied."
+  }
+]

@@ -631,8 +631,17 @@ class WorkbenchOrchestrator(OrchestrationWorkflows, OrchestrationProposals, Orch
             raise
         self._tool_registries[chain_id] = registry
         from .planning.agent_phase import restore_phase
+        agent.completion_check = lambda: self._completion_check(session_id)
         agent.phase_restorer = lambda checkpoint: restore_phase(core=agent, orchestrator=self,
             chain_id=chain_id, checkpoint=checkpoint)
+
+
+    def _completion_check(self, session_id):
+        from .completion import evaluate
+
+        plan = self.plan_store.current(session_id)
+        project_root = getattr(self.context_provider, "project_root", self.repository.root.parent)
+        return evaluate(project_root, plan.completion if plan else None, plan.completion_evidence if plan else None)
 
 
     def _chain(self, chain_id: str) -> tuple[str, AgentCore]:

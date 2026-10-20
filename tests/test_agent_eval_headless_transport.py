@@ -186,7 +186,8 @@ def test_headless_turn_uses_scoped_fake_runtime_without_current_provider(tmp_pat
         session = routes.create_agent_session(str(tmp_path), routes.AgentSessionCreateRequest(role='chain'))['session_id']
         result = runner._turn(None, tmp_path, session, 'Inspect.', 'proposal_only', 'ask', transport='headless')
     assert len(requests) == 1
-    assert result['reply'] == 'ANALYSIS COMPLETE'
+    assert result['reply'].startswith('Partially complete')
+    assert 'ANALYSIS COMPLETE' not in result['reply']
     assert result['http_status'] is None
     assert {'agent_start', 'agent_end'} <= {event['event_type'] for event in result['raw_events']}
 
@@ -220,7 +221,8 @@ def test_inprocess_headless_retains_existing_provider_tape_without_network(tmp_p
     session = routes.create_agent_session(str(project), routes.AgentSessionCreateRequest(role='chain'))['session_id']
     with recorder.provider_tape(tape_file, mode='replay') as tape:
         result = runner._turn(None, project, session, 'Inspect.', 'proposal_only', 'ask', transport='headless')
-    assert result['reply'] == 'ANALYSIS COMPLETE'
+    assert result['reply'].startswith('Partially complete')
+    assert 'ANALYSIS COMPLETE' not in result['reply']
     assert not tape.queue
     # This pre-existing evaluator tape reports mismatches; it is not the strict
     # product ReplayAdapter and must never be described as one.

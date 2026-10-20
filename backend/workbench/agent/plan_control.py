@@ -113,11 +113,19 @@ class PlanControl:
                 steps = tuple(replace(step, status=old[step.step_id].status,
                                       added_after_results=old[step.step_id].added_after_results)
                               if step.step_id in old else step for step in requested)
-            plan = plans.merge(previous, question=question, criteria=changes.get("criteria", list(previous.criteria)),
+            basis = previous
+            contract_changed = "completion" in changes and changes["completion"] != previous.completion
+            if contract_changed:
+                from .completion import source_receipt
+                contract = changes["completion"]
+                if source_receipt(self.root, contract["source"]) != contract["source"]:
+                    raise plans.PlanError("completion source is unavailable or changed")
+                basis = replace(previous, completion=contract, completion_evidence=None)
+            plan = plans.merge(basis, question=question, criteria=changes.get("criteria", list(previous.criteria)),
                                steps=steps, budget=previous.budget, allowed_classes=list(previous.allowed_classes))
             def execution_scope(items):
                 return [(step.step_id, step.operation_ids, step.depends_on, step.expected_outputs) for step in items]
-            if previous.approved_version is not None and execution_scope(steps) != execution_scope(previous.steps):
+            if previous.approved_version is not None and (contract_changed or execution_scope(steps) != execution_scope(previous.steps)):
                 plan = replace(plan, status="needs_approval")
             if previous.approved_version is not None and plan.question != previous.question:
                 event = analysis_ledger.record_plan_event_once(self.root, session_id=self.session_id,

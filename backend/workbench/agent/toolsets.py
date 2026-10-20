@@ -6,6 +6,7 @@ from collections.abc import Callable, Iterable
 from typing import Any
 
 from .tools import ToolDefinition, ToolHandler, ToolRegistry
+from .completion import CONTRACT_SCHEMA, EVIDENCE_SCHEMA, INSPECT_SCHEMA
 
 
 _UPDATE_PLAN_SCHEMA: dict[str, Any] = {
@@ -13,6 +14,8 @@ _UPDATE_PLAN_SCHEMA: dict[str, Any] = {
     "required": ["question", "steps"],
     "properties": {
         "question": {"type": "string"},
+        "completion": CONTRACT_SCHEMA,
+        "completion_evidence": EVIDENCE_SCHEMA,
         "criteria": {"type": "array", "items": {"type": "string"}, "maxItems": 12},
         "steps": {
             "type": "array",
@@ -47,6 +50,7 @@ def build_chain_tool_registry(
     update_plan: ToolHandler,
     run_operation: ToolHandler,
     plan_analysis: ToolHandler,
+    inspect_analysis_completion: ToolHandler,
 ) -> ToolRegistry:
     """Keep context reads first, followed by scoped planning and operation tools.
 
@@ -88,5 +92,15 @@ def build_chain_tool_registry(
             "question":{"type":"string", "minLength":1, "maxLength":4000}}, "additionalProperties":False},
         handler=plan_analysis,
         description="Plan a source-bound Notebook analysis on this same Agent turn and budget; return ordinary proposal cards."
+    ))
+    registry.register(ToolDefinition(
+        tool_id="inspect_analysis_completion", version="v1", side_effect="none", scope_requirements=("chain",),
+        max_output_budget=12_000,
+        input_schema=INSPECT_SCHEMA,
+        handler=inspect_analysis_completion,
+        description="Recheck the current plan against registered source, fitted models, computed diagnostics, "
+                    "distinct sensitivity fits and a source-bound report. Missing evidence means partial; "
+                    "requirements met does not certify scientific validity. Optionally pass a source artifact reference "
+                    "to discover its verified dataset sha256 before declaring the plan. Read-only; no model call."
     ))
     return registry

@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "model_id": "iv_2sls_1",
+  "model_type": "iv_2sls",
+  "engine": "linearmodels",
+  "y_column": null,
+  "nobs": 1500,
+  "r_squared": 0.44909668320409357,
+  "r_squared_adj": 0.44836067342881514,
+  "df_model": 3.0,
+  "df_resid": 1497.0,
+  "coefficients": {
+    "Intercept": {
+      "estimate": -0.6263564287503414,
+      "std_error": 0.1494316339490371,
+      "p_value": 2.8e-05,
+      "ci_lower": -0.9192370494414269,
+      "ci_upper": -0.3334758080592558,
+      "source_id": "model_results.iv_2sls_1.coefficients.Intercept"
+    },
+    "experience": {
+      "estimate": 0.021596651541682388,
+      "std_error": 0.0012465065403331143,
+      "p_value": 0.0,
+      "ci_lower": 0.01915354361613586,
+      "ci_upper": 0.024039759467228916,
+      "source_id": "model_results.iv_2sls_1.coefficients.experience"
+    },
+    "education": {
+      "estimate": 0.22576691632728085,
+      "std_error": 0.011771097697007429,
+      "p_value": 0.0,
+      "ci_lower": 0.20269598878264392,
+      "ci_upper": 0.2488378438719178,
+      "source_id": "model_results.iv_2sls_1.coefficients.education"
+    }
+  },
+  "warnings": []
+}
