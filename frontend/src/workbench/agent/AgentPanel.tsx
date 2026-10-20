@@ -7,6 +7,7 @@ import { agentAuditExportUrl } from "./agentApi";
 import { AgentComposer } from "./AgentComposer";
 import type { AgentMessage } from "./agentTypes";
 import { AgentRowsTable, shownRows } from "./AgentRowsTable";
+import { AgentTargetRecovery } from "./AgentTargetRecovery";
 import { renderMarkdown } from "../../report/markdown";
 import "./agent.css";
 import { formatPValue } from "../../format/numbers";
@@ -492,6 +493,11 @@ export function AgentPanel({
                 const shown = shownRows(message);
                 return shown ? <AgentRowsTable key={`rows-${message.entry_id}`} shown={shown} /> : null;
               })}
+              {turn.steps.filter((message) => message.role === "tool").map((message) => (
+                <AgentTargetRecovery key={`target-recovery-${message.entry_id}`} content={message.content}
+                  disabled={turnActive || agent.confirmationBusyId !== null}
+                  onSelect={(prompt) => { void agent.sendPrompt(prompt); }} />
+              ))}
               {turn.responses.map(renderTranscriptMessage)}
             </div>
           );

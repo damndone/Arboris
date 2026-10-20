@@ -67,7 +67,6 @@ LOCAL_DEFAULT_ALLOW = frozenset(CONTENT_CLASSES)
 # tests/test_egress.py fails when a registered tool is missing from this table.
 TOOL_CONTENT_CLASSES: Mapping[str, str] = {
     # Agent (main and chain sessions)
-    "propose_analysis_loop": "workbench_state",
     "calculate": "workbench_state",
     # What the person and the Agent said earlier; tool results are excluded.
     "search_project_conversations": "workbench_state",
@@ -302,7 +301,10 @@ def current_project() -> Path | None:
 
 
 # Retired names are data compatibility only; never publish them as callable tools.
-RETIRED_TOOL_CONTENT_CLASSES: Mapping[str, str] = {"propose_operation": "workbench_state"}
+RETIRED_TOOL_CONTENT_CLASSES: Mapping[str, str] = {
+    "propose_operation": "workbench_state",
+    "propose_analysis_loop": "workbench_state",
+}
 
 
 def tool_content_class(tool_id: str | None) -> str:

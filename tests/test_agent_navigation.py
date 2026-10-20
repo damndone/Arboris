@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.operation_request_fixtures import admit_proposal
+
 import asyncio
 import json
 from dataclasses import dataclass
@@ -79,7 +81,7 @@ def build_confirmed_rerun_fixture(project_root: Path) -> NavigationFixture:
         main_session_id="main-session",
     )
     orchestrator.register_chain("chain-a", "chain-session", agent)
-    proposal = orchestrator.create_proposal(
+    proposal = admit_proposal(orchestrator,
         chain_id="chain-a",
         operation_id="model.rerun",
         target={

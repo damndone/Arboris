@@ -8,6 +8,8 @@ ledger, whoever authorized it.
 
 from __future__ import annotations
 
+from tests.operation_request_fixtures import admit_proposal
+
 import asyncio
 import json
 from pathlib import Path
@@ -91,7 +93,7 @@ class _Fixture:
         self.orchestrator.read_only_runner = runner
 
     def propose(self, steps: list[dict]):
-        proposal = self.orchestrator.create_proposal(
+        proposal = admit_proposal(self.orchestrator,
             chain_id="chain-a",
             operation_id="operation.multi_step",
             target={"run_id": self.run_id, "node_ref": "stage:source", "artifact_id": self.artifact_id},

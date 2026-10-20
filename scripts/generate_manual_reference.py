@@ -124,7 +124,7 @@ def agent_tools_page() -> str:
     parts = [
         HEADER,
         "# Agent tools and what they may send\n\n",
-        "Tool-result content classes, including historical persisted tool names. `propose_operation` is retired and cannot be called; its classification remains for reading old conversations. The "
+        "Tool-result content classes, including historical persisted tool names. Retired tool names cannot be called; their classifications remain for reading old conversations. The "
         "project's data-sharing policy decides, per class, what may be sent to a remote model "
         "provider; anything else stays on this computer and the model receives only a summary.\n\n",
         _table(

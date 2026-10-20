@@ -44,7 +44,6 @@ def build_chain_tool_registry(
     *,
     context_tools: Iterable[ToolDefinition],
     proposal_tool_schema: Callable[[], dict[str, Any]],
-    propose_analysis_loop: ToolHandler,
     update_plan: ToolHandler,
     run_operation: ToolHandler,
     plan_analysis: ToolHandler,
@@ -58,34 +57,6 @@ def build_chain_tool_registry(
     registry = ToolRegistry()
     for definition in context_tools:
         registry.register(definition)
-
-    registry.register(
-        ToolDefinition(
-            tool_id="propose_analysis_loop",
-            version="v1",
-            input_schema={
-                "type": "object",
-                "required": [
-                    "source_run_id",
-                    "source_node_ref",
-                    "active_head_run_id",
-                    "cluster_variable",
-                ],
-                "properties": {
-                    "source_run_id": {"type": "string", "minLength": 1},
-                    "source_node_ref": {"type": "string", "minLength": 1},
-                    "active_head_run_id": {"type": "string", "minLength": 1},
-                    "cluster_variable": {"type": "string", "minLength": 1},
-                    "result_id": {"type": "string", "minLength": 1},
-                },
-                "additionalProperties": False,
-            },
-            side_effect="proposal",
-            scope_requirements=("chain", "active_head"),
-            max_output_budget=24_000,
-            handler=propose_analysis_loop,
-        )
-    )
 
     registry.register(
         ToolDefinition(

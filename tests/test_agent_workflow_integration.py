@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.operation_request_fixtures import admit_proposal
+
 import asyncio
 import json
 from pathlib import Path
@@ -375,7 +377,7 @@ def test_confirmed_workflow_runs_declared_model_terms_and_post_estimation(
             agent_session_id="chain-session",
         )
         context_fingerprint = "nocv1:declared-model-terms"
-        proposal = orchestrator.create_proposal(
+        proposal = admit_proposal(orchestrator,
             chain_id="chain-a",
             operation_id="operation.multi_step",
             target={

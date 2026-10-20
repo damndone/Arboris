@@ -1,6 +1,8 @@
 """Real generic and fork adapters share typed proposal admission."""
 from __future__ import annotations
 
+from tests.operation_request_fixtures import admit_proposal
+
 import asyncio
 import importlib
 from pathlib import Path
@@ -46,11 +48,8 @@ def test_generic_tool_reaches_shared_admission_without_legacy_create_proposal(tm
         admitted.append((request, kwargs, receipt))
         return receipt
 
-    def legacy_forbidden(**kwargs):
-        raise AssertionError("generic adapter must use typed admission directly")
-
     monkeypatch.setattr(module, "admit", observe)
-    monkeypatch.setattr(orchestrator, "create_proposal", legacy_forbidden)
+    assert not hasattr(orchestrator, "create_proposal")
     arguments = {key: value for key, value in proposal_kwargs().items() if key not in {"chain_id", "command_id"}}
     result = asyncio.run(orchestrator.tool_registry("chain-a").execute(
         {"tool_call_id": "typed-generic", "tool_id": "run_operation", "arguments": arguments},
@@ -84,11 +83,8 @@ def test_fork_route_reaches_shared_admission_after_server_source_resolution(tmp_
         admitted.append((request, kwargs, receipt))
         return receipt
 
-    def legacy_forbidden(*args, **kwargs):
-        raise AssertionError("fork adapter must use typed admission directly")
-
     monkeypatch.setattr(module, "admit", observe)
-    monkeypatch.setattr(WorkbenchOrchestrator, "create_proposal", legacy_forbidden)
+    assert not hasattr(WorkbenchOrchestrator, "create_proposal")
     with TestClient(app) as client:
         response = client.post("/agent/fork-proposals", params={"project_root": str(project)}, json={
             "source_run_id": "run-a", "source_node_ref": "model:ols_1", "active_head_run_id": "run-a",
@@ -123,7 +119,7 @@ def test_shared_admission_keeps_scope_and_unknown_operation_refusals_before_writ
     assert orchestrator.operation_store.list_records() == []
 
 
-def test_legacy_create_proposal_remains_a_thin_typed_admission_adapter(tmp_path: Path, monkeypatch) -> None:
+def test_typed_admission_persists_the_original_proposal_shape(tmp_path: Path, monkeypatch) -> None:
     module = request_module()
     orchestrator = make_orchestrator(tmp_path)
     admitted = []
@@ -135,7 +131,7 @@ def test_legacy_create_proposal_remains_a_thin_typed_admission_adapter(tmp_path:
         return receipt
 
     monkeypatch.setattr(module, "admit", observe)
-    proposal = orchestrator.create_proposal(**proposal_kwargs(), proposal_id="proposal_typed")
+    proposal = admit_proposal(orchestrator, **proposal_kwargs(), proposal_id="proposal_typed")
     assert len(admitted) == 1
     assert admitted[0].proposal is proposal
     stored = orchestrator.proposal_store.latest_revision(proposal.proposal_id)

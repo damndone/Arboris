@@ -33,7 +33,7 @@ def test_tool_registry_surfaces_analysis_loop_source_errors_to_agent() -> None:
     registry = ToolRegistry()
     registry.register(
         ToolDefinition(
-            tool_id="propose_analysis_loop",
+            tool_id="run_operation",
             version="v1",
             input_schema={"type": "object"},
             side_effect="proposal",
@@ -45,7 +45,7 @@ def test_tool_registry_surfaces_analysis_loop_source_errors_to_agent() -> None:
         registry.execute(
             {
                 "tool_call_id": "call-analysis-loop",
-                "tool_id": "propose_analysis_loop",
+                "tool_id": "run_operation",
                 "arguments": {},
             },
             session_id="session-a",

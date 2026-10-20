@@ -137,6 +137,8 @@ class Request:
     named_in_plan: bool = False
     #: The plan's (Auto) or the conversation's (Ask) budget still covers it.
     within_budget: bool = True
+    #: An unresolved estimand correction needs a specific human decision.
+    target_decision_required: bool = False
 
 
 @dataclass(frozen=True)
@@ -146,7 +148,7 @@ class Grants:
     entries: frozenset[Rule] = field(default_factory=frozenset)
 
     def covers(self, request: Request) -> bool:
-        return request.permission_class in GRANTABLE and not request.touches_source and any(
+        return request.permission_class in GRANTABLE and not request.touches_source and not request.target_decision_required and any(
             rule.matches(request) for rule in self.entries
         )
 
@@ -164,14 +166,15 @@ class Decision:
 
 
 def on_floor(request: Request) -> bool:
-    return request.permission_class in {PermissionClass.EXTERNAL, PermissionClass.HIGH} or request.touches_source
+    return request.permission_class in {PermissionClass.EXTERNAL, PermissionClass.HIGH} or request.touches_source or request.target_decision_required
 
 
 def decide(mode: Mode, request: Request, rules: Rules = Rules(), grants: Grants = Grants()) -> Decision:
     if any(rule.matches(request) for rule in rules.deny):
         return Decision(Outcome.DENY, "a project rule denies this operation")
     if on_floor(request):
-        what = ("changes source data" if request.touches_source
+        what = ("changes an unresolved analysis target" if request.target_decision_required
+                else "changes source data" if request.touches_source
                 else "leaves the Workbench" if request.permission_class == PermissionClass.EXTERNAL
                 else "is registered as high risk")
         return Decision(Outcome.ASK, f"this operation {what}, which always needs your approval", floor=True)

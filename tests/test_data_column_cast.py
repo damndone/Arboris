@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.operation_request_fixtures import admit_proposal
+
 import json
 import asyncio
 from pathlib import Path
@@ -269,7 +271,7 @@ def test_column_cast_confirmed_operation_uses_shared_lifecycle(tmp_path: Path) -
         main_session_id="agent_main",
     )
     orchestrator.register_chain("chain_data", "agent_data", agent)
-    proposal = orchestrator.create_proposal(
+    proposal = admit_proposal(orchestrator,
         chain_id="chain_data",
         operation_id="data.column.cast",
         target={
@@ -377,7 +379,7 @@ def test_column_cast_lifecycle_reconciles_without_duplicate_child_effect(
         failpoint=CrashOnce(),
     )
     orchestrator.register_chain("chain_data", "agent_data", agent)
-    proposal = orchestrator.create_proposal(
+    proposal = admit_proposal(orchestrator,
         chain_id="chain_data",
         operation_id="data.column.cast",
         target={

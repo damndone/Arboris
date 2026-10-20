@@ -900,3 +900,31 @@ describe("AgentPanel", () => {
     expect(screen.queryByText("**Stable** result")).not.toBeInTheDocument();
   });
 });
+
+
+describe("AgentPanel target correction", () => {
+  it("keeps the generated correction visible outside collapsed reasoning and uses the ordinary composer path", () => {
+    const send = vi.fn();
+    const confirm = vi.fn();
+    const prompt = "Keep coef:control. Draft a correction plan; do not execute a substitute.";
+    const state = value({ sendPrompt: send, confirmProposal: confirm, messages: [
+      agentMessageFixture({ entry_id: "target-question", role: "user", content: "Analyze the control effect", stop_reason: null }),
+      agentMessageFixture({ entry_id: "target-error", role: "tool", name: "run_operation", content: JSON.stringify({
+        ok: false, error: "ANALYSIS_TARGET_CONFLICT", output: { status: "needs_target_decision", executed: false, recovery: {
+          schema: "workbench.analysis-target-recovery.v1", source_run_id: "source-a",
+          requested_result_id: "coef:control", primary_result_id: "coef:treatment",
+          message: "Nothing was submitted or executed.", steps: ["Review the source", "Draft options", "Continue independent steps"],
+          options: [{ id: "preserve_requested_target", label: "Keep requested target; review compatible sources", prompt }],
+        } },
+      }), stop_reason: null }),
+      agentMessageFixture({ entry_id: "target-answer", role: "assistant", content: "Choose the target before dependent estimation.", stop_reason: "stop" }),
+    ] });
+    render(<AgentSurfaceContext.Provider value={state}><AgentPanel runId="source-a" projectRoot="/tmp/recovery-project" /></AgentSurfaceContext.Provider>);
+    const notice = screen.getByRole("status", { name: "Analysis target correction" });
+    expect(notice.closest("details")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Keep requested target; review compatible sources" }));
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith(prompt);
+    expect(confirm).not.toHaveBeenCalled();
+  });
+});

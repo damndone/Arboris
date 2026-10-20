@@ -7,8 +7,8 @@ from .chains import ChainHeadConflict
 from .context_tools import InspectNodeContextRequest
 from .operation_requests import OperationRequest
 from .operations import RERUN_OPERATIONS, is_rerun_operation
-from .proposals import ProposalInvocation
-from .tools import ToolRegistry
+from .proposals import ProposalInvocation, ProposalRevision
+from .tools import ToolRegistry, ToolVisibleError
 from .toolsets import build_chain_tool_registry
 from .operation_handlers.proposal_arguments import _canonicalize_data_columns_cast_arguments, _canonicalize_workflow_arguments, _precheck_model_options, _clustered_analysis_loop_intent
 
@@ -100,21 +100,21 @@ class OrchestrationTools:
         return {**arguments, "preconditions": preconditions}
 
 
-    def _create_analysis_loop_proposal_from_agent_arguments(
+    def _prepare_analysis_loop_proposal_from_agent_arguments(
         self,
         *,
         chain_id: str,
         session_id: str,
         arguments: dict[str, Any],
         metadata: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
+    ) -> tuple[ProposalRevision, dict[str, Any]]:
         """Create the typed OLS proposal from backend-resolved source facts.
 
         The generic ``model.rerun`` registry remains available for operations
         outside v1.7.2.  A conventional-to-clustered OLS request, however,
         must enter the Analysis Loop seam so its PlanDiff binding is present
-        before confirmation.  This method is shared by the dedicated typed
-        tool and the compatibility path that older Agents already call.
+        before confirmation.  The unified operation tool preserves exact-result selection
+        before applying the common permission decision.
         """
 
         project_root = self.data_operation_project_root
@@ -198,7 +198,7 @@ class OrchestrationTools:
             },
             cluster_values=resolved.cluster_values,
             model_row_ids=resolved.model_row_ids,
-            requested_result_id=arguments.get("result_id"),
+            requested_result_id=target.get("result_id"),
             source_context_fingerprint=context_fingerprint,
             source_identity={
                 "run_id": source_run_id,
@@ -230,9 +230,7 @@ class OrchestrationTools:
             ),
             "analysis_row_count": len(resolved.source.analysis_row_ids),
         }
-        return {
-            "requires_confirmation": True,
-            "proposal": proposal.to_dict(),
+        return proposal, {
             "plan_diff": packet.plan_diff.to_dict(),
             "analysis_loop": {
                 "status": "pending",
@@ -377,7 +375,7 @@ class OrchestrationTools:
                 raise ValueError("invalid_command_id")
             cluster_variable = self._clustered_analysis_loop_intent(arguments)
             if operation_id == "model.rerun" and cluster_variable is not None:
-                return self._create_analysis_loop_proposal_from_agent_arguments(
+                proposal, details = self._prepare_analysis_loop_proposal_from_agent_arguments(
                     chain_id=operation_chain,
                     session_id=session_id,
                     arguments={
@@ -391,6 +389,13 @@ class OrchestrationTools:
                     },
                     metadata=metadata,
                 )
+                outcome = await self._run_or_await_confirmation(proposal, session_id=session_id)
+                status = ("pending" if outcome.get("requires_confirmation") else
+                          "denied" if outcome.get("denied") else
+                          outcome.get("operation", {}).get("status", "failed"))
+                return {**outcome, **details, "analysis_loop": {**details["analysis_loop"], "status": status}}
+            if "result_id" in arguments["target"]:
+                raise ToolVisibleError("target.result_id is only supported for the clustered OLS Analysis Loop")
             if is_rerun_operation(operation_id):
                 self._preflight_model_rerun_declarations(
                     arguments, metadata_edit=operation_id == "metadata.edit"
@@ -408,24 +413,6 @@ class OrchestrationTools:
             )
             proposal = receipt.proposal
             return await self._run_or_await_confirmation(proposal, session_id=session_id)
-
-        def propose_analysis_loop(arguments: dict[str, Any], context) -> dict[str, Any]:
-            if context.session_id != session_id:
-                raise ValueError("tool session is outside the registered chain scope")
-            metadata = context.metadata
-            allowed_operations = metadata.get("allowed_operations")
-            if allowed_operations is not None and "model.rerun" not in {
-                str(item) for item in (allowed_operations or [])
-            }:
-                raise PermissionError("operation_not_allowed")
-            operation_chain = self._operation_chain(session_id, {"run_id":arguments["source_run_id"]})
-            return self._create_analysis_loop_proposal_from_agent_arguments(
-                chain_id=operation_chain,
-                session_id=session_id,
-                arguments=arguments,
-                metadata=metadata,
-            )
-
 
         async def update_plan(arguments: dict[str, Any], context) -> dict[str, Any]:
             from . import plans as plan_module
@@ -489,7 +476,6 @@ class OrchestrationTools:
         return build_chain_tool_registry(
             context_tools=context_tools,
             proposal_tool_schema=lambda: self.operation_registry.proposal_tool_schema(),
-            propose_analysis_loop=propose_analysis_loop,
             update_plan=update_plan,
             run_operation=run_operation,
             plan_analysis=plan_analysis,

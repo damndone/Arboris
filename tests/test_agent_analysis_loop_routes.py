@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import pandas as pd
+import pytest
 from fastapi.testclient import TestClient
 
 from workbench.analysis_loop.validation import ValidationCheck, ValidationPacket
@@ -224,15 +225,16 @@ def test_chain_tool_registry_exposes_typed_analysis_loop_tools_without_mutation(
     assert not (tmp_path / "workbench" / "analysis-packets").exists()
 
 
+@pytest.mark.parametrize("policy", ["ask", "deny", "allow", "bad_selector", "conflicting_selector", "no_primary"])
 def test_chain_tool_registry_creates_canonical_analysis_loop_proposal_from_exact_ols_facts(
-    tmp_path: Path,
+    tmp_path: Path, policy: str,
 ) -> None:
     """Agent proposal tooling must enter the typed PlanDiff seam.
 
     This is the regression for the real DeepSeek run: the generic proposal
     tool used to create a plain model.rerun record, so the child completed
-    without ValidationPacket/ComparePacket materialization.  The typed tool
-    and the compatibility generic path both have to bind the canonical plan.
+    without ValidationPacket/ComparePacket materialization.  The unified tool must preserve exact-result selection and bind the canonical
+    plan before using the common permission decision.
     """
 
     from test_agent_analysis_loop_resolver import _write_source
@@ -246,6 +248,11 @@ def test_chain_tool_registry_creates_canonical_analysis_loop_proposal_from_exact
         "result_id": result["stable_result_ids"][0],
         "role": "primary",
     }
+    if policy == "no_primary":
+        result.pop("primary_estimand")
+    if policy == "conflicting_selector":
+        assert len(result["stable_result_ids"]) >= 2
+        assert result["stable_result_ids"][-1] != result["stable_result_ids"][0]
     (project_root / "runs" / "run-source" / "model_results" / "ols_1.json").write_text(
         json.dumps(result)
     )
@@ -282,25 +289,61 @@ def test_chain_tool_registry_creates_canonical_analysis_loop_proposal_from_exact
     registry = orchestrator.tool_registry("chain-a")
     descriptors = {item["tool_id"]: item for item in registry.descriptors()}
 
-    assert "propose_analysis_loop" in descriptors
-    assert descriptors["propose_analysis_loop"]["side_effect"] == "proposal"
+    assert "propose_analysis_loop" not in descriptors
+    assert descriptors["run_operation"]["side_effect"] == "proposal"
+    from workbench.agent.permissions import Rules, Rule, PermissionClass
+    from types import SimpleNamespace
+    dispatched = []
 
+    async def runner(proposal, actor):
+        dispatched.append(proposal)
+        return SimpleNamespace(record_id="record-test", status="completed", error=None)
+
+    if policy == "deny":
+        orchestrator.permission_rules = Rules(deny=(Rule(PermissionClass.DERIVE),))
+    elif policy == "allow":
+        orchestrator.execution_mode = "auto"
+        orchestrator.plan_scope = {"in_plan": True, "named": True, "allowed_classes": ["derive"]}
+        orchestrator.read_only_runner = runner
     exact_call = {
-        "tool_id": "propose_analysis_loop",
-        "tool_call_id": "call-analysis-loop",
+        "tool_id": "run_operation", "tool_call_id": "call-analysis-loop",
         "arguments": {
-            "source_run_id": "run-source",
-            "source_node_ref": "model:ols_1",
-            "active_head_run_id": "run-source",
-            "cluster_variable": "company_id",
-            "result_id": result["stable_result_ids"][0],
-        },
+            "operation_id": "model.rerun", "target": {
+                "run_id": "run-source", "node_ref": "model:ols_1", "node_hash": "model-guess",
+                "forest_node_key": "forest-guess",
+                "result_id": ("missing-result" if policy == "bad_selector" else
+                    result["stable_result_ids"][-1] if policy == "conflicting_selector" else result["stable_result_ids"][0])},
+            "preconditions": {"context_version": "node-operation-context/v1", "context_fingerprint": "model-guess",
+                "active_head_run_id": "run-source", "owner_resolution": "model-guess"},
+            "changes": {"covariance": {"old": "unadjusted", "new": "clustered"},
+                "entity_col": {"old": None, "new": "company_id"}},
+            "evidence_refs": [], "expected_effect": ["Change covariance."], "risks": ["Cluster count matters."]},
     }
     exact = asyncio.run(
         registry.execute(exact_call, session_id="chain-session")
     )
 
-    assert exact.ok is True
+    if policy in {"bad_selector", "conflicting_selector"}:
+        assert exact.ok is False
+        assert exact.output["code"] in {"ANALYSIS_TARGET_UNKNOWN", "ANALYSIS_TARGET_CONFLICT"}
+        assert dispatched == []
+        assert orchestrator.operation_store.list_records() == []
+        assert not list((repository.root / "proposals").glob("*.jsonl"))
+        return
+    assert exact.ok, exact.error
+    if policy == "deny":
+        assert exact.output["denied"] is True
+        assert "requires_confirmation" not in exact.output
+        assert dispatched == []
+        assert orchestrator.operation_store.list_records() == []
+        return
+    if policy == "allow":
+        assert exact.output["executed"] is True
+        assert exact.output["analysis_loop"]["status"] == "completed"
+        assert len(dispatched) == 1
+        assert dispatched[0].preconditions["analysis_loop"]
+        return
+    assert exact.output["requires_confirmation"] is True
     assert exact.output["proposal"]["preconditions"]["analysis_loop"]
     assert exact.output["plan_diff"]["product_patch"] == {
         "covariance": "clustered",
@@ -311,6 +354,8 @@ def test_chain_tool_registry_creates_canonical_analysis_loop_proposal_from_exact
         "entity_col": "company_id",
     }
 
+    if policy == "no_primary":
+        return
     generic = asyncio.run(
         registry.execute(
             {
@@ -658,3 +703,18 @@ def test_analysis_loop_packet_route_reads_immutable_child_packets_and_source_fac
     assert body["packet"]["validation_packet"]["status"] == "complete"
     assert body["packet"]["compare_packet"]["source_run_id"] == "run-source"
     assert body["packet"]["plan_diff"]["plan_hash"] == plan.plan_hash
+
+
+def test_exact_result_selector_cannot_be_ignored_by_an_ordinary_rerun(tmp_path):
+    from tests.test_agent_proposal_operations import make_orchestrator, proposal_kwargs
+
+    orchestrator = make_orchestrator(tmp_path)
+    arguments = {k: v for k, v in proposal_kwargs().items() if k not in {"chain_id", "command_id"}}
+    arguments["target"] = {**arguments["target"], "result_id": "explicit-result"}
+    result = asyncio.run(orchestrator.tool_registry("chain-a").execute(
+        {"tool_id": "run_operation", "tool_call_id": "ordinary-rerun", "arguments": arguments},
+        session_id="chain-session"))
+    assert not result.ok
+    assert "only supported for the clustered OLS Analysis Loop" in str(result.error_details)
+    assert not list(orchestrator.proposal_store.proposals_dir.glob("*.jsonl"))
+    assert orchestrator.operation_store.list_records() == []

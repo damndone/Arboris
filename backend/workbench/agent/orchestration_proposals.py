@@ -95,45 +95,6 @@ class OrchestrationProposals:
             raise ToolVisibleError(f"{exc.code}: {exc}") from exc
 
 
-    def create_proposal(
-        self,
-        *,
-        chain_id: str,
-        operation_id: str,
-        target: dict[str, Any],
-        preconditions: dict[str, Any],
-        changes: dict[str, Any],
-        evidence_refs: Iterable[str],
-        expected_effect: Iterable[str],
-        risks: Iterable[str],
-        operation_version: str = "v1",
-        command_id: str | None = None,
-        proposal_id: str | None = None,
-        session_id: str | None = None,
-    ) -> ProposalRevision:
-        # Deterministic UI actions need a durable Chain identity, not an LLM.
-        # The session is server-selected and must satisfy the same scope check
-        # used by register_chain before any proposal or event is persisted.
-        """Compatibility adapter for callers with the original proposal fields."""
-
-        return self.admit_operation_request(
-            OperationRequest(
-                operation_id=operation_id,
-                operation_version=operation_version,
-                target=target,
-                preconditions=preconditions,
-                changes=changes,
-                evidence_refs=evidence_refs,
-                expected_effect=expected_effect,
-                risks=risks,
-            ),
-            chain_id=chain_id,
-            session_id=session_id,
-            command_id=command_id,
-            proposal_id=proposal_id,
-        ).proposal
-
-
     def admit_operation_request(
         self,
         request: OperationRequest,

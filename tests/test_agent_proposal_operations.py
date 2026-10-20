@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.operation_request_fixtures import admit_proposal
+
 import asyncio
 import json
 from pathlib import Path
@@ -192,7 +194,7 @@ def test_proposal_revision_and_confirmation_create_pending_audit_record_without_
 ) -> None:
     orchestrator = make_orchestrator(tmp_path)
 
-    first = orchestrator.create_proposal(**proposal_kwargs())
+    first = admit_proposal(orchestrator, **proposal_kwargs())
     revised = orchestrator.revise_proposal(
         first.proposal_id,
         base_revision=first.revision,
@@ -243,7 +245,7 @@ def test_stale_context_blocks_confirmation_and_leaves_no_pending_operation(
     tmp_path: Path,
 ) -> None:
     orchestrator = make_orchestrator(tmp_path)
-    proposal = orchestrator.create_proposal(**proposal_kwargs())
+    proposal = admit_proposal(orchestrator, **proposal_kwargs())
 
     with pytest.raises(ProposalStaleError):
         orchestrator.confirm_proposal(
@@ -263,7 +265,7 @@ def test_proposal_and_confirmation_are_persisted_as_typed_session_messages(
     tmp_path: Path,
 ) -> None:
     orchestrator = make_orchestrator(tmp_path)
-    proposal = orchestrator.create_proposal(**proposal_kwargs())
+    proposal = admit_proposal(orchestrator, **proposal_kwargs())
     orchestrator.confirm_proposal(
         proposal.proposal_id,
         revision=proposal.revision,
@@ -289,7 +291,7 @@ def test_proposal_and_confirmation_are_persisted_as_typed_session_messages(
 
 def test_proposal_api_is_async_safe_when_confirmation_calls_are_repeated(tmp_path: Path) -> None:
     orchestrator = make_orchestrator(tmp_path)
-    proposal = orchestrator.create_proposal(**proposal_kwargs())
+    proposal = admit_proposal(orchestrator, **proposal_kwargs())
 
     async def confirm_twice():
         return await asyncio.gather(
@@ -322,7 +324,7 @@ def test_operation_record_state_is_append_only_and_cannot_move_backwards(
     tmp_path: Path,
 ) -> None:
     orchestrator = make_orchestrator(tmp_path)
-    proposal = orchestrator.create_proposal(**proposal_kwargs())
+    proposal = admit_proposal(orchestrator, **proposal_kwargs())
     record = orchestrator.confirm_proposal(
         proposal.proposal_id,
         revision=proposal.revision,
@@ -354,7 +356,7 @@ def test_operation_record_idempotency_does_not_depend_on_dispatch_command_id(
     tmp_path: Path,
 ) -> None:
     orchestrator = make_orchestrator(tmp_path)
-    proposal = orchestrator.create_proposal(**proposal_kwargs())
+    proposal = admit_proposal(orchestrator, **proposal_kwargs())
     confirmation = orchestrator.proposal_store.confirm(
         proposal.proposal_id,
         revision=proposal.revision,
@@ -378,7 +380,7 @@ def test_operation_registry_rejects_unregistered_mutations_before_session_write(
     invalid = {**proposal_kwargs(), "operation_id": "arbitrary.file_write"}
 
     with pytest.raises(UnknownOperationError):
-        orchestrator.create_proposal(**invalid)
+        admit_proposal(orchestrator, **invalid)
 
     assert orchestrator.repository.get_branch("chain-session") == []
 
@@ -461,7 +463,7 @@ def test_confirmed_proposal_creates_child_branch_and_is_idempotent(
     tmp_path: Path,
 ) -> None:
     orchestrator = make_orchestrator(tmp_path)
-    proposal = orchestrator.create_proposal(**proposal_kwargs())
+    proposal = admit_proposal(orchestrator, **proposal_kwargs())
     record = orchestrator.confirm_proposal(
         proposal.proposal_id,
         revision=proposal.revision,
@@ -517,7 +519,7 @@ def test_confirmed_proposal_rechecks_preconditions_before_creating_branch(
     tmp_path: Path,
 ) -> None:
     orchestrator = make_orchestrator(tmp_path)
-    proposal = orchestrator.create_proposal(**proposal_kwargs())
+    proposal = admit_proposal(orchestrator, **proposal_kwargs())
     record = orchestrator.confirm_proposal(
         proposal.proposal_id,
         revision=proposal.revision,
@@ -550,7 +552,7 @@ def test_confirmed_proposal_records_executor_failure_and_is_idempotent(
     tmp_path: Path,
 ) -> None:
     orchestrator = make_orchestrator(tmp_path)
-    proposal = orchestrator.create_proposal(**proposal_kwargs())
+    proposal = admit_proposal(orchestrator, **proposal_kwargs())
     record = orchestrator.confirm_proposal(
         proposal.proposal_id,
         revision=proposal.revision,
@@ -635,7 +637,7 @@ def test_submitted_child_is_reconciled_before_operation_completion(
         "plan_hash": "plan-hash",
         "canonical_patch_hash": "patch-hash",
     }
-    proposal = orchestrator.create_proposal(**kwargs)
+    proposal = admit_proposal(orchestrator, **kwargs)
     record = orchestrator.confirm_proposal(
         proposal.proposal_id,
         revision=proposal.revision,
@@ -709,7 +711,7 @@ def test_reconciled_child_failure_marks_operation_and_branch_failed(
         "workbench.agent.orchestration_reruns.RerunService", FailedRerunService
     )
     orchestrator = make_orchestrator(tmp_path)
-    proposal = orchestrator.create_proposal(**proposal_kwargs())
+    proposal = admit_proposal(orchestrator, **proposal_kwargs())
     record = orchestrator.confirm_proposal(
         proposal.proposal_id,
         revision=proposal.revision,
@@ -773,7 +775,7 @@ def test_recover_operations_reconciles_interrupted_child_without_resubmitting(
         "workbench.agent.orchestration_reruns.RerunService", CompletedRerunService
     )
     orchestrator = make_orchestrator(tmp_path)
-    proposal = orchestrator.create_proposal(**proposal_kwargs())
+    proposal = admit_proposal(orchestrator, **proposal_kwargs())
     record = orchestrator.confirm_proposal(
         proposal.proposal_id,
         revision=proposal.revision,
@@ -814,7 +816,7 @@ def test_recover_operations_fails_interrupted_submission_without_retry(
     tmp_path: Path,
 ) -> None:
     orchestrator = make_orchestrator(tmp_path)
-    proposal = orchestrator.create_proposal(**proposal_kwargs())
+    proposal = admit_proposal(orchestrator, **proposal_kwargs())
     record = orchestrator.confirm_proposal(
         proposal.proposal_id,
         revision=proposal.revision,
@@ -861,7 +863,7 @@ def test_recover_operations_fails_when_recorded_child_is_missing(
     tmp_path: Path,
 ) -> None:
     orchestrator = make_orchestrator(tmp_path)
-    proposal = orchestrator.create_proposal(**proposal_kwargs())
+    proposal = admit_proposal(orchestrator, **proposal_kwargs())
     record = orchestrator.confirm_proposal(
         proposal.proposal_id,
         revision=proposal.revision,
@@ -918,7 +920,7 @@ def test_graph_fork_recovery_after_durable_lifecycle_crash_binds_one_effect(
         "custom_message",
         {"message_type": "agent_context", "content": "verified"},
     )
-    proposal = orchestrator.create_proposal(
+    proposal = admit_proposal(orchestrator,
         chain_id="chain-a",
         operation_id="graph.fork",
         target={

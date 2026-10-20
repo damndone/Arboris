@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.operation_request_fixtures import admit_proposal
+
 import asyncio
 
 from workbench.agent.core import AgentCore
@@ -129,7 +131,7 @@ def test_completed_workflow_persists_authorized_child_records(tmp_path, monkeypa
     import workbench.agent.orchestration_operation_handler as orchestrator_module
 
     monkeypatch.setattr(orchestrator_module, "execute_workflow", lambda root, compiled: state)
-    proposal = orchestrator.create_proposal(
+    proposal = admit_proposal(orchestrator,
         chain_id="chain-1",
         operation_id="operation.multi_step",
         target=draft.target,

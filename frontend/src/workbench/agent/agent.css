@@ -1224,3 +1224,8 @@
 .wb-agent-plan button:disabled, .wb-agent-run-controls button:disabled { opacity: .5; }
 .wb-agent-run-controls { padding: 6px 0; font-size: 11px; }
 .wb-agent-run-controls select { max-width: 100%; }
+
+.wb-agent-target-recovery { border: 1px solid var(--separator); border-radius: 8px; padding: 12px; margin: 8px 0; font-size: 12px; overflow-wrap: anywhere; }
+.wb-agent-target-recovery p { margin: 8px 0; }
+.wb-agent-target-recovery ol { padding-left: 20px; }
+.wb-agent-target-recovery button { margin: 4px 8px 4px 0; }

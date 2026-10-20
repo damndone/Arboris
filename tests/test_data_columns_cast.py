@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.operation_request_fixtures import admit_proposal
+
 import asyncio
 import json
 from datetime import datetime, timezone
@@ -218,7 +220,7 @@ def test_columns_cast_confirmed_operation_uses_shared_lifecycle(tmp_path: Path) 
     agent = AgentCore(repository, events, NoopAdapter(), session_id="agent_data")
     orchestrator = WorkbenchOrchestrator(repository, events, main_session_id="agent_main")
     orchestrator.register_chain("chain_data", "agent_data", agent)
-    proposal = orchestrator.create_proposal(
+    proposal = admit_proposal(orchestrator,
         chain_id="chain_data",
         operation_id="data.columns.cast",
         target={
@@ -310,7 +312,7 @@ def test_columns_cast_lifecycle_reconciles_without_duplicate_effect(
         repository, events, main_session_id="agent_main", failpoint=CrashOnce()
     )
     orchestrator.register_chain("chain_data", "agent_data", agent)
-    proposal = orchestrator.create_proposal(
+    proposal = admit_proposal(orchestrator,
         chain_id="chain_data",
         operation_id="data.columns.cast",
         target={

@@ -80,15 +80,13 @@ def test_tool_builder_uses_injected_handlers_and_preserves_descriptors():
     registry = module.build_chain_tool_registry(
         context_tools=[ToolDefinition("inspect", "v1", {"type": "object"}, "none", inspect)],
         proposal_tool_schema=lambda: {"type": "object"},
-        propose_analysis_loop=propose,
         update_plan=propose,
         run_operation=propose,
         plan_analysis=propose,
     )
     descriptors = {item["tool_id"]: item for item in registry.descriptors()}
-    assert set(descriptors) == {"inspect", "propose_analysis_loop", "update_plan", "run_operation", "plan_analysis"}
-    assert descriptors["propose_analysis_loop"]["scope_requirements"] == ["chain", "active_head"]
-    assert descriptors["propose_analysis_loop"]["max_output_budget"] == 24_000
+    assert set(descriptors) == {"inspect", "update_plan", "run_operation", "plan_analysis"}
+    assert descriptors["run_operation"]["max_output_budget"] == 24_000
     assert descriptors["update_plan"]["input_schema"] is module._UPDATE_PLAN_SCHEMA
     assert descriptors["run_operation"]["side_effect"] == "proposal"
     assert seen == []
@@ -114,7 +112,6 @@ def test_duplicate_tool_is_rejected_before_building_the_proposal_schema():
         module.build_chain_tool_registry(
             context_tools=[ToolDefinition("update_plan", "v1", {"type": "object"}, "none", handler)],
             proposal_tool_schema=schema,
-            propose_analysis_loop=handler,
             update_plan=handler,
             run_operation=handler,
             plan_analysis=handler,

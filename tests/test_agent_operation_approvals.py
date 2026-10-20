@@ -1,4 +1,6 @@
 """One persistent approval authority for public operation entry points."""
+
+from tests.operation_request_fixtures import admit_proposal
 from datetime import datetime, timedelta, timezone
 import pytest
 from tests.test_agent_proposal_operations import make_orchestrator, proposal_kwargs
@@ -6,7 +8,7 @@ from tests.test_agent_proposal_operations import make_orchestrator, proposal_kwa
 
 def _confirmed(tmp_path):
     orchestrator = make_orchestrator(tmp_path)
-    proposal = orchestrator.create_proposal(**proposal_kwargs())
+    proposal = admit_proposal(orchestrator, **proposal_kwargs())
     record = orchestrator.confirm_proposal(proposal.proposal_id, revision=proposal.revision,
         fingerprint=proposal.fingerprint, actor_type="user",
         current_context_fingerprint="ctx-1", current_active_head_run_id="run-1")
@@ -62,7 +64,7 @@ def test_confirmation_obeys_current_project_deny_rule(tmp_path):
     orchestrator = make_orchestrator(tmp_path)
     root = orchestrator.repository.root
     (root / "agent-permissions.json").write_text(json.dumps({"deny":[{"class":"derive"}]}))
-    proposal = orchestrator.create_proposal(**proposal_kwargs())
+    proposal = admit_proposal(orchestrator, **proposal_kwargs())
     with pytest.raises(PermissionError, match="denies"):
         orchestrator.confirm_proposal(proposal.proposal_id, revision=proposal.revision,
             fingerprint=proposal.fingerprint, actor_type="user",
@@ -137,7 +139,7 @@ def test_auto_plan_and_project_allow_cannot_approve_high_risk(tmp_path):
     orchestrator = make_orchestrator(tmp_path)
     orchestrator.operation_registry.register(OperationDefinition(operation_id="test.high", risk_level="high"))
     arguments = {**proposal_kwargs(), "operation_id":"test.high"}
-    proposal = orchestrator.create_proposal(**arguments)
+    proposal = admit_proposal(orchestrator, **arguments)
     orchestrator.execution_mode = "auto"
     orchestrator.plan_scope = {"in_plan":True, "named":True, "allowed_classes":["high"]}
     (orchestrator.repository.root / "agent-permissions.json").write_text(json.dumps({"allow":[{"class":"high"}]}))
@@ -156,7 +158,7 @@ def test_proposal_revision_and_confirmation_bound_context_without_losing_audit(t
     arguments = proposal_kwargs()
     full_text = "Full audit evidence. " * 4000
     orchestrator.operation_registry.register(OperationDefinition(operation_id="test.large"))
-    proposal = orchestrator.create_proposal(**{**arguments, "operation_id":"test.large",
+    proposal = admit_proposal(orchestrator, **{**arguments, "operation_id":"test.large",
         "changes":{"parameters":full_text}, "expected_effect":[full_text]})
     revised = orchestrator.revise_proposal(proposal.proposal_id, base_revision=proposal.revision,
         changes=proposal.changes, expected_effect=[full_text + " Revised."])

@@ -11,6 +11,8 @@ from typing import Any, Awaitable, Callable, Protocol
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import best_match
 
+from ..analysis_loop.lifecycle import AnalysisLoopSelectionError
+
 # Bounds for the validation feedback handed back to the model. Messages embed
 # the offending value, which is the model's own argument — echoing it back is
 # not a leak, but an unbounded blob would be.
@@ -495,6 +497,14 @@ class ToolRegistry:
                             ],
                         )
             return ToolResult(tool_call_id=call_id, tool_id=tool_id, ok=True, output=output)
+        except AnalysisLoopSelectionError as exc:
+            # Recovery contains source identities and a read-only next call, never
+            # an authorized substitute. It has the same bound as other tool data.
+            budget = 8000 if definition.max_output_budget is None else min(8000, definition.max_output_budget)
+            output = _bounded_tool_output({"status": "needs_target_decision", "executed": False,
+                "code": exc.code, "recovery": exc.details["recovery"]}, budget)
+            return ToolResult(tool_call_id=call_id, tool_id=tool_id, ok=False, output=output,
+                error=exc.code, error_details=[{"message": str(exc)[:MAX_VALIDATION_MESSAGE_CHARS]}])
         except ToolVisibleError as exc:
             return ToolResult(
                 tool_call_id=call_id,

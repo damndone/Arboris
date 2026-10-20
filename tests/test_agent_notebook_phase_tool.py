@@ -62,9 +62,9 @@ def test_run_operation_is_the_single_operation_tool_entry(tmp_path):
     registry = fixture.orchestrator.tool_registry("chain-a")
     descriptors = {tool["tool_id"]:tool for tool in registry.descriptors()}
     assert "run_operation" in descriptors
-    assert "propose_operation" not in descriptors
+    assert {"propose_operation", "propose_analysis_loop"}.isdisjoint(descriptors)
     assert not any(hasattr(fixture.orchestrator, name) for name in (
-        "execute_confirmed_proposal", "execute_confirmed_fork", "reconcile_confirmed_proposal"))
+        "create_proposal", "execute_confirmed_proposal", "execute_confirmed_fork", "reconcile_confirmed_proposal"))
     request = {"operation_id":"operation.multi_step", "target":{
         "run_id":fixture.run_id, "node_ref":"stage:source", "artifact_id":fixture.artifact_id},
         "preconditions":{"context_version":"node-operation-context/v1", "context_fingerprint":FINGERPRINT,

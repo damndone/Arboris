@@ -559,6 +559,13 @@ class OperationRegistry:
                 "type": "string",
                 "const": definition.operation_id,
             }
+            if definition.operation_id == "model.rerun":
+                # A request selector, consumed when binding the canonical PlanDiff;
+                # the durable proposal still uses the source-resolved target.
+                schema["properties"]["target"]["properties"]["result_id"] = {
+                    "type": "string", "minLength": 1, "maxLength": 500,
+                    "description": "Optional exact source result for a clustered OLS Analysis Loop; invalid for other reruns.",
+                }
             if definition.operation_id == "graph.fork":
                 # The source Agent entry is a backend-bound fact: requiring the
                 # model to invent it would turn a durable Chain leaf into an

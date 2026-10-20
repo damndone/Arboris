@@ -37,8 +37,17 @@ class OrchestrationPermissions:
         from . import permissions
 
         definition = self.operation_registry.require(proposal.operation_id, proposal.operation_version)
-        return permissions.request_for_operation(proposal.operation_id, proposal.changes,
+        request = permissions.request_for_operation(proposal.operation_id, proposal.changes,
             risk_level=definition.risk_level, within_budget=within_budget, scope=self.plan_scope)
+        run_id, node_ref = proposal.target.get("run_id"), proposal.target.get("node_ref")
+        if run_id and node_ref:
+            from dataclasses import replace
+            from ..analysis_loop.lifecycle import latest_target_correction
+
+            correction = latest_target_correction(self.repository, proposal.session_id, run_id, node_ref)
+            if correction is not None and not correction["confirmed"]:
+                request = replace(request, target_decision_required=True)
+        return request
 
 
     async def _run_or_await_confirmation(self, proposal: Any, *, session_id: str) -> dict[str, Any]:

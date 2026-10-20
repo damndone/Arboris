@@ -1459,7 +1459,7 @@ def test_main_role_turn_exposes_project_evidence_and_permissioned_operation_tool
         "inspect_custom_skills",
         "check_model_claims",
     }
-    operation_tools = {"run_operation", "propose_analysis_loop", "update_plan", "plan_analysis"}
+    operation_tools = {"run_operation", "update_plan", "plan_analysis"}
     source_tools = {"list_project_datasets", "inspect_data_schema", "inspect_node_context", "inspect_operation_contract"}
     assert tool_ids == evidence_tools | source_tools | operation_tools
     for tool in FakeAgentAdapter.instances[-1].requests[0].tools:

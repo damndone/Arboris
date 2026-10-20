@@ -1,5 +1,7 @@
 """Offline harness control tests; these never call an LLM provider."""
 from __future__ import annotations
+
+from tests.operation_request_fixtures import admit_proposal
 import importlib.util
 import json
 import sys
@@ -380,7 +382,7 @@ def repair_completed_public_owner_fixture(tmp_path_factory):
         agent = AgentCore(repo, events, _NoopModelAdapter(), session_id="planning-review")
         orchestrator = WorkbenchOrchestrator(repo, events, main_session_id="main-repair", context_provider=NodeOperationContextProvider(root))
         orchestrator.register_chain("planning-chain-repair", "planning-review", agent)
-        proposal = orchestrator.create_proposal(chain_id="planning-chain-repair", operation_id="model.rerun", target={"run_id": source, "node_ref": node, "node_hash": context.node_hash, "forest_node_key": context.forest_node_key}, preconditions={"context_version": context.context_version, "context_fingerprint": context.context_fingerprint, "active_head_run_id": source, "owner_resolution": context.owner_resolution, "run_family_id": f"legacy-family:{source}"}, changes={"x": {"old": packet["params"]["x"], "new": packet["params"]["x"]}}, evidence_refs=["repair:public-native-fixture"], expected_effect=["one real child"], risks=[], proposal_id="repair-poisson-proposal")
+        proposal = admit_proposal(orchestrator, chain_id="planning-chain-repair", operation_id="model.rerun", target={"run_id": source, "node_ref": node, "node_hash": context.node_hash, "forest_node_key": context.forest_node_key}, preconditions={"context_version": context.context_version, "context_fingerprint": context.context_fingerprint, "active_head_run_id": source, "owner_resolution": context.owner_resolution, "run_family_id": f"legacy-family:{source}"}, changes={"x": {"old": packet["params"]["x"], "new": packet["params"]["x"]}}, evidence_refs=["repair:public-native-fixture"], expected_effect=["one real child"], risks=[], proposal_id="repair-poisson-proposal")
         initialized = client.post("/agent/sessions", params={"project_root": str(root)}, json={"role": "chain", "chain_id": "planning-chain-repair", "run_id": source, "context_packet": {}})
         assert initialized.status_code == 200, initialized.text
         proposals = client.get("/agent/sessions/planning-review/proposals", params={"project_root": str(root)}).json()["proposals"]
