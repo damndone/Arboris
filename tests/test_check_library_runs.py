@@ -117,10 +117,7 @@ def test_the_anderson_rubin_set_agrees_with_r(tmp_path, case, instruments, covar
     assert packet["coefficients"]["educ"]["estimate"] == pytest.approx(float(fitted.params["educ"]), abs=5e-7)
 
 
-def test_robust_relevance_is_not_calibrated_by_f_thresholds_and_gets_certified_ar(tmp_path) -> None:
-    import json
-
-    oracle = json.loads((ROOT / "tests" / "fixtures" / "checks" / "oracle.json").read_text())["anderson_rubin"]["one"]
+def test_robust_relevance_is_not_calibrated_by_f_thresholds_and_defers_ar(tmp_path) -> None:
     outcome, run_root = _run(
         tmp_path, "iv-weakish", IV, model_type="iv_2sls", y="wage", x=["age"], iv_endog=["educ"], iv_instruments=["dist"],
     )
@@ -131,8 +128,8 @@ def test_robust_relevance_is_not_calibrated_by_f_thresholds_and_gets_certified_a
     assert strength["evidence"]["reference_distribution"] == "chi2(1)"
     assert strength["evidence"]["verdict"] == "unassessed"
     region = strength["evidence"]["anderson_rubin_95"]
-    assert [region["lower"], region["upper"]] == pytest.approx(oracle["robust"], abs=1e-7)
-    assert "Anderson-Rubin" in strength["summary"]
+    assert region == {"kind": "not_computed", "reason": "request_ar_confidence_explicitly"}
+    assert "not computed" in strength["summary"]
     assert checks["iv.exclusion_restriction"]["status"] == "needs_reason"
 
 

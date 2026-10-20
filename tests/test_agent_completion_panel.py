@@ -110,7 +110,7 @@ def test_balanced_two_way_residuals_agree_with_hand_double_demeaning():
     primary, fitted = run_panel_ols(frame, y='y', x=[], entity='g', time='time', model_id='p')
     diag, positions, _ = panel_evidence(fitted, primary, frame, y='y', x=[], entity='g', time='time')
     np.testing.assert_allclose(diag['residuals'], np.array([2, -1, -1, -2, 1, 1])/3, rtol=1e-12, atol=1e-12)
-    assert positions == list(range(6))
+    np.testing.assert_array_equal(positions, np.arange(6))
     assert diag['total_parameter_rank'] == 4 and diag['residual_df'] == 2
     assert diag['adjacent_pairs'] == 4
 
@@ -133,7 +133,7 @@ def test_native_residuals_and_rank_match_independent_r_and_stata(case):
     np.testing.assert_allclose(diag['residuals'], stata.residual, rtol=1e-7, atol=1e-9)
     assert diag['total_parameter_rank'] == reference['parameter_rank']
     assert diag['residual_df'] == reference['residual_df']
-    assert positions == list(range(len(frame)))
+    np.testing.assert_array_equal(positions, np.arange(len(frame)))
     if case == 'one_way':
         assert diag['adjacent_pairs'] == 0 and diag['adjacent_residual_correlation'] is None
 

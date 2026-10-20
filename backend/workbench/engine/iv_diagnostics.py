@@ -6,8 +6,8 @@ from ..checks.iv_checks import first_stage_diagnostic
 
 def build_iv_diagnostics(fitted: Any, n_endog: int, n_instruments: int, strength_check: dict | None = None) -> dict:
     identification = 'under' if n_instruments < n_endog else 'just' if n_instruments == n_endog else 'over'
-    weak = first_stage_diagnostic(fitted)
     evidence = (strength_check or {}).get('evidence') or {}
+    weak = dict(evidence) if evidence.get('per_endogenous') else first_stage_diagnostic(fitted)
     weak['anderson_rubin_95'] = evidence.get('anderson_rubin_95')
     weak['message'] = (strength_check or {}).get('summary') or (
         f'First-stage {weak["test"]} = {weak["first_stage_statistic"]:.4g}, reference {weak["reference_distribution"]}. '

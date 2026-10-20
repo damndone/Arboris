@@ -240,14 +240,18 @@ class PinnedRunDirectory:
 
         return self._read_regular_snapshot(_LMM_TERMINAL_PACKET_PARTS, 1024 * 1024)
 
-    def read_lmm_analysis_source(self, *, artifact_id=None, sha256=None):
-        """Read one registered data source through the pinned FD, never a raw path."""
+    def lmm_source_record(self, *, artifact_id=None, sha256=None):
+        """Resolve import metadata, including the legacy pre-index fit state."""
         records = _read_lmm_index(self)['artifacts']
         matches = [r for r in records if r['artifact_type'] in {'raw_data', 'processed_data', 'derived_data'}
                    and (r['artifact_id'] == artifact_id if artifact_id is not None else r['sha256'] == sha256)]
-        if len(matches) != 1:
+        return matches[0] if len(matches) == 1 else None
+
+    def read_lmm_analysis_source(self, *, artifact_id=None, sha256=None):
+        """Read one registered data source through the pinned FD, never a raw path."""
+        record = self.lmm_source_record(artifact_id=artifact_id, sha256=sha256)
+        if record is None:
             return None
-        record = matches[0]
         raw = self._read_regular_snapshot(tuple(record['path'].split('/')), 256 * 1024 * 1024)
         if hashlib.sha256(raw).hexdigest() != record['sha256']:
             _raise('LMM_ANALYSIS_SOURCE_CHANGED')
@@ -1272,10 +1276,10 @@ class _LmmPinnedPersistenceFacade:
         inputs = [terminal_record['artifact_id']]
         source = bound['payload']['source']
         if source is not None:
-            # Recheck the exact source at publication; the sidecar cannot add a
-            # stale data edge even when the result packet is already durable.
-            current = admission._pinned.read_lmm_analysis_source(artifact_id=source['artifact_id'])
-            if current is None or current[0]['sha256'] != source['sha256']:
+            # Recheck the import registration, not a second source decode.
+            # The producer binds the live frame fingerprint separately.
+            current = admission._pinned.lmm_source_record(artifact_id=source['artifact_id'])
+            if current is None or current['sha256'] != source['sha256']:
                 _raise('LMM_ANALYSIS_SOURCE_CHANGED')
             inputs.append(source['artifact_id'])
         return self._persist(admission=admission, packet=bound,

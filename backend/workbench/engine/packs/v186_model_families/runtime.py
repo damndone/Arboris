@@ -579,14 +579,15 @@ def fit_survival(ctx: Any, env: Any) -> tuple[str, dict[str, Any], Any]:
     }
     from ..survival_analysis.ph_diagnostics import ph_score_test
     from ...completion_evidence import publish_completion_evidence
+    from ....services.completion_products import array_fingerprint
     ph = ph_score_test(duration, status, exog.to_numpy(dtype=float), fitted.params,
                        names, ties=str(options.get('ties', 'breslow')), entry=entry)
     required = [ctx.artifacts['_normalized_y'], *ctx.artifacts['_normalized_x'], *extra_columns]
-    retained = np.flatnonzero(ctx.data.frame[list(dict.fromkeys(required))].notna().all(axis=1)).tolist()
+    retained = np.flatnonzero(ctx.data.frame[list(dict.fromkeys(required))].notna().all(axis=1))
     publish_completion_evidence(ctx, env, primary,
-        point_definition={'family': 'survival_cox', 'names': names, 'time': duration.tolist(),
-                          'event': status.tolist(), 'design': exog.to_numpy(dtype=float).tolist(),
-                          'entry': None if entry is None else entry.tolist(),
+        point_definition={'family': 'survival_cox', 'names': names, 'time': array_fingerprint(duration),
+                          'event': array_fingerprint(status), 'design': array_fingerprint(exog.to_numpy(dtype=float)),
+                          'entry': None if entry is None else array_fingerprint(entry),
                           'ties': options.get('ties', 'breslow')},
         retained_positions=retained, diagnostics={'proportional_hazards': ph},
         diagnostic_artifact_ids=['survival_evidence'])

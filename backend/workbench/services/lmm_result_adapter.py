@@ -1033,19 +1033,27 @@ def read_lmm_completion_product(run_root: Path, artifact_id: str) -> dict[str, A
             prepared = prepare_lmm_input(frame, outcome=value['outcome'], controls=value['controls'],
                                          options=representation['model_options'])
             if (prepared.formula != payload['fixed_effects_formula']
-                    or point_estimation_fingerprint(prepared) != value['point_estimation_fingerprint']):
+                    or point_estimation_fingerprint(prepared, version=value.get('schema_version', 1)) != value['point_estimation_fingerprint']):
                 return None
-            rows = value['rows']
-            if not isinstance(rows, list) or len(rows) != payload['nobs'] or not rows:
-                return None
-            positions = [r['source_row_position'] for r in rows]
-            if (any(type(p) is not int or p < 0 or p >= source['row_count'] for p in positions)
-                    or positions != list(prepared.source_row_positions)
-                    or sha256_canonical(positions) != value['analysis_sample_sha256']):
-                return None
+            if value.get('schema_version') == 2:
+                from workbench.services.completion_products import sample_metadata, frame_fingerprint
+                sample = sample_metadata(prepared.source_row_positions, len(frame))
+                if (value.get('sample') != sample
+                        or sample['positions_sha256'] != value['analysis_sample_sha256']
+                        or source.get('frame_fingerprint') != frame_fingerprint(frame)):
+                    return None
+            else:
+                rows = value['rows']
+                if not isinstance(rows, list) or len(rows) != payload['nobs'] or not rows:
+                    return None
+                positions = [r['source_row_position'] for r in rows]
+                if (any(type(p) is not int or p < 0 or p >= source['row_count'] for p in positions)
+                        or positions != list(prepared.source_row_positions)
+                        or sha256_canonical(positions) != value['analysis_sample_sha256']):
+                    return None
             if value['residual_definitions'] != DEFINITIONS:
                 return None
-            for row in rows:
+            for row in value.get('rows', []):
                 if not all(type(row[k]) in {float, int} and math.isfinite(row[k]) for k in (
                         'conditional_residual', 'marginal_residual', 'scaled_conditional_residual', 'conditional_fitted')):
                     return None

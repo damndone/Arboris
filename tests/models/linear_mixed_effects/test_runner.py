@@ -810,7 +810,7 @@ def test_runner_turns_an_unexpected_fit_exception_into_a_safe_terminal_result(
     companion = _indexed_packet(tmp_path, "lmm_analysis_evidence").to_dict()["payload"]
     assert companion["status"] == "unavailable"
     assert companion["reason"] == "fit_incomplete"
-    assert companion["rows"] == []
+    assert companion["sample"] is None and "rows" not in companion
     assert "private estimator traceback detail" not in json.dumps(companion)
 
 
@@ -983,3 +983,18 @@ def test_result_build_failure_propagates_after_a_successful_fit(
         )
 
     assert not _terminal_result_path(tmp_path).exists()
+
+
+def test_direct_csv_source_digest_is_computed_once(tmp_path, monkeypatch):
+    from workbench.engine.packs.linear_mixed_effects import runner
+    original = runner.dataset_fingerprint_for_csv
+    reads = []
+    def fingerprint(path):
+        reads.append(path)
+        return original(path)
+    monkeypatch.setattr(runner, 'dataset_fingerprint_for_csv', fingerprint)
+    packet, _ = fit_linear_mixed_effects(csv_path=ROOT/'known_truth.csv', outcome='score',
+        controls=['baseline_score'], options={'subject_id':'participant_id', 'time':'week',
+        'group':'arm', 'fit_method':'reml', 'random_slope':True}, run_root=tmp_path)
+    assert _packet_payload(packet)['status'] == 'complete'
+    assert len(reads) == 1

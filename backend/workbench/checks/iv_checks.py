@@ -80,7 +80,7 @@ def first_stage_diagnostic(fitted: Any) -> dict[str, Any]:
                               'reference_distribution': str(r['f.dist'])} for name, r in diagnostics.iterrows()}}
 
 
-def first_stage_strength(context: CheckContext, spec: CheckSpec) -> CheckOutcome:
+def first_stage_strength(context: CheckContext, spec: CheckSpec, *, compute_ar: bool = False) -> CheckOutcome:
     fitted = context.fitted
     try:
         evidence = first_stage_diagnostic(fitted)
@@ -92,6 +92,10 @@ def first_stage_strength(context: CheckContext, spec: CheckSpec) -> CheckOutcome
         weights = np.asarray(fitted.model.weights.ndarray)
         if not np.all(weights == 1):
             region = {'kind': 'unavailable', 'reason': 'weighted_ar_not_validated'}
+        elif arrays['cov_type'] not in {'unadjusted', 'robust', 'heteroskedastic'}:
+            region = {'kind': 'unavailable', 'reason': 'unsupported_covariance_for_ar'}
+        elif not compute_ar:
+            region = {'kind': 'not_computed', 'reason': 'request_ar_confidence_explicitly'}
         elif arrays['cov_type'] == 'unadjusted':
             region = anderson_rubin_homoskedastic(arrays['y'], arrays['x'], arrays['z'], arrays['w'])
         elif arrays['cov_type'] in {'robust', 'heteroskedastic'}:
@@ -108,7 +112,9 @@ def first_stage_strength(context: CheckContext, spec: CheckSpec) -> CheckOutcome
     else:
         summary += ('The 10/104.7 benchmarks concern a single instrument and endogenous regressor under '
                     'homoskedastic independent observations; they do not certify exclusion or general inference validity. ')
-    if region['kind'] == 'unavailable':
+    if region['kind'] == 'not_computed':
+        summary += 'AR confidence set was not computed; request it explicitly before claiming weak-instrument-robust inference.'
+    elif region['kind'] == 'unavailable':
         summary += f'AR confidence set unavailable: {region["reason"]}.'
     else:
         summary += f'Anderson-Rubin 95% confidence set: {_describe(region)}. '

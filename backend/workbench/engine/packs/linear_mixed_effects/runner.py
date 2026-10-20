@@ -245,8 +245,9 @@ def fit_linear_mixed_effects(
         raise
     _commit_lmm_execution_admission(lmm_execution_admission)
     live_pinned_run, seal = _consume_lmm_execution_admission(lmm_execution_admission)
+    input_sha256 = dataset_fingerprint_for_csv(source_path)
     result, fitted = _fit_and_build_terminal_result(
-        dataset_fingerprint=dataset_fingerprint_for_csv(source_path),
+        dataset_fingerprint=input_sha256,
         source_row_count=len(source_frame),
         outcome=outcome,
         prepared=prepared,
@@ -255,7 +256,7 @@ def fit_linear_mixed_effects(
     _require_live_seal(seal, live_pinned_run, run_root, options, model_options_binding)
     from .analysis_evidence import build_analysis_evidence, source_binding
     evidence = build_analysis_evidence(source=source_binding(live_pinned_run, source_frame,
-        csv_sha256=dataset_fingerprint_for_csv(source_path)),
+        csv_sha256=input_sha256),
         prepared=prepared, result=result, fitted=fitted)
     _persist_result_packets(lmm_execution_admission, result, evidence)
     return result, fitted

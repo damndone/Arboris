@@ -27,3 +27,17 @@ Before closing the version, verify the event stream and regenerate
 
 Formal FMS verification is a process-control gate only; it does not replace
 model, containment, browser, performance, or release acceptance evidence.
+
+# Default-path performance and storage (2026-10-20)
+
+- New default-path code must keep elapsed time, peak RSS, and run-directory
+  bytes within 1.05 times v1.9.0 on the same workload. A regression blocks
+  further feature work until accepted.
+- Do not serialize observation rows into JSON, convert large arrays to Python
+  lists for processing, or re-read/copy a whole source merely for validation.
+  Use registered import digests, versioned array-byte fingerprints and compact
+  summaries; explicit observation inspection may use ranges or binary arrays.
+- Performance acceptance uses an otherwise test-idle host and alternating
+  A/B/A/B runs, two per version, with raw measurements and median comparisons.
+  Retain failed measurements. Numerical coefficients, standard errors and test
+  statistics must remain bit-identical; do not widen reference tolerances.

@@ -1,6 +1,7 @@
 """Native LMM residual/source evidence, without a provider or holdout run."""
 from __future__ import annotations
 
+import gzip
 import hashlib
 import json
 from pathlib import Path
@@ -66,15 +67,20 @@ def test_native_lmm_has_explicit_residuals_and_actual_retained_row_positions(tmp
     assert evidence['status'] == 'complete'
     assert evidence['execution_binding'] == result['payload']['execution_binding']
     assert evidence['terminal_sha256'] == hashlib.sha256((run / 'artifacts/model_results/linear_mixed_effects_1.result.json').read_bytes()).hexdigest()
-    rows = evidence['rows']
-    assert [r['source_row_position'] for r in rows] == [i for i in range(len(frame)) if i != 3]
-    np.testing.assert_allclose([r['conditional_residual'] for r in rows], fitted.resid, atol=1e-12)
-    np.testing.assert_allclose([r['marginal_residual'] for r in rows], fitted.model.endog - fitted.model.exog @ fitted.fe_params, atol=1e-12)
+    from workbench.engine.packs.linear_mixed_effects.analysis_evidence import residual_arrays
+    from workbench.services.completion_products import sample_metadata, array_fingerprint
+    arrays = residual_arrays(fitted)
+    positions = np.array([i for i in range(len(frame)) if i != 3])
+    assert evidence['sample'] == sample_metadata(positions, len(frame))
+    assert 'rows' not in evidence
+    np.testing.assert_allclose(arrays['conditional'], fitted.resid, atol=1e-12)
+    np.testing.assert_allclose(arrays['marginal'], fitted.model.endog - fitted.model.exog @ fitted.fe_params, atol=1e-12)
+    assert evidence['residual_fingerprints'] == {k: array_fingerprint(v) for k,v in arrays.items()}
     assert evidence['residual_definitions']['conditional'] == 'y - X beta - Z b_hat'
     assert evidence['residual_definitions']['scaled_conditional'] == 'conditional_residual / sqrt(residual_variance); not studentized or independent'
     assert evidence['source']['artifact_id'] == 'data'
     assert evidence['source']['sha256'] == hashlib.sha256((run / 'input.csv').read_bytes()).hexdigest()
-    assert evidence['analysis_sample_sha256'] == sha256_canonical([r['source_row_position'] for r in rows])
+    assert evidence['analysis_sample_sha256'] == sample_metadata(positions, len(frame))['positions_sha256']
     # Existing packet stays strict and unchanged in shape.
     from workbench.services.lmm_result_adapter import parse_lmm_result_payload_v1
     assert parse_lmm_result_payload_v1(result['payload']) == result['payload']
@@ -149,7 +155,7 @@ def test_lmm_companion_rejects_changed_dependencies_even_with_reindexed_companio
     elif mutation == 'seal':
         (run / 'artifacts/execution/executed_input_v1.json').write_text('{}')
     elif mutation == 'row_mapping':
-        packet['payload']['rows'][1]['source_row_position'] = 0
+        packet['payload']['sample']['positions_sha256'] = '0'*64
     else:
         packet['payload']['residual_definitions']['conditional'] = 'not actual conditional residuals'
     path.write_text(json.dumps(packet))
@@ -164,7 +170,7 @@ def test_lmm_companion_rejects_changed_dependencies_even_with_reindexed_companio
 @pytest.mark.parametrize('setting', ['intercept_reml', 'intercept_ml', 'slope_reml', 'slope_ml', 'unbalanced_missing'])
 def test_native_residuals_agree_with_independent_lme4_producer(setting):
     from workbench.engine.packs.linear_mixed_effects.analysis_evidence import build_analysis_evidence
-    oracle = json.loads((Path(__file__).parent / 'fixtures/agent_completion/lmm/residuals_r.json').read_text())
+    oracle = json.loads(gzip.decompress((Path(__file__).parent / 'fixtures/agent_completion/lmm/residuals_r.json.gz').read_bytes()))
     record = oracle['cases'][setting]
     path = Path(record['source'])
     assert hashlib.sha256(path.read_bytes()).hexdigest() == record['source_sha256']
@@ -175,11 +181,15 @@ def test_native_residuals_agree_with_independent_lme4_producer(setting):
     # Diagnostic-only builder: no attempt to mint an execution admission.
     payload = dict(model_id='linear_mixed_effects_1', model_type='linear_mixed_effects',
                    execution_binding={}, result_identity='diagnostic-only', status='complete', nobs=int(fitted.nobs))
-    evidence = build_analysis_evidence(source={'artifact_id': 'data', 'sha256': record['source_sha256']}, prepared=prepared,
+    evidence = build_analysis_evidence(source={'artifact_id': 'data', 'sha256': record['source_sha256'], 'row_count': len(frame)}, prepared=prepared,
                                        result={'payload': payload}, fitted=fitted)['payload']
-    assert [r['source_row_position'] for r in evidence['rows']] == record['source_row_positions']
+    from workbench.services.completion_products import sample_metadata
+    from workbench.engine.packs.linear_mixed_effects.analysis_evidence import residual_arrays
+    assert evidence['sample'] == sample_metadata(record['source_row_positions'], len(frame))
+    arrays = residual_arrays(fitted)
+    arrays['conditional_fitted'] = fitted.model.endog-arrays['conditional']
     for key in ('conditional_residual', 'marginal_residual', 'conditional_fitted', 'scaled_conditional_residual'):
-        np.testing.assert_allclose([r[key] for r in evidence['rows']], record[key], rtol=2e-6, atol=2e-6)
+        np.testing.assert_allclose(arrays[{'conditional_residual': 'conditional', 'marginal_residual': 'marginal', 'scaled_conditional_residual': 'scaled_conditional', 'conditional_fitted': 'conditional_fitted'}[key]], record[key], rtol=2e-6, atol=2e-6)
 
 
 def test_native_companion_reopens_in_fresh_process_without_fit_or_provider(tmp_path):
@@ -206,8 +216,8 @@ def test_sidecar_requires_original_execution_admission(tmp_path, admission):
 
 @pytest.mark.parametrize('setting', ['intercept_reml', 'intercept_ml', 'slope_reml', 'slope_ml', 'unbalanced_missing'])
 def test_native_residuals_agree_with_stata_mixed_predictions(setting):
-    oracle = pd.read_csv(Path(__file__).parent / 'fixtures/agent_completion/lmm/residuals_stata.csv')
-    r = json.loads((Path(__file__).parent / 'fixtures/agent_completion/lmm/residuals_r.json').read_text())['cases'][setting]
+    oracle = pd.read_csv(Path(__file__).parent / 'fixtures/agent_completion/lmm/residuals_stata.csv.gz')
+    r = json.loads(gzip.decompress((Path(__file__).parent / 'fixtures/agent_completion/lmm/residuals_r.json.gz').read_bytes()))['cases'][setting]
     prepared = prepare_lmm_input(pd.read_csv(r['source'], float_precision='round_trip'), outcome='y', controls=['x'],
         options=dict(subject_id='g', time='time', group='arm', fit_method=r['fit_method'], random_slope=r['random_slope']))
     fitted = _fit_prepared(prepared)
@@ -245,7 +255,7 @@ def test_failed_fit_cannot_publish_successful_residual_evidence(tmp_path, monkey
     evidence = json.loads(evidence_file(run).read_text())['payload']
     assert evidence['status'] == 'unavailable'
     assert evidence['reason'] == 'fit_incomplete'
-    assert evidence['rows'] == []
+    assert evidence['sample'] is None and 'rows' not in evidence
     from workbench.agent.context_compiler import read_completion_artifact
     assert read_completion_artifact(run, 'linear_mixed_effects_1.result') is None
 
@@ -279,7 +289,7 @@ def test_source_artifact_rename_cannot_count_as_different_estimation():
                    execution_binding={}, result_identity='diagnostic-only', status='complete', nobs=int(fitted.nobs))
     fingerprints = []
     for name in ('data', 'renamed'):
-        fingerprints.append(build_analysis_evidence(source={'artifact_id': name, 'sha256': 'a' * 64},
+        fingerprints.append(build_analysis_evidence(source={'artifact_id': name, 'sha256': 'a' * 64, 'row_count': len(prepared.frame)},
             prepared=prepared, result={'payload': payload}, fitted=fitted)['payload']['point_estimation_fingerprint'])
     assert fingerprints[0] == fingerprints[1]
 
@@ -304,6 +314,8 @@ def test_numeric_reference_manifest_binds_commands_versions_inputs_and_raw_outpu
     assert manifest['independent_producers'] == ['R lme4', 'Stata mixed']
     for path, digest in manifest['repository_files'].items():
         assert hashlib.sha256(Path(path).read_bytes()).hexdigest() == digest
+    for path, digest in manifest.get('decoded_sha256', {}).items():
+        assert hashlib.sha256(gzip.decompress(Path(path).read_bytes())).hexdigest() == digest
 
 
 def test_changing_unused_source_values_cannot_count_as_lmm_sensitivity():
@@ -318,7 +330,7 @@ def test_changing_unused_source_values_cannot_count_as_lmm_sensitivity():
         fitted = _fit_prepared(prepared)
         payload = dict(model_id='linear_mixed_effects_1', model_type='linear_mixed_effects',
             execution_binding={}, result_identity='diagnostic-only', status='complete', nobs=int(fitted.nobs))
-        fingerprints.append(build_analysis_evidence(source={'artifact_id': 'data', 'sha256': str(value) * 64},
+        fingerprints.append(build_analysis_evidence(source={'artifact_id': 'data', 'sha256': str(value) * 64, 'row_count': len(prepared.frame)},
             prepared=prepared, result={'payload': payload}, fitted=fitted)['payload']['point_estimation_fingerprint'])
     assert fingerprints[0] == fingerprints[1]
 
@@ -334,3 +346,34 @@ def test_failed_fit_with_nonfinite_inputs_keeps_its_failure_evidence():
     evidence = build_analysis_evidence(source=None, prepared=prepared, result=failed, fitted=None)['payload']
     assert evidence['status'] == 'unavailable' and evidence['reason'] == 'fit_incomplete'
     assert evidence['point_estimation_fingerprint'] is None
+
+
+def test_historical_row_evidence_remains_readable(tmp_path):
+    from workbench.agent.context_compiler import read_completion_artifact
+    from workbench.engine.packs.linear_mixed_effects.analysis_evidence import residual_arrays
+    run, frame, _, fitted = native_run(tmp_path, random_slope=False)
+    path = evidence_file(run)
+    packet = json.loads(path.read_text())
+    value = packet['payload']
+    options = dict(subject_id='g', time='time', group='arm', fit_method='reml', random_slope=False)
+    prepared = prepare_lmm_input(frame, outcome='y', controls=['x'], options=options)
+    controls = list(prepared.fixed_effects[4:])
+    old_frame = prepared.frame
+    value['point_estimation_fingerprint'] = sha256_canonical({
+        'fixed': prepared.formula, 'random': prepared.random_effects, 'method': prepared.input.fit_method,
+        'numeric_values': np.asarray(old_frame[[prepared.outcome, prepared.input.time, *controls]], dtype=float).tolist(),
+        'subject_partition': pd.factorize(old_frame[prepared.input.subject_id], sort=False)[0].tolist(),
+        'comparison_group': (old_frame[prepared.input.group] == prepared.comparison_group_value).tolist()})
+    values = residual_arrays(fitted)
+    value['schema_version'] = 1
+    positions = list(prepared.source_row_positions)
+    value['analysis_sample_sha256'] = sha256_canonical(positions)
+    value['rows'] = [{'source_row_position': p, 'conditional_residual': float(c),
+        'marginal_residual': float(m), 'scaled_conditional_residual': float(s), 'conditional_fitted': float(y-c)}
+        for p,c,m,s,y in zip(positions,values['conditional'],values['marginal'],values['scaled_conditional'],fitted.model.endog)]
+    path.write_text(json.dumps(packet))
+    index_path = run/'artifacts_index.json'
+    index = json.loads(index_path.read_text())
+    next(r for r in index['artifacts'] if r['artifact_id']=='linear_mixed_effects_1.analysis_evidence')['sha256'] = hashlib.sha256(path.read_bytes()).hexdigest()
+    index_path.write_text(json.dumps(index))
+    assert read_completion_artifact(run, 'linear_mixed_effects_1.result') is not None

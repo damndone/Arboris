@@ -53,7 +53,11 @@
         }
       ]
     },
-    "selection": "Exact registered source/model/diagnostic and workflow bytes; final assistant JSONL line unchanged. Other files in the original index are intentionally not copied."
+    "selection": "Exact registered source/model/diagnostic and workflow bytes; final assistant JSONL line unchanged. Other files in the original index are intentionally not copied.",
+    "packed_files": {
+      "runs/20261018_052318_621582_b31a9162/model_results/ols_1.json.gz": "1a9edb46b6fed8cb0d8ffe8282eca16f93e07a7348d7f304290c103fb4c7bedb",
+      "runs/20261018_052243_525173_383b0ebf/model_results/ols_1.json.gz": "7c940d0a1e05f60560c226f1be5bce34de036168c42eaa02f09708fc413a96b7"
+    }
   },
   {
     "task": "survival.goal.r1",
@@ -64,17 +68,14 @@
     "final_entry_line": 61,
     "final_entry_sha256": "464dcd88d531a7f8322ae140addc158fc053feee03a625b013b38b3c7d3d3d03",
     "files": {
-      "runs/20261018_052806_294416_9f830b23/artifacts_index.json": "d0adf7bc93688d111ec4e8e0b4b1b72fba0b53eadede5f157e453efb7f52d79e",
+      "runs/20261018_052806_294416_9f830b23/artifacts_index.json": "38a3791f117130d260297007587738e8272808f48d73cafcc2f882fc84671948",
       "runs/20261018_052806_294416_9f830b23/raw_snapshot/survival.csv": "57a46005578ef371456dcd1c105184d2a05be14887e7b51690dc2162901201a8",
       "runs/20261018_052806_294416_9f830b23/processed/cleaned_dataset.parquet": "fe74caba1d02c5a469273b404f80e5bb24386820d62b3e4d90f531c9019995ac",
       "runs/20261018_052806_294416_9f830b23/model_results/ols_1.json": "4553e3d656a22af8c46d98c9a2a66c2cfa1965281484563d79b52c442bb3fd19",
       "runs/20261018_052806_294416_9f830b23/model_results/diagnostics_ols_1.json": "d79576c2a9588360e5eff9e8f2788bd45534bd4d17478e27847601ad370d6f93",
       "runs/20261018_052806_294416_9f830b23/artifacts/p7_analysis/workflow_p7_survival_kaplan_meier_4a27faad83df7613_c693ee3770f05caa71b3fa32.json": "646d179f7e8ab811fd988bbc354050e2a2c9391b88d79f8f770c7b87178550aa",
       "runs/20261018_052806_294416_9f830b23/artifacts/p7_analysis/workflow_p7_survival_log_rank_4a27faad83df7613_7224d82a18c8be3fa8543873.json": "d795819ebe9ba92bea45bd9e8cd22675f679fb3f8761b3023952ebe1cd0203ad",
-      "runs/20261018_052806_294416_9f830b23/artifacts/p7_analysis/workflow_p7_survival_kaplan_meier_5b4ca93610d53b8b_c693ee3770f05caa71b3fa32.json": "9fd840f5f4696828ead0a14e3da1bb47ff423f915abc1df1577800b2ba017a53",
-      "runs/20261018_052806_294416_9f830b23/artifacts/p7_analysis/workflow_p7_survival_log_rank_5b4ca93610d53b8b_7224d82a18c8be3fa8543873.json": "d58ff5f4b5bdd3ae84a32275842dba517163231d75f70a3d37c8095ee8c029c9",
-      "runs/20261018_052806_294416_9f830b23/artifacts/p7_analysis/workflow_p7_survival_rmst_cbb97387b8b667dc_dcb2d4c3d0f838353eb125cb.json": "27c5ca647a7c1c85bdfe30196b11d97894aba2e21ebb360e1171b0e9f3a41b00",
-      "runs/20261018_052806_294416_9f830b23/artifacts/p7_analysis/workflow_p7_survival_rmst_cbb97387b8b667dc_7c686f8aca9069a0e48eda76.json": "1f75f7bd1f784c86762490547f93020181c455a230562ef24466147210f48404"
+      "runs/20261018_052806_294416_9f830b23/artifacts/p7_analysis/workflow_p7_survival_rmst_cbb97387b8b667dc_dcb2d4c3d0f838353eb125cb.json": "27c5ca647a7c1c85bdfe30196b11d97894aba2e21ebb360e1171b0e9f3a41b00"
     },
     "contract": {
       "playbooks": [
@@ -110,23 +111,24 @@
         },
         {
           "run_id": "20261018_052806_294416_9f830b23",
-          "artifact_id": "workflow_p7_survival_kaplan_meier_5b4ca93610d53b8b_c693ee3770f05caa71b3fa32"
-        },
-        {
-          "run_id": "20261018_052806_294416_9f830b23",
-          "artifact_id": "workflow_p7_survival_log_rank_5b4ca93610d53b8b_7224d82a18c8be3fa8543873"
-        },
-        {
-          "run_id": "20261018_052806_294416_9f830b23",
           "artifact_id": "workflow_p7_survival_rmst_cbb97387b8b667dc_dcb2d4c3d0f838353eb125cb"
-        },
-        {
-          "run_id": "20261018_052806_294416_9f830b23",
-          "artifact_id": "workflow_p7_survival_rmst_cbb97387b8b667dc_7c686f8aca9069a0e48eda76"
         }
       ]
     },
-    "selection": "Exact registered source/model/diagnostic and workflow bytes; final assistant JSONL line unchanged. Other files in the original index are intentionally not copied."
+    "selection": "Exact registered source/model/diagnostic and workflow bytes; final assistant JSONL line unchanged. Other files in the original index are intentionally not copied. Performance fixture selection retains one KM, one RMST and one log-rank; full originals remain in the local M0 tape. The fixture index drops unselected repeated survival records; original index identity is recorded separately.",
+    "packed_files": {
+      "runs/20261018_052806_294416_9f830b23/artifacts_index.json.gz": "f43605cbeb205d66d131bc4a90a885082cb86d23442300cded5affa387077b88",
+      "runs/20261018_052806_294416_9f830b23/model_results/ols_1.json.gz": "8f2e002fd4f50b2cde2b1532b8b47463f5427c845186440868e9632b48768040",
+      "runs/20261018_052806_294416_9f830b23/artifacts/p7_analysis/workflow_p7_survival_log_rank_4a27faad83df7613_7224d82a18c8be3fa8543873.json.gz": "081bc2dd988aef52efd0f81ff9e1bf65c325114d973ef4f1342cbe55694e0ff5",
+      "runs/20261018_052806_294416_9f830b23/artifacts/p7_analysis/workflow_p7_survival_rmst_cbb97387b8b667dc_dcb2d4c3d0f838353eb125cb.json.gz": "f85dd4b8c223013f19b8e86bde17ee6b4ad1dad080b0fd7de4e0a9309a672497",
+      "runs/20261018_052806_294416_9f830b23/artifacts/p7_analysis/workflow_p7_survival_kaplan_meier_4a27faad83df7613_c693ee3770f05caa71b3fa32.json.gz": "244d2bafeda63aa8a424b53a319e74acf570b6fc01f5786f6c7ce05b1bde4017"
+    },
+    "original_index_sha256": "d0adf7bc93688d111ec4e8e0b4b1b72fba0b53eadede5f157e453efb7f52d79e",
+    "fixture_index_removed_artifact_ids": [
+      "workflow_p7_survival_kaplan_meier_5b4ca93610d53b8b_c693ee3770f05caa71b3fa32",
+      "workflow_p7_survival_log_rank_5b4ca93610d53b8b_7224d82a18c8be3fa8543873",
+      "workflow_p7_survival_rmst_cbb97387b8b667dc_7c686f8aca9069a0e48eda76"
+    ]
   },
   {
     "task": "lmm_repeated.goal.r1",
@@ -168,7 +170,11 @@
       ],
       "sensitivity": []
     },
-    "selection": "Exact registered source/model/diagnostic and workflow bytes; final assistant JSONL line unchanged. Other files in the original index are intentionally not copied."
+    "selection": "Exact registered source/model/diagnostic and workflow bytes; final assistant JSONL line unchanged. Other files in the original index are intentionally not copied.",
+    "packed_files": {
+      "runs/20261018_051128_838601_dac3e963/artifacts_index.json.gz": "07e83e4a95ed73df779ed534462e7ed05465f3af02855dc95843b408955c8bc4",
+      "runs/20261018_051128_838601_dac3e963/model_results/ols_1.json.gz": "3df18a2bb78c3bf5f4cd6e700bb336d58d278952cd3c0c162faff6a966687255"
+    }
   },
   {
     "task": "ts_spurious.goal.r1",
@@ -215,7 +221,11 @@
       ],
       "sensitivity": []
     },
-    "selection": "Exact registered source/model/diagnostic and workflow bytes; final assistant JSONL line unchanged. Other files in the original index are intentionally not copied."
+    "selection": "Exact registered source/model/diagnostic and workflow bytes; final assistant JSONL line unchanged. Other files in the original index are intentionally not copied.",
+    "packed_files": {
+      "runs/20261018_042733_471189_55b28bba/artifacts_index.json.gz": "7cbb35c24ad9137b8abc6a20c82060b04799f8262303a4610771f1ffbc0ea4e1",
+      "runs/20261018_042733_471189_55b28bba/model_results/ols_1.json.gz": "1b661f6080931ed29dd6f6175f6f654ff9e2572568efd6f9f2d0fe4322af435a"
+    }
   },
   {
     "task": "ts_garch.goal.r1",
@@ -283,7 +293,16 @@
         }
       ]
     },
-    "selection": "Exact registered source/model/diagnostic and workflow bytes; final assistant JSONL line unchanged. Other files in the original index are intentionally not copied."
+    "selection": "Exact registered source/model/diagnostic and workflow bytes; final assistant JSONL line unchanged. Other files in the original index are intentionally not copied.",
+    "packed_files": {
+      "runs/20261018_044038_935580_d2c4e871/artifacts_index.json.gz": "d6727427a9b6830d4902ec7546abc3f85ac4154dea1125c2b62fbf838f0163e8",
+      "runs/20261018_044038_935580_d2c4e871/model_results/ols_1.json.gz": "5569e90f41388fe5ef9d644ce044f24de1fafe40fe9684dc21d18881fe5e97b5",
+      "runs/20261018_044038_935580_d2c4e871/artifacts/p7_analysis/workflow_p7_time_series_acf_865ee2f346f9606a_ca3ec9deca0f5a8b5b9d8925.json.gz": "c1fecafb68accf2e9e7cd249f7d88d71c2e1fdb6fb9a5ab6bdad4dc9df4b6724",
+      "runs/20261018_044038_935580_d2c4e871/artifacts/p7_analysis/workflow_p7_time_series_acf_e3fb8b6b07e037c2_ca3ec9deca0f5a8b5b9d8925.json.gz": "d0a54bd4c0be83a56c7a86535d2ecb070ec2659ced0390a57abafb4db43837e6",
+      "runs/20261018_044038_935580_d2c4e871/artifacts/p7_analysis/workflow_p7_time_series_acf_88fa2130545e416f_ca3ec9deca0f5a8b5b9d8925.json.gz": "82944d62925a11e5a1ee60f7ed9593a0ae74ed3c2652d664a3819ab7d4ce06ac",
+      "runs/20261018_044038_935580_d2c4e871/artifacts/p7_analysis/workflow_p7_time_series_acf_4febefbc7d1441a8_ca3ec9deca0f5a8b5b9d8925.json.gz": "3860fdec0e5558623ea852fc9dc88e75c272fbff75794e4c0cd4f95d814d8111",
+      "runs/20261018_044038_935580_d2c4e871/artifacts/workflow_capability/workflow_capability_model_time_series_arma_garch_e3fb8b6b07e037c2_fd56126a2a09d393822f9d62.json.gz": "fdf0a19a8bc638a940a5b758c5b564f4d8531e8632638f567b2d8fa944d824f0"
+    }
   },
   {
     "task": "iv_valid.open.r1",
@@ -354,6 +373,10 @@
         }
       ]
     },
-    "selection": "Exact registered source/model/diagnostic and workflow bytes; final assistant JSONL line unchanged. Other files in the original index are intentionally not copied."
+    "selection": "Exact registered source/model/diagnostic and workflow bytes; final assistant JSONL line unchanged. Other files in the original index are intentionally not copied.",
+    "packed_files": {
+      "runs/20261018_035324_925213_81d490b3/artifacts_index.json.gz": "9f1b379aeb8438e55d8d973bf46c88366bc701560f5f12288936bd767da18b6a",
+      "runs/20261018_035324_925213_81d490b3/model_results/ols_1.json.gz": "0d3bd6fc2228bb2102fe25d116535b89e7d8f37e8ece9d021220528e08563b92"
+    }
   }
 ]

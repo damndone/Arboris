@@ -13,7 +13,7 @@ def companion_model(products, ref, artifact, model):
     if companion is None or companion.artifact_type != 'analysis_completion_evidence':
         return None
     value = companion.payload or {}
-    if (value.get('contract') != 'analysis-completion.evidence.v1' or value.get('status') != 'complete'
+    if (value.get('contract') not in {'analysis-completion.evidence.v1', 'analysis-completion.evidence.v2'} or value.get('status') != 'complete'
             or value.get('model_payload_sha256') != sha256_canonical(artifact.payload)
             or value.get('model_id') != model['model_id'] or value.get('model_type') != model['model_type']
             or value.get('nobs') != model['nobs']):
@@ -24,12 +24,21 @@ def companion_model(products, ref, artifact, model):
     registered = products.load({'run_id': ref['run_id'], 'artifact_id': source.get('artifact_id')})
     if registered is None or registered.sha256 != source.get('sha256'):
         return None
-    positions = value.get('retained_positions')
-    if (not isinstance(positions, list) or len(positions) != model['nobs']
-            or any(type(p) is not int or p < 0 or p >= source['row_count'] for p in positions)
-            or positions != sorted(set(positions))
-            or sha256_canonical(positions) != value.get('analysis_sample_fingerprint')):
-        return None
+    if value['contract'] == 'analysis-completion.evidence.v1':
+        positions = value.get('retained_positions')
+        if (not isinstance(positions, list) or len(positions) != model['nobs']
+                or any(type(p) is not int or p < 0 or p >= source['row_count'] for p in positions)
+                or positions != sorted(set(positions))
+                or sha256_canonical(positions) != value.get('analysis_sample_fingerprint')):
+            return None
+    else:
+        sample = value.get('sample') or {}
+        if (sample.get('retained_count') != model['nobs']
+                or sample.get('missing_count') != source['row_count']-model['nobs']
+                or sample.get('fingerprint_version') != 'numpy-bytes.v1'
+                or sample.get('positions_sha256') != value.get('analysis_sample_fingerprint')
+                or len(str(sample.get('positions_sha256', ''))) != 64):
+            return None
     if any(item not in companion.inputs for item in [model['model_id'], source['artifact_id']]):
         return None
     for artifact_id in value.get('diagnostic_artifact_ids', []):
@@ -64,10 +73,14 @@ def native_diagnostics(family, values):
     if family in {'panel', 'did'}:
         for value in values:
             panel = (value.get('diagnostics') or {}).get('panel') or {}
-            valid = (value.get('contract') == 'analysis-completion.evidence.v1'
+            valid = (value.get('contract') in {'analysis-completion.evidence.v1', 'analysis-completion.evidence.v2'}
                 and panel.get('status') == 'computed' and panel.get('method') == 'panel_within_residual_descriptive_v1'
-                and panel.get('nobs') == value.get('nobs') and panel.get('groups')
-                and len(panel.get('residuals', [])) == value.get('nobs')
+                and panel.get('nobs') == value.get('nobs')
+                and ((value['contract'] == 'analysis-completion.evidence.v1' and panel.get('groups')
+                      and len(panel.get('residuals', [])) == value.get('nobs'))
+                     or (value['contract'] == 'analysis-completion.evidence.v2' and panel.get('n_entities', 0) > 0
+                         and (panel.get('residual_summary') or {}).get('count') == value.get('nobs')
+                         and len(str(panel['residual_summary'].get('sha256', ''))) == 64))
                 and panel.get('total_parameter_rank', 0) > 0 and panel.get('residual_df', 0) > 0)
             if family == 'did':
                 did = (value.get('diagnostics') or {}).get('did') or {}
@@ -84,7 +97,7 @@ def native_diagnostics(family, values):
             ar = weak.get('anderson_rubin_95') or {}
             endogeneity = diag.get('endogeneity') or {}
             overid = diag.get('overidentification') or {}
-            if (value.get('contract') == 'analysis-completion.evidence.v1'
+            if (value.get('contract') in {'analysis-completion.evidence.v1', 'analysis-completion.evidence.v2'}
                     and weak.get('per_endogenous') and weak.get('reference_distribution')
                     and (ar.get('global_certification') or {}).get('status') == 'certified'
                     and ar.get('kind') in {'interval', 'singleton', 'whole_line', 'ray_below', 'ray_above', 'union_of_rays', 'disjoint', 'empty'}
@@ -97,7 +110,7 @@ def native_diagnostics(family, values):
     if family == 'survival':
         for value in values:
             ph = (value.get('diagnostics') or {}).get('proportional_hazards') or {}
-            if (value.get('contract') == 'analysis-completion.evidence.v1'
+            if (value.get('contract') in {'analysis-completion.evidence.v1', 'analysis-completion.evidence.v2'}
                     and ph.get('status') == 'computed' and ph.get('method') == 'cox_log_time_interaction_score_v1'
                     and ph.get('transform') == 'log' and ph.get('ties') in {'breslow', 'efron'}
                     and type((ph.get('global') or {}).get('p_value')) in {float, int}

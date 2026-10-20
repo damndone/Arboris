@@ -315,6 +315,7 @@ class DiagnosticsStage:
 
                 from ..completion_evidence import publish_completion_evidence
                 from ...canonical import sha256_canonical
+                from ...services.completion_products import array_fingerprint
 
                 native = iv_fitted.model
                 primary = dict(model_results)['iv_2sls_1']
@@ -322,11 +323,11 @@ class DiagnosticsStage:
                     'outcome': native.dependent.cols, 'exogenous': native.exog.cols,
                     'endogenous': native.endog.cols, 'instruments': native.instruments.cols,
                     'actual_design_sha256': sha256_canonical({
-                        'y': native.dependent.ndarray.tolist(), 'w': native.exog.ndarray.tolist(),
-                        'x': native.endog.ndarray.tolist(), 'z': native.instruments.ndarray.tolist(),
-                        'weights': native.weights.ndarray.tolist()})}
+                        'y': array_fingerprint(native.dependent.ndarray), 'w': array_fingerprint(native.exog.ndarray),
+                        'x': array_fingerprint(native.endog.ndarray), 'z': array_fingerprint(native.instruments.ndarray),
+                        'weights': array_fingerprint(native.weights.ndarray)})}
                 publish_completion_evidence(ctx, env, primary, point_definition=definition,
-                    retained_positions=np.flatnonzero(native.notnull).tolist(),
+                    retained_positions=np.flatnonzero(native.notnull),
                     diagnostics={'iv': iv_diag}, diagnostic_artifact_ids=['iv_diagnostics'])
 
         if model_type == "did":

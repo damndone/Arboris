@@ -231,7 +231,9 @@ def test_m0_original_failures_replay_without_provider_or_heldout(tmp_path, case)
     shutil.copytree(M0_ROOT / case['task'] / 'project', project)
     # Large raw recordings are losslessly packed in Git. Always expand the
     # archive, even when this checkout retains its original local raw copy.
-    for packed in project.rglob('*.json.gz'):
+    for relative, digest in case.get('packed_files', {}).items():
+        assert sha256_file(project / relative) == digest
+    for packed in project.rglob('*.gz'):
         packed.with_suffix('').write_bytes(gzip.decompress(packed.read_bytes()))
     for relative, digest in case['files'].items():
         assert sha256_file(project / relative) == digest

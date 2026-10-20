@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from workbench.artifacts import read_json, register_artifact, write_json
 from workbench.canonical import sha256_canonical
-from workbench.services.completion_products import source_binding
+from workbench.services.completion_products import source_binding, sample_metadata
 from workbench.services.pinned_run_directory import open_pinned_run_directory
 
 
@@ -18,14 +18,17 @@ def publish_completion_evidence(ctx, env, primary, *, point_definition, retained
     model_id = primary['model_id']
     registered = {record['artifact_id']: record['sha256']
                   for record in read_json(env.run_root / 'artifacts_index.json')['artifacts']}
-    payload = {'contract': 'analysis-completion.evidence.v1', 'model_id': model_id,
+    sample = sample_metadata(retained_positions, len(ctx.data.frame))
+    diagnostics = {family: {k: v for k, v in value.items() if k != 'residuals'}
+                   for family, value in diagnostics.items()}
+    payload = {'contract': 'analysis-completion.evidence.v2', 'model_id': model_id,
         'model_type': primary['model_type'], 'nobs': primary['nobs'],
         'status': 'complete' if source else 'unavailable',
         'reason': None if source else 'source_unverified', 'source': source,
         'model_payload_sha256': sha256_canonical(primary),
         'point_estimation_fingerprint': sha256_canonical(point_definition),
-        'analysis_sample_fingerprint': sha256_canonical(list(retained_positions)),
-        'retained_positions': list(retained_positions), 'diagnostics': diagnostics,
+        'analysis_sample_fingerprint': sample['positions_sha256'],
+        'sample': sample, 'diagnostics': diagnostics,
         'diagnostic_artifact_ids': list(diagnostic_artifact_ids),
         'diagnostic_artifact_sha256': {key: registered[key] for key in diagnostic_artifact_ids},
         'scientific_validity': 'not_certified'}

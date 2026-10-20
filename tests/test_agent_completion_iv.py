@@ -41,17 +41,18 @@ def products(tmp_path_factory):
     return build_products(tmp_path_factory.mktemp('iv-native'))
 
 
-def test_m0_iv_input_can_reach_native_completion_with_certified_ar(products):
+def test_default_iv_is_partial_until_explicit_ar_is_requested(products):
     from workbench.agent.completion import evaluate
     project, contract, evidence = products
     result = evaluate(project, contract, evidence)
-    assert result['status'] == 'requirements_met', result['missing']
+    assert result['status'] == 'partial'
+    assert 'iv:diagnostics:ar_unavailable' in result['missing']
     assert result['scientific_validity'] == 'not_certified'
     companion = json.loads((project / 'runs' / contract['source']['run_id'] / 'model_results/iv_2sls_1.completion.json').read_text())
     assert companion['nobs'] == 1500
     diag = companion['diagnostics']['iv']
     assert diag['weak_instruments']['first_stage_f'] is None
-    assert diag['weak_instruments']['anderson_rubin_95']['global_certification']['status'] == 'certified'
+    assert diag['weak_instruments']['anderson_rubin_95']['kind'] == 'not_computed'
     assert diag['endogeneity']['test'] == 'wooldridge_regression'
 
 
