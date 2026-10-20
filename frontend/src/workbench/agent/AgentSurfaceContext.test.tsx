@@ -263,6 +263,27 @@ describe("AgentSurfaceProvider", () => {
     expect(mocks.sendAgentTurn).not.toHaveBeenCalled();
   });
 
+  it("replays recorded usage once and clears it when changing sessions", async () => {
+    localStorage.setItem("workbench:agent-session:/proj:run-a:project%3Arun-a%3Anone","saved");
+    localStorage.setItem("workbench:agent-session:/proj:run-b:project%3Arun-b%3Anone","other");
+    mocks.getAgentSession.mockImplementation(async (_root,id)=>session(id));
+    const event={schema_version:"agent.event.v1",event_id:"usage",session_id:"saved",seq:9,event_type:"provider_step",
+      command_id:"command",created_at:"2026-10-20T17:00:00Z",payload:{request_id:"request",provider_step:1,model:"test-model",
+        elapsed_s:1,first_public_s:0.2,outcome:"stop",retries:0,usage_state:"reported",usage_scope:"last_reported_snapshot",
+        usage:{prompt_tokens:80,completion_tokens:9,prompt_cache_hit_tokens:60},cost:null,cost_state:"pricing_unverified"}};
+    mocks.getAgentEvents.mockImplementation(async (_root,id)=>({events:id==="saved"?[event]:[]}));
+    const view=mount();
+    expect(await screen.findByTestId("agent-usage")).toHaveTextContent("1 provider steps");
+    fireEvent.change(screen.getByRole("textbox",{name:"Ask Agent"}),{target:{value:"Another question"}});
+    fireEvent.click(screen.getByRole("button",{name:"Send to Agent"}));
+    await waitFor(()=>expect(mocks.getAgentEvents.mock.calls.length).toBeGreaterThan(1));
+    expect(screen.getByTestId("agent-usage")).toHaveTextContent("80 input");
+    expect(screen.getByTestId("agent-usage")).not.toHaveTextContent("160 input");
+    view.rerender(<MemoryRouter><AgentSurfaceProvider projectRoot="/proj" runId="run-b"><AgentPanel projectRoot="/proj" runId="run-b" /></AgentSurfaceProvider></MemoryRouter>);
+    await waitFor(()=>expect(mocks.getAgentPlan).toHaveBeenCalledWith("/proj","other"));
+    expect(screen.queryByTestId("agent-usage")).not.toBeInTheDocument();
+  });
+
   it("sends the selected mode and explicitly queues follow-ups without starting a second turn", async () => {
     mocks.sendAgentTurn.mockReturnValue(new Promise(() => {}));
     mocks.queueAgentTurnMessage.mockResolvedValue({status:"queued"});

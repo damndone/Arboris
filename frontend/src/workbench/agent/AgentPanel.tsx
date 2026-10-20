@@ -1,3 +1,4 @@
+import { AgentUsagePanel } from "./AgentUsagePanel";
 import { AgentPlanPanel } from "./AgentPlanPanel";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { buildTurns, duration, messageTime } from "./transcript/turns";
@@ -430,6 +431,7 @@ export function AgentPanel({
           </a>
         )}
       </header>}
+      <AgentUsagePanel events={agent.providerSteps ?? []} />
       <AgentPlanPanel key={agent.sessionId ?? "new"} />
       {terminalFailure && (
         <p

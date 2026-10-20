@@ -928,3 +928,43 @@ describe("AgentPanel target correction", () => {
     expect(confirm).not.toHaveBeenCalled();
   });
 });
+
+describe("Agent recorded usage", () => {
+  const observation = (seq:number, payload:Record<string,unknown>) => ({
+    schema_version:"agent.event.v1",event_id:`usage-${seq}`,session_id:"session",seq,event_type:"provider_step",
+    command_id:"command",created_at:"2026-10-20T17:00:00Z",payload:{request_id:`request-${seq}`,provider_step:seq,
+      model:"test-model",usage_scope:"last_reported_snapshot",usage_state:"reported",outcome:"stop",retries:0,
+      elapsed_s:1.25,first_public_s:0.2,cost:null,cost_state:"pricing_unverified",...payload},
+  });
+  it("shows per-step timing, tokens, weighted cache usage and unverified cost", () => {
+    render(<AgentSurfaceContext.Provider value={value({providerSteps:[
+      observation(1,{usage:{prompt_tokens:80,completion_tokens:9,prompt_cache_hit_tokens:60}}),
+      observation(2,{usage:{prompt_tokens:20,completion_tokens:2,prompt_cache_hit_tokens:0},outcome:"error",retries:1}),
+    ]})}><AgentPanel runId="run-a" projectRoot="/proj" /></AgentSurfaceContext.Provider>);
+    const usage=screen.getByTestId("agent-usage");
+    expect(usage).toHaveTextContent("2 provider steps");
+    expect(usage).toHaveTextContent("100 input");
+    expect(usage).toHaveTextContent("11 output");
+    expect(usage).toHaveTextContent("60.0% cache");
+    expect(usage).toHaveTextContent("1.25s");
+    expect(usage).toHaveTextContent("0.20s");
+    expect(usage).toHaveTextContent("error");
+    expect(usage).toHaveTextContent("Cost unverified");
+  });
+  it("keeps missing and invalid usage unknown and preserves failed or cancelled calls", () => {
+    render(<AgentSurfaceContext.Provider value={value({providerSteps:[
+      observation(1,{usage:null,usage_state:"unavailable",outcome:"cancelled"}),
+      observation(2,{usage:{prompt_tokens:-20,completion_tokens:"9",prompt_cache_hit_tokens:90}}),
+    ]})}><AgentPanel runId="run-a" projectRoot="/proj" /></AgentSurfaceContext.Provider>);
+    const usage=screen.getByTestId("agent-usage");
+    expect(usage).toHaveTextContent("Input unavailable");
+    expect(usage).toHaveTextContent("Output unavailable");
+    expect(usage).toHaveTextContent("Cache unavailable");
+    expect(usage).toHaveTextContent("cancelled");
+    expect(usage).not.toHaveTextContent("0 input");
+  });
+  it("does not imply an empty usage log means zero cost", () => {
+    render(<AgentSurfaceContext.Provider value={value()}><AgentPanel runId="run-a" projectRoot="/proj" /></AgentSurfaceContext.Provider>);
+    expect(screen.queryByTestId("agent-usage")).not.toBeInTheDocument();
+  });
+});

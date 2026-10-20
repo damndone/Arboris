@@ -1229,3 +1229,10 @@
 .wb-agent-target-recovery p { margin: 8px 0; }
 .wb-agent-target-recovery ol { padding-left: 20px; }
 .wb-agent-target-recovery button { margin: 4px 8px 4px 0; }
+
+.wb-agent-usage { padding: 6px 10px; color: var(--label-secondary); font-size: 11px; border-bottom: 1px solid var(--separator); }
+.wb-agent-usage summary { cursor: pointer; }
+.wb-agent-usage p { max-width: 80ch; }
+.wb-agent-usage__scroll { max-height: 240px; overflow: auto; }
+.wb-agent-usage table { width: 100%; border-collapse: collapse; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.wb-agent-usage th, .wb-agent-usage td { text-align: left; padding: 3px 8px; border-bottom: 1px solid var(--separator); }

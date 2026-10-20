@@ -196,6 +196,7 @@ export interface AgentSurfaceContextValue {
   approvePlan?: (version: number) => Promise<void>;
   approveAndRunPlan?: (version: number) => Promise<void>;
   durableTurns?: AgentDurableTurn[];
+  providerSteps?: AgentEvent[];
   continueTurn?: () => Promise<void>;
   resumeTurn?: (turnId: string) => Promise<void>;
   queueTurnMessage?: (kind: "steer" | "follow_up", text: string) => Promise<void>;
@@ -363,6 +364,7 @@ export function AgentSurfaceProvider({
   const [confirmationBusyId, setConfirmationBusyId] = useState<string | null>(null);
   const [activeOperation, setActiveOperation] = useState<AgentOperationStatus | null>(null);
   const [eventCursor, setEventCursor] = useState(0);
+  const [providerSteps, setProviderSteps] = useState<AgentEvent[]>([]);
   const [lastEventType, setLastEventType] = useState<string | null>(null);
   const [liveResponseText, setLiveResponseText] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -462,6 +464,8 @@ export function AgentSurfaceProvider({
       .sort((left, right) => left.seq - right.seq);
     if (unseen.length === 0) return;
     const latest = unseen[unseen.length - 1];
+    const observations = unseen.filter(event => event.event_type === "provider_step");
+    if (observations.length) setProviderSteps(current => [...current, ...observations]);
     eventCursorRef.current = latest.seq;
     for (const event of unseen) {
       if (event.event_type === "message_start") {
@@ -535,6 +539,7 @@ export function AgentSurfaceProvider({
     setActiveTurnStartedAt(null);
     setConfirmationBusyId(null);
     setEventCursor(0);
+    setProviderSteps([]);
     eventCursorRef.current = 0;
     setLastEventType(null);
     setLiveResponseText("");
@@ -1240,7 +1245,7 @@ export function AgentSurfaceProvider({
     navigationLinks,
     hierarchy,
     activeOperation,
-    eventCursor,
+    eventCursor,providerSteps,
     lastEventType,
     liveResponseText,
     activeTurnStartedAt,
@@ -1285,7 +1290,7 @@ export function AgentSurfaceProvider({
     pinChapter,
     unpinChapter,
     navigation,
-    eventCursor,
+    eventCursor,providerSteps,
     lastEventType,
     liveResponseText,
     activeTurnStartedAt,
