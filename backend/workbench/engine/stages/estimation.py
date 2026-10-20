@@ -202,6 +202,14 @@ def _fit_panel_ols(ctx, env):
     )
     if kernel is not None:
         record_inference_kernel(ctx, kernel)
+    from ..panel_diagnostics import panel_evidence
+    from ..completion_evidence import publish_completion_evidence
+
+    diagnostics, positions, definition = panel_evidence(fitted, primary, ctx.data.frame,
+        y=ctx.artifacts['_normalized_y'], x=ctx.artifacts['_normalized_x'],
+        entity=id_cands[0] if id_cands else None, time=t_cands[0] if t_cands else None, cluster=cluster)
+    publish_completion_evidence(ctx, env, primary, point_definition=definition,
+        retained_positions=positions, diagnostics={'panel': diagnostics})
     return "panel_ols_1", primary, None
 
 

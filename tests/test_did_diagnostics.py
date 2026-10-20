@@ -79,12 +79,12 @@ def test_parallel_trends_rejects_on_violated_pretrend():
 
 
 def test_parallel_trends_uses_the_leads_covariance():
-    # Two leads of 1.0 with variance 1: independent, F = (1 + 1) / 2 = 1; perfectly
-    # correlated at 0.9, the joint test sees one shift, F = 2 / (1 + 0.9) / 2.
+    # Without finite denominator df, report the actual Wald chi-square, not Wald/q.
     independent = _parallel_trends(_leads([1.0, 1.0], [[1.0, 0.0], [0.0, 1.0]]))
     correlated = _parallel_trends(_leads([1.0, 1.0], [[1.0, 0.9], [0.9, 1.0]]))
-    assert independent["statistic"] == pytest.approx(1.0)
-    assert correlated["statistic"] == pytest.approx(1 / 1.9)
+    assert independent["statistic"] == pytest.approx(2.0)
+    assert independent["distribution"] == "chi2"
+    assert correlated["statistic"] == pytest.approx(2 / 1.9)
 
 
 def test_parallel_trends_not_rejected_when_leads_flat():

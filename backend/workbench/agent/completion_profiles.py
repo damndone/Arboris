@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from ..canonical import sha256_canonical
 
-NATIVE_COMPANIONS = {'survival_cox', 'iv_2sls'}
+NATIVE_COMPANIONS = {'survival_cox', 'iv_2sls', 'panel_ols', 'did'}
 
 
 def companion_model(products, ref, artifact, model):
@@ -41,6 +41,22 @@ def companion_model(products, ref, artifact, model):
 
 
 def native_diagnostics(family, values):
+    if family in {'panel', 'did'}:
+        for value in values:
+            panel = (value.get('diagnostics') or {}).get('panel') or {}
+            valid = (value.get('contract') == 'analysis-completion.evidence.v1'
+                and panel.get('status') == 'computed' and panel.get('method') == 'panel_within_residual_descriptive_v1'
+                and panel.get('nobs') == value.get('nobs') and panel.get('groups')
+                and len(panel.get('residuals', [])) == value.get('nobs')
+                and panel.get('total_parameter_rank', 0) > 0 and panel.get('residual_df', 0) > 0)
+            if family == 'did':
+                did = (value.get('diagnostics') or {}).get('did') or {}
+                trends = did.get('parallel_trends') or {}
+                valid = (valid and trends.get('verdict') in {'not_rejected', 'rejected'}
+                    and trends.get('n_pre_leads', 0) > 0
+                    and type(trends.get('pvalue')) in {float, int} and 0 <= trends['pvalue'] <= 1)
+            if valid:
+                return True
     if family == 'iv':
         for value in values:
             diag = (value.get('diagnostics') or {}).get('iv') or {}
@@ -71,6 +87,29 @@ def native_diagnostics(family, values):
 
 
 def native_findings(family, values):
+    if family in {'panel', 'did'}:
+        from ..checks.fit_checks import CLUSTER_COUNT
+
+        findings = []
+        for value in values:
+            panel = (value.get('diagnostics') or {}).get('panel') or {}
+            if panel:
+                if panel.get('covariance') != 'clustered':
+                    findings.append(f'{family}:diagnostics:within_dependence_inference_unverified')
+                elif (panel.get('cluster_count') or 0) < CLUSTER_COUNT.threshold('severe_below'):
+                    findings.append(f'{family}:diagnostics:few_clusters_inference_unverified')
+            if family == 'did':
+                did = (value.get('diagnostics') or {}).get('did') or {}
+                trends = did.get('parallel_trends') or {}
+                if trends.get('verdict') == 'unavailable' or not trends.get('n_pre_leads'):
+                    findings.append('did:diagnostics:pretrends_unavailable')
+                if trends.get('omitted_pre_leads'):
+                    findings.append('did:diagnostics:pretrends_partly_unidentified')
+                if trends.get('verdict') == 'rejected':
+                    findings.append('did:diagnostics:pretrends_rejected_requires_revision')
+                if did.get('interpretation_restriction'):
+                    findings.append('did:diagnostics:staggered_interpretation_requires_revision')
+        return list(dict.fromkeys(findings))
     if family == 'iv':
         findings = []
         for value in values:

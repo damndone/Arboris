@@ -358,6 +358,15 @@ class DiagnosticsStage:
                     "econometrics",
                     model_input_ids,
                 )
+                from ..panel_diagnostics import panel_evidence
+                from ..completion_evidence import publish_completion_evidence
+
+                primary = dict(model_results)['did_1']
+                panel, positions, definition = panel_evidence(did_fitted, primary, norm.frame,
+                    y=norm.y, x=['_did_D', *normalized_x], entity=norm.entity, time=norm.time, cluster=cluster)
+                publish_completion_evidence(ctx, env, primary, point_definition=definition,
+                    retained_positions=positions, diagnostics={'panel': panel, 'did': did_diag},
+                    diagnostic_artifact_ids=['did_diagnostics'])
 
         if model_type == "cs_did":
             cs_result = ctx.artifacts.get("_cs_did_result")

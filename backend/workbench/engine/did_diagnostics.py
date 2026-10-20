@@ -34,7 +34,7 @@ def _parallel_trends(event_study: dict) -> dict:
     terms = event_study.get("pre_period_terms") or []
     if not terms:
         return {"test": "joint_pre_leads_f", "statistic": None, "pvalue": None,
-                "n_pre_leads": 0, "verdict": "not_rejected",
+                "n_pre_leads": 0, "verdict": "unavailable", "reason": "no_estimable_pre_period_leads",
                 "message": "No pre-period leads available to test."}
     beta = np.asarray([np.nan if v is None else v for v in event_study["pre_period_estimates"]], dtype=float)
     covariance = np.asarray(
@@ -46,22 +46,24 @@ def _parallel_trends(event_study: dict) -> dict:
     q = int(keep.sum())
     if q == 0:
         return {"test": "joint_pre_leads_f", "statistic": None, "pvalue": None,
-                "n_pre_leads": 0, "verdict": "not_rejected",
+                "n_pre_leads": 0, "verdict": "unavailable", "reason": "no_estimable_pre_period_leads",
                 "message": "No estimable pre-period leads available to test."}
     f_stat = float(beta @ np.linalg.solve(covariance, beta) / q)
     df_den = event_study.get("effective_df")
     pvalue = float(stats.f.sf(f_stat, q, df_den)) if df_den else float(stats.chi2.sf(f_stat * q, q))
     df1 = q
     verdict = "rejected" if pvalue < 0.05 else "not_rejected"
-    return {"test": "joint_pre_leads_f", "statistic": f_stat,
+    return {"test": "joint_pre_leads_f" if df_den else "joint_pre_leads_wald", "statistic": f_stat if df_den else f_stat*q,
             "pvalue": round(pvalue, 6), "n_pre_leads": df1, "verdict": verdict,
             "df_num": q, "df_den": df_den,
             "distribution": "F" if df_den else "chi2",
+            "statistic_definition": "wald_over_q" if df_den else "wald_chi_square",
+            "tested_pre_leads": [term for term, included in zip(terms, keep) if included],
+            "omitted_pre_leads": [term for term, included in zip(terms, keep) if not included],
             "message": (
-                "Pre-trend leads jointly insignificant (p >= 0.05); parallel "
-                "trends not rejected." if verdict == "not_rejected" else
-                "Pre-trend leads jointly significant (p < 0.05); parallel trends "
-                "rejected — DID identifying assumption is suspect.")}
+                "Zero pre-period coefficients are not rejected; this does not establish counterfactual parallel trends."
+                if verdict == "not_rejected" else
+                "Zero pre-period coefficients are rejected; review the design and identifying assumptions.")}
 
 
 def build_did_diagnostics(fitted: Any, norm: NormalizedDID, frame, *,

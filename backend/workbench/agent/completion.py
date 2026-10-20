@@ -223,7 +223,7 @@ def evaluate(project_root, contract, evidence):
                              and (main.get('model_type') not in NATIVE_COMPANIONS
                                   or ref['artifact_id'] == main['model_id'] + '.completion')]
         if not _diagnostics(family, diagnostic_values):
-            reason = 'computed_and_model_bound' if family in {'ols', 'lmm', 'survival', 'iv'} else 'native_profile_unverified'
+            reason = 'computed_and_model_bound' if family in {'ols', 'lmm', 'survival', 'iv', 'panel', 'did'} else 'native_profile_unverified'
             missing.append(f'{family}:diagnostics:{reason}')
         missing.extend(native_findings(family, diagnostic_values))
         alternates = [model for ref, artifact in groups['sensitivity']
@@ -280,6 +280,30 @@ def _missing_label(code, language):
         'survival:diagnostics:ph_rejected_requires_model_revision': (
             'Cox PH was rejected; the time-varying effect requires an explicit model revision.',
             'Cox 比例风险检验拒绝：时变效应尚未用适用模型处理，需明确修订方案。'),
+        'panel:diagnostics:within_dependence_inference_unverified': (
+            'Inference allowing within-unit dependence has not been validated for this panel fit.',
+            '该面板拟合的组内相关推断尚未核验；不能用逐行 HC 当作固定 T 的聚类推断。'),
+        'did:diagnostics:within_dependence_inference_unverified': (
+            'Inference allowing within-unit dependence has not been validated for this DID fit.',
+            '该 DID 拟合的组内相关推断尚未核验。'),
+        'panel:diagnostics:few_clusters_inference_unverified': (
+            'There are fewer than 10 clusters; small-cluster inference remains unverified.',
+            '聚类少于 10 个，少聚类推断仍未验证，不能声称分析完成。'),
+        'did:diagnostics:few_clusters_inference_unverified': (
+            'There are fewer than 10 clusters; DID inference remains unverified.',
+            '聚类少于 10 个，DID 的少聚类推断仍未验证。'),
+        'did:diagnostics:pretrends_unavailable': (
+            'There are no estimable pre-period leads to test; the design needs additional evidence.',
+            '没有可估计的前导项，无法检验预趋势；需补充识别证据或明确修订方案。'),
+        'did:diagnostics:pretrends_partly_unidentified': (
+            'Some declared pre-period leads are unidentified; a test of the remainder is insufficient.',
+            '部分前导项未识别，仅检验其余项不足以完成预趋势诊断。'),
+        'did:diagnostics:pretrends_rejected_requires_revision': (
+            'Zero pre-period coefficients were rejected; review and revise the identifying design.',
+            '前导项为零的检验被拒绝，需复核并明确修订识别方案。'),
+        'did:diagnostics:staggered_interpretation_requires_revision': (
+            'Staggered TWFE is not a generic ATT; an appropriate estimator/estimand revision is required.',
+            '交错实施 TWFE 不能直接解释为一般 ATT；需采用适用估计器并明确目标量。'),
         'iv:diagnostics:ar_unavailable': (
             'The global AR confidence set is unavailable or uncertified; weak-instrument inference remains incomplete.',
             'AR 全局置信集合不可用或未认证，弱工具推断仍未完成；需按不可用原因修订方案。'),

@@ -1,0 +1,42 @@
+{
+  "contract": "native-panel-validation.v1",
+  "tolerance": {
+    "rtol": 1e-07,
+    "atol": 1e-09
+  },
+  "residual_definition": "y minus all fitted slopes and fixed effects; independent native R stats::lm explicit indicators and Stata xtreg/predict,e. Residual diagnostics are descriptive and do not certify independence, model validity or causal identification.",
+  "row_transformations": {
+    "two_way": "All original 400 rows, entity and time effects",
+    "one_way": "All 400 rows, entity effects only; no inferred temporal pairing",
+    "unbalanced": "Retain source positions with (position+1) modulo 19 != 0; original order retained"
+  },
+  "did_reference": "Existing panel_cluster/oracle.json: original Stata coefficients, SE, CIs and joint pre-lead F against full covariance, unchanged strict tolerances in test_panel_cluster_inference.py. Missing pre-period leads are unavailable, not non-rejection.",
+  "limits": "No standalone serial-dependence test or cross-unit independence certificate. Entity/time labels define observed neighbors; gaps are not assumed to be one lag. HC without clustering is not certified for fixed-T FE; G<10 remains partial; G<30 caution has one source in checks/fit_checks.py. TWFE staggered interpretation restrictions require revision, not automatic estimator substitution.",
+  "no_m0_claim": "No new panel/DID M0 trace or evaluated candidate score is invented; these are native numerical/delivery fixtures. The original six M0 failure recordings remain unchanged.",
+  "commands": [
+    "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 Rscript tests/fixtures/agent_completion/panel/generate_residual_reference.R",
+    "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 /Applications/Stata/StataMP.app/Contents/MacOS/stata-mp -bq do REPO_ROOT/tests/fixtures/agent_completion/panel/generate_residual_reference.do REPO_ROOT (cwd: scratch directory)",
+    "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/python -m pytest -q tests/test_agent_completion_panel.py tests/test_panel_cluster_inference.py tests/test_did_diagnostics.py tests/test_did_wiring.py"
+  ],
+  "repository_files": {
+    "tests/fixtures/agent_completion/panel/residual_reference_r.json": "09c2691fb22e567c00d3f4c709e3d97c8d09cd2afff2932933cb875f2c4b7ea1",
+    "tests/fixtures/agent_completion/panel/generate_residual_reference.do": "76d0a4d4dc8b9f00b3074c6359c09e9ebafd099b2889259692ed52712bb303ac",
+    "tests/fixtures/agent_completion/panel/residual_reference_stata.csv": "0f7c41ebd8795ce74bccfa7b88e2903f858df52bf94d5cae4e1687e02af0adb2",
+    "tests/fixtures/agent_completion/panel/generate_residual_reference.R": "25f5743a99f7139d588024fc24d2feceb1f1244e6d2f56728981975ff97a224f",
+    "tests/fixtures/admission/panel_ols/data.csv": "b03b366bfd8cb184868689b8a979711c0f2a13b946d282a2bad59ccc5871a9ee",
+    "tests/fixtures/admission/did/data.csv": "2c8665a37e562f75943261907f8c7742a6a6c9b162c90aa279a9651d6afbd30e",
+    "tests/fixtures/panel_cluster/staggered.csv": "480b5a87a735761be6ccb0260e56a631ce34c1f9245de6a7a50bb072379471dc",
+    "tests/fixtures/panel_cluster/oracle.json": "5762c67bc879535d6ad880028fe255fccef9048b4d0c35de06321712a39a331e",
+    "tests/fixtures/panel_cluster/generate_oracle.py": "c7fb5ba5a687afd93a3288a6d644d57cf3610b584cde07c2185b2fce20242400"
+  },
+  "python_versions": {
+    "numpy": "2.5.0",
+    "pandas": "3.0.4",
+    "linearmodels": "7.0"
+  },
+  "sources": [
+    "https://www.stata.com/manuals/xtxtreg.pdf",
+    "https://www.stata.com/manuals/xtxtregpostestimation.pdf",
+    "https://bashtage.github.io/linearmodels/panel/panel/linearmodels.panel.data.PanelData.html"
+  ]
+}

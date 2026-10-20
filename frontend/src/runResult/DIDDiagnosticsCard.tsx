@@ -7,7 +7,8 @@ export interface DIDDiagnostics {
     coef: (number | null)[]; se: (number | null)[]; ci_lower: (number | null)[];
     ci_upper: (number | null)[]; ref_period: number };
   parallel_trends: { test: string; statistic: number | null; pvalue: number | null;
-    n_pre_leads: number; verdict: "not_rejected" | "rejected"; message: string;
+    n_pre_leads: number; verdict: "not_rejected" | "rejected" | "unavailable"; message: string;
+    statistic_definition?: "wald_over_q" | "wald_chi_square";
     df_num?: number; df_den?: number | null; distribution?: "F" | "chi2" };
   goodman_bacon: { applicable: boolean; message?: string;
     components: { type: string; weight: number; estimate: number }[];
@@ -55,8 +56,14 @@ export function DIDDiagnosticsCard({ diagnostics }: { diagnostics: DIDDiagnostic
   if (!d) return null;
   const esOk = d.event_study.applicable !== false && d.event_study.event_time.length > 0;
   const baconOk = d.goodman_bacon.applicable !== false;
-  const ptColor = d.parallel_trends.verdict === "not_rejected" ? "var(--status-holds-fg)" : "var(--status-fails-fg)";
-  const ptText = d.parallel_trends.verdict === "not_rejected" ? "not rejected" : "rejected";
+  const ptColor = d.parallel_trends.verdict === "unavailable" ? "var(--text-secondary)"
+    : d.parallel_trends.verdict === "not_rejected" ? "var(--status-holds-fg)" : "var(--status-fails-fg)";
+  const ptText = d.parallel_trends.verdict === "unavailable" ? "not testable"
+    : d.parallel_trends.verdict === "not_rejected" ? "not rejected" : "rejected";
+  const pt = d.parallel_trends;
+  const statisticLabel = pt.distribution === "chi2"
+    ? pt.statistic_definition === "wald_chi_square" ? `χ²(${pt.df_num})` : "Stored statistic (legacy definition)"
+    : `F(${pt.df_num}${pt.df_den ? `, ${pt.df_den}` : ""})`;
   return (
     <section className="ios-card did-diagnostics" aria-label="did-diagnostics">
       <div className="ios-card-title">DID diagnostics</div>
@@ -77,10 +84,12 @@ export function DIDDiagnosticsCard({ diagnostics }: { diagnostics: DIDDiagnostic
         Parallel trends <span style={{ color: ptColor }}>{ptText}</span>
         {d.parallel_trends.pvalue != null && (
           <> ({d.parallel_trends.statistic != null && d.parallel_trends.df_num != null
-            ? `F(${d.parallel_trends.df_num}${d.parallel_trends.df_den ? `, ${d.parallel_trends.df_den}` : ""}) = ${d.parallel_trends.statistic.toFixed(2)}, `
+            ? `${statisticLabel} = ${d.parallel_trends.statistic.toFixed(2)}, `
             : ""}p={d.parallel_trends.pvalue.toFixed(3)})</>
         )}
       </div>
+
+      <p>{d.parallel_trends.message}</p>
 
       <div>
         Goodman-Bacon{" "}
