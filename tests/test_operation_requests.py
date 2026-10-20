@@ -53,7 +53,7 @@ def test_generic_tool_reaches_shared_admission_without_legacy_create_proposal(tm
     monkeypatch.setattr(orchestrator, "create_proposal", legacy_forbidden)
     arguments = {key: value for key, value in proposal_kwargs().items() if key not in {"chain_id", "command_id"}}
     result = asyncio.run(orchestrator.tool_registry("chain-a").execute(
-        {"tool_call_id": "typed-generic", "tool_id": "propose_operation", "arguments": arguments},
+        {"tool_call_id": "typed-generic", "tool_id": "run_operation", "arguments": arguments},
         session_id="chain-session",
         metadata={"command_id": "cmd-typed", "allowed_operations": ["model.rerun"], "context_fingerprint": "ctx-1"},
     ))

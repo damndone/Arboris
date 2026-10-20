@@ -509,8 +509,11 @@ class WorkbenchOrchestrator(OrchestrationWorkflows, OrchestrationProposals, Orch
                             },
                         )
                     recovered.append(
-                        await self.reconcile_confirmed_proposal(
+                        await self.execute_confirmed_operation(
                             record.record_id,
+                            current_context_fingerprint=record.preconditions.get("context_fingerprint"),
+                            current_active_head_run_id=record.preconditions.get("active_head_run_id"),
+                            allow_recovery=True,
                             project_root=project_root,
                         )
                     )

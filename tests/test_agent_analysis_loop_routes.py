@@ -314,7 +314,7 @@ def test_chain_tool_registry_creates_canonical_analysis_loop_proposal_from_exact
     generic = asyncio.run(
         registry.execute(
             {
-                "tool_id": "propose_operation",
+                "tool_id": "run_operation",
                 "tool_call_id": "call-generic-analysis-loop",
                 "arguments": {
                     "operation_id": "model.rerun",

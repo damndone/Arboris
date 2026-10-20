@@ -275,13 +275,15 @@ def test_analysis_loop_execution_recomputes_and_persists_executed_proposal_hash(
         )
 
     completed = asyncio.run(
-        orchestrator.execute_confirmed_proposal(
+        orchestrator.execute_confirmed_operation(
             record.record_id,
+            project_root=orchestrator.repository.root.parent,
+            allow_recovery=True,
             current_context_fingerprint=proposal.preconditions[
                 "context_fingerprint"
             ],
             current_active_head_run_id="run-source",
-            executor=executor,
+            rerun_executor=executor,
         )
     )
 

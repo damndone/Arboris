@@ -124,7 +124,7 @@ class ProposalReadyAdapter:
             request.request_id,
             {
                 "tool_call_id": "call-propose",
-                "tool_id": "propose_operation",
+                "tool_id": "run_operation",
                 "arguments": {},
             },
         )
@@ -354,7 +354,7 @@ def test_proposal_ready_is_a_successful_terminal_state_even_at_step_budget(
         tools = ToolRegistry()
         tools.register(
             ToolDefinition(
-                tool_id="propose_operation",
+                tool_id="run_operation",
                 version="v1",
                 input_schema={"type": "object"},
                 side_effect="proposal",

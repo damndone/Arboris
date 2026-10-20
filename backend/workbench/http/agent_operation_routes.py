@@ -425,9 +425,13 @@ async def reconcile_agent_operation(
         context_provider=NodeOperationContextProvider(root),
     )
     from .notebook_runtime import notebook_service_from_state
-    if record.operation_id != "graph.fork":
-        record = await orchestrator.reconcile_confirmed_proposal(
-            record_id, project_root=root, notebook_service=notebook_service_from_state(root, request.app.state)
+    if record.operation_id != "graph.fork" and record.status not in {"completed", "failed", "stale", "cancelled"}:
+        record = await orchestrator.execute_confirmed_operation(
+            record_id,
+            current_context_fingerprint=record.preconditions.get("context_fingerprint"),
+            current_active_head_run_id=record.preconditions.get("active_head_run_id"),
+            allow_recovery=True,
+            project_root=root, notebook_service=notebook_service_from_state(root, request.app.state)
         )
     return {"operation": record.to_dict(), "status": record.status}
 

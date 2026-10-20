@@ -82,18 +82,18 @@ def test_tool_builder_uses_injected_handlers_and_preserves_descriptors():
         proposal_tool_schema=lambda: {"type": "object"},
         propose_analysis_loop=propose,
         update_plan=propose,
-        propose_operation=propose,
+        run_operation=propose,
         plan_analysis=propose,
     )
     descriptors = {item["tool_id"]: item for item in registry.descriptors()}
-    assert set(descriptors) == {"inspect", "propose_analysis_loop", "update_plan", "propose_operation", "run_operation", "plan_analysis"}
+    assert set(descriptors) == {"inspect", "propose_analysis_loop", "update_plan", "run_operation", "plan_analysis"}
     assert descriptors["propose_analysis_loop"]["scope_requirements"] == ["chain", "active_head"]
     assert descriptors["propose_analysis_loop"]["max_output_budget"] == 24_000
     assert descriptors["update_plan"]["input_schema"] is module._UPDATE_PLAN_SCHEMA
-    assert descriptors["propose_operation"]["side_effect"] == "proposal"
+    assert descriptors["run_operation"]["side_effect"] == "proposal"
     assert seen == []
     result = asyncio.run(registry.execute(
-        {"tool_id": "propose_operation", "tool_call_id": "call", "arguments": {}},
+        {"tool_id": "run_operation", "tool_call_id": "call", "arguments": {}},
         session_id="chain-session",
     ))
     assert result.ok and result.output == {"requires_confirmation": True}
@@ -116,6 +116,6 @@ def test_duplicate_tool_is_rejected_before_building_the_proposal_schema():
             proposal_tool_schema=schema,
             propose_analysis_loop=handler,
             update_plan=handler,
-            propose_operation=handler,
+            run_operation=handler,
             plan_analysis=handler,
         )

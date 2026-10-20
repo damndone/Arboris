@@ -401,7 +401,7 @@ def test_chain_turn_receives_structured_proposal_protocol(
     ]
     assert len(protocol_messages) == 1
     protocol = protocol_messages[0]["content"]
-    assert "must call propose_operation" in protocol
+    assert "must call run_operation" in protocol
     assert "does not execute" in protocol
     assert "description does not execute a result" in protocol
     assert "model.joint_f_test" in protocol
@@ -854,7 +854,7 @@ class ProposalCallingAdapter:
                 request.request_id,
                 {
                     "tool_call_id": "call-propose",
-                    "tool_id": "propose_operation",
+                    "tool_id": "run_operation",
                     "arguments": {
                         "operation_id": "model.rerun",
                         "operation_version": "v1",
@@ -1355,9 +1355,9 @@ def test_chain_turn_wires_scoped_read_only_tools_without_mutation(
             for tool in adapter.requests[0].tools
         }
         assert "inspect_node_context" in tool_ids
-        assert "propose_operation" in tool_ids
+        assert "run_operation" in tool_ids
         proposal_tool = next(
-            tool for tool in adapter.requests[0].tools if tool.get("tool_id") == "propose_operation"
+            tool for tool in adapter.requests[0].tools if tool.get("tool_id") == "run_operation"
         )
         proposal_schema = proposal_tool["input_schema"]
         # The envelope stays shape-agnostic: a `oneOf` is an AND with its
@@ -1459,7 +1459,7 @@ def test_main_role_turn_exposes_project_evidence_and_permissioned_operation_tool
         "inspect_custom_skills",
         "check_model_claims",
     }
-    operation_tools = {"run_operation", "propose_operation", "propose_analysis_loop", "update_plan", "plan_analysis"}
+    operation_tools = {"run_operation", "propose_analysis_loop", "update_plan", "plan_analysis"}
     source_tools = {"list_project_datasets", "inspect_data_schema", "inspect_node_context", "inspect_operation_contract"}
     assert tool_ids == evidence_tools | source_tools | operation_tools
     for tool in FakeAgentAdapter.instances[-1].requests[0].tools:
@@ -1551,7 +1551,7 @@ def test_main_turn_refreshes_protocol_for_existing_session(
 
 
 class ProposingAdapter:
-    """Emits one propose_operation call built from real project state."""
+    """Emits one run_operation call built from real project state."""
 
     instances: list["ProposingAdapter"] = []
     proposal_arguments: dict = {}
@@ -1568,7 +1568,7 @@ class ProposingAdapter:
                 request.request_id,
                 {
                     "tool_call_id": "call-propose-1",
-                    "tool_id": "propose_operation",
+                    "tool_id": "run_operation",
                     "arguments": ProposingAdapter.proposal_arguments,
                 },
             )
@@ -1732,6 +1732,7 @@ def test_confirmed_proposal_executes_rerun_and_reconciles_to_completion(
     import io
     import time
 
+    from workbench.agent.orchestrator import WorkbenchOrchestrator
     from workbench.http import agent_routes
     from workbench.lineage.node_write_validation import (
         NodeWriteOperationRequestV1,
@@ -1868,12 +1869,16 @@ def test_confirmed_proposal_executes_rerun_and_reconciles_to_completion(
         final = reconciled.json()["operation"]
         assert final["status"] == "completed"
         assert final["verification"]
+        async def terminal_execution_must_not_restart(*args, **kwargs):
+            raise AssertionError("Terminal reconciliation must not append an observation or execute again")
+
+        monkeypatch.setattr(WorkbenchOrchestrator, "execute_confirmed_operation", terminal_execution_must_not_restart)
         again = client.post(
             f"/agent/sessions/{session_id}/operations/{record_id}/reconcile",
             params={"project_root": str(project.root)},
         )
         assert again.status_code == 200
-        assert again.json()["operation"]["status"] == "completed"
+        assert again.json()["operation"] == final
 
         unknown = client.post(
             f"/agent/sessions/{session_id}/operations/oprec_missing/reconcile",

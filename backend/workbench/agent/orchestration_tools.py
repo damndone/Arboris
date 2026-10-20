@@ -348,7 +348,7 @@ class OrchestrationTools:
             context_tools = (*self.context_provider.global_tool_definitions(session_id=session_id),
                              *(tool for tool in context_tools if tool.tool_id in source_tools))
 
-        async def propose_operation(arguments: dict[str, Any], context) -> dict[str, Any]:
+        async def run_operation(arguments: dict[str, Any], context) -> dict[str, Any]:
             if context.session_id != session_id:
                 raise ValueError("tool session is outside the registered chain scope")
             operation_id = str(arguments["operation_id"])
@@ -491,7 +491,7 @@ class OrchestrationTools:
             proposal_tool_schema=lambda: self.operation_registry.proposal_tool_schema(),
             propose_analysis_loop=propose_analysis_loop,
             update_plan=update_plan,
-            propose_operation=propose_operation,
+            run_operation=run_operation,
             plan_analysis=plan_analysis,
         )
 

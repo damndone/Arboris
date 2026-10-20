@@ -72,7 +72,6 @@ TOOL_CONTENT_CLASSES: Mapping[str, str] = {
     # What the person and the Agent said earlier; tool results are excluded.
     "search_project_conversations": "workbench_state",
     "read_project_conversation": "workbench_state",
-    "propose_operation": "workbench_state",
     "run_operation": "workbench_state",
     "plan_analysis": "workbench_state",
     "update_plan": "workbench_state",
@@ -302,8 +301,12 @@ def current_project() -> Path | None:
     return _PROJECT_SCOPE.get()
 
 
+# Retired names are data compatibility only; never publish them as callable tools.
+RETIRED_TOOL_CONTENT_CLASSES: Mapping[str, str] = {"propose_operation": "workbench_state"}
+
+
 def tool_content_class(tool_id: str | None) -> str:
-    return TOOL_CONTENT_CLASSES.get(tool_id or "", "unclassified")
+    return TOOL_CONTENT_CLASSES.get(tool_id or "", RETIRED_TOOL_CONTENT_CLASSES.get(tool_id or "", "unclassified"))
 
 
 def _tool_names_by_call_id(messages: Sequence[Mapping[str, Any]]) -> dict[str, str]:

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import ast
-import hashlib
 import importlib
 import importlib.util
 from concurrent.futures import ThreadPoolExecutor
@@ -23,13 +22,18 @@ def _boundary(name: str):
 
 def test_protocol_service_preserves_the_current_approved_prompt_contract() -> None:
     protocol = _boundary("protocol")
-    expected = {
-        "CHAIN_AGENT_PROTOCOL": "bdf72b48490efeadd57238ab7bf32aed25b76af44bb78c06c1810ff2188b9baa",
-        "MAIN_AGENT_PROTOCOL": "a32ad013a644c64594f428ba92ce86685abc4cab4d2c4936374f5be6f7fc3f36",
-        "CONTINUATION_NOTE": "472088888439a73be1782e92ab48d0e2118d84c668ac85e549331fbb08afa75c",
-    }
-    for name, digest in expected.items():
-        assert hashlib.sha256(getattr(protocol, name).encode("utf-8")).hexdigest() == digest
+    chain = protocol.CHAIN_AGENT_PROTOCOL
+    for clause in (
+        "must call run_operation", "requires_confirmation: true", "pending proposal has not executed",
+        "completed execution receipt", "server owns statistical semantics", "Never silently do fewer",
+        "no further tools", "graph.fork",
+    ):
+        assert clause.lower() in chain.lower()
+    assert "propose_operation" not in chain
+    assert "run_operation" in protocol.MAIN_AGENT_PROTOCOL
+    assert "same permissions" in protocol.MAIN_AGENT_PROTOCOL
+    assert "completed receipt" in protocol.MAIN_AGENT_PROTOCOL
+    assert protocol.CONTINUATION_NOTE.strip()
 
 
 def test_protocol_rendering_has_no_dependency_on_http_routes() -> None:

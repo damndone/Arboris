@@ -33,7 +33,7 @@ def wal_arguments(case):
     return {"session_id": "chain-session", "command_id": "command-recovery",
             "provider_step": case.invocation.provider_step, "tool_call_id": case.invocation.tool_call_id,
             "invocation_id": case.invocation.invocation_id, "tool_call": {
-                "tool_call_id": case.invocation.tool_call_id, "tool_id": "propose_operation",
+                "tool_call_id": case.invocation.tool_call_id, "tool_id": "run_operation",
                 "arguments": {"operation_id": case.request.operation_id,
                               "target": case.request.target, "preconditions": case.request.preconditions,
                               "changes": case.request.changes, "evidence_refs": list(case.request.evidence_refs),
@@ -60,7 +60,7 @@ class Case:
             self.proposal, session_id="chain-session"))
         # Stop at the real tool return / Core session append boundary.
         return ToolResult(tool_call_id=self.invocation.tool_call_id,
-                          tool_id="propose_operation", ok=True, output=output).to_payload()
+                          tool_id="run_operation", ok=True, output=output).to_payload()
 
     def run_actual_tool_return(self):
         orchestrator = self.fixture.orchestrator
@@ -211,7 +211,7 @@ def test_original_tool_return_is_persisted_read_and_repaired_without_reexecution
     assert module.read(rebuilt, **arguments) == entry
     message = module.repair_message(rebuilt, **arguments)
     assert message.payload == {"role": "tool", "tool_call_id": arguments["tool_call_id"],
-        "name": "propose_operation", "command_id": arguments["command_id"],
+        "name": "run_operation", "command_id": arguments["command_id"],
         "content": json.dumps(final_payload, ensure_ascii=False, sort_keys=True)}
     assert module.repair_message(rebuilt, **arguments) == message
     assert len([e for e in rebuilt.get_branch("chain-session") if e.entry_type == "tool_receipt"]) == 1

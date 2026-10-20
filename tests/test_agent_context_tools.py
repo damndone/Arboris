@@ -473,7 +473,7 @@ def test_unconfigured_orchestrator_does_not_expose_project_context_tool(
 
     tool_ids = {item["tool_id"] for item in orchestrator.tool_registry("chain-a").descriptors()}
 
-    assert "propose_operation" in tool_ids
+    assert "run_operation" in tool_ids
     assert "inspect_node_context" not in tool_ids
     assert "inspect_operation_contract" not in tool_ids
     assert "inspect_diagnostics" not in tool_ids
@@ -493,7 +493,7 @@ def test_configured_chain_exposes_read_only_node_context_provider(
 
     tool_ids = {item["tool_id"] for item in registry.descriptors()}
     assert {
-        "propose_operation",
+        "run_operation",
         "list_project_datasets",
         "inspect_node_context",
         "inspect_operation_contract",

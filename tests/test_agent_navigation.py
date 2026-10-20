@@ -119,11 +119,13 @@ def build_confirmed_rerun_fixture(project_root: Path) -> NavigationFixture:
         )
 
     completed = asyncio.run(
-        orchestrator.execute_confirmed_proposal(
+        orchestrator.execute_confirmed_operation(
             record.record_id,
+            project_root=orchestrator.repository.root.parent,
+            allow_recovery=True,
             current_context_fingerprint="context-1",
             current_active_head_run_id="run-source",
-            executor=executor,
+            rerun_executor=executor,
         )
     )
     _write_run(project_root, "run-source", "model:ols_1", "hash-source")

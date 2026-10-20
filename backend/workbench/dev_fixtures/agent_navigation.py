@@ -264,23 +264,29 @@ def seed_agent_navigation_fixture(
             current_active_head_run_id=source_run_id,
         )
         operation = asyncio.run(
-            orchestrator.execute_confirmed_proposal(
+            orchestrator.execute_confirmed_operation(
                 operation.record_id,
+                project_root=orchestrator.repository.root.parent,
+                allow_recovery=True,
                 current_context_fingerprint=context.context_fingerprint,
                 current_active_head_run_id=source_run_id,
-                executor=orchestrator.model_rerun_executor(root),
+                rerun_executor=orchestrator.model_rerun_executor(root),
             )
         )
         child_run_id = str(operation.outputs.get("target_run_id") or "")
         if not child_run_id:
             raise RuntimeError("fixture rerun did not persist a child run id")
         _wait_for_terminal_run(root, child_run_id, timeout_s=timeout_s)
-        operation = asyncio.run(
-            orchestrator.reconcile_confirmed_proposal(
-                operation.record_id,
-                project_root=root,
+        if operation.status not in {"completed", "failed", "stale", "cancelled"}:
+            operation = asyncio.run(
+                orchestrator.execute_confirmed_operation(
+                    operation.record_id,
+                    current_context_fingerprint=operation.preconditions.get("context_fingerprint"),
+                    current_active_head_run_id=operation.preconditions.get("active_head_run_id"),
+                    allow_recovery=True,
+                    project_root=root,
+                )
             )
-        )
         if operation.status != "completed":
             raise RuntimeError(
                 f"fixture operation did not reconcile: {operation.status} "

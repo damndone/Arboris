@@ -79,7 +79,7 @@ def test_generic_tool_passes_trusted_invocation_and_notifies_once(tmp_path, call
     arguments = {k: v for k, v in proposal_kwargs().items() if k not in {"chain_id", "command_id"}}
     registry = orchestrator.tool_registry("chain-a")
     results = [asyncio.run(registry.execute(
-        {"tool_call_id": call_id, "tool_id": "propose_operation", "arguments": arguments},
+        {"tool_call_id": call_id, "tool_id": "run_operation", "arguments": arguments},
         session_id="chain-session", metadata={"command_id": "cmd-1", "provider_step": 2,
         "tool_call_id": call_id, "invocation_id": "invocation-a"},
     )) for _ in range(2)]

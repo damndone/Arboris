@@ -29,7 +29,7 @@ class ProductAnalysis:
                     "arguments": {"calculations": [{"expression": "2 + 3" if self.calls == 1 else "5 - 2",
                                                      "label": "arithmetic"}]}}
         else:
-            call = {"tool_call_id": "analysis", "tool_id": "propose_operation", "arguments": {
+            call = {"tool_call_id": "analysis", "tool_id": "run_operation", "arguments": {
                 "operation_id": "operation.multi_step", "operation_version": "v1",
                 "target": {"run_id": "run_source", "node_ref": "stage:source", "artifact_id": "source_data"},
                 "preconditions": {"context_version": "node-operation-context/v1", "context_fingerprint": FINGERPRINT,

@@ -119,12 +119,12 @@ def workflow_steps_page() -> str:
 
 
 def agent_tools_page() -> str:
-    from workbench.egress import CONTENT_CLASSES, LOCAL_DEFAULT_ALLOW, REMOTE_DEFAULT_ALLOW, TOOL_CONTENT_CLASSES
+    from workbench.egress import CONTENT_CLASSES, LOCAL_DEFAULT_ALLOW, REMOTE_DEFAULT_ALLOW, RETIRED_TOOL_CONTENT_CLASSES, TOOL_CONTENT_CLASSES
 
     parts = [
         HEADER,
         "# Agent tools and what they may send\n\n",
-        "Every tool the Agent can call, and the class of content its result contains. The "
+        "Tool-result content classes, including historical persisted tool names. `propose_operation` is retired and cannot be called; its classification remains for reading old conversations. The "
         "project's data-sharing policy decides, per class, what may be sent to a remote model "
         "provider; anything else stays on this computer and the model receives only a summary.\n\n",
         _table(
@@ -136,6 +136,8 @@ def agent_tools_page() -> str:
         ),
         "\n",
         _table(["Tool", "Content class"], [[f"`{tool}`", f"`{cls}`"] for tool, cls in sorted(TOOL_CONTENT_CLASSES.items())]),
+        "\n## Historical result names (not callable)\n\n",
+        _table(["Retired tool", "Content class"], [[f"`{tool}`", f"`{cls}`"] for tool, cls in sorted(RETIRED_TOOL_CONTENT_CLASSES.items())]),
     ]
     return "".join(parts)
 

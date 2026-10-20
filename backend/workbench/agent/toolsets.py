@@ -46,10 +46,10 @@ def build_chain_tool_registry(
     proposal_tool_schema: Callable[[], dict[str, Any]],
     propose_analysis_loop: ToolHandler,
     update_plan: ToolHandler,
-    propose_operation: ToolHandler,
+    run_operation: ToolHandler,
     plan_analysis: ToolHandler,
 ) -> ToolRegistry:
-    """Keep context reads first, followed by the three proposal tools.
+    """Keep context reads first, followed by scoped planning and operation tools.
 
     Handlers retain their caller-owned session and authority checks. Publishing
     the allowlist neither calls those handlers nor creates an operation.
@@ -104,20 +104,9 @@ def build_chain_tool_registry(
         )
     )
 
-    registry.register(
-        ToolDefinition(
-            tool_id="propose_operation",
-            version="v1",
-            max_output_budget=24_000,
-            input_schema=proposal_tool_schema(),
-            side_effect="proposal",
-            scope_requirements=("chain",),
-            handler=propose_operation,
-        )
-    )
     registry.register(ToolDefinition(
         tool_id="run_operation", version="v1", input_schema=proposal_tool_schema(), max_output_budget=24_000,
-        side_effect="proposal", scope_requirements=("chain",), handler=propose_operation,
+        side_effect="proposal", scope_requirements=("chain",), handler=run_operation,
         description="Run one typed operation under the current permissions, or return its reviewable proposal."
     ))
     registry.register(ToolDefinition(

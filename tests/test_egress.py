@@ -101,6 +101,15 @@ def _declared_tool_ids() -> set[str]:
     return ids
 
 
+def test_retired_tool_results_keep_their_original_content_class(monkeypatch, tmp_path: Path) -> None:
+    assert "propose_operation" not in _declared_tool_ids()
+    historical = {"ok": True, "output": {"requires_confirmation": True}}
+    with egress_project(tmp_path):
+        body = _send(monkeypatch, _conversation("propose_operation", historical), REMOTE)
+    assert _tool_content(body) == historical
+    assert read_audit(tmp_path)[0]["decisions"][0]["content_class"] == "workbench_state"
+
+
 def test_every_tool_declares_what_it_can_send() -> None:
     declared = _declared_tool_ids()
     assert "show_dataset_rows" in declared

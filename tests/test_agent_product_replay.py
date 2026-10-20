@@ -43,7 +43,7 @@ class ScriptedAnalysis:
             }
         elif self.calls == (2 if self.with_plan else 1):
             call = {
-                "tool_call_id": "analysis", "tool_id": "propose_operation",
+                "tool_call_id": "analysis", "tool_id": "run_operation",
                 "arguments": {
                     "operation_id": "operation.multi_step", "operation_version": "v1",
                     "target": {"run_id": "run_source", "node_ref": "stage:source", "artifact_id": "source_data"},

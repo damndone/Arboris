@@ -2,7 +2,7 @@
 
 # Agent tools and what they may send
 
-Every tool the Agent can call, and the class of content its result contains. The project's data-sharing policy decides, per class, what may be sent to a remote model provider; anything else stays on this computer and the model receives only a summary.
+Tool-result content classes, including historical persisted tool names. `propose_operation` is retired and cannot be called; its classification remains for reading old conversations. The project's data-sharing policy decides, per class, what may be sent to a remote model provider; anything else stays on this computer and the model receives only a summary.
 
 | Content class | Sent to a remote provider by default | Sent to a local model by default |
 |---|---|---|
@@ -50,7 +50,6 @@ Every tool the Agent can call, and the class of content its result contains. The
 | `list_project_datasets` | `metadata` |
 | `plan_analysis` | `workbench_state` |
 | `propose_analysis_loop` | `workbench_state` |
-| `propose_operation` | `workbench_state` |
 | `read_project_conversation` | `workbench_state` |
 | `request_notebook_inspections` | `aggregate` |
 | `run_operation` | `workbench_state` |
@@ -59,3 +58,9 @@ Every tool the Agent can call, and the class of content its result contains. The
 | `submit_analysis_loop_intent` | `workbench_state` |
 | `submit_notebook_option_batch` | `workbench_state` |
 | `update_plan` | `workbench_state` |
+
+## Historical result names (not callable)
+
+| Retired tool | Content class |
+|---|---|
+| `propose_operation` | `workbench_state` |

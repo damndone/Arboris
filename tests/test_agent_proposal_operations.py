@@ -43,7 +43,7 @@ class ProposalToolAdapter:
                 request.request_id,
                 {
                     "tool_call_id": "call-proposal-1",
-                    "tool_id": "propose_operation",
+                    "tool_id": "run_operation",
                     "arguments": {
                         "operation_id": "model.rerun",
                         "target": {
@@ -398,7 +398,7 @@ def test_operation_registry_can_extend_with_explicit_definition() -> None:
     assert definition.effect_level == "read_only"
 
 
-def test_workbench_propose_operation_tool_creates_proposal_only(tmp_path: Path) -> None:
+def test_workbench_run_operation_tool_creates_proposal_only(tmp_path: Path) -> None:
     orchestrator = make_orchestrator(tmp_path)
     tool_registry = orchestrator.tool_registry("chain-a")
 
@@ -406,7 +406,7 @@ def test_workbench_propose_operation_tool_creates_proposal_only(tmp_path: Path) 
         tool_registry.execute(
             {
                 "tool_call_id": "call-proposal-1",
-                "tool_id": "propose_operation",
+                "tool_id": "run_operation",
                 "arguments": {
                     key: value
                     for key, value in proposal_kwargs().items()
@@ -474,11 +474,13 @@ def test_confirmed_proposal_creates_child_branch_and_is_idempotent(
     executor = SuccessfulRerunExecutor()
 
     completed = asyncio.run(
-        orchestrator.execute_confirmed_proposal(
+        orchestrator.execute_confirmed_operation(
             record.record_id,
+            project_root=orchestrator.repository.root.parent,
+            allow_recovery=True,
             current_context_fingerprint="ctx-1",
             current_active_head_run_id="run-1",
-            executor=executor,
+            rerun_executor=executor,
         )
     )
 
@@ -498,11 +500,13 @@ def test_confirmed_proposal_creates_child_branch_and_is_idempotent(
     assert child_branch[-1].parent_ref == EntryRef("chain-session", source_leaf_id)
 
     duplicate = asyncio.run(
-        orchestrator.execute_confirmed_proposal(
+        orchestrator.execute_confirmed_operation(
             record.record_id,
+            project_root=orchestrator.repository.root.parent,
+            allow_recovery=True,
             current_context_fingerprint="ctx-1",
             current_active_head_run_id="run-1",
-            executor=executor,
+            rerun_executor=executor,
         )
     )
     assert duplicate == completed
@@ -526,11 +530,13 @@ def test_confirmed_proposal_rechecks_preconditions_before_creating_branch(
 
     with pytest.raises(ProposalStaleError):
         asyncio.run(
-            orchestrator.execute_confirmed_proposal(
+            orchestrator.execute_confirmed_operation(
                 record.record_id,
+                project_root=orchestrator.repository.root.parent,
+                allow_recovery=True,
                 current_context_fingerprint="ctx-changed",
                 current_active_head_run_id="run-1",
-                executor=executor,
+                rerun_executor=executor,
             )
         )
 
@@ -556,11 +562,13 @@ def test_confirmed_proposal_records_executor_failure_and_is_idempotent(
     executor = FailingRerunExecutor()
 
     failed = asyncio.run(
-        orchestrator.execute_confirmed_proposal(
+        orchestrator.execute_confirmed_operation(
             record.record_id,
+            project_root=orchestrator.repository.root.parent,
+            allow_recovery=True,
             current_context_fingerprint="ctx-1",
             current_active_head_run_id="run-1",
-            executor=executor,
+            rerun_executor=executor,
         )
     )
 
@@ -578,11 +586,13 @@ def test_confirmed_proposal_records_executor_failure_and_is_idempotent(
     assert child_entries[-1].payload["operation_result"]["status"] == "failed"
 
     duplicate = asyncio.run(
-        orchestrator.execute_confirmed_proposal(
+        orchestrator.execute_confirmed_operation(
             record.record_id,
+            project_root=orchestrator.repository.root.parent,
+            allow_recovery=True,
             current_context_fingerprint="ctx-1",
             current_active_head_run_id="run-1",
-            executor=executor,
+            rerun_executor=executor,
         )
     )
     assert duplicate == failed
@@ -636,19 +646,24 @@ def test_submitted_child_is_reconciled_before_operation_completion(
     )
 
     submitted = asyncio.run(
-        orchestrator.execute_confirmed_proposal(
+        orchestrator.execute_confirmed_operation(
             record.record_id,
+            project_root=orchestrator.repository.root.parent,
+            allow_recovery=True,
             current_context_fingerprint="ctx-1",
             current_active_head_run_id="run-1",
-            executor=SubmittedRerunExecutor(),
+            rerun_executor=SubmittedRerunExecutor(),
         )
     )
     assert submitted.status == "running"
     assert submitted.outputs["target_run_id"] == "run-child"
 
     completed = asyncio.run(
-        orchestrator.reconcile_confirmed_proposal(
+        orchestrator.execute_confirmed_operation(
             record.record_id,
+            current_context_fingerprint=record.preconditions.get("context_fingerprint"),
+            current_active_head_run_id=record.preconditions.get("active_head_run_id"),
+            allow_recovery=True,
             project_root=tmp_path / "project",
         )
     )
@@ -704,16 +719,21 @@ def test_reconciled_child_failure_marks_operation_and_branch_failed(
         current_active_head_run_id="run-1",
     )
     submitted = asyncio.run(
-        orchestrator.execute_confirmed_proposal(
+        orchestrator.execute_confirmed_operation(
             record.record_id,
+            project_root=orchestrator.repository.root.parent,
+            allow_recovery=True,
             current_context_fingerprint="ctx-1",
             current_active_head_run_id="run-1",
-            executor=SubmittedRerunExecutor(),
+            rerun_executor=SubmittedRerunExecutor(),
         )
     )
     failed = asyncio.run(
-        orchestrator.reconcile_confirmed_proposal(
+        orchestrator.execute_confirmed_operation(
             submitted.record_id,
+            current_context_fingerprint=submitted.preconditions.get("context_fingerprint"),
+            current_active_head_run_id=submitted.preconditions.get("active_head_run_id"),
+            allow_recovery=True,
             project_root=tmp_path / "project",
         )
     )
@@ -763,11 +783,13 @@ def test_recover_operations_reconciles_interrupted_child_without_resubmitting(
         current_active_head_run_id="run-1",
     )
     submitted = asyncio.run(
-        orchestrator.execute_confirmed_proposal(
+        orchestrator.execute_confirmed_operation(
             record.record_id,
+            project_root=orchestrator.repository.root.parent,
+            allow_recovery=True,
             current_context_fingerprint="ctx-1",
             current_active_head_run_id="run-1",
-            executor=SubmittedRerunExecutor(),
+            rerun_executor=SubmittedRerunExecutor(),
         )
     )
 
@@ -849,11 +871,13 @@ def test_recover_operations_fails_when_recorded_child_is_missing(
         current_active_head_run_id="run-1",
     )
     submitted = asyncio.run(
-        orchestrator.execute_confirmed_proposal(
+        orchestrator.execute_confirmed_operation(
             record.record_id,
+            project_root=orchestrator.repository.root.parent,
+            allow_recovery=True,
             current_context_fingerprint="ctx-1",
             current_active_head_run_id="run-1",
-            executor=SubmittedRerunExecutor(),
+            rerun_executor=SubmittedRerunExecutor(),
         )
     )
 
@@ -929,8 +953,10 @@ def test_graph_fork_recovery_after_durable_lifecycle_crash_binds_one_effect(
 
     with pytest.raises(InjectedOperationCrash):
         asyncio.run(
-            orchestrator.execute_confirmed_fork(
+            orchestrator.execute_confirmed_operation(
                 record.record_id,
+                project_root=orchestrator.repository.root.parent,
+                allow_recovery=True,
                 current_context_fingerprint="ctx-1",
                 current_active_head_run_id="run-1",
             )

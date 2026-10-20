@@ -79,7 +79,7 @@ class MultiToolWorkflowAdapter:
                 request.request_id,
                 {
                     "tool_call_id": "call-proposal",
-                    "tool_id": "propose_operation",
+                    "tool_id": "run_operation",
                     "arguments": {
                         "operation_id": "model.rerun",
                         "operation_version": "v1",
@@ -283,11 +283,13 @@ def test_main_to_chain_multi_tool_workflow_stops_at_confirmation_then_completes(
                 verification={"passed": True, "status": "completed"},
             )
 
-        completed = await orchestrator.execute_confirmed_proposal(
+        completed = await orchestrator.execute_confirmed_operation(
             record.record_id,
+            project_root=orchestrator.repository.root.parent,
+            allow_recovery=True,
             current_context_fingerprint=adapter.context_fingerprint,
             current_active_head_run_id="run-a",
-            executor=executor,
+            rerun_executor=executor,
         )
 
         assert completed.status == "completed"
