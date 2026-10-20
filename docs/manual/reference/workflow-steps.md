@@ -772,6 +772,7 @@ Assemble the completed steps into a report.
 
 | Field | Required | Meaning |
 |---|---|---|
+| `specification_curve` |  | Render all model members of a frozen prior workflow; retain failures and native uncertainty. |
 | `report_contract` |  | Report contract identifier. |
 | `required_steps` |  | step_ids that must have completed before composing. |
 | `formats` |  | Output formats to emit. |

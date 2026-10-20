@@ -293,6 +293,9 @@ class WorkflowExecutor:
         if existing is not None and existing.plan_fingerprint != draft.plan_fingerprint:
             raise WorkflowExecutionError("source fingerprint changed; workflow plan cannot resume")
 
+        from .specification_curves import freeze_workflow
+        freeze_workflow(self.project_root, draft, resumed=existing is not None)
+
         states: dict[str, WorkflowStepState] = {}
         if existing is not None:
             for step in draft.steps:

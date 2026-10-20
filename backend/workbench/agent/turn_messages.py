@@ -67,6 +67,16 @@ def budget_exhausted_message(
 ) -> str:
     """Why a turn stopped without an answer, and what the user can do next."""
 
+    if error == "analysis_recovery_limit":
+        if language == "zh":
+            return ("部分完成：同一步已失败 2 次，已暂停自动尝试。\n"
+                + "已记录原因：" + (last_failure or "工具未能完成该步骤。")[:300]
+                + "\n修正选项：根据该错误核对数据、变量和方法条件，修订方案后明确继续；或保留缺项并结束。"
+                + "已完成的操作与证据保留，不自动切换方法或降低标准。")
+        return ("Partial completion: this step failed 2 times; automatic attempts have stopped.\n"
+            + "Recorded failure: " + (last_failure or "The tool could not complete this step.")[:300]
+            + "\nCorrection options: check the data, variables and method conditions, then explicitly continue with a revised plan; or finish with the gap recorded."
+            + " Completed operations and evidence are retained; no automatic method substitution or relaxed criteria.")
     distinct = list(dict.fromkeys(tools_used))
     if language == "zh":
         reason = "步数预算已用完" if error == "max_steps_exceeded" else "检测到重复调用同一工具"

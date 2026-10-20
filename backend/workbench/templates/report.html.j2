@@ -190,6 +190,24 @@
     </section>
     {% endif %}
 
+    {% if view_model.specification_curve %}
+    <section id="specification-curve">
+      <h2>Specification curve</h2>
+      <p>All model specifications fixed before this workflow executed. Formal preregistration and scientific comparability are unverified. Intervals are not simultaneous.</p>
+      {% if view_model.specification_curve.changed_or_unverified_samples %}<p>Analysis samples differ or are unverified; compare with care.</p>{% endif %}
+      <p>Declared estimand: {{ view_model.specification_curve.declared_estimand }}</p>
+      {% for image in view_model.specification_curve.images %}<img src="{{ image }}" alt="Specification curve with failed and unattempted members retained" style="max-width:100%;height:auto" />{% endfor %}
+      <table><thead><tr><th>Specification</th><th>Status</th><th>Estimate</th><th>SE</th><th>Lower</th><th>Upper</th><th>N</th><th>Gap / interval status</th></tr></thead>
+      <tbody>{% for row in view_model.specification_curve.rows %}<tr>
+        <td>{{ row.step_id }} {{ row.branch_id }}</td><td>{{ row.status }}</td>
+        <td>{{ row.estimate if row.estimate is not none else 'Unavailable' }}</td>
+        <td>{{ row.std_error if row.std_error is not none else 'Unavailable' }}</td>
+        <td>{{ row.ci_lower if row.ci_lower is not none else 'Unavailable' }}</td>
+        <td>{{ row.ci_upper if row.ci_upper is not none else 'Unavailable' }}</td>
+        <td>{{ row.nobs if row.nobs is not none else 'Unavailable' }}</td><td>{{ row.reason or row.interval_status }}</td>
+      </tr>{% endfor %}</tbody></table>
+    </section>
+    {% endif %}
     {% if view_model.exploration %}
     <section id="statistical-exploration">
       <h2>Statistical Exploration</h2>

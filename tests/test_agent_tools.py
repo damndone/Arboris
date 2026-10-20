@@ -332,7 +332,7 @@ def test_unknown_tool_is_visible_to_the_agent_and_does_not_abort_the_turn(
         )
 
         assert await agent.prompt("inspect the workflow contract") == "recovered after tool feedback"
-        branch = repository.get_branch("session-a")
+        branch = [entry for entry in repository.get_branch("session-a") if entry.entry_type == "message"]
         tool_payload = json.loads(branch[2].payload["content"])
         assert tool_payload["error"] == "unknown_tool"
         assert len(adapter.requests) == 2

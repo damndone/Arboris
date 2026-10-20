@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 from pathlib import Path
+import base64
 from typing import Any, Mapping
 from ...artifacts import read_json, register_artifact, write_json
 from ...exports import export_pdf, export_xlsx
@@ -55,13 +56,24 @@ def _execute_workflow_report(
         "steps": steps,
         "exploration_log": events,
     }
+    curve = None
+    if step is not None and step.spec.get("specification_curve"):
+        from ..specification_curves import publish_curve
+        curve = publish_curve(root, draft, step.spec["specification_curve"])
+        collection["specification_curve"] = curve
     collection_path = run_root / "artifacts" / "statistical_exploration" / f"{draft.workflow_id}.json"
     collection_path.parent.mkdir(parents=True, exist_ok=True)
     if collection_path.exists() and read_json(collection_path) != collection:
         raise WorkflowExecutionError("workflow report collection path is occupied")
     if not collection_path.exists():
         write_json(collection_path, collection)
-    register_artifact(run_root, collection_id, collection_path, "report_collection", "report.compose", [])
+    register_artifact(run_root, collection_id, collection_path, "report_collection", "report.compose", [curve["artifact_id"]] if curve else [])
+    curve_view = None
+    if curve:
+        folder = run_root / "artifacts/specification_curves"
+        curve_view = {**read_json(folder / f"{draft.workflow_id}.json"),
+            "images": ["data:image/png;base64," + base64.b64encode((folder / name).read_bytes()).decode("ascii")
+                       for name in curve["panel_files"]]}
     view_model = {
         "title": "Statistical workflow report",
         "facts": [
@@ -73,11 +85,13 @@ def _execute_workflow_report(
         "warnings": [],
         "descriptive_stats": [],
         "exploration": collection,
+        **({"specification_curve": curve_view} if curve_view else {}),
     }
     render_html_report(view_model, run_root, filename=f"{draft.workflow_id}.html", artifact_id=html_id, inputs=[collection_id])
     export_pdf(view_model, run_root, filename=f"{draft.workflow_id}.pdf", artifact_id=pdf_id, inputs=[collection_id])
     export_xlsx(
         {
+            **({"specification_curve": curve_view["rows"]} if curve_view else {}),
             "workflow_steps": [
                 {
                     "step_id": key,
@@ -93,7 +107,7 @@ def _execute_workflow_report(
         inputs=[collection_id],
     )
     return WorkflowStepResult(
-        artifact_ids=[collection_id, html_id, pdf_id, xlsx_id],
+        artifact_ids=[collection_id, html_id, pdf_id, xlsx_id] + ([curve["artifact_id"], *curve["figure_artifact_ids"]] if curve else []),
         row_counts={"steps": len(steps)},
         payload={"collection_id": collection_id},
     )

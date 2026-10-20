@@ -772,12 +772,17 @@ def base_workflow_step_contracts() -> dict[str, StepSpecContract]:
         "report.compose": StepSpecContract(
             summary="Assemble the completed steps into a report.",
             fields={
+                "specification_curve": "Render all model members of a frozen prior workflow; retain failures and native uncertainty.",
                 "report_contract": "Report contract identifier.",
                 "required_steps": "step_ids that must have completed before composing.",
                 "formats": "Output formats to emit.",
                 "sections": "Ordered report sections.",
                 "complete_on": "Completion condition.",
             },
+            field_schemas={"specification_curve": {"type": "object", "required": ["workflow_id", "term", "estimand"],
+                "properties": {"workflow_id": {"type": "string", "pattern": "^[A-Za-z0-9_.-]{1,160}$"},
+                    "term": {"type": "string", "minLength": 1, "maxLength": 200},
+                    "estimand": {"type": "string", "minLength": 1, "maxLength": 600}}, "additionalProperties": False}},
             semantic_validator_key="report.compose",
             reference_resolver_key="workflow.step_artifacts",
             output_schema_ref="workbench.report.collection/v1",

@@ -987,6 +987,7 @@ class AgentCore:
                 error = "tool_runtime_unavailable"
             else:
                 confirmation_ready = False
+                recovery_stopped = False
                 for tool_call in tool_calls.values():
                     tool_call_id = str(tool_call.get("tool_call_id", ""))
                     tool_id = str(tool_call.get("tool_id", ""))
@@ -1004,6 +1005,10 @@ class AgentCore:
                             error_details=payload.get("error_details"))
                         if result.ok:
                             self._answered_tool_calls[self._tool_call_fingerprint(tool_call)] = result.tool_id
+                    elif recovery_stopped:
+                        result = ToolResult(tool_call_id=tool_call_id, tool_id=tool_id, ok=False,
+                            error="analysis_recovery_limit", output={"executed": False})
+                        payload = result.to_payload()
                     else:
                         if self.turn_journal:
                             self.turn_journal.before_tool(self, tool_call)
@@ -1087,6 +1092,16 @@ class AgentCore:
                         elif result.ok:
                             self._answered_tool_calls[repeat_fingerprint] = result.tool_id
                         payload = self._annotate_step_budget(payload)
+                    from .recovery import record_failure
+                    recovery = (payload.get("bounded_recovery") if recovered is not None else None)
+                    if recovery is None:
+                        recovery = record_failure(self.repository, self.session_id, command_id,
+                            self._steps_used, tool_call, payload)
+                    if recovery is not None:
+                        if recovered is None:
+                            payload = {**payload, "bounded_recovery": recovery}
+                        self._last_tool_failure = recovery["reason"]
+                        recovery_stopped = recovery_stopped or recovery["exhausted"]
                     if self.turn_journal:
                         result_entry = self.turn_journal.result_message(self, tool_call, payload)
                     else:
@@ -1160,6 +1175,8 @@ class AgentCore:
                         if isinstance(proposal, Mapping):
                             self._ready_proposal = proposal
                     confirmation_ready = confirmation_ready or self._is_confirmation_ready(result)
+                if recovery_stopped:
+                    return self._persist_terminal_error("analysis_recovery_limit")
                 self.events.emit(
                     self.session_id,
                     "turn_end",
@@ -1356,7 +1373,7 @@ class AgentCore:
     def _persist_terminal_error(self, error: str) -> str:
         """Persist a budget stop as a complete, replayable assistant turn."""
 
-        if error in {"max_steps_exceeded", "repeated_tool_call_limit"}:
+        if error in {"max_steps_exceeded", "repeated_tool_call_limit", "analysis_recovery_limit"}:
             self._final_status = "blocked"
         elif error == "agent_aborted":
             self._final_status = "cancelled"
@@ -1396,7 +1413,7 @@ class AgentCore:
                 getattr(self, "_tools_used", []),
                 getattr(self, "_last_tool_failure", None),
             )
-            if error in {"max_steps_exceeded", "repeated_tool_call_limit"}
+            if error in {"max_steps_exceeded", "repeated_tool_call_limit", "analysis_recovery_limit"}
             else provider_failure_message(detect_language(getattr(self, "_user_text", None)), error)
             if error == "agent_timeout"
             else ""

@@ -37,6 +37,7 @@ def _normalize_to_view_model(data: dict[str, Any]) -> dict[str, Any]:
         "causal_caution": "",
         "descriptive_stats": data.get("descriptive_stats"),
         "exploration": data.get("exploration"),
+        "specification_curve": data.get("specification_curve"),
         "statistical_tests": data.get("statistical_tests"),
         "statistical_evidence": data.get("statistical_evidence"),
         "regression_table": data.get("regression_table"),

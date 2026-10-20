@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+import base64
+import io
+import textwrap
 import json
 from pathlib import Path
 from typing import Any
@@ -9,6 +12,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
 from reportlab.lib.pagesizes import letter
+from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 
 from .artifacts import register_artifact
@@ -57,6 +61,26 @@ def export_pdf(
         else:
             y = _draw_section(pdf, "Statistical tests", st or [], y)
         _draw_section(pdf, "Warnings", report.get("warnings", []), y)
+    curve = report.get("specification_curve")
+    if curve:
+        for image in curve["images"]:
+            pdf.showPage()
+            pdf.setFont("Helvetica-Bold", 14)
+            pdf.drawString(54, height-48, "Specification curve")
+            reader = ImageReader(io.BytesIO(base64.b64decode(image.split(",",1)[1])))
+            width_px, height_px = reader.getSize()
+            draw_height = min(480, 504*height_px/width_px)
+            pdf.drawImage(reader, 54, height-100-draw_height, width=504, height=draw_height)
+            pdf.setFont("Helvetica", 8)
+            pdf.drawString(54, 72, "All frozen members retained. Preregistration/comparability unverified; intervals not simultaneous.")
+        pdf.showPage()
+        lines = []
+        for row in curve["rows"]:
+            for key in ["step_id", "branch_id", "status", "estimate", "std_error", "ci_lower", "ci_upper", "nobs", "reason"]:
+                value = row.get(key)
+                lines.extend(textwrap.wrap(f"{key}: {value if value is not None else 'Unavailable'}", width=78))
+            lines.append("")
+        _draw_section(pdf, "Specification curve native values", lines, height-72)
     pdf.save()
 
     register_artifact(run_root, artifact_id, pdf_path, "report", "export", list(inputs))
