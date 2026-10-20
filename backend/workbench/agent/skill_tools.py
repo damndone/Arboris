@@ -69,7 +69,7 @@ def skill_tool_definitions(project_root, *, session_id, catalog=None):
 
     try:
         public = index(True)["skills"]
-        names = "; ".join(item["name"] + ": " + item["description"] for item in public[:8])[:2500]
+        names = "; ".join(item["name"] + ": " + item["description"] for item in public[:16])[:2500]
     except SkillError:
         names = "Catalog unavailable; index reports the access refusal."
     return [

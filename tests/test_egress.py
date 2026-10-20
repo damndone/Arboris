@@ -427,3 +427,16 @@ def test_the_policy_api_edits_column_levels_and_shows_the_audit(project_run, mon
         _send(monkeypatch, _conversation("show_dataset_rows", ROWS_RESULT), REMOTE)
     records = client.get("/projects/egress/audit", params=params).json()["records"]
     assert records[0]["withheld_count"] == 1
+
+
+def test_research_review_packet_obeys_model_result_sharing_at_the_wire_boundary(monkeypatch, tmp_path):
+    save_policy(tmp_path, EgressPolicy(providers={'remote': frozenset({'workbench_state', 'aggregate'})}))
+    packet = {'protocol_version': 'research-review/v1', 'observations': {
+        'candidate': 'PRIVATE MODEL CANDIDATE', 'models': [{'estimate': 18.731}],
+        'diagnostics': [{'p_value': .0041}]}}
+    with egress_project(tmp_path):
+        body = _send(monkeypatch, [{'role': 'user', 'content': json.dumps(packet)}], REMOTE)
+    sent = json.loads(body['messages'][0]['content'])
+    assert sent['observations']['egress_withheld'] is True
+    assert 'PRIVATE MODEL CANDIDATE' not in json.dumps(body)
+    assert '18.731' not in json.dumps(body)

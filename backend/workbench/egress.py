@@ -116,6 +116,7 @@ TOOL_CONTENT_CLASSES: Mapping[str, str] = {
 # (Notebook planning puts its evidence pack in the user turn), so they are
 # classified by protocol wherever they appear.
 EVIDENCE_PROTOCOL_CLASSES: Mapping[str, str] = {
+    "research-review/v1": "model_result",
     "profile/v1": "aggregate",
     "quality/v1": "aggregate",
     "time-index/v1": "aggregate",

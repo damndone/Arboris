@@ -632,8 +632,18 @@ class WorkbenchOrchestrator(OrchestrationWorkflows, OrchestrationProposals, Orch
         self._tool_registries[chain_id] = registry
         from .planning.agent_phase import restore_phase
         agent.completion_check = lambda: self._completion_check(session_id)
-        agent.phase_restorer = lambda checkpoint: restore_phase(core=agent, orchestrator=self,
-            chain_id=chain_id, checkpoint=checkpoint)
+        from .research_review import build_context
+        agent.research_review_mode = lambda: self.execution_mode
+        agent.research_review_context = lambda candidate: build_context(
+            getattr(self.context_provider, "project_root", self.repository.root.parent),
+            self.plan_store.current(session_id), mode=self.execution_mode, candidate=candidate,
+            config=getattr(agent.adapter, "config", None))
+        def restore_core_phase(checkpoint):
+            if checkpoint.get("kind") == "research_review/v1":
+                from .research_review import restore_phase as restore_review
+                return restore_review(agent, checkpoint)
+            return restore_phase(core=agent, orchestrator=self, chain_id=chain_id, checkpoint=checkpoint)
+        agent.phase_restorer = restore_core_phase
 
 
     def _completion_check(self, session_id):

@@ -85,6 +85,7 @@ class TurnJournal:
                    "budget": asdict(core._budget), "user_text": getattr(core, "_user_text", None),
                    "runtime_contract": _runtime_contract(core),
                    "phase_active": core._core_phase is not None,
+                   "phase_replay_safe": bool(getattr(core._core_phase, "replay_safe", False)),
                    "phase_checkpoint": core._core_phase.checkpoint() if core._core_phase else None,
                    "phase_messages": core._phase_messages,
                    "state": {name: getattr(core, name) for name in _STATE_FIELDS}, **details}
@@ -137,7 +138,7 @@ class TurnJournal:
         return self.assistant_message(payload, core._steps_used)
 
     def assistant_message(self, payload, step):
-        return self.repository.append_once(self.session_id, "message", payload,
+        return self.repository.append_once(self.session_id, "analysis_candidate" if payload.get("review_pending") else "message", payload,
             key=self.record.command_id, stage=f"assistant:{step}")
 
     def identity(self, core, call):
@@ -244,7 +245,18 @@ class TurnJournal:
                 or state["state"]["_steps_used"] < self.record.steps_used):
             raise TurnRecoveryRequired("Core checkpoint runtime contract or cumulative budget changed")
         if state["stage"] == "phase_consuming":
-            raise TurnRecoveryRequired("phase has no durable original transition receipt; do not reexecute")
+            if state.get("phase_replay_safe") is not True or core.phase_restorer is None:
+                raise TurnRecoveryRequired("phase has no durable original transition receipt; do not reexecute")
+            restored = core.phase_restorer(state["phase_checkpoint"])
+            if not getattr(restored, "replay_safe", False):
+                raise TurnRecoveryRequired("phase has no durable original transition receipt; do not reexecute")
+            received = next((entry.payload for entry in reversed(states[:-1])
+                if entry.payload["stage"] == "phase_received"
+                and entry.payload["phase_checkpoint"]["episode_id"] == state["phase_checkpoint"]["episode_id"]), None)
+            if received is None:
+                raise TurnRecoveryRequired("pure phase has no durable original provider events")
+            state = {**state, "stage":"phase_received", "phase_events":received["phase_events"],
+                     "phase_error":received["phase_error"]}
         if state.get("phase_active"):
             applied = state.get("phase_step")
             if not (applied and applied["next"] in {"completed", "refused"}):

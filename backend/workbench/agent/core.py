@@ -159,6 +159,8 @@ class AgentCore:
         self.phase_restorer = None
         self.turn_journal = turn_journal
         self.completion_check = None
+        self.research_review_context = None
+        self.research_review_mode = lambda: "ask"
 
     def enter_phase(self, phase: CorePhase) -> None:
         """Schedule a deterministic phase on this running Core's next step.
@@ -276,6 +278,19 @@ class AgentCore:
         if step.public_result.get("requires_confirmation") is True:
             self._ready_proposal = step.public_result["proposal"]
             return self._finish_proposal_ready("", self._active_command_id)
+        terminal = step.public_result.get("terminal_assistant")
+        if terminal is not None:
+            if len(json.dumps(dict(step.public_result), ensure_ascii=False)) > 64_000:
+                raise ValueError("phase_terminal_result_exceeds_64000_characters")
+            for audit in step.public_result.get("audit_events", []):
+                self.repository.append_once(self.session_id, audit["entry_type"], audit["payload"],
+                    key=audit["key"], stage=audit["stage"])
+            publication = step.public_result["publication"]
+            entry = self.repository.append_once(self.session_id, "message", dict(terminal),
+                key=publication["key"], stage=publication["stage"])
+            return await self._finish_assistant(dict(terminal), entry,
+                request_id=step.public_result["request_id"],
+                context_fingerprint=step.public_result["context_fingerprint"], tool_context=tool_context)
         result_text = json.dumps(dict(step.public_result), ensure_ascii=False, sort_keys=True)
         if len(result_text) > 24_000:
             raise ValueError("phase_public_result_exceeds_24000_characters")
@@ -734,6 +749,10 @@ class AgentCore:
 
         active_phase = self._core_phase
         context = self.context_builder.build(self.session_id)
+        from .research_review import requested as review_requested
+        if append_user and active_phase is None and self.research_review_context is not None and review_requested(text):
+            from .research_review import requested_review
+            return await requested_review(self, context=context, command_id=command_id, tool_context=tool_context)
         if self.compaction_policy is not None and active_phase is None:
             tokens = self.context_tokens(context.messages)
             if self.compaction_policy.should_compact(tokens):
@@ -741,6 +760,19 @@ class AgentCore:
                     context = self.context_builder.build(self.session_id)
         self._active_context_fingerprint = context.fingerprint
 
+        try:
+            phase_request = active_phase.request(self._phase_messages) if active_phase is not None else None
+        except Exception:
+            self._final_status = "failed"
+            self._phase_checkpoint(active_phase, "failed")
+            raise
+        if isinstance(phase_request, PhaseStep):
+            if self.turn_journal:
+                self.turn_journal.save(self, "phase_applied", phase_step={
+                    "next":phase_request.next, "append_messages":list(phase_request.append_messages),
+                    "public_result":dict(phase_request.public_result)})
+            return await self._apply_phase_step(active_phase, phase_request,
+                episode_id=active_phase.episode_id, tool_context=tool_context)
         if (
             self._budget.max_steps is not None
             and self._steps_used >= self._budget.max_steps
@@ -750,12 +782,6 @@ class AgentCore:
                 self._phase_checkpoint(active_phase, "failed")
                 raise active_phase.failure("budget")
             return self._persist_terminal_error("max_steps_exceeded")
-        try:
-            phase_request = active_phase.request(self._phase_messages) if active_phase is not None else None
-        except Exception:
-            self._final_status = "failed"
-            self._phase_checkpoint(active_phase, "failed")
-            raise
         if phase_request is not None and not self._phase_messages:
             self._phase_messages = [dict(message) for message in phase_request.messages]
             for message in self._phase_messages:
@@ -906,11 +932,14 @@ class AgentCore:
             payload["tool_calls"] = list(tool_calls.values())
         if error is not None:
             payload["error"] = error
+        from .research_review import needed as review_needed
+        if review_needed(self, payload):
+            payload["review_pending"] = True
         if self.turn_journal:
             entry = self.turn_journal.assistant(self, payload, request_id=request.request_id,
                                                 context_fingerprint=context.fingerprint)
         else:
-            entry = self.repository.append(self.session_id, "message", payload)
+            entry = self.repository.append(self.session_id, "analysis_candidate" if payload.get("review_pending") else "message", payload)
         return await self._finish_assistant(payload, entry, request_id=request.request_id,
                                             context_fingerprint=context.fingerprint, tool_context=tool_context, completion_checked=True)
 
@@ -939,7 +968,7 @@ class AgentCore:
         reviewed = {**payload, "content": content, "completion_check": result}
         if reviewed != payload:
             digest = hashlib.sha256(json.dumps(reviewed, sort_keys=True).encode()).hexdigest()
-            entry = self.repository.append_once(self.session_id, "message", reviewed,
+            entry = self.repository.append_once(self.session_id, "analysis_candidate" if reviewed.get("review_pending") else "message", reviewed,
                 key=self._active_command_id, stage="completion_recheck:" + digest)
         return reviewed, entry
 
@@ -948,6 +977,14 @@ class AgentCore:
         command_id = self._active_command_id
         if not completion_checked and payload["stop_reason"] == "stop" and not payload.get("tool_calls"):
             payload, entry = self._recheck_completion(payload, entry)
+        if payload.get("review_pending"):
+            from .research_review import start_review
+            return await start_review(self, payload, entry, request_id=request_id,
+                context_fingerprint=context_fingerprint, tool_context=tool_context)
+        if payload.get("review_revision"):
+            from .research_review import continue_after_review
+            return await continue_after_review(self, payload, entry, command_id=command_id,
+                context_fingerprint=context_fingerprint, tool_context=tool_context)
         content, finish_reason = payload["content"], payload["stop_reason"]
         error = payload.get("error")
         tool_calls = {str(call.get("tool_call_id", "")): call for call in payload.get("tool_calls", [])}

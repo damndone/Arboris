@@ -9,6 +9,7 @@ from .types import PlanningRefusal, NotebookPlanningContractError
 
 
 class AnalysisPlanningPhase:
+    replay_safe = False
     def __init__(self, phase, *, service, notebook_id, trace, orchestrator, chain_id):
         self.phase = phase
         self.service = service

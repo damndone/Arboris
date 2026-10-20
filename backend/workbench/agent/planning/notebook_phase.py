@@ -46,6 +46,7 @@ from .validation import _validate_submissions, _published_artifact_types
 
 
 class NotebookPlanningPhase:
+    replay_safe = False
     def __init__(self, *, context, initial_evidence, capability_catalog,
                  artifact_types_by_capability, inspection_executor, recommendation_validator,
                  operation_registry, proposal_validator, available_inspections,

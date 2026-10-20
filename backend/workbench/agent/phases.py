@@ -34,9 +34,16 @@ class PhaseStep(Generic[T]):
 
 
 class CorePhase(Protocol[T]):
+    """A replay-safe phase consumes original events without external writes.
+
+    Only Core commits its returned transition. Mutating planning phases must
+    leave replay_safe false and reconcile an unknown transition explicitly.
+    """
     episode_id: str
 
-    def request(self, transcript: Sequence[dict[str, Any]]) -> PhaseRequest: ...
+    replay_safe: bool
+
+    def request(self, transcript: Sequence[dict[str, Any]]) -> PhaseRequest | PhaseStep[T]: ...
 
     async def consume(
         self,
