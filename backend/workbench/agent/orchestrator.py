@@ -617,6 +617,8 @@ class WorkbenchOrchestrator(OrchestrationWorkflows, OrchestrationProposals, Orch
         self._register_session(chain_id, session_id, agent)
 
     def _register_session(self, chain_id: str, session_id: str, agent: AgentCore) -> None:
+        from .analysis_history import require_active_session, capture_checkpoint
+        require_active_session(self.repository, session_id)
         if chain_id in self._chains:
             raise ValueError(f"chain already registered: {chain_id}")
         if agent.session_id != session_id:
@@ -630,6 +632,8 @@ class WorkbenchOrchestrator(OrchestrationWorkflows, OrchestrationProposals, Orch
             self._tool_registries.pop(chain_id, None)
             raise
         self._tool_registries[chain_id] = registry
+        agent.command_check = lambda: require_active_session(self.repository, session_id)
+        agent.input_checkpoint = lambda command: capture_checkpoint(self.repository, session_id, command)
         from .planning.agent_phase import restore_phase
         agent.completion_check = lambda: self._completion_check(session_id)
         from .research_review import build_context

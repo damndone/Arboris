@@ -358,6 +358,7 @@ export function AgentSurfaceProvider({
   const [compacting, setCompacting] = useState(false);
   // Bumped to load another conversation (or none) for the same view.
   const [conversationVersion, setConversationVersion] = useState(0);
+  const restoredSessionRef = useRef<string | null>(null);
   const [proposals, setProposals] = useState<AgentProposal[]>([]);
   const [confirmationBusyId, setConfirmationBusyId] = useState<string | null>(null);
   const [activeOperation, setActiveOperation] = useState<AgentOperationStatus | null>(null);
@@ -537,11 +538,14 @@ export function AgentSurfaceProvider({
     eventCursorRef.current = 0;
     setLastEventType(null);
     setLiveResponseText("");
-    const stored = linkedSessionId ?? readConversation(storageKey);
+    const restored = restoredSessionRef.current;
+    const stored = restored ?? linkedSessionId ?? readConversation(storageKey);
+    if (restored && !linkedSessionId) writeConversation(storageKey, restored);
     if (!stored) return () => { cancelled = true; };
     getAgentSession(projectRoot, stored)
       .then(async (session) => {
         if (cancelled) return;
+        if (restoredSessionRef.current === restored) restoredSessionRef.current = null;
         setSessionId(session.session_id);
         setMessages(session.messages);
         setServerContext(session.context ?? null);
@@ -1129,10 +1133,28 @@ export function AgentSurfaceProvider({
   }, [isSubmitting]);
   const rewindTo = useCallback((entryId: string) => historyAction(async () => {
     if (!sessionId) return;
+    const scope = sessionScope;
     const change = await rewindAgentSession(projectRoot, sessionId, entryId);
+    if (activeScopeRef.current !== scope || currentSessionRef.current !== sessionId) return;
+    restoredSessionRef.current = change.session.session_id;
+    writeConversation(storageKey, change.session.session_id);
+    if (linkedSessionId) {
+      const params = new URLSearchParams(searchParams);
+      params.set("agent_session", change.session.session_id);
+      params.delete("operation");params.delete("diff");
+      setSearchParams(params, {replace:true});
+    }
+    if (change.lineage) {
+      if (change.lineage.run_id) forest?.setActiveRunId(change.lineage.run_id);
+      const focus = change.lineage.focus;
+      workbench.dispatch.setAgentFocus(focus ? {kind:focus.kind,id:focus.id,runId:focus.run_id ?? undefined} : null);
+    }
+    setSessionId(change.session.session_id);
     showSession(change.session);
     if (change.restored_prompt) setPrompt(change.restored_prompt);
-  }, "Could not rewind the conversation"), [historyAction, projectRoot, sessionId, setPrompt, showSession]);
+    setConversationVersion(value => value + 1);
+  }, "Could not restore the analysis"), [historyAction, projectRoot, sessionId, sessionScope, storageKey,
+    linkedSessionId, searchParams, setSearchParams, forest, workbench.dispatch, setPrompt, showSession]);
   const forkConversation = useCallback((entryId: string) => historyAction(async () => {
     if (!sessionId) return;
     const change = await forkAgentSession(projectRoot, sessionId, entryId);

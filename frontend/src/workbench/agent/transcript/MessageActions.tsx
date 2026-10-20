@@ -55,7 +55,7 @@ export function MessageActions({ message, pinned, busy, onRewind, onFork, onPin,
         <button
           type="button"
           aria-label="Rewind to here"
-          title="Go back to before this message; its text returns to the input. Later turns stay in the log."
+          title="Restore the conversation and analysis head before this message on a new branch. Original evidence is retained; external actions are not reversed."
           disabled={busy}
           onClick={() => onRewind(message.entry_id)}
         >

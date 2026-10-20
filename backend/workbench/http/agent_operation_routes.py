@@ -208,6 +208,8 @@ async def confirm_agent_proposal(
 ) -> ProposalConfirmed:
     root = _project_root(project_root)
     repository, events, metadata = _get_session(root, session_id)
+    from .agent_route_runtime import _require_active_session
+    _require_active_session(repository, session_id)
     store = ProposalStore(repository.root)
     proposal = _proposal_for_session(
         store,

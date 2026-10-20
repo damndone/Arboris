@@ -158,6 +158,8 @@ class AgentCore:
         self._standalone_phase = False
         self.phase_restorer = None
         self.turn_journal = turn_journal
+        self.command_check = None
+        self.input_checkpoint = None
         self.completion_check = None
         self.research_review_context = None
         self.research_review_mode = lambda: "ask"
@@ -392,12 +394,16 @@ class AgentCore:
     async def _command(self, text, *, budget, tool_context, continuation):
         journal = self.turn_journal
         with journal.ownership() if journal else nullcontext():
+            if self.command_check is not None:
+                self.command_check()
             self._begin(AgentRunBudget.from_value(budget), command_id=(tool_context or {}).get("command_id"))
             self._user_text = text
             started = False
             try:
                 if continuation:
                     self._assert_continuable()
+                elif self.input_checkpoint is not None:
+                    self.input_checkpoint(self._active_command_id)
                 if journal:
                     journal.start(self, text, continuation=continuation)
                     started = True
@@ -419,6 +425,8 @@ class AgentCore:
         if journal is None:
             raise AgentCoreContinuationError("resume requires a durable turn journal")
         with journal.ownership() as guard:
+            if self.command_check is not None:
+                self.command_check()
             record = journal.store.get(turn_id)
             self._begin(AgentRunBudget.from_value(record.budget), command_id=record.command_id)
             try:

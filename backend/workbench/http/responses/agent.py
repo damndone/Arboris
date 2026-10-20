@@ -159,11 +159,23 @@ class AgentChapter(TypedDict):
     at: str
 
 
+class AgentRestoredFocus(TypedDict):
+    kind: Literal["project", "dataset", "node", "plan", "report"]
+    id: str
+    run_id: NotRequired[str | None]
+
+
+class AgentRestoredLineage(TypedDict):
+    run_id: str | None
+    focus: AgentRestoredFocus | None
+
+
 class AgentSessionChange(TypedDict):
     """A session after a rewind or fork, and the message to put back in the input."""
 
     session: AgentSession
     restored_prompt: str | None
+    lineage: NotRequired[AgentRestoredLineage]
 
 
 class AgentTurn(TypedDict):

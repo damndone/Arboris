@@ -39,6 +39,8 @@ class PlanControl:
                                    details={"current_version": plan.version})
 
     def approve(self, version):
+        from .analysis_history import require_active_session
+        require_active_session(self.repository, self.session_id)
         def apply(plan):
             self._require_version(plan, version)
             if plan.status == "approved" and plan.approved_version == version:
@@ -63,6 +65,8 @@ class PlanControl:
         return {"plan": approved.to_dict()}
 
     def revise(self, version, changes):
+        from .analysis_history import require_active_session
+        require_active_session(self.repository, self.session_id)
         changes = json.loads(json.dumps(changes, ensure_ascii=False, allow_nan=False))
         notice = ("Workbench: the person revised the analysis plan to version " + str(version + 1)
                   + ". Apply these exact changes to the previous plan for subsequent steps: "

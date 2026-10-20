@@ -23,7 +23,7 @@ from .agent_route_context import (_ensure_current_global_protocol, _ensure_main_
 from .agent_route_permissions import (_project_permission_rules, _session_grants)
 from .agent_route_projection import (_messages, _public_session)
 from .agent_route_requests import (AgentContinueRequest, AgentResumeRequest, AgentSteerRequest, AgentTurnRequest)
-from .agent_route_runtime import (_agent_llm_config, _agent_llm_configured, _agent_model_adapter, _reserve_turn)
+from .agent_route_runtime import (_agent_llm_config, _agent_llm_configured, _agent_model_adapter, _reserve_turn, _require_active_session)
 
 from fastapi import APIRouter
 from .typed_routes import TypedAPIRoute
@@ -65,6 +65,7 @@ def approve_agent_plan(session_id: str, project_root: str, body: AgentPlanApprov
     """Approve exactly the version the person reviewed, without a model call."""
     root = _project_root(project_root)
     repository, _events, _metadata = _get_session(root, session_id)
+    _require_active_session(repository, session_id)
     try:
         return PlanControl(root, repository, session_id).approve(body.version)
     except PlanControlError as exc:
@@ -76,6 +77,7 @@ def revise_agent_plan(session_id: str, project_root: str, body: AgentPlanPatchRe
     """Apply a versioned human edit; execution state is server-owned."""
     root = _project_root(project_root)
     repository, _events, _metadata = _get_session(root, session_id)
+    _require_active_session(repository, session_id)
     try:
         return PlanControl(root, repository, session_id).revise(
             body.version, body.model_dump(exclude_unset=True, exclude={"version"}))

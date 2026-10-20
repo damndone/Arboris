@@ -213,11 +213,8 @@ def _before(entry) -> EntryRef:
 
 @router.post("/agent/sessions/{session_id}/rewind")
 def rewind_agent_session(session_id: str, project_root: str, body: AgentEntryRequest) -> AgentSessionChange:
-    """Go back to just before one of your messages; its text returns to the input.
-
-    The later conversation is kept in the session log (rewinding is recorded,
-    not deleted); the next message continues from here.
-    """
+    """Restore the conversation and analysis head together on a retained branch."""
+    from ..agent.analysis_history import rewind_analysis
     root = _project_root(project_root)
     repository, events, metadata = _get_session(root, session_id)
     _refuse_while_running(metadata, "rewind")
@@ -225,15 +222,13 @@ def rewind_agent_session(session_id: str, project_root: str, body: AgentEntryReq
     if entry.payload.get("role") != "user":
         raise WorkbenchAPIError(status_code=422, code="AGENT_REWIND_TARGET",
                                 message="Rewind goes back to one of your own messages.", details={})
-    target = _before(entry)
     try:
-        repository.rewind(session_id, target)
-    except (KeyError, ValueError) as exc:
+        restored = rewind_analysis(repository, session_id, body.entry_id)
+    except (KeyError, ValueError, RuntimeError) as exc:
         raise WorkbenchAPIError(status_code=409, code="AGENT_REWIND_REFUSED", message=str(exc), details={}) from exc
-    events.emit(session_id, "session_rewound", {"to_entry": target.to_dict(), "undone_entry_id": entry.entry_id})
-    metadata = repository.get_metadata(session_id)
-    return {"session": _public_session(repository, session_id, metadata, _agent_llm_config()),
-            "restored_prompt": str(entry.payload.get("content") or "")}
+    restored_id = restored["session_id"]
+    return {"session": _public_session(repository, restored_id, repository.get_metadata(restored_id), _agent_llm_config()),
+            "restored_prompt": restored["restored_prompt"], "lineage": restored["lineage"]}
 
 
 @router.post("/agent/sessions/{session_id}/fork")

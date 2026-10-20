@@ -8,6 +8,8 @@ import type { AgentMessage, AgentProposal } from "./agentTypes";
 import { agentMessageFixture, agentProposalFixture } from "../../apiFixtures";
 
 const mocks = vi.hoisted(() => ({
+  rewindAgentSession: vi.fn(),
+  setAgentFocus: vi.fn(),
   getAgentPlan: vi.fn(),
   patchAgentPlan: vi.fn(),
   approveAgentPlan: vi.fn(),
@@ -36,6 +38,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("./agentApi", () => ({
+  rewindAgentSession: mocks.rewindAgentSession,
   getAgentPlan: mocks.getAgentPlan,
   patchAgentPlan: mocks.patchAgentPlan,
   approveAgentPlan: mocks.approveAgentPlan,
@@ -70,7 +73,7 @@ vi.mock("../../lineage/LineageContext", () => ({
 }));
 vi.mock("../ForestContext", () => ({ useForest: () => mocks.forest.current }));
 vi.mock("../WorkbenchStateProvider", () => ({
-  useWorkbench: () => ({ state: mocks.workbenchState }),
+  useWorkbench: () => ({ state: mocks.workbenchState, dispatch: {setAgentFocus: mocks.setAgentFocus} }),
 }));
 
 const provider = {
@@ -208,6 +211,56 @@ describe("AgentSurfaceProvider", () => {
       proposal: { ...pendingProposal, revision: 2, status: "pending" },
       status: "pending",
     });
+  });
+
+  it("joint rewind switches to the restored branch, head and focus before the next request", async () => {
+    mocks.getAgentSession.mockImplementation(async (_root,id) => session(id));
+    mocks.rewindAgentSession.mockResolvedValue({session:session("restored"),restored_prompt:"Original",lineage:{run_id:"run-source",focus:{kind:"node",id:"node-source",run_id:"run-source"}}});
+    const setActiveRunId=vi.fn();
+    mocks.forest.current={forest:{nodes:[],heads:[]},activeRunId:"run-a",setActiveRunId};
+    mount();
+    fireEvent.change(screen.getByRole("textbox",{name:"Ask Agent"}),{target:{value:"Seed"}});
+    fireEvent.click(screen.getByRole("button",{name:"Send to Agent"}));
+    fireEvent.click(await screen.findByRole("button",{name:"Rewind to here"}));
+    await waitFor(()=>expect(Object.values(localStorage)).toContain("restored"));
+    expect(setActiveRunId).toHaveBeenCalledWith("run-source");
+    expect(mocks.setAgentFocus).toHaveBeenCalledWith({kind:"node",id:"node-source",runId:"run-source"});
+    await waitFor(()=>expect(mocks.getAgentPlan).toHaveBeenCalledWith("/proj","restored"));
+    fireEvent.change(screen.getByRole("textbox",{name:"Ask Agent"}),{target:{value:"Revised request"}});
+    fireEvent.click(screen.getByRole("button",{name:"Send to Agent"}));
+    await waitFor(()=>expect(mocks.sendAgentTurn).toHaveBeenCalledWith("/proj","restored","Revised request",expect.any(AbortSignal),expect.anything(),"proposal_only","ask"));
+    expect(mocks.continueAgentTurn).not.toHaveBeenCalled();
+  });
+
+  it("a refused joint rewind preserves the current conversation and its saved binding", async () => {
+    const key="workbench:agent-session:/proj:run-a:project%3Arun-a%3Anone";
+    localStorage.setItem(key,"old");
+    mocks.getAgentSession.mockResolvedValue(session("old",[agentMessageFixture({entry_id:"u1",role:"user",content:"Keep this"})]));
+    mocks.rewindAgentSession.mockRejectedValue(new Error("Stop the unfinished execution first."));
+    mount();
+    fireEvent.click(await screen.findByRole("button",{name:"Rewind to here"}));
+    expect(await screen.findByText("Stop the unfinished execution first.")).toBeInTheDocument();
+    expect(localStorage.getItem(key)).toBe("old");
+    expect(screen.getByText("Keep this")).toBeInTheDocument();
+    expect(mocks.setAgentFocus).not.toHaveBeenCalled();
+  });
+
+  it("ignores a joint rewind response after the user switches conversations", async () => {
+    const keyA="workbench:agent-session:/proj:run-a:project%3Arun-a%3Anone";
+    const keyB="workbench:agent-session:/proj:run-b:project%3Arun-b%3Anone";
+    localStorage.setItem(keyA,"old");localStorage.setItem(keyB,"other");
+    mocks.getAgentSession.mockImplementation(async (_root,id)=>session(id,[agentMessageFixture({entry_id:"u1",role:"user",content:id})]));
+    let finish!: (value:unknown)=>void;
+    mocks.rewindAgentSession.mockImplementation(()=>new Promise(resolve=>{finish=resolve;}));
+    const view=mount();
+    fireEvent.click(await screen.findByRole("button",{name:"Rewind to here"}));
+    view.rerender(<MemoryRouter><AgentSurfaceProvider projectRoot="/proj" runId="run-b"><AgentPanel projectRoot="/proj" runId="run-b" /></AgentSurfaceProvider></MemoryRouter>);
+    await screen.findByText("other");
+    await act(async()=>finish({session:session("restored"),restored_prompt:"Undone",lineage:{run_id:"run-source",focus:null}}));
+    expect(screen.getByText("other")).toBeInTheDocument();
+    expect(localStorage.getItem(keyB)).toBe("other");
+    expect(mocks.setAgentFocus).not.toHaveBeenCalled();
+    expect(mocks.sendAgentTurn).not.toHaveBeenCalled();
   });
 
   it("sends the selected mode and explicitly queues follow-ups without starting a second turn", async () => {

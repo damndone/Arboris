@@ -314,6 +314,11 @@ class WorkbenchOperationLifecycle:
                 )
                 if inspect.isawaitable(domain_lease):
                     domain_lease = await domain_lease
+            # Common to native operations and the CF4 handler. Check after
+            # acquiring the domain lease so an undo cannot race dispatch.
+            validate_session = getattr(handler, "validate_session", None)
+            if validate_session is not None:
+                validate_session(record)
             prepare = getattr(handler, "prepare", None)
             if prepare is not None:
                 prepared = prepare(

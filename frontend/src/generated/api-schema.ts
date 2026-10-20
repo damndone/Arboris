@@ -671,10 +671,7 @@ export interface paths {
         put?: never;
         /**
          * Rewind Agent Session
-         * @description Go back to just before one of your messages; its text returns to the input.
-         *
-         *     The later conversation is kept in the session log (rewinding is recorded,
-         *     not deleted); the next message continues from here.
+         * @description Restore the conversation and analysis head together on a retained branch.
          */
         post: operations["rewind_agent_session_agent_sessions__session_id__rewind_post"];
         delete?: never;
@@ -3325,6 +3322,24 @@ export interface components {
             /** Risks */
             risks?: string[] | null;
         };
+        /** AgentRestoredFocus */
+        AgentRestoredFocus: {
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "project" | "dataset" | "node" | "plan" | "report";
+            /** Run Id */
+            run_id?: string | null;
+        };
+        /** AgentRestoredLineage */
+        AgentRestoredLineage: {
+            focus: components["schemas"]["AgentRestoredFocus"] | null;
+            /** Run Id */
+            run_id: string | null;
+        };
         /** AgentResumeRequest */
         AgentResumeRequest: {
             /** Turn Id */
@@ -3366,6 +3381,7 @@ export interface components {
          * @description A session after a rewind or fork, and the message to put back in the input.
          */
         AgentSessionChange: {
+            lineage?: components["schemas"]["AgentRestoredLineage"];
             /** Restored Prompt */
             restored_prompt: string | null;
             session: components["schemas"]["AgentSession"];

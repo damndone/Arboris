@@ -211,6 +211,8 @@ class OrchestrationProposals:
         current_active_head_run_id: str | None,
     ) -> OperationRecord:
         latest = self.proposal_store.latest_revision(proposal_id)
+        from .analysis_history import require_active_session
+        require_active_session(self.repository, latest.session_id)
         from . import permissions
         from .permission_config import project_permission_rules
         from ..operation_approvals import OperationApprovalStore

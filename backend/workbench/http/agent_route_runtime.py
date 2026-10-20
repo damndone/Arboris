@@ -20,7 +20,20 @@ _RESERVED_TURNS = turn_registry.reserved
 _TURN_RESERVATION_LOCK = turn_registry.lock
 
 
-_reserve_turn = turn_registry.reserve
+def _require_active_session(repository, session_id):
+    from ..agent.analysis_history import AnalysisHistoryError, require_active_session
+    from ..api_errors import WorkbenchAPIError
+    try:
+        require_active_session(repository, session_id)
+    except AnalysisHistoryError as exc:
+        raise WorkbenchAPIError(status_code=409, code="AGENT_ANALYSIS_REWOUND", message=str(exc),
+                                details={"session_id": session_id}) from exc
+
+
+def _reserve_turn(root, session_id):
+    from ..agent.session import JsonlSessionRepository
+    _require_active_session(JsonlSessionRepository(root / "workbench"), session_id)
+    return turn_registry.reserve(root, session_id)
 
 
 _release_turn = turn_registry.release

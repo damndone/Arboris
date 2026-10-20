@@ -19,6 +19,10 @@ _DATA_CHILD_NODE_OPERATIONS = frozenset(
 class _OrchestratorOperationHandler:
     """Provide only operation-specific hooks to the shared lifecycle."""
 
+    def validate_session(self, record):
+        from .analysis_history import require_active_session
+        require_active_session(self.orchestrator.repository, record.agent_session_id)
+
     def __init__(
         self,
         orchestrator: "WorkbenchOrchestrator",

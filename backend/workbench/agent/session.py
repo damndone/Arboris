@@ -319,6 +319,7 @@ class JsonlSessionRepository:
         chain_id: str,
         role: str,
         inherited_parent_ref: EntryRef | None = None,
+        status: str = "idle",
     ) -> dict[str, Any]:
         """Create an empty local log, optionally rooted at another entry."""
 
@@ -332,7 +333,7 @@ class JsonlSessionRepository:
                 "session_id": session_id,
                 "chain_id": chain_id,
                 "role": role,
-                "status": "idle",
+                "status": status,
                 "root_entry_id": None,
                 "leaf_entry_id": None,
                 "inherited_parent_ref": (
@@ -453,7 +454,7 @@ class JsonlSessionRepository:
         """Set display fields (title, archived) and the conversation's permission
         grants (v1.9.1 "don't ask again"); the log itself is untouched."""
 
-        allowed = {"title", "archived", "permission_grants", "execution_mode"}
+        allowed = {"title", "archived", "permission_grants", "execution_mode", "analysis_rewind"}
         unknown = set(fields) - allowed
         if unknown:
             raise ValueError(f"not editable: {sorted(unknown)}")
