@@ -1,88 +1,36 @@
+"""Covariance-compatible native IV diagnostics; strength is not certified."""
 from __future__ import annotations
-
 from typing import Any
+from ..checks.iv_checks import first_stage_diagnostic
 
-from ..checks.iv_checks import FIRST_STAGE_STRENGTH
 
-
-def build_iv_diagnostics(
-    fitted: Any, n_endog: int, n_instruments: int, strength_check: dict | None = None,
-) -> dict:
-    """Build the standard IV diagnostic trio from a fitted linearmodels IV2SLS result.
-
-    linearmodels 7.0 accessors used:
-      - weak instruments: ``fitted.first_stage.diagnostics`` (DataFrame, one row per
-        endog) column ``'f.stat'`` -> first-stage F per endog; report the MIN.
-      - endogeneity:      ``fitted.wu_hausman()`` -> WaldTestStatistic (.stat / .pval)
-      - overidentification: ``fitted.sargan`` -> WaldTestStatistic (.stat / .pval),
-        only meaningful when over-identified.
-
-    All numeric values are plain Python floats so the dict is JSON-serializable.
-    """
-    identification = (
-        "under" if n_instruments < n_endog
-        else "just" if n_instruments == n_endog
-        else "over"
-    )
-
-    # --- weak instruments: min first-stage F across endog ---
-    # v1.8.10: thresholds and verdict come from the check library's
-    # iv.first_stage_strength, so the card and the run's issues agree.
-    fs_diag = fitted.first_stage.diagnostics
-    min_f = float(fs_diag["f.stat"].min())
-    fails_below = FIRST_STAGE_STRENGTH.threshold("fails_below")
-    caution_below = FIRST_STAGE_STRENGTH.threshold("caution_below")
-    verdict = "weak" if min_f < fails_below else "caution" if min_f < caution_below else "strong"
-    weak = {
-        "first_stage_f": min_f,
-        "threshold": fails_below,
-        "caution_threshold": caution_below,
-        "verdict": verdict,
-        "message": (strength_check or {}).get("summary") or (
-            f"First-stage F = {min_f:.1f}." if verdict == "strong" else
-            f"First-stage F = {min_f:.1f}, below {caution_below:g}."
-        ),
-        "anderson_rubin_95": ((strength_check or {}).get("evidence") or {}).get("anderson_rubin_95"),
-    }
-
-    # --- endogeneity: Wu-Hausman ---
-    wh = fitted.wu_hausman()
-    wh_stat, wh_p = float(wh.stat), float(wh.pval)
-    endogeneity = {
-        "test": "wu_hausman",
-        "statistic": wh_stat,
-        "pvalue": wh_p,
-        "verdict": "rejects_exogeneity" if wh_p < 0.05 else "does_not_reject",
-        # v1.8.10: a post-fit test may inform inference, not the choice of
-        # specification (design section 4.3), and not rejecting is not proof.
-        "message": (
-            "The Wu-Hausman test rejects exogeneity of the regressor (p < 0.05)."
-            if wh_p < 0.05 else
-            "The Wu-Hausman test does not reject exogeneity (p >= 0.05); this does not show the "
-            "regressor is exogenous."
-        ),
-    }
-
-    # --- overidentification: Sargan, only when over-identified ---
-    if identification == "over":
-        sg = fitted.sargan
-        s_stat, s_p = float(sg.stat), float(sg.pval)
-        overid = {
-            "applicable": True, "test": "sargan",
-            "statistic": s_stat, "pvalue": s_p,
-            "verdict": "suspect" if s_p < 0.05 else "not_rejected",
-            "message": (
-                "Instrument exogeneity rejected (p < 0.05); instruments suspect."
-                if s_p < 0.05 else
-                "Instrument exogeneity not rejected (p >= 0.05)."
-            ),
-        }
+def build_iv_diagnostics(fitted: Any, n_endog: int, n_instruments: int, strength_check: dict | None = None) -> dict:
+    identification = 'under' if n_instruments < n_endog else 'just' if n_instruments == n_endog else 'over'
+    weak = first_stage_diagnostic(fitted)
+    evidence = (strength_check or {}).get('evidence') or {}
+    weak['anderson_rubin_95'] = evidence.get('anderson_rubin_95')
+    weak['message'] = (strength_check or {}).get('summary') or (
+        f'First-stage {weak["test"]} = {weak["first_stage_statistic"]:.4g}, reference {weak["reference_distribution"]}. '
+        'Instrument strength and validity are not certified.')
+    conventional = str(fitted.cov_type) == 'unadjusted'
+    test = fitted.wu_hausman() if conventional else fitted.wooldridge_regression
+    name = 'wu_hausman' if conventional else 'wooldridge_regression'
+    p = float(test.pval)
+    endogeneity = {'test': name, 'statistic': float(test.stat), 'pvalue': p,
+        'reference_distribution': test.dist_name,
+        'verdict': 'rejects_exogeneity' if p < .05 else 'does_not_reject',
+        'message': ('The exogeneity test rejects under its maintained model assumptions.' if p < .05 else
+                    'The exogeneity test does not reject; this does not establish exogeneity.')}
+    if identification == 'over' and str(fitted.cov_type) in {'unadjusted', 'robust', 'heteroskedastic'}:
+        test = fitted.sargan if conventional else fitted.wooldridge_overid
+        p = float(test.pval)
+        overid = {'applicable': True, 'test': 'sargan' if conventional else 'wooldridge_overid',
+            'statistic': float(test.stat), 'pvalue': p, 'reference_distribution': test.dist_name,
+            'verdict': 'suspect' if p < .05 else 'not_rejected',
+            'message': ('The joint instrument/model restrictions are rejected; the test does not identify which assumption fails.'
+                        if p < .05 else 'The joint restrictions are not rejected; instrument validity is not established.')}
     else:
-        overid = {"applicable": False, "verdict": "Not applicable (just-identified)."}
-
-    return {
-        "identification": identification,
-        "weak_instruments": weak,
-        "endogeneity": endogeneity,
-        "overidentification": overid,
-    }
+        overid = {'applicable': False, 'verdict': 'Not applicable (just-identified).' if identification == 'just'
+                  else 'No covariance-compatible over-identification test is validated.'}
+    return {'identification': identification, 'weak_instruments': weak, 'endogeneity': endogeneity,
+            'overidentification': overid}

@@ -117,7 +117,7 @@ def test_the_anderson_rubin_set_agrees_with_r(tmp_path, case, instruments, covar
     assert packet["coefficients"]["educ"]["estimate"] == pytest.approx(float(fitted.params["educ"]), abs=5e-7)
 
 
-def test_a_moderately_strong_instrument_gets_a_caution_and_the_anderson_rubin_set(tmp_path) -> None:
+def test_robust_relevance_is_not_calibrated_by_f_thresholds_and_gets_certified_ar(tmp_path) -> None:
     import json
 
     oracle = json.loads((ROOT / "tests" / "fixtures" / "checks" / "oracle.json").read_text())["anderson_rubin"]["one"]
@@ -126,7 +126,10 @@ def test_a_moderately_strong_instrument_gets_a_caution_and_the_anderson_rubin_se
     )
     checks = _checks(run_root, "iv_2sls_1")
     strength = checks["iv.first_stage_strength"]
-    assert strength["status"] == "caution" and 10 < strength["evidence"]["first_stage_f"] < 104.7
+    assert strength["status"] == "caution"
+    assert strength["evidence"]["first_stage_f"] is None
+    assert strength["evidence"]["reference_distribution"] == "chi2(1)"
+    assert strength["evidence"]["verdict"] == "unassessed"
     region = strength["evidence"]["anderson_rubin_95"]
     assert [region["lower"], region["upper"]] == pytest.approx(oracle["robust"], abs=1e-7)
     assert "Anderson-Rubin" in strength["summary"]

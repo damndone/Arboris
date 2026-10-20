@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from ..canonical import sha256_canonical
 
-NATIVE_COMPANIONS = {'survival_cox'}
+NATIVE_COMPANIONS = {'survival_cox', 'iv_2sls'}
 
 
 def companion_model(products, ref, artifact, model):
@@ -33,13 +33,31 @@ def companion_model(products, ref, artifact, model):
     if any(item not in companion.inputs for item in [model['model_id'], source['artifact_id']]):
         return None
     for artifact_id in value.get('diagnostic_artifact_ids', []):
-        if products.load({'run_id': ref['run_id'], 'artifact_id': artifact_id}) is None:
+        diagnostic = products.load({'run_id': ref['run_id'], 'artifact_id': artifact_id})
+        if diagnostic is None or diagnostic.sha256 != value.get('diagnostic_artifact_sha256', {}).get(artifact_id):
             return None
     return {**model, 'point_estimation_fingerprint': value['point_estimation_fingerprint'],
             'analysis_sample_fingerprint': value['analysis_sample_fingerprint']}
 
 
 def native_diagnostics(family, values):
+    if family == 'iv':
+        for value in values:
+            diag = (value.get('diagnostics') or {}).get('iv') or {}
+            weak = diag.get('weak_instruments') or {}
+            ar = weak.get('anderson_rubin_95') or {}
+            endogeneity = diag.get('endogeneity') or {}
+            overid = diag.get('overidentification') or {}
+            if (value.get('contract') == 'analysis-completion.evidence.v1'
+                    and weak.get('per_endogenous') and weak.get('reference_distribution')
+                    and (ar.get('global_certification') or {}).get('status') == 'certified'
+                    and ar.get('kind') in {'interval', 'singleton', 'whole_line', 'ray_below', 'ray_above', 'union_of_rays', 'disjoint', 'empty'}
+                    and endogeneity.get('test') in {'wooldridge_regression', 'wu_hausman'}
+                    and type(endogeneity.get('pvalue')) in {float, int} and 0 <= endogeneity['pvalue'] <= 1
+                    and (diag.get('identification') == 'just' or (overid.get('applicable') is True
+                         and overid.get('test') in {'wooldridge_overid', 'sargan'}
+                         and type(overid.get('pvalue')) in {float, int} and 0 <= overid['pvalue'] <= 1))):
+                return True
     if family == 'survival':
         for value in values:
             ph = (value.get('diagnostics') or {}).get('proportional_hazards') or {}
@@ -53,6 +71,18 @@ def native_diagnostics(family, values):
 
 
 def native_findings(family, values):
+    if family == 'iv':
+        findings = []
+        for value in values:
+            diag = (value.get('diagnostics') or {}).get('iv') or {}
+            ar = (diag.get('weak_instruments') or {}).get('anderson_rubin_95') or {}
+            if ar.get('kind') == 'unavailable' or (ar.get('kind') and (ar.get('global_certification') or {}).get('status') != 'certified'):
+                findings.append('iv:diagnostics:ar_unavailable')
+            if ar.get('kind') == 'empty':
+                findings.append('iv:diagnostics:ar_empty_requires_model_revision')
+            if (diag.get('overidentification') or {}).get('pvalue', 1) < .05:
+                findings.append('iv:diagnostics:overidentification_rejected_requires_model_revision')
+        return list(dict.fromkeys(findings))
     if family == 'survival':
         for value in values:
             ph = (value.get('diagnostics') or {}).get('proportional_hazards') or {}

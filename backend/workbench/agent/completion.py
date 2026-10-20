@@ -12,7 +12,7 @@ from typing import Any
 
 from ..canonical import sha256_canonical
 from .context_compiler import read_completion_artifact, read_completion_dataset_source
-from .completion_profiles import companion_model, native_diagnostics, native_findings
+from .completion_profiles import NATIVE_COMPANIONS, companion_model, native_diagnostics, native_findings
 
 VERSION = 'analysis-completion/v1'
 PLAYBOOKS = {
@@ -220,10 +220,10 @@ def evaluate(project_root, contract, evidence):
                              and bound(ref) and main_ref and ref['run_id'] == main_ref['run_id']
                              and artifact.payload and artifact.payload.get('model_id') == main.get('model_id')
                              and (family != 'lmm' or artifact.artifact_type == 'lmm_analysis_evidence')
-                             and (main.get('model_type') not in {'survival_cox'}
+                             and (main.get('model_type') not in NATIVE_COMPANIONS
                                   or ref['artifact_id'] == main['model_id'] + '.completion')]
         if not _diagnostics(family, diagnostic_values):
-            reason = 'computed_and_model_bound' if family in {'ols', 'lmm', 'survival'} else 'native_profile_unverified'
+            reason = 'computed_and_model_bound' if family in {'ols', 'lmm', 'survival', 'iv'} else 'native_profile_unverified'
             missing.append(f'{family}:diagnostics:{reason}')
         missing.extend(native_findings(family, diagnostic_values))
         alternates = [model for ref, artifact in groups['sensitivity']
@@ -280,6 +280,15 @@ def _missing_label(code, language):
         'survival:diagnostics:ph_rejected_requires_model_revision': (
             'Cox PH was rejected; the time-varying effect requires an explicit model revision.',
             'Cox 比例风险检验拒绝：时变效应尚未用适用模型处理，需明确修订方案。'),
+        'iv:diagnostics:ar_unavailable': (
+            'The global AR confidence set is unavailable or uncertified; weak-instrument inference remains incomplete.',
+            'AR 全局置信集合不可用或未认证，弱工具推断仍未完成；需按不可用原因修订方案。'),
+        'iv:diagnostics:ar_empty_requires_model_revision': (
+            'The AR set is empty: the joint model restrictions require review, not a precise effect claim.',
+            'AR 集合为空：需复核联合模型限制，不能据此声称效应已精确估计。'),
+        'iv:diagnostics:overidentification_rejected_requires_model_revision': (
+            'The joint over-identifying restrictions were rejected; revise and justify the model.',
+            '过度识别联合限制被拒绝，需明确修订模型并给出理由。'),
         'survival:diagnostics:delayed_entry_not_validated': (
             'The Cox PH test with delayed entry has not been validated.',
             '延迟入组情形的 Cox 比例风险检验尚未验证。')}
