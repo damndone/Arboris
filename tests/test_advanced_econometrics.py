@@ -359,25 +359,16 @@ def test_run_workflow_panel_ols_requires_panel_fields(tmp_path):
 
 def test_run_workflow_panel_ols_skips_statsmodels_diagnostics(monkeypatch, tmp_path):
     import workbench.orchestrator as orchestrator
+    from workbench.econometrics.runner import run_panel_ols as native_panel_ols
 
     def fake_panel_ols(frame, y, x, entity, time, model_id, covariance="clustered", cluster_col=None):
         assert entity == "firm_id"
         assert time == "year"
-        return (
-            {
-                "schema_version": 1,
-                "model_id": model_id,
-                "model_type": "panel_ols",
-                "engine": "linearmodels",
-                "nobs": len(frame),
-                "r_squared": 0.5,
-                "coefficients": {
-                    "x": {"estimate": 1.0, "std_error": 0.1, "p_value": 0.01}
-                },
-                "warnings": [],
-            },
-            object(),
-        )
+        return native_panel_ols(frame, y, x, entity, time, model_id,
+                                covariance=covariance, cluster_col=cluster_col)
+
+    def pooled_diagnostics(*args, **kwargs):
+        pytest.fail("Panel fits must not use pooled statsmodels diagnostics")
 
     source = tmp_path / "panel.csv"
     firms = [f"firm_{idx:02d}" for idx in range(30)]
@@ -385,12 +376,14 @@ def test_run_workflow_panel_ols_skips_statsmodels_diagnostics(monkeypatch, tmp_p
         {
             "firm_id": [firm for firm in firms for _ in range(2)],
             "year": [2020, 2021] * len(firms),
-            "y": [1.0 + idx * 0.1 for idx in range(len(firms) * 2)],
-            "x": [float(idx % 2) for idx in range(len(firms) * 2)],
+            "y": [1.0 + idx * 0.1 + .7 * ((idx // 2) % 3) * (idx % 2) + (idx % 7) * .03
+                  for idx in range(len(firms) * 2)],
+            "x": [float(((idx // 2) % 3) * (idx % 2)) for idx in range(len(firms) * 2)],
         }
     ).to_csv(source, index=False)
     project = create_project(tmp_path, "panel_success_without_diagnostics")
     monkeypatch.setattr(orchestrator, "run_panel_ols", fake_panel_ols)
+    monkeypatch.setattr(orchestrator, "compute_diagnostics", pooled_diagnostics)
 
     result = run_workflow(
         project.root,
@@ -409,6 +402,8 @@ def test_run_workflow_panel_ols_skips_statsmodels_diagnostics(monkeypatch, tmp_p
     assert model_result["model_type"] == "panel_ols"
     assert manifest["model_routing"]["effective_model_type"] == "panel_ols"
     assert not (run_root / "model_results" / "diagnostics_panel_ols_1.json").exists()
+    evidence = read_json(run_root / "model_results/panel_ols_1.completion.json")
+    assert evidence["diagnostics"]["panel"]["status"] == "computed"
 
 
 def test_run_workflow_panel_ols_missing_dependency_writes_structured_issue(

@@ -29,6 +29,11 @@
     "iv_2sls_1": [
       "cleaned_dataset"
     ],
+    "iv_2sls_1.completion": [
+      "cleaned_dataset",
+      "iv_2sls_1",
+      "iv_diagnostics"
+    ],
     "iv_diagnostics": [
       "cleaned_dataset"
     ],
@@ -60,7 +65,8 @@
     ]
   },
   "error_codes": [
-    "CHECK_IV_EXCLUSION_RESTRICTION"
+    "CHECK_IV_EXCLUSION_RESTRICTION",
+    "CHECK_IV_FIRST_STAGE_STRENGTH"
   ],
   "models": {
     "iv_2sls_1": {

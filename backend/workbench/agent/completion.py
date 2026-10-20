@@ -177,6 +177,11 @@ class _Products:
                             # statistical products in the target run are local.
                             run_id, artifact_id = item.split(':', 1) if ':' in item else (current['run_id'], item)
                             pending.append({'run_id': run_id, 'artifact_id': artifact_id})
+                    review = collection.get('research_review')
+                    if isinstance(review, dict):
+                        pending.extend(ref for ref in review.get('result_refs', [])
+                            if isinstance(ref, dict) and all(isinstance(ref.get(key), str)
+                                for key in ['run_id', 'artifact_id']))
             if value.artifact_type == 'raw_data':
                 run_id = current['run_id']
                 if run_id not in self.lineage_cache:

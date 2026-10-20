@@ -24,6 +24,11 @@
     "did_1": [
       "cleaned_dataset"
     ],
+    "did_1.completion": [
+      "cleaned_dataset",
+      "did_1",
+      "did_diagnostics"
+    ],
     "did_diagnostics": [
       "cleaned_dataset"
     ],

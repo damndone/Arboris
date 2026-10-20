@@ -1,0 +1,2 @@
+# Retain local originals; Git stores their byte-identical gzip archives.
+survival.goal.r1/project/runs/*/artifacts/p7_analysis/*.json

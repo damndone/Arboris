@@ -83,9 +83,10 @@ def test_tool_builder_uses_injected_handlers_and_preserves_descriptors():
         update_plan=propose,
         run_operation=propose,
         plan_analysis=propose,
+        inspect_analysis_completion=inspect,
     )
     descriptors = {item["tool_id"]: item for item in registry.descriptors()}
-    assert set(descriptors) == {"inspect", "update_plan", "run_operation", "plan_analysis"}
+    assert set(descriptors) == {"inspect", "update_plan", "run_operation", "plan_analysis", "inspect_analysis_completion"}
     assert descriptors["run_operation"]["max_output_budget"] == 24_000
     assert descriptors["update_plan"]["input_schema"] is module._UPDATE_PLAN_SCHEMA
     assert descriptors["run_operation"]["side_effect"] == "proposal"
@@ -115,4 +116,5 @@ def test_duplicate_tool_is_rejected_before_building_the_proposal_schema():
             update_plan=handler,
             run_operation=handler,
             plan_analysis=handler,
+            inspect_analysis_completion=handler,
         )

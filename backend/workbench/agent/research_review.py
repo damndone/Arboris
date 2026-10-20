@@ -106,7 +106,8 @@ def build_context(root, plan, *, mode, candidate, config):
         keys.append(key)
     return {'mode': mode, 'packet': packet, 'manifest_sha256': check['verified_manifest_sha256'],
             'evidence_keys': keys, 'complete_packet': complete, 'egress_allowed': permitted,
-            'policy_sha256': sha256_canonical(policy.to_dict())}
+            'policy_sha256': sha256_canonical(policy.to_dict()),
+            'verification_inputs': {'contract':plan.completion, 'evidence':plan.completion_evidence}}
 
 
 def _unverified(reason):
@@ -270,6 +271,7 @@ async def start_review(core, payload, entry, *, request_id, context_fingerprint,
             core.repository.append_once(core.session_id,'research_review_intent',{
                 'review_id':digest,'command_id':core._active_command_id,'packet':packet,
                 'packet_sha256':sha256_canonical(packet),'manifest_sha256':ctx['manifest_sha256'],
+                'verification_inputs':ctx.get('verification_inputs'),
                 'model':core.model_name,'candidate_entry_id':entry.entry_id,
             },key=digest,stage='research_review_intent')
     count = len(intents) + int(cached is None and reason is None)

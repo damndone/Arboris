@@ -57,17 +57,24 @@ def _execute_workflow_report(
         "exploration_log": events,
     }
     curve = None
+    review, review_table = None, None
     if step is not None and step.spec.get("specification_curve"):
         from ..specification_curves import publish_curve
         curve = publish_curve(root, draft, step.spec["specification_curve"])
         collection["specification_curve"] = curve
+    if step is not None and step.spec.get("research_review"):
+        from ..report_reviews import collect_review, review_rows
+        review = collect_review(root, draft.target, step.spec["research_review"])
+        review_table = review_rows(review)
+        collection["research_review"] = review
     collection_path = run_root / "artifacts" / "statistical_exploration" / f"{draft.workflow_id}.json"
     collection_path.parent.mkdir(parents=True, exist_ok=True)
     if collection_path.exists() and read_json(collection_path) != collection:
         raise WorkflowExecutionError("workflow report collection path is occupied")
     if not collection_path.exists():
         write_json(collection_path, collection)
-    register_artifact(run_root, collection_id, collection_path, "report_collection", "report.compose", [curve["artifact_id"]] if curve else [])
+    inputs = ([curve["artifact_id"]] if curve else []) + (review["local_artifact_inputs"] if review else [])
+    register_artifact(run_root, collection_id, collection_path, "report_collection", "report.compose", inputs)
     curve_view = None
     if curve:
         folder = run_root / "artifacts/specification_curves"
@@ -86,12 +93,14 @@ def _execute_workflow_report(
         "descriptive_stats": [],
         "exploration": collection,
         **({"specification_curve": curve_view} if curve_view else {}),
+        **({"research_review": review, "research_review_rows": review_table} if review else {}),
     }
     render_html_report(view_model, run_root, filename=f"{draft.workflow_id}.html", artifact_id=html_id, inputs=[collection_id])
     export_pdf(view_model, run_root, filename=f"{draft.workflow_id}.pdf", artifact_id=pdf_id, inputs=[collection_id])
     export_xlsx(
         {
             **({"specification_curve": curve_view["rows"]} if curve_view else {}),
+            **({"research_review": review_table} if review else {}),
             "workflow_steps": [
                 {
                     "step_id": key,

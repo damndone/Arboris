@@ -166,6 +166,11 @@ def test_golden_iv_2sls(tmp_path):
     snap = _capture(run_root)
     # Guard: an IV regression from Task 2 must complete; a failure here is a regression.
     assert snap["status"] == "completed"
+    strength = next(issue["evidence"]["evidence"] for issue in read_json(run_root / "errors.json")["issues"]
+                    if issue["code"] == "CHECK_IV_FIRST_STAGE_STRENGTH")
+    assert strength["test"] == "wald_chi2" and strength["reference_distribution"] == "chi2(1)"
+    assert strength["first_stage_f"] is None and strength["verdict"] == "unassessed"
+    assert strength["strength_certified"] is False
     _assert_or_write_golden("iv_2sls", snap)
 
 

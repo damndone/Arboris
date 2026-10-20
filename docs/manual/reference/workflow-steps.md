@@ -773,6 +773,7 @@ Assemble the completed steps into a report.
 | Field | Required | Meaning |
 |---|---|---|
 | `specification_curve` |  | Render all model members of a frozen prior workflow; retain failures and native uncertainty. |
+| `research_review` |  | Attach a saved isolated review, retaining its original verdict and checking whether its evidence is unchanged. |
 | `report_contract` |  | Report contract identifier. |
 | `required_steps` |  | step_ids that must have completed before composing. |
 | `formats` |  | Output formats to emit. |

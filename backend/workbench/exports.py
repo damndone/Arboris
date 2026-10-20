@@ -81,10 +81,43 @@ def export_pdf(
                 lines.extend(textwrap.wrap(f"{key}: {value if value is not None else 'Unavailable'}", width=78))
             lines.append("")
         _draw_section(pdf, "Specification curve native values", lines, height-72)
+    if report.get("research_review"):
+        _draw_research_review_pdf(pdf, report["research_review"], report["research_review_rows"])
     pdf.save()
 
     register_artifact(run_root, artifact_id, pdf_path, "report", "export", list(inputs))
     return pdf_path
+
+
+def _draw_research_review_pdf(pdf, review, rows):
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+
+    # Embed a subset of the supported macOS host's Unicode font: a viewer must
+    # not need an external CJK language pack to render a saved review.
+    font = "ArborisReviewUnicode"
+    if font not in pdfmetrics.getRegisteredFontNames():
+        pdfmetrics.registerFont(TTFont(font, "/System/Library/Fonts/Supplemental/Arial Unicode.ttf"))
+    pdf.showPage()
+    y = letter[1] - 60
+    pdf.setFont("Helvetica-Bold", 14)
+    pdf.drawString(54, y, "Isolated research review")
+    y -= 28
+    lines = [review['scope'], 'Evidence status: ' + review['evidence_status'],
+        'Original verdict: ' + review['result']['verdict'], 'Review: ' + review['review_id'],
+        'Evidence packet: ' + review['packet_sha256'], 'Evidence manifest: ' + review['manifest_sha256']]
+    if review['evidence_status'] != 'unchanged':
+        lines.append('Historical opinion: current evidence changed or could not be verified.')
+    for row in rows:
+        lines.extend(['', row['severity'] + ': ' + row['message'], 'References: ' + row['evidence_refs']])
+    for paragraph in lines:
+        for line in textwrap.wrap(paragraph, width=50) or ['']:
+            if y < 60:
+                pdf.showPage()
+                y = letter[1] - 60
+            pdf.setFont(font, 10)
+            pdf.drawString(54, y, line)
+            y -= 15
 
 
 def export_xlsx(

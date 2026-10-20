@@ -190,6 +190,24 @@
     </section>
     {% endif %}
 
+    {% if view_model.research_review %}
+    <section id="research-review" style="overflow-wrap:anywhere">
+      <h2>Isolated research review</h2>
+      <p>{{ view_model.research_review.scope }}</p>
+      <p>Evidence status: {{ view_model.research_review.evidence_status }}.
+        Original verdict: {{ view_model.research_review.result.verdict }}.</p>
+      {% if view_model.research_review.evidence_status != 'unchanged' %}
+      <p class="warning">Historical review: current evidence has changed or cannot be verified. The original opinion is retained below.</p>
+      {% endif %}
+      <p>Review: <code>{{ view_model.research_review.review_id }}</code><br>
+        Evidence packet: <code>{{ view_model.research_review.packet_sha256 }}</code><br>
+        Evidence manifest: <code>{{ view_model.research_review.manifest_sha256 }}</code></p>
+      <table><thead><tr><th>Severity</th><th>Opinion / limitation</th><th>Evidence references</th></tr></thead>
+      <tbody>{% for row in view_model.research_review_rows %}
+        <tr><td>{{ row.severity }}</td><td>{{ row.message }}</td><td>{{ row.evidence_refs }}</td></tr>
+      {% endfor %}</tbody></table>
+    </section>
+    {% endif %}
     {% if view_model.specification_curve %}
     <section id="specification-curve">
       <h2>Specification curve</h2>
