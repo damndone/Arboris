@@ -26,33 +26,10 @@ def statistical_workflow_step_contracts() -> dict[str, StepSpecContract]:
     return {
         f"test.{family}": StepSpecContract(
             summary=contract.summary,
-            fields={
-                "analysis_columns": (
-                    "Explicit source columns for this named statistical family; "
-                    "columns are never inferred or silently dropped."
-                ),
-                "reference_means": (
-                    "Optional column-to-population-mean declarations for the "
-                    "evidence family."
-                ),
-                "paired_columns": (
-                    "Optional list of explicit two-column before/after pairs for "
-                    "the evidence family."
-                ),
-                "by_group": (
-                    "Optional grouping column: the test runs separately within each group "
-                    "(a missing value is a group of its own; at most 50 groups), and each "
-                    "test's p-values are also adjusted across groups (Holm and "
-                    "Benjamini-Hochberg). Groups side by side are not a test of a difference."
-                ),
-            },
+            fields=contract.request.fields,
             required=("analysis_columns",),
-            field_types={
-                "analysis_columns": "list",
-                "reference_means": "object",
-                "paired_columns": "list",
-                "by_group": "string",
-            },
+            field_types=contract.request.field_types,
+            field_schemas=contract.request.field_schemas,
             semantic_validator_key="statistical.named_test",
             reference_resolver_key="workflow.source_columns",
             column_extractor_key="statistical.named_test",

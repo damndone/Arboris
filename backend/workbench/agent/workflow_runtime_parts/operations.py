@@ -157,7 +157,7 @@ def _execute_named_statistical_step(
     step: Any,
     frame: pd.DataFrame,
 ) -> WorkflowStepResult:
-    from ...statistical_tests import run_named_statistical_test
+    from ...statistical_tests import TEST_FAMILIES, run_named_statistical_test
     family = str(step.operation_id).removeprefix("test.")
 
     def run_one(rows: pd.DataFrame) -> dict[str, Any]:
@@ -167,8 +167,7 @@ def _execute_named_statistical_step(
             analysis_columns=list(step.spec["analysis_columns"]),
             dataset_sha256=str(lineage["sha256"]),
             lineage_parent=str(lineage["artifact_id"]),
-            reference_means=step.spec.get("reference_means"),
-            paired_columns=[tuple(pair) for pair in step.spec.get("paired_columns", []) or []],
+            **TEST_FAMILIES[family].request.kernel_arguments(step.spec, named=True),
         )
 
     by_group = step.spec.get("by_group")

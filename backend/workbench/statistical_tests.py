@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from statistics import StatisticsError
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from itertools import combinations
 from pathlib import Path
 from collections.abc import Mapping, Sequence
@@ -14,6 +14,7 @@ from scipy import stats
 from statsmodels.stats.multitest import multipletests
 
 from .artifacts import register_artifact, write_json
+from .statistical_test_requests import DEFAULT_TEST_PARAMETERS, StatisticalTestRequest, TestParameter
 
 CATEGORY_MAX_UNIQUE = 20
 
@@ -29,6 +30,11 @@ class TestFamilyContract:
 
     artifact_filename: str
     summary: str
+    parameters: Mapping[str, TestParameter] = field(default_factory=lambda: dict(DEFAULT_TEST_PARAMETERS))
+
+    @property
+    def request(self) -> StatisticalTestRequest:
+        return StatisticalTestRequest(self.parameters)
 
 
 TEST_FAMILIES: dict[str, TestFamilyContract] = {

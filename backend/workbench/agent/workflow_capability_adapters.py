@@ -203,55 +203,13 @@ def _binding_column(bindings: Mapping[str, Any], key: str, *, operation_id: str)
     return value
 
 
-def _validate_statistical_option_shapes(
-    operation_id: str,
-    columns: list[str],
-    options: Mapping[str, Any],
-) -> None:
-    reference_means = options.get("reference_means")
-    if reference_means is not None:
-        if not isinstance(reference_means, Mapping):
-            raise WorkflowCapabilityAdapterError(
-                f"{operation_id} reference_means must be an object mapping columns to finite numbers"
-            )
-        for column, value in reference_means.items():
-            if type(column) is not str or not column or column not in columns:
-                raise WorkflowCapabilityAdapterError(
-                    f"{operation_id} reference_means columns must be present in the declared columns"
-                )
-            if type(value) not in (int, float):
-                raise WorkflowCapabilityAdapterError(
-                    f"{operation_id} reference_means values must be finite numbers"
-                )
-            try:
-                finite = math.isfinite(float(value))
-            except (OverflowError, TypeError):
-                finite = False
-            if not finite:
-                raise WorkflowCapabilityAdapterError(
-                    f"{operation_id} reference_means values must be finite numbers"
-                )
+def _validate_statistical_option_shapes(operation_id, columns, options):
+    from ..statistical_tests import TEST_FAMILIES
 
-    paired_columns = options.get("paired_columns")
-    if paired_columns is not None:
-        if not isinstance(paired_columns, (list, tuple)):
-            raise WorkflowCapabilityAdapterError(
-                f"{operation_id} paired_columns must be a list of two-column pairs"
-            )
-        for pair in paired_columns:
-            if (
-                not isinstance(pair, (list, tuple))
-                or len(pair) != 2
-                or any(type(column) is not str or not column for column in pair)
-            ):
-                raise WorkflowCapabilityAdapterError(
-                    f"{operation_id} paired_columns entries must contain exactly two column names"
-                )
-            left, right = pair
-            if left == right or left not in columns or right not in columns:
-                raise WorkflowCapabilityAdapterError(
-                    f"{operation_id} paired_columns entries must name two distinct declared columns"
-                )
+    try:
+        TEST_FAMILIES[operation_id.removeprefix("test.")].request.validate_options(operation_id, columns, options)
+    except ValueError as exc:
+        raise WorkflowCapabilityAdapterError(str(exc)) from exc
 
 
 def _validate_statistical_request(operation_id: str, request: Mapping[str, Any]) -> dict[str, Any]:
@@ -310,8 +268,7 @@ def _execute_statistical(frame: pd.DataFrame, request: Mapping[str, Any]) -> Wor
     results = run_statistical_tests(
         selected_frame,
         analysis_columns=columns,
-        reference_means=options.get("reference_means"),
-        paired_columns=options.get("paired_columns"),
+        **_statistical_request(operation_id).kernel_arguments(options, named=False),
     )
     family = operation_id.removeprefix("test.")
     payload = results.get(family)
@@ -959,10 +916,7 @@ _ADAPTER_REQUEST_SCHEMAS: dict[str, dict[str, Any]] = {
     "statistical_test": _request_schema(
         {"columns": _columns_schema(minimum=2)},
         required_bindings=("columns",),
-        options={
-            "reference_means": {"type": "object"},
-            "paired_columns": {"type": "array"},
-        },
+        options={},
     ),
     "prediction_model": _request_schema(
         {"outcome": _string_schema(), "features": _columns_schema(minimum=1)},
@@ -1064,7 +1018,14 @@ def _adapter_key_for_operation(operation_id: str) -> str:
     )
 
 
+def _statistical_request(operation_id):
+    from ..statistical_tests import TEST_FAMILIES
+    return TEST_FAMILIES[operation_id.removeprefix("test.")].request
+
+
 def _declared_request_properties(operation_id: str, field_name: str) -> set[str]:
+    if operation_id.startswith("test.") and field_name == "options":
+        return set(_statistical_request(operation_id).parameters)
     adapter_key = _adapter_key_for_operation(operation_id)
     try:
         properties = _ADAPTER_REQUEST_SCHEMAS[adapter_key]["properties"][field_name]["properties"]
@@ -1079,11 +1040,16 @@ def _declared_request_properties(operation_id: str, field_name: str) -> set[str]
     return {str(name) for name in properties}
 
 
-def workflow_capability_request_schema(adapter_key: str) -> dict[str, Any]:
+def workflow_capability_request_schema(adapter_key: str, *, operation_id: str | None = None) -> dict[str, Any]:
     """Return the adapter declaration used by Agent and workflow schemas."""
 
     try:
-        return deepcopy(_ADAPTER_REQUEST_SCHEMAS[adapter_key])
+        schema = deepcopy(_ADAPTER_REQUEST_SCHEMAS[adapter_key])
+        if adapter_key == "statistical_test":
+            from ..statistical_test_requests import DEFAULT_TEST_PARAMETERS, StatisticalTestRequest
+            declaration = _statistical_request(operation_id) if operation_id else StatisticalTestRequest(DEFAULT_TEST_PARAMETERS)
+            schema["properties"]["options"]["properties"] = declaration.option_schemas
+        return schema
     except KeyError as exc:
         raise KeyError(f"unknown workflow capability adapter schema: {adapter_key}") from exc
 

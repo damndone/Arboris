@@ -94,7 +94,7 @@ and replication packages only under `local/` with source, version, licence and c
 user authorization.
 
 ## Boundary
-- Affected paths: `backend/workbench/agent`, `backend/workbench/http`, `backend/workbench/analysis_loop`, `backend/workbench/analysis_ledger.py`, `backend/workbench/egress.py`, `backend/workbench/events.py`, `backend/workbench/cli.py`, `backend/workbench/cli_commands.py`, `backend/workbench/canonical.py`, `frontend/src`, `scripts`, `tests`, `docs`, `evaluations`, `backend/workbench/llm/client.py`, `pyproject.toml`, `backend/workbench/capability_factory`, `backend/workbench/operation_approvals.py`, `backend/workbench/cli_agent.py`
+- Affected paths: `backend/workbench/agent`, `backend/workbench/http`, `backend/workbench/analysis_loop`, `backend/workbench/analysis_ledger.py`, `backend/workbench/egress.py`, `backend/workbench/events.py`, `backend/workbench/cli.py`, `backend/workbench/cli_commands.py`, `backend/workbench/canonical.py`, `frontend/src`, `scripts`, `tests`, `docs`, `evaluations`, `backend/workbench/llm/client.py`, `pyproject.toml`, `backend/workbench/capability_factory`, `backend/workbench/operation_approvals.py`, `backend/workbench/cli_agent.py`, `backend/workbench/statistical_tests.py`, `backend/workbench/statistical_test_requests.py`
 - Allowed paths: none
 - Protected paths: `backend/workbench/econometrics`, `backend/workbench/contracts/model`
 - Dependencies: none

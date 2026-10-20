@@ -79,14 +79,9 @@ def _spec_columns(operation_id: str, spec: Mapping[str, Any]) -> set[str]:
         elif operation == "feature_recipe":
             columns.update(str(item) for item in spec.get("inputs", []) or [])
     elif extractor_key == "statistical.named_test":
-        columns.update(str(item) for item in spec.get("analysis_columns", []) or [])
-        if isinstance(spec.get("by_group"), str) and spec["by_group"]:
-            columns.add(spec["by_group"])
-        for column in (spec.get("reference_means") or {}):
-            columns.add(str(column))
-        for pair in spec.get("paired_columns", []) or []:
-            if isinstance(pair, (list, tuple)):
-                columns.update(str(item) for item in pair if item)
+        from ...statistical_tests import TEST_FAMILIES
+
+        columns.update(TEST_FAMILIES[operation_id.removeprefix("test.")].request.referenced_columns(spec))
     elif extractor_key == "prediction.model":
         if spec.get("y"):
             columns.add(str(spec["y"]))

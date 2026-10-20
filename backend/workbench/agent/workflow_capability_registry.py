@@ -242,7 +242,7 @@ def _build_registry() -> WorkflowCapabilityRegistry:
             kind=str(declaration["kind"]),
             summary=str(declaration["summary"]),
             adapter_key=adapter_key,
-            request_schema=workflow_capability_request_schema(adapter_key),
+            request_schema=workflow_capability_request_schema(adapter_key, operation_id=operation_id),
             output_schema_ref=f"workbench.workflow-capability.{operation_id}/v1",
             produces_dataset=bool(declaration.get("produces_dataset", False)),
             dataset_kind=declaration.get("dataset_kind"),

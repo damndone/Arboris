@@ -530,58 +530,12 @@ def _validate_step_spec(operation_id: str, spec: Mapping[str, Any]) -> None:
                 "model.white_test branch_id must be a non-empty string"
             )
     elif validator_key == "statistical.named_test":
-        by_group = spec.get("by_group")
-        if by_group is not None:
-            if not isinstance(by_group, str) or not by_group.strip():
-                raise OperationValidationError(f"{operation_id} by_group must name one column")
-            if by_group in (spec.get("analysis_columns") or []):
-                raise OperationValidationError(
-                    f"{operation_id} by_group cannot also be an analysis column"
-                )
-        analysis_columns = spec.get("analysis_columns")
-        if not isinstance(analysis_columns, list) or not analysis_columns:
-            raise OperationValidationError(
-                f"{operation_id} requires a non-empty analysis_columns list"
-            )
-        if any(not isinstance(column, str) or not column for column in analysis_columns):
-            raise OperationValidationError(
-                f"{operation_id} analysis_columns must contain non-empty strings"
-            )
-        if len(set(analysis_columns)) != len(analysis_columns):
-            raise OperationValidationError(
-                f"{operation_id} analysis_columns must not contain duplicates"
-            )
-        reference_means = spec.get("reference_means")
-        if reference_means is not None:
-            if not isinstance(reference_means, Mapping):
-                raise OperationValidationError(
-                    f"{operation_id} reference_means must be an object"
-                )
-            if any(
-                not isinstance(value, (int, float))
-                or isinstance(value, bool)
-                or not math.isfinite(float(value))
-                for value in reference_means.values()
-            ):
-                raise OperationValidationError(
-                    f"{operation_id} reference_means values must be finite numbers"
-                )
-        paired_columns = spec.get("paired_columns")
-        if paired_columns is not None:
-            if not isinstance(paired_columns, list):
-                raise OperationValidationError(
-                    f"{operation_id} paired_columns must be a list"
-                )
-            for pair in paired_columns:
-                if (
-                    not isinstance(pair, list)
-                    or len(pair) != 2
-                    or any(not isinstance(column, str) or not column for column in pair)
-                    or pair[0] == pair[1]
-                ):
-                    raise OperationValidationError(
-                        f"{operation_id} paired_columns must contain distinct two-column lists"
-                    )
+        from ...statistical_tests import TEST_FAMILIES
+
+        try:
+            TEST_FAMILIES[operation_id.removeprefix("test.")].request.validate_named_spec(operation_id, spec)
+        except ValueError as exc:
+            raise OperationValidationError(str(exc)) from exc
     elif validator_key == "prediction.model":
         x_columns = spec.get("x")
         if not isinstance(spec.get("y"), str) or not spec["y"]:
