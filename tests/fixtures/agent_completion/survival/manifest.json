@@ -1,0 +1,42 @@
+{
+  "ph_oracle": "R survival::cox.zph(transform=log, terms=FALSE)",
+  "cox_estimation_oracle": "Stata stcox coefficients and standard errors; not a PH score oracle",
+  "tolerance": {
+    "rtol": 1e-07,
+    "atol": 1e-09
+  },
+  "repository_files": {
+    "tests/fixtures/agent_completion/survival/cox_reference_stata.csv": "f82533bee1ab8b5eb22c4a2fcfb3559db3c2b80f82ff2ebd6e793507b2524ad6",
+    "tests/fixtures/agent_completion/survival/generate_cox_reference.do": "c3798a453f25c4fc738eabceecd093f7c483586881ca7c4f20955c7ef51732c9",
+    "tests/fixtures/agent_completion/survival/generate_ph_reference.R": "a0c4124f4f789e6e0d98c1920540507e2bb4e9202bd7f9f63bb2f51376e1c9ab",
+    "tests/fixtures/agent_completion/survival/ph_reference_r.json": "9313105bf2300e1867861a155fd6586bbc78a2e4191144e6a3d980906a49701f",
+    "tests/fixtures/agent_completion/survival/stata_environment.json": "713ddc8c0134e06fd78a960eb6ecfc2553aea57642ab129d51e8668dd76239c1",
+    "tests/fixtures/agent_completion/survival/tied.csv": "1919adc26e90405de75745350c1e8860c954487e024f10183e9b32c29022e1ed",
+    "tests/fixtures/v186_families/families.csv": "cb8172fbd6c7a4b70a5c524df660480c1e98529ccbe3bfdd10b30748ffa35ad8"
+  },
+  "commands": [
+    "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 Rscript tests/fixtures/agent_completion/survival/generate_ph_reference.R",
+    "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 /Applications/Stata/StataMP.app/Contents/MacOS/stata-mp -bq do REPO_ROOT/tests/fixtures/agent_completion/survival/generate_cox_reference.do REPO_ROOT (cwd: scratch directory)"
+  ],
+  "definitions_and_sources": [
+    "https://stat.ethz.ch/R-manual/R-devel/library/survival/html/cox.zph.html",
+    "https://github.com/therneau/survival/blob/master/R/cox.zph.R"
+  ],
+  "installed_r_method_snapshot_sha256": "43a71599c96cdc2306c0fba8367d9a22d7a29aedfa39b2e5497cea492c15be0c",
+  "statsmodels_version": "0.14.6",
+  "transformations": "tied.csv changes duration only: max(0.1, round(duration*2)/2); all original rows, no weights or strata; no fit selected using p-values",
+  "monte_carlo": {
+    "seed": 20261020,
+    "n": 400,
+    "alpha": 0.05,
+    "null_replicates": 200,
+    "alternative_replicates": 60,
+    "nominal_null_mcse": 0.015411035007422441,
+    "type_i_acceptance": [
+      0.005,
+      0.11
+    ],
+    "minimum_power": 0.8
+  },
+  "scope": "Independent right-censored subjects, Breslow/Efron ties. Delayed entry explicitly unverified. Score test is asymptotic; non-rejection is not proof of PH or causality."
+}

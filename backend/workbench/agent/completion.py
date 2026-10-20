@@ -12,6 +12,7 @@ from typing import Any
 
 from ..canonical import sha256_canonical
 from .context_compiler import read_completion_artifact, read_completion_dataset_source
+from .completion_profiles import companion_model, native_diagnostics, native_findings
 
 VERSION = 'analysis-completion/v1'
 PLAYBOOKS = {
@@ -93,7 +94,9 @@ def _diagnostics(family, values):
         return any(_test(v.get('breusch_pagan')) and _test(v.get('cooks_distance')) for v in values)
     if family == 'lmm':
         return any(v.get('status') == 'complete' and v.get('summary') and v.get('residual_definitions') for v in values)
-    # Native Cox/time-series packets use distinct contracts, not these
+    if native_diagnostics(family, values):
+        return True
+    # Native time-series packets use distinct contracts, not these
     # legacy OLS diagnostic dictionaries. Keep their positive path closed
     # until calibrated against actual producer fixtures, rather than treating
     # generic p-value-shaped JSON as family-specific evidence.
@@ -124,6 +127,10 @@ class _Products:
                 return None
             self.cache[key] = read_completion_artifact(root, artifact_id)
         return self.cache[key]
+
+    def model(self, ref, artifact):
+        model = _model(artifact)
+        return companion_model(self, ref, artifact, model) if model is not None else None
 
     def ancestors(self, ref):
         seen, pending, found = set(), [ref], []
@@ -204,20 +211,23 @@ def evaluate(project_root, contract, evidence):
     for family in families:
         names = PLAYBOOKS[family]
         matches = [(ref, model) for ref, artifact in groups['models']
-                   if (model := _model(artifact)) is not None and model.get('model_type') in names and bound(ref)]
+                   if (model := products.model(ref, artifact)) is not None and model.get('model_type') in names and bound(ref)]
         if len(matches) != 1:
             missing.append(f'{family}:model:{MODEL_NAMES[family]}')
         main_ref, main = matches[0] if len(matches) == 1 else (None, None)
         diagnostic_values = [artifact.payload for ref, artifact in groups['diagnostics']
-                             if artifact is not None and artifact.artifact_type in {'model_diagnostic', 'lmm_analysis_evidence'}
+                             if artifact is not None and artifact.artifact_type in {'model_diagnostic', 'lmm_analysis_evidence', 'analysis_completion_evidence'}
                              and bound(ref) and main_ref and ref['run_id'] == main_ref['run_id']
                              and artifact.payload and artifact.payload.get('model_id') == main.get('model_id')
-                             and (family != 'lmm' or artifact.artifact_type == 'lmm_analysis_evidence')]
+                             and (family != 'lmm' or artifact.artifact_type == 'lmm_analysis_evidence')
+                             and (main.get('model_type') not in {'survival_cox'}
+                                  or ref['artifact_id'] == main['model_id'] + '.completion')]
         if not _diagnostics(family, diagnostic_values):
-            reason = 'computed_and_model_bound' if family in {'ols', 'lmm'} else 'native_profile_unverified'
+            reason = 'computed_and_model_bound' if family in {'ols', 'lmm', 'survival'} else 'native_profile_unverified'
             missing.append(f'{family}:diagnostics:{reason}')
+        missing.extend(native_findings(family, diagnostic_values))
         alternates = [model for ref, artifact in groups['sensitivity']
-                      if (model := _model(artifact)) is not None and model.get('model_type') in names and bound(ref)]
+                      if (model := products.model(ref, artifact)) is not None and model.get('model_type') in names and bound(ref)]
         comparisons = [alternate for alternate in alternates if main and _different_estimation(main, alternate)]
         if not comparisons:
             missing.append(f'{family}:sensitivity:distinct_point_estimation')
@@ -266,6 +276,16 @@ def claims_completion(content, request_text=None):
 
 def _missing_label(code, language):
     family, _, requirement = code.partition(':')
+    special = {
+        'survival:diagnostics:ph_rejected_requires_model_revision': (
+            'Cox PH was rejected; the time-varying effect requires an explicit model revision.',
+            'Cox 比例风险检验拒绝：时变效应尚未用适用模型处理，需明确修订方案。'),
+        'survival:diagnostics:delayed_entry_not_validated': (
+            'The Cox PH test with delayed entry has not been validated.',
+            '延迟入组情形的 Cox 比例风险检验尚未验证。')}
+    if code in special:
+        return special[code][1 if language == 'zh' else 0]
+
     if language != 'zh':
         labels = {'completion_contract': 'Select the analysis playbooks and verify the dataset source.',
                   'source': 'The dataset source changed or is unavailable.',

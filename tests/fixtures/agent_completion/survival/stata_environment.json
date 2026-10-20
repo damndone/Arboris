@@ -1,0 +1,1 @@
+{"stata_version":"18","os":"Unix","definition":"stcox, breslow/efron; coefficients and standard errors only, not a Cox PH score oracle"}

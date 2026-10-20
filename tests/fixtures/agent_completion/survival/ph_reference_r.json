@@ -1,0 +1,146 @@
+{
+  "environment": {
+    "R": "R version 4.6.0 (2026-04-24)",
+    "survival": "3.8.6"
+  },
+  "command": "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 Rscript tests/fixtures/agent_completion/survival/generate_ph_reference.R",
+  "definition": "Native survival::cox.zph(transform=log, terms=FALSE); chi-square score tests with beta nuisance information",
+  "tolerance": {
+    "rtol": 1e-07,
+    "atol": 1e-09
+  },
+  "cases": {
+    "untied_breslow": {
+      "source": "tests/fixtures/v186_families/families.csv",
+      "ties": "breslow",
+      "tests": {
+        "x1": {
+          "statistic": 0.604009716729487,
+          "df": 1,
+          "p_value": 0.43705221423365
+        },
+        "x2": {
+          "statistic": 0.0103416516293131,
+          "df": 1,
+          "p_value": 0.918999635038084
+        },
+        "grp": {
+          "statistic": 0.00706853657243603,
+          "df": 1,
+          "p_value": 0.93299712786841
+        },
+        "global": {
+          "statistic": 0.721459904155178,
+          "df": 3,
+          "p_value": 0.868145129369111
+        }
+      },
+      "coefficients": {
+        "x1": 0.725224638823776,
+        "x2": -0.525460571392367,
+        "grp": 0.450720351686019
+      },
+      "nobs": 240,
+      "n_events": 160
+    },
+    "untied_efron": {
+      "source": "tests/fixtures/v186_families/families.csv",
+      "ties": "efron",
+      "tests": {
+        "x1": {
+          "statistic": 0.604009716729487,
+          "df": 1,
+          "p_value": 0.43705221423365
+        },
+        "x2": {
+          "statistic": 0.0103416516293131,
+          "df": 1,
+          "p_value": 0.918999635038084
+        },
+        "grp": {
+          "statistic": 0.00706853657243603,
+          "df": 1,
+          "p_value": 0.93299712786841
+        },
+        "global": {
+          "statistic": 0.721459904155178,
+          "df": 3,
+          "p_value": 0.868145129369111
+        }
+      },
+      "coefficients": {
+        "x1": 0.725224638823776,
+        "x2": -0.525460571392367,
+        "grp": 0.450720351686019
+      },
+      "nobs": 240,
+      "n_events": 160
+    },
+    "tied_breslow": {
+      "source": "tests/fixtures/agent_completion/survival/tied.csv",
+      "ties": "breslow",
+      "tests": {
+        "x1": {
+          "statistic": 0.704755635936999,
+          "df": 1,
+          "p_value": 0.401190330678578
+        },
+        "x2": {
+          "statistic": 0.000155992539738542,
+          "df": 1,
+          "p_value": 0.99003492240062
+        },
+        "grp": {
+          "statistic": 0.135306408946797,
+          "df": 1,
+          "p_value": 0.712992395880041
+        },
+        "global": {
+          "statistic": 1.04974271711948,
+          "df": 3,
+          "p_value": 0.789218097040048
+        }
+      },
+      "coefficients": {
+        "x1": 0.699063104835111,
+        "x2": -0.506373596337292,
+        "grp": 0.439410887234547
+      },
+      "nobs": 240,
+      "n_events": 160
+    },
+    "tied_efron": {
+      "source": "tests/fixtures/agent_completion/survival/tied.csv",
+      "ties": "efron",
+      "tests": {
+        "x1": {
+          "statistic": 0.804830455126977,
+          "df": 1,
+          "p_value": 0.36965305564672
+        },
+        "x2": {
+          "statistic": 0.00687753323173077,
+          "df": 1,
+          "p_value": 0.933906488535215
+        },
+        "grp": {
+          "statistic": 0.139402571142329,
+          "df": 1,
+          "p_value": 0.708875661143252
+        },
+        "global": {
+          "statistic": 1.20171578346585,
+          "df": 3,
+          "p_value": 0.752592825379179
+        }
+      },
+      "coefficients": {
+        "x1": 0.728678813816511,
+        "x2": -0.522257118669461,
+        "grp": 0.451529475960295
+      },
+      "nobs": 240,
+      "n_events": 160
+    }
+  }
+}

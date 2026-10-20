@@ -577,6 +577,19 @@ def fit_survival(ctx: Any, env: Any) -> tuple[str, dict[str, Any], Any]:
         "hazard_ratios": {name: values.get("hazard_ratio") for name, values in coefficient_map.items()},
         "survival_evidence_artifact": "survival_evidence",
     }
+    from ..survival_analysis.ph_diagnostics import ph_score_test
+    from ...completion_evidence import publish_completion_evidence
+    ph = ph_score_test(duration, status, exog.to_numpy(dtype=float), fitted.params,
+                       names, ties=str(options.get('ties', 'breslow')), entry=entry)
+    required = [ctx.artifacts['_normalized_y'], *ctx.artifacts['_normalized_x'], *extra_columns]
+    retained = np.flatnonzero(ctx.data.frame[list(dict.fromkeys(required))].notna().all(axis=1)).tolist()
+    publish_completion_evidence(ctx, env, primary,
+        point_definition={'family': 'survival_cox', 'names': names, 'time': duration.tolist(),
+                          'event': status.tolist(), 'design': exog.to_numpy(dtype=float).tolist(),
+                          'entry': None if entry is None else entry.tolist(),
+                          'ties': options.get('ties', 'breslow')},
+        retained_positions=retained, diagnostics={'proportional_hazards': ph},
+        diagnostic_artifact_ids=['survival_evidence'])
     _record_kernel(ctx, fitted, model_id="survival_cox_1", model_type="survival_cox", nobs=int(len(frame)), names=names)
     return "survival_cox_1", primary, None
 
