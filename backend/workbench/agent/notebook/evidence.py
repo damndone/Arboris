@@ -30,6 +30,47 @@ MAX_CELL_CHARS = 128
 MAX_RECORD_BYTES = 16 * 1024
 MAX_PACK_BYTES = 48 * 1024
 
+# These inspections describe raw-data support, not fitted relationships.
+COMPARISON_INSPECTIONS = frozenset({"profile.v1", "quality.v1", "time_index.v1", "sample.v1"})
+
+
+def comparison_evidence_pack(pack: DataEvidencePackV1) -> DataEvidencePackV1:
+    """Select citable original records; never rewrite their immutable hashes."""
+    return DataEvidencePackV1(pack.source_id, tuple(
+        record for record in pack.records if record.inspection_id in COMPARISON_INSPECTIONS
+    ), pack.pack_omissions)
+
+
+def comparison_evidence_payload(pack: DataEvidencePackV1) -> dict[str, Any]:
+    """Model-only projection. result_hash always identifies the ORIGINAL record.
+
+    The projection hash identifies what was displayed. Raw packs remain intact
+    on disk; omitting paired sample values also prevents recomputing a fit from
+    the supposedly blinded input. New inspection fields are excluded by default.
+    """
+    fields = {
+        "profile.v1": {"row_count", "source_rows_capped", "columns"},
+        "quality.v1": {"row_count", "duplicate_row_count", "missing_counts"},
+        "time_index.v1": {"candidate_column", "ordered", "duplicate_count", "gap_count", "regular"},
+        "sample.v1": {"columns", "row_count"},
+    }
+    payload = comparison_evidence_pack(pack).to_dict()
+    for record in payload["records"]:
+        observations = record["observations"]
+        record["observations"] = {key: value for key, value in observations.items() if key in fields[record["inspection_id"]]}
+        if "columns" in record["observations"]:
+            record["observations"]["columns"] = [
+                {key: column[key] for key in ("name", "dtype", "row_count", "missing_count", "unique_count") if key in column}
+                if isinstance(column, dict) else column
+                for column in observations["columns"]
+            ]
+        record["metrics"] = {}
+        record["warnings"] = []
+    payload["projection_profile"] = "result-blind-evidence/v1"
+    payload["hash_semantics"] = "result_hash and pack hashes refer to original evidence, not this projection"
+    payload["projection_hash"] = "sha256:" + sha256_canonical(payload)
+    return payload
+
 
 class EvidenceError(ValueError):
     """Base for typed, fail-closed inspection errors."""

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+from copy import deepcopy
 from typing import Any
 from uuid import uuid4
 
@@ -14,6 +15,8 @@ from ..context_compiler import (
     notebook_planning_workbench_context,
 )
 from ..notebook.evidence import DataEvidencePackV1, InspectionRequest
+from ..notebook.evidence import COMPARISON_INSPECTIONS, comparison_evidence_pack, comparison_evidence_payload
+from ...canonical import sha256_canonical
 from ..notebook.vocabulary import (
     ARTIFACT_VOCABULARY_VERSION,
     CAPABILITY_ARTIFACT_VOCABULARY_VERSION,
@@ -44,6 +47,8 @@ from .corrections import _append_contract_correction
 from .provider_contract import _notebook_tools_for
 from .validation import _validate_submissions, _published_artifact_types
 
+MAX_PLANNING_MESSAGE_CHARS = 1024 * 1024
+
 
 class NotebookPlanningPhase:
     replay_safe = False
@@ -59,7 +64,8 @@ class NotebookPlanningPhase:
         self.recommendation_validator = recommendation_validator
         self.operation_registry = operation_registry
         self.proposal_validator = proposal_validator
-        self.available_inspections = available_inspections
+        self.result_blind = _interaction_mode(context) == "plan"
+        self.available_inspections = frozenset(available_inspections) & COMPARISON_INSPECTIONS if self.result_blind else available_inspections
         self.max_inspection_rounds = max_inspection_rounds
         self.max_contract_corrections = max_contract_corrections
         self.model_timeout_s = model_timeout_s
@@ -73,9 +79,9 @@ class NotebookPlanningPhase:
         self.round_number = 0
         self.inspection_rounds = 0
         self.contract_corrections = 0
-        self.evidence = initial_evidence
+        self.evidence = comparison_evidence_pack(initial_evidence) if self.result_blind else initial_evidence
         self.requests_seen = []
-        self.terminal_inspection_ids = {r.inspection_id for r in initial_evidence.records if r.status in {"completed", "partial"}}
+        self.terminal_inspection_ids = {r.inspection_id for r in self.evidence.records if r.status in {"completed", "partial"}}
         interaction_mode = _interaction_mode(context)
         max_options = 1 if interaction_mode == "action" else 3
         catalog = self.capability_catalog or {name: {} for name in context.available_capabilities}
@@ -91,7 +97,7 @@ class NotebookPlanningPhase:
                 declaration["recipe_contract"] = contract.to_payload()
         if not catalog:
             raise NotebookNoEligibleCapability("no registered executable Notebook capability is available")
-        context_payload = notebook_planning_workbench_context(context)
+        context_payload = notebook_planning_workbench_context(context, result_blind=self.result_blind)
         context_payload["interaction_mode"] = interaction_mode
         context_payload["execution_pins"] = self._execution_pins(context)
         context_payload["available_inspection_ids"] = sorted(self.available_inspections)
@@ -107,6 +113,8 @@ class NotebookPlanningPhase:
             },
             "required_expectations_must_use_declared_ids": True,
         }
+        if self.result_blind:
+            context_payload["model_projection_hash"] = "sha256:" + sha256_canonical(context_payload)
         messages: list[dict[str, Any]] = [
             {
                 "role": "system",
@@ -123,12 +131,19 @@ class NotebookPlanningPhase:
                         "requested specification; list only evidence-backed necessary assumptions "
                         "and limitations. "
                     )
+                    + (
+                        "Result-blind comparison: compare question fit, data support, assumptions, cost and domain practice, "
+                        "in that order. Never rank substantive specifications by significance, R-squared or fitted effects. "
+                        "Raw source rows and post-fit evidence are withheld; forecast score comparison is unavailable "
+                        "until evaluation-set sealing is verified. User-supplied goals are not certified result-free. "
+                        if self.result_blind else ""
+                    )
                     + "Use only the three typed Notebook tools. Never invent metrics or executable capability ids. "
                     "When the request cannot be safely or honestly turned into a registered executable plan, "
                     "call decline_notebook_plan with one published reason_code and a concise user-facing message; "
                     "a refusal is terminal and must not be combined with a submission. "
-                    "Inspection ids are exactly profile.v1, quality.v1, time_index.v1, sample.v1, "
-                    "or forecast_rolling_origin.v1; use dataset:active for a dataset projection and "
+                    f"Inspection ids are exactly {', '.join(sorted(self.available_inspections))}; "
+                    "use dataset:active for a dataset projection and "
                     "run:active for a run projection. Treat completed evidence already supplied in "
                     "the initial Evidence Pack as sufficient for the evidence requirement; request "
                     "an inspection only to fill a concrete evidence gap needed by the option you "
@@ -218,9 +233,9 @@ class NotebookPlanningPhase:
                     {
                         "context": context_payload,
                         "capability_catalog": catalog,
-                        "evidence": initial_evidence.to_dict(),
+                        "evidence": self._model_evidence(),
                         "evidence_citation_policy": self._evidence_citation_policy(
-                            initial_evidence
+                            self.evidence
                         ),
                     },
                     ensure_ascii=False,
@@ -245,6 +260,9 @@ class NotebookPlanningPhase:
             operation_registry=self.operation_registry, proposal_validator=self.proposal_validator,
             artifact_types_by_capability=self.artifact_types_by_capability, max_options=max_options)
 
+    def _model_evidence(self):
+        return comparison_evidence_payload(self.evidence) if self.result_blind else self.evidence.to_dict()
+
     def request(self, transcript):
         if self.round_number >= self.max_inspection_rounds + 1 + self.max_contract_corrections:
             raise NotebookPlanningContractError("planning loop did not submit an option batch")
@@ -254,10 +272,19 @@ class NotebookPlanningPhase:
             raise self.failure("timeout")
         self.total_budget_limited = remaining is not None and remaining < self.model_timeout_s
         self.round_number += 1
+        messages = list(transcript) if transcript else list(self.initial_messages)
+        # Refuse oversize input rather than truncating executable contracts or
+        # an approval identity. Applies also to restored/correction messages.
+        if any(len(json.dumps(message, ensure_ascii=False)) > MAX_PLANNING_MESSAGE_CHARS for message in messages):
+            raise NotebookPlanningContractError("planning message budget exceeded")
+        tools = deepcopy(_notebook_tools_for(self.max_options,
+            include_inspection=not _has_complete_baseline_evidence(self.evidence)))
+        for tool in tools:
+            if tool["tool_id"] == "request_notebook_inspections":
+                tool["input_schema"]["properties"]["requests"]["items"]["properties"]["inspection_id"]["enum"] = sorted(self.available_inspections)
         return PhaseRequest(
-            messages=list(transcript) if transcript else list(self.initial_messages),
-            tools=[dict(tool) for tool in _notebook_tools_for(self.max_options,
-                include_inspection=not _has_complete_baseline_evidence(self.evidence))],
+            messages=messages,
+            tools=list(tools),
             model_config=dict(self.request_config),
             provider_timeout_s=self.model_timeout_s if remaining is None else min(self.model_timeout_s, remaining),
         )
@@ -276,6 +303,7 @@ class NotebookPlanningPhase:
 
     def checkpoint(self):
         return {"schema_version": 1, "episode_id": self.episode_id, "context_id": self.context.context_id,
+            "comparison_profile": "result-blind-comparison/v1" if self.result_blind else None,
             "context_fingerprint": freshness_dependency_fingerprint(self.context),
             "batch_id": f"batch_agent_{self.context.context_id}_{self.episode_id}",
             "catalog": self.catalog, "request_config": dict(self.request_config),
@@ -296,6 +324,8 @@ class NotebookPlanningPhase:
         from ..notebook.evidence import EvidenceRecord
 
         current = self.checkpoint()
+        if self.result_blind and checkpoint.get("comparison_profile") != current["comparison_profile"]:
+            raise NotebookPlanningContractError("legacy comparison transcript is not certified result-blind; start a new comparison")
         for key in ("catalog", "request_config", "model_timeout_s", "planning_timeout_s",
                     "max_inspection_rounds", "max_contract_corrections", "available_inspections"):
             if current[key] != checkpoint[key]:
@@ -307,6 +337,8 @@ class NotebookPlanningPhase:
         self.evidence = DataEvidencePackV1(source_id=pack["source_id"],
             records=tuple(EvidenceRecord(**record) for record in pack["records"]),
             pack_omissions=tuple(pack["pack_omissions"]))
+        if self.result_blind:
+            self.evidence = comparison_evidence_pack(self.evidence)
         self.requests_seen = [InspectionRequest(**request) for request in checkpoint["requests_seen"]]
         self.terminal_inspection_ids = set(checkpoint["terminal_inspection_ids"])
         remaining = checkpoint["remaining_wall_s"]
@@ -474,6 +506,8 @@ class NotebookPlanningPhase:
                 inspection_pack = await result if hasattr(result, "__await__") else result
                 if not isinstance(inspection_pack, DataEvidencePackV1):
                     raise NotebookPlanningContractError("inspection executor returned no Evidence Pack")
+                if self.result_blind:
+                    inspection_pack = comparison_evidence_pack(inspection_pack)
                 self.inspection_rounds += 1
                 self.evidence = self._append_evidence_pack(self.evidence, inspection_pack)
                 resolved_inspection_ids = {
@@ -505,7 +539,7 @@ class NotebookPlanningPhase:
                     "tool_call_id": call.get("tool_call_id", "inspection"),
                     "content": json.dumps(
                         {
-                            "evidence": self.evidence.to_dict(),
+                            "evidence": self._model_evidence(),
                             "evidence_citation_policy": self._evidence_citation_policy(
                                 self.evidence
                             ),

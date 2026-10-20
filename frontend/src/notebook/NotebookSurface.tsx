@@ -6,6 +6,7 @@ import { DomainMemoryControls } from "./DomainMemoryControls";
 import { DomainMemoryEntryList } from "./DomainMemoryEntryList";
 import { DomainMemoryReviewQueue } from "./DomainMemoryReviewQueue";
 import { OptionCard } from "./OptionCard";
+import { PlanComparisonTable } from "./PlanComparisonTable";
 import { PlanDiffConfirmation } from "./PlanDiffConfirmation";
 import { SelectionActions } from "./SelectionActions";
 import { rootToSlug } from "../workbench/projectSlug";
@@ -729,6 +730,7 @@ export function NotebookSurface(props: NotebookSurfaceProps) {
                 <span className="nb-option-batch-action">Show / hide</span>
               </summary>
               <div className="nb-option-batch-body">
+                {!actionMode ? <PlanComparisonTable options={options} /> : null}
                 {options.map((option) => (
                   <Fragment key={option.option_id}>
                     <OptionCard
@@ -764,7 +766,7 @@ export function NotebookSurface(props: NotebookSurfaceProps) {
         </section>
       )}
 
-      {notebook.contextSlice ? <ContextSlicePanel slice={notebook.contextSlice} /> : null}
+      {notebook.contextSlice ? <ContextSlicePanel slice={notebook.contextSlice} resultBlind={!actionMode} /> : null}
 
       {notebook.contextSlice?.domain_memory_projection ? (
         <DomainMemoryEntryList projection={notebook.contextSlice.domain_memory_projection} />

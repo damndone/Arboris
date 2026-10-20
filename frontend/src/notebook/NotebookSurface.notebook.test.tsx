@@ -69,6 +69,8 @@ describe("NotebookSurface — six states, none of them lying", () => {
     expect(screen.getByTestId("notebook-mode-action")).toHaveAttribute("aria-pressed", "false");
     fireEvent.click(screen.getByTestId("notebook-mode-action"));
     expect(onInteractionModeChange).toHaveBeenCalledWith("action");
+    expect(screen.getByRole("table", { name: "Analysis plan comparison" })).toBeInTheDocument();
+    expect(screen.getByText("Compiled source context")).toBeInTheDocument();
   });
 
   it("uses one-Draft, non-executing language in Action mode", () => {
@@ -78,6 +80,7 @@ describe("NotebookSurface — six states, none of them lying", () => {
     expect(screen.getByText("What should Workbench do?")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Check and prepare Draft" })).toBeInTheDocument();
     expect(screen.getByText(/Nothing runs until you confirm/)).toBeInTheDocument();
+    expect(screen.queryByRole("table", { name: "Analysis plan comparison" })).toBeNull();
   });
 
   it("loading (planning phase): names the slow agent step so it does not read as a hang", () => {

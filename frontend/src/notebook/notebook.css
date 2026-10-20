@@ -663,3 +663,7 @@
 .nb-user-intent label { color: var(--label); font-size: 13px; font-weight: 650; }
 .nb-user-intent textarea { background: var(--bg-card-2, transparent); border: 1px solid var(--separator); border-radius: 7px; box-sizing: border-box; color: var(--label); font: inherit; padding: 9px; resize: vertical; width: 100%; }
 .nb-user-intent button { justify-self: start; }
+.nb-comparison-scroll { overflow-x: auto; }
+.nb-comparison table { width: 100%; border-collapse: collapse; text-align: left; }
+.nb-comparison th, .nb-comparison td { padding: 0.75rem; vertical-align: top; border-bottom: 1px solid var(--border, #8885); min-width: 10rem; overflow-wrap: anywhere; }
+.nb-comparison p { color: var(--text-muted); font-size: 0.85rem; }

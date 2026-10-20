@@ -899,6 +899,8 @@ def compile_notebook_planning_context(
 
 def notebook_planning_workbench_context(
     context: NotebookPlanningContextV1,
+    *,
+    result_blind: bool = False,
 ) -> dict[str, Any]:
     """The model-facing projection, ready for `ContextBuilder(workbench_context=...)`.
 
@@ -912,7 +914,7 @@ def notebook_planning_workbench_context(
     36 of which are per-series JSON" can ask for the right thing instead.
     """
 
-    return {
+    payload = {
         "context_profile": context.context_profile,
         "context_id": context.context_id,
         "generation_context_hash": generation_context_hash(context),
@@ -926,3 +928,48 @@ def notebook_planning_workbench_context(
             if key not in {"omissions", "artifact_type_counts", "budget_report"}
         },
     }
+    if result_blind:
+        # A whitelist, not a search for statistical key names: graph summaries,
+        # diagnostics and memory prose can embed fitted results in arbitrary text.
+        content = payload["content"]
+        content["analysis_contract"] = {
+            key: value for key, value in context.analysis_contract.items()
+            if key in {"revision", "objective", "question", "target", "y", "x", "constraints"}
+        }
+        content["user_focus"] = {
+            key: value for key, value in context.user_focus.items()
+            if key in {"goal", "interaction_mode"}
+        }
+        content["dataset_profile"] = {
+            "row_count": context.dataset_profile.get("row_count"),
+            "columns": [
+                {key: column[key] for key in ("name", "dtype", "row_count", "missing_count", "unique_count") if key in column}
+                for column in context.dataset_profile.get("columns", [])
+            ],
+        }
+        content["active_run_summary"] = {
+            key: context.active_run_summary[key]
+            for key in ("run_id", "mode", "y", "x", "requested_model_type")
+            if key in context.active_run_summary
+        }
+        content["bounded_lineage"] = [
+            {key: node[key] for key in (
+                "node_id", "kind", "stage", "node_hash", "forest_node_key",
+                "context_fingerprint", "artifact_id", "workflow_artifact_id",
+            ) if key in node} for node in context.bounded_lineage
+        ]
+        content["diagnostics"] = []
+        content["artifact_summaries"] = []
+        # Defaults are applied by their existing server registry. Unclassified
+        # natural-language lessons are not evidence for a blinded comparison.
+        if "domain_memory_projection" in content:
+            content["domain_memory_projection"] = None
+        payload["artifact_type_counts"] = {}
+        payload["comparison_policy"] = {
+            "profile": "result-blind-comparison/v1",
+            "dimensions": ["question_fit", "data_support", "assumptions", "cost", "domain_practice"],
+            "excluded": ["fitted_results", "post_fit_checks", "paired_sample_rows", "unclassified_memory_prose"],
+            "user_supplied_text": "User goals and declared specifications are not certified result-free.",
+            "prediction_exception": "Unavailable until a sealed evaluation source is verified.",
+        }
+    return payload
