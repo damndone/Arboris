@@ -445,6 +445,13 @@ class VerifiedCompletionArtifact:
     size_bytes: int
 
 
+def read_arima_completion_product(run_root: Path, artifact: VerifiedCompletionArtifact):
+    """Project a native ARIMA result after owner-side source verification."""
+    from ..services.time_series_result_adapter import read_arima_completion
+
+    return read_arima_completion(run_root, artifact)
+
+
 def read_completion_artifact(run_root: Path, artifact_id: str) -> VerifiedCompletionArtifact | None:
     """Read one unambiguous registered product and verify the exact bytes read.
 

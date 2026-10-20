@@ -41,6 +41,15 @@ def companion_model(products, ref, artifact, model):
 
 
 def native_diagnostics(family, values):
+    if family == 'time_series':
+        for value in values:
+            ts = (value.get('diagnostics') or {}).get('time_series') or {}
+            if (value.get('contract') == 'time-series.completion.v1'
+                    and ts.get('method') == 'arima_native_innovations_v1' and ts.get('status') == 'computed'
+                    and all((ts.get('stationarity') or {}).get(test, {}).get('status') == 'computed' for test in ['adf', 'kpss'])
+                    and type((ts.get('ljung_box') or {}).get('p_value')) in {float, int}
+                    and type((ts.get('arch_lm') or {}).get('p_value')) in {float, int}):
+                return True
     if family in {'panel', 'did'}:
         for value in values:
             panel = (value.get('diagnostics') or {}).get('panel') or {}
@@ -87,6 +96,24 @@ def native_diagnostics(family, values):
 
 
 def native_findings(family, values):
+    if family == 'time_series':
+        findings = []
+        for value in values:
+            ts = (value.get('diagnostics') or {}).get('time_series') or {}
+            if not ts:
+                continue
+            if not (ts.get('sampling') or {}).get('regular'):
+                findings.append('time_series:diagnostics:irregular_sampling_unverified')
+            if ts.get('ar_stationary') is False or ts.get('ma_invertible') is False:
+                findings.append('time_series:diagnostics:inadmissible_arima_roots')
+            unit = ts.get('stationarity') or {}
+            if (unit.get('adf') or {}).get('p_value', 1) >= .05 or (unit.get('kpss') or {}).get('p_value', 0) < .05:
+                findings.append('time_series:diagnostics:stationarity_unresolved')
+            if (ts.get('ljung_box') or {}).get('p_value', 1) < .05:
+                findings.append('time_series:diagnostics:residual_correlation_requires_revision')
+            if (ts.get('arch_lm') or {}).get('p_value', 1) < .05:
+                findings.append('time_series:diagnostics:conditional_variance_requires_revision')
+        return list(dict.fromkeys(findings))
     if family in {'panel', 'did'}:
         from ..checks.fit_checks import CLUSTER_COUNT
 

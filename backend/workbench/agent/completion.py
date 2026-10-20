@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from ..canonical import sha256_canonical
-from .context_compiler import read_completion_artifact, read_completion_dataset_source
+from .context_compiler import read_completion_artifact, read_completion_dataset_source, read_arima_completion_product
 from .completion_profiles import NATIVE_COMPANIONS, companion_model, native_diagnostics, native_findings
 
 VERSION = 'analysis-completion/v1'
@@ -111,6 +111,8 @@ class _Products:
         self.cache = {}
         self.lineage_cache = {}
         self.verified_lineage = {}
+        self.native_models = {}
+        self.native_diagnostics = {}
 
     def load(self, ref):
         if not isinstance(ref, dict):
@@ -129,8 +131,19 @@ class _Products:
         return self.cache[key]
 
     def model(self, ref, artifact):
+        if artifact is not None and artifact.artifact_type == 'p7_analysis':
+            key = (ref['run_id'], ref['artifact_id'])
+            if key not in self.native_models:
+                projected = read_arima_completion_product(self.runs / ref['run_id'], artifact)
+                self.native_models[key] = projected[0] if projected else None
+                if projected:
+                    self.native_diagnostics[key] = projected[1]
+            return self.native_models[key]
         model = _model(artifact)
         return companion_model(self, ref, artifact, model) if model is not None else None
+
+    def diagnostic(self, ref, artifact):
+        return self.native_diagnostics.get((ref['run_id'], ref['artifact_id']), artifact.payload if artifact else None)
 
     def ancestors(self, ref):
         seen, pending, found = set(), [ref], []
@@ -215,10 +228,10 @@ def evaluate(project_root, contract, evidence):
         if len(matches) != 1:
             missing.append(f'{family}:model:{MODEL_NAMES[family]}')
         main_ref, main = matches[0] if len(matches) == 1 else (None, None)
-        diagnostic_values = [artifact.payload for ref, artifact in groups['diagnostics']
-                             if artifact is not None and artifact.artifact_type in {'model_diagnostic', 'lmm_analysis_evidence', 'analysis_completion_evidence'}
+        diagnostic_values = [value for ref, artifact in groups['diagnostics']
+                             if artifact is not None and artifact.artifact_type in {'model_diagnostic', 'lmm_analysis_evidence', 'analysis_completion_evidence', 'p7_analysis'}
                              and bound(ref) and main_ref and ref['run_id'] == main_ref['run_id']
-                             and artifact.payload and artifact.payload.get('model_id') == main.get('model_id')
+                             and (value := products.diagnostic(ref, artifact)) and value.get('model_id') == main.get('model_id')
                              and (family != 'lmm' or artifact.artifact_type == 'lmm_analysis_evidence')
                              and (main.get('model_type') not in NATIVE_COMPANIONS
                                   or ref['artifact_id'] == main['model_id'] + '.completion')]
@@ -277,6 +290,21 @@ def claims_completion(content, request_text=None):
 def _missing_label(code, language):
     family, _, requirement = code.partition(':')
     special = {
+        'time_series:diagnostics:irregular_sampling_unverified': (
+            'Observed times are irregular; an equal-spacing interpretation needs revision.',
+            '观测时间不规则；需修正等间距解释，不能自动填补。'),
+        'time_series:diagnostics:inadmissible_arima_roots': (
+            'ARIMA roots are inadmissible; revise the frozen model specification.',
+            'ARIMA 根不满足平稳或可逆条件，需修正模型设定。'),
+        'time_series:diagnostics:stationarity_unresolved': (
+            'Stationarity remains unresolved by the fixed ADF/KPSS diagnostics; revise or explain the transformation.',
+            '固定 ADF／KPSS 诊断尚未解决平稳性问题；需修正或解释转换设定。'),
+        'time_series:diagnostics:residual_correlation_requires_revision': (
+            'Residual autocorrelation remains; revise the mean specification.',
+            '残差仍有自相关，需修正均值设定。'),
+        'time_series:diagnostics:conditional_variance_requires_revision': (
+            'Residual ARCH remains; assess an applicable variance model.',
+            '残差仍有 ARCH，需评估适用的条件方差模型。'),
         'survival:diagnostics:ph_rejected_requires_model_revision': (
             'Cox PH was rejected; the time-varying effect requires an explicit model revision.',
             'Cox 比例风险检验拒绝：时变效应尚未用适用模型处理，需明确修订方案。'),
