@@ -1023,152 +1023,24 @@ class AgentCore:
             if self.tool_runtime is None:
                 error = "tool_runtime_unavailable"
             else:
+                from .tool_batches import can_parallelize, run_reads, run_single
                 confirmation_ready = False
                 recovery_stopped = False
-                for tool_call in tool_calls.values():
-                    tool_call_id = str(tool_call.get("tool_call_id", ""))
+                prepared = None
+                calls = list(tool_calls.values())
+                if can_parallelize(self, calls):
+                    task = asyncio.create_task(run_reads(self, calls, tool_context=tool_context))
+                    self._active_tool_task = task
+                    try:
+                        prepared = await task
+                    finally:
+                        if self._active_tool_task is task:
+                            self._active_tool_task = None
+                for tool_call in calls:
                     tool_id = str(tool_call.get("tool_id", ""))
-                    self.events.emit(
-                        self.session_id,
-                        "tool_execution_start",
-                        {"tool_call_id": tool_call_id, "tool_id": tool_id},
-                        command_id=command_id,
-                    )
-                    recovered = self.turn_journal.original_receipt(self, tool_call) if self.turn_journal else None
-                    if recovered is not None:
-                        payload = recovered
-                        result = ToolResult(tool_call_id=tool_call_id, tool_id=tool_id,
-                            ok=payload["ok"], output=payload.get("output"), error=payload.get("error"),
-                            error_details=payload.get("error_details"))
-                        if result.ok:
-                            self._answered_tool_calls[self._tool_call_fingerprint(tool_call)] = result.tool_id
-                    elif recovery_stopped:
-                        result = ToolResult(tool_call_id=tool_call_id, tool_id=tool_id, ok=False,
-                            error="analysis_recovery_limit", output={"executed": False})
-                        payload = result.to_payload()
-                    else:
-                        if self.turn_journal:
-                            self.turn_journal.before_tool(self, tool_call)
-                        tool_task = asyncio.create_task(
-                            self.tool_runtime.execute(
-                                tool_call,
-                                session_id=self.session_id,
-                                metadata={
-                                    **(tool_context or {}),
-                                    "command_id": command_id,
-                                    "provider_step": self._steps_used,
-                                    "tool_call_id": tool_call_id,
-                                    "invocation_id": "invocation_" + hashlib.sha256(
-                                        json.dumps([
-                                            "workbench.agent.invocation.v1", self.session_id,
-                                            command_id, self._steps_used, tool_call_id,
-                                        ], separators=(",", ":")).encode("utf-8")
-                                    ).hexdigest(),
-                                },
-                            )
-                        )
-                        self._active_tool_task = tool_task
-                        try:
-                            result = await tool_task
-                        except asyncio.CancelledError:
-                            if self._timeout_requested:
-                                result = ToolResult(
-                                    tool_call_id=tool_call_id,
-                                    tool_id=tool_id,
-                                    ok=False,
-                                    error="agent_timeout",
-                                )
-                            elif self._abort_requested:
-                                result = ToolResult(
-                                    tool_call_id=tool_call_id,
-                                    tool_id=tool_id,
-                                    ok=False,
-                                    error="agent_aborted",
-                                )
-                            else:
-                                raise
-                        except Exception:
-                            result = ToolResult(
-                                tool_call_id=tool_call_id,
-                                tool_id=tool_id,
-                                ok=False,
-                                error="tool_runtime_error",
-                            )
-                        finally:
-                            if self._active_tool_task is tool_task:
-                                self._active_tool_task = None
-                        # A turn that re-asks a question it already answered learns
-                        # nothing and spends a provider step doing it. The guard above
-                        # only catches *consecutive* repeats, so an agent alternating
-                        # between two inspections loops until the budget is gone. Hand
-                        # the same evidence back with an explicit "you already have
-                        # this" so the loop converges instead of erroring out.
-                        payload = result.to_payload()
-                        repeat_fingerprint = self._tool_call_fingerprint(tool_call)
-                        if result.ok and repeat_fingerprint in self._answered_tool_calls:
-                            if isinstance(payload, dict):
-                                payload = {
-                                    **payload,
-                                    "already_answered_this_turn": True,
-                                    "guidance": (
-                                        "This exact inspection was already answered in "
-                                        "this turn; its evidence is unchanged. Stop "
-                                        "inspecting and either submit a proposal or "
-                                        "answer the user."
-                                    ),
-                                }
-                            self.events.emit(
-                                self.session_id,
-                                "loop_guard",
-                                {
-                                    "tool_id": result.tool_id,
-                                    "reason": "repeated_inspection_replayed",
-                                },
-                                command_id=command_id,
-                            )
-                        elif result.ok:
-                            self._answered_tool_calls[repeat_fingerprint] = result.tool_id
-                        payload = self._annotate_step_budget(payload)
-                    from .recovery import record_failure
-                    recovery = (payload.get("bounded_recovery") if recovered is not None else None)
-                    if recovery is None:
-                        recovery = record_failure(self.repository, self.session_id, command_id,
-                            self._steps_used, tool_call, payload)
-                    if recovery is not None:
-                        if recovered is None:
-                            payload = {**payload, "bounded_recovery": recovery}
-                        self._last_tool_failure = recovery["reason"]
-                        recovery_stopped = recovery_stopped or recovery["exhausted"]
-                    if self.turn_journal:
-                        result_entry = self.turn_journal.result_message(self, tool_call, payload)
-                    else:
-                        result_entry = self.repository.append(
-                            self.session_id,
-                            "message",
-                            {
-                                "role": "tool",
-                                "tool_call_id": result.tool_call_id,
-                                "name": result.tool_id,
-                                "command_id": command_id,
-                                "content": json.dumps(
-                                    payload,
-                                    ensure_ascii=False,
-                                    sort_keys=True,
-                                ),
-                            },
-                        )
-                    self.events.emit(
-                        self.session_id,
-                        "tool_execution_end",
-                        {
-                            "tool_call_id": result.tool_call_id,
-                            "tool_id": result.tool_id,
-                            "ok": result.ok,
-                            "entry_id": result_entry.entry_id,
-                            "error": result.error,
-                        },
-                        command_id=command_id,
-                    )
+                    result, recovery = (prepared[tool_call["tool_call_id"]] if prepared is not None else
+                        await run_single(self, tool_call, tool_context=tool_context, skip=recovery_stopped))
+                    recovery_stopped = recovery_stopped or bool(recovery and recovery["exhausted"])
                     if not result.ok and result.error in {
                         "agent_aborted",
                         "agent_timeout",

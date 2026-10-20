@@ -194,3 +194,26 @@ def test_diagnostic_reference_materials_and_original_stata_inputs_are_content_bo
     for path, digest in manifest['repository_files'].items():
         assert hashlib.sha256(Path(path).read_bytes()).hexdigest() == digest
     assert manifest['tolerance'] == {'rtol': 1e-7, 'atol': 1e-9}
+
+
+def test_manual_native_pipeline_exposes_the_same_source_verified_production_child(tmp_path):
+    from workbench.projects import create_project
+    from workbench.orchestrator import run_workflow
+    from workbench.agent.context_compiler import read_completion_artifact, read_garch_completion_product
+    source = tmp_path / 'returns.csv'
+    _source(300).to_csv(source,index=False)
+    project = create_project(tmp_path,'manual-native-garch')
+    options = _options()
+    options['validation']['validation_n'] = 2
+    result = run_workflow(project.root,[source],mode='auto',model_type='time_series.arma_garch',
+        y='value',x=[],model_options=options)
+    assert result['status'] == 'completed', result
+    run_root = project.root / 'runs' / result['run_id']
+    artifact = read_completion_artifact(run_root,'arma_garch_1')
+    assert artifact is not None
+    projected = read_garch_completion_product(run_root,artifact)
+    assert projected is not None
+    model, diagnostic = projected
+    assert model['fit_scope'] == 'all_available_observations' and model['nobs'] == 300
+    assert diagnostic['model_id'] == model['model_id']
+    assert diagnostic['diagnostics']['garch']['method'] == 'garch_production_standardized_innovations_v1'

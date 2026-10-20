@@ -111,7 +111,10 @@ def test_agent_session_turn_is_durable_and_replayable(
             "user",
             "assistant",
         ]
-        assert "fp-agent-1" in FakeAgentAdapter.instances[-1].requests[0].messages[0]["content"]
+        contexts = [message for message in FakeAgentAdapter.instances[-1].requests[0].messages
+                    if message.get("name") == "workbench_context"]
+        assert len(contexts) == 1
+        assert "fp-agent-1" in contexts[0]["content"]
 
         events = client.get(
             f"/agent/sessions/{session_id}/events",
@@ -2106,8 +2109,18 @@ def test_a_main_session_sees_runs_made_after_it_started(tmp_path) -> None:
     )
 
     contexts = [m for m in ContextBuilder(repository).build("main-1").messages if m.get("name") == "workbench_context"]
-    assert len(contexts) == 4
-    assert '"run_count":3' in contexts[-1]["content"] and "supersedes" in contexts[-1]["content"]
+    assert len(contexts) == 1
+    assert '"run_count":3' in contexts[0]["content"] and "supersedes" in contexts[0]["content"]
+    # Projection replaces stale snapshots, while append-only audit history
+    # retains every distinct context as originally recorded.
+    recorded = [entry.payload for entry in repository.get_branch("main-1")
+                if entry.entry_type == "custom_message"
+                and entry.payload.get("name") == "workbench_context"]
+    assert len(recorded) == 4
+    assert '"run-old"' in recorded[0]["content"]
+    assert '"run-new"' in recorded[1]["content"]
+    assert '"run_count":2' in recorded[2]["content"]
+    assert recorded[3]["content"] == contexts[0]["content"]
 
 
 def test_two_turns_sent_at_once_to_one_session_run_one_and_refuse_the_other(

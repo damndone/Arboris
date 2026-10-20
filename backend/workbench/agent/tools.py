@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import asyncio
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -266,7 +267,60 @@ def _discriminated_branch(schema: dict[str, Any], instance: Any) -> dict[str, An
         }
         if consts and all(instance.get(key) == value for key, value in consts.items()):
             return branch
+    # Some compatibility unions have no const discriminator. Prefer the one
+    # branch that recognizes the most supplied keys; never infer a different
+    # operation when a const discriminator exists but does not match.
+    has_consts = any("const" in spec for branch in branches if isinstance(branch, dict)
+        for spec in (branch.get("properties") or {}).values() if isinstance(spec, dict))
+    if not has_consts:
+        scored = [(len(set(instance) & set(branch.get("properties") or {})), branch)
+                  for branch in branches if isinstance(branch, dict)]
+        best = max((score for score,_ in scored), default=0)
+        matches = [branch for score,branch in scored if score == best and score > 0]
+        if len(matches) == 1:
+            return matches[0]
     return None
+
+
+def _operation_change_example(schema, arguments):
+    """Suggest shape only: preserve source/intent and leave opaque options alone."""
+    if not isinstance(arguments, dict) or not isinstance(arguments.get("changes"), dict):
+        return None
+    try:
+        encoded = json.dumps(arguments, ensure_ascii=False, allow_nan=False)
+        if len(encoded) > 4000:
+            return None
+        example = json.loads(encoded)
+    except (TypeError, ValueError):
+        return None
+    branch = _discriminated_branch(schema, arguments) or schema
+    contract = (branch.get("properties") or {}).get("changes")
+    if not isinstance(contract, dict):
+        return None
+    def reshape(value, declared):
+        selected = _discriminated_branch(declared, value) if isinstance(value, dict) else None
+        declared = selected or declared
+        if (declared.get("type") == "string" and isinstance(value,dict)
+                and set(value) == {"old","new"} and isinstance(value["new"],str)):
+            return value["new"]
+        if isinstance(value,dict):
+            fields = declared.get("properties") or {}
+            return {key:reshape(item,fields[key]) if key in fields else item for key,item in value.items()}
+        return value
+    example["changes"] = reshape(example["changes"],contract)
+    if example == arguments or not Draft202012Validator(schema).is_valid(example):
+        return None
+    return example
+
+
+def _specific_validation_errors(schema, arguments, prefix=()):
+    selected = _discriminated_branch(schema, arguments) or schema
+    for error in Draft202012Validator(selected).iter_errors(arguments):
+        nested = _discriminated_branch(error.schema, error.instance) if error.context else None
+        if nested is not None:
+            yield from _specific_validation_errors(nested,error.instance,prefix+tuple(error.absolute_path))
+        else:
+            yield best_match(error.context) if error.context else error, prefix
 
 
 def validation_details(schema: dict[str, Any], arguments: Any) -> list[dict[str, Any]]:
@@ -288,16 +342,11 @@ def validation_details(schema: dict[str, Any], arguments: Any) -> list[dict[str,
     effective = _discriminated_branch(schema, arguments) or schema
     details: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
-    errors = sorted(
-        Draft202012Validator(effective).iter_errors(arguments),
-        key=lambda item: list(item.absolute_path),
-    )
-    for error in errors:
-        if error.context:
-            deepest = best_match(error.context)
-            if deepest is not None:
-                error = deepest
+    errors = sorted(_specific_validation_errors(schema,arguments),
+                    key=lambda pair:[str(p) for p in (*pair[1],*pair[0].absolute_path)])
+    for error, prefix in errors:
         formatted = _format_validation_error(error)
+        formatted["path"] = ".".join(str(p) for p in (*prefix,*error.absolute_path)) or "<root>"
         key = (formatted["path"], formatted["message"])
         if key in seen:
             continue
@@ -428,6 +477,11 @@ class ToolRegistry:
             for tool_id in sorted(self._definitions)
         ]
 
+    def parallel_read_batch(self, calls):
+        names = [str(call.get("tool_id", "")) for call in calls]
+        return (len(names) > 1 and len(names) == len(set(names))
+            and all(name in self._definitions and self._definitions[name].side_effect == "none" for name in names))
+
     async def execute(
         self,
         tool_call: dict[str, Any],
@@ -465,6 +519,10 @@ class ToolRegistry:
         arguments = tool_call.get("arguments") or {}
         details = validation_details(definition.input_schema, arguments)
         if details:
+            example = _operation_change_example(definition.input_schema, arguments)
+            if example is not None:
+                details[0] = {**details[0], "example_arguments": example,
+                    "example_scope": "Schema-only format suggestion; not executed. Normal source, method preflight and approval still apply."}
             return ToolResult(
                 tool_call_id=call_id,
                 tool_id=tool_id,
@@ -473,10 +531,11 @@ class ToolRegistry:
                 error_details=details,
             )
         try:
-            output = definition.handler(
-                arguments,
-                ToolContext(session_id=session_id, metadata=dict(metadata or {})),
-            )
+            context = ToolContext(session_id=session_id, metadata=dict(metadata or {}))
+            if definition.side_effect == "none" and not inspect.iscoroutinefunction(definition.handler):
+                output = await asyncio.to_thread(definition.handler, arguments, context)
+            else:
+                output = definition.handler(arguments, context)
             if inspect.isawaitable(output):
                 output = await output
             if definition.max_output_budget is not None:

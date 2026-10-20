@@ -116,32 +116,17 @@ class ContextBuilder:
         return ContextSnapshot(messages=messages, fingerprint=fingerprint, source_entry_ids=source_entry_ids)
 
 
+_STANDING_ORDER = {name: index for index,name in enumerate([
+    "workbench_global_agent_protocol", "workbench_agent_protocol", "workbench_agent_identity",
+    "workbench_instructions", "workbench_context", "workbench_agent_focus", "workbench_project_recall",
+])}
+
+
 def _project(branch: list[SessionTreeEntry]) -> list[SessionTreeEntry]:
-    """The branch as the model sees it after the latest compaction.
-
-    Without one, every entry (unchanged behaviour). With one: the latest copy
-    of each standing message that precedes the kept part, then the summary,
-    then everything from the first kept entry on. Older conversation and
-    earlier summaries are on record but not resent.
-    """
-
+    """Latest standing layers lead a stable prefix; dialogue keeps its order."""
+    latest = {str(entry.payload.get("name")):entry for entry in branch if is_standing(entry)}
+    head = sorted(latest.values(),key=lambda entry:_STANDING_ORDER[str(entry.payload["name"])])
     found = latest_compaction(branch)
-    if found is None:
-        return branch
-    _, compaction_entry = found
-    start = live_start(branch)
-    latest_standing: dict[str, SessionTreeEntry] = {}
-    for entry in branch:
-        if is_standing(entry):
-            latest_standing[str(entry.payload.get("name"))] = entry
-    position = {entry.entry_id: index for index, entry in enumerate(branch)}
-    head = sorted(
-        (entry for entry in latest_standing.values() if position[entry.entry_id] < start),
-        key=lambda entry: position[entry.entry_id],
-    )
-    tail = [
-        entry for entry in branch[start:]
-        if entry.entry_type != "compaction"
-        and not (is_standing(entry) and latest_standing.get(str(entry.payload.get("name"))) is not entry)
-    ]
-    return [*head, compaction_entry, *tail]
+    start = live_start(branch) if found is not None else 0
+    tail = [entry for entry in branch[start:] if entry.entry_type != "compaction" and not is_standing(entry)]
+    return [*head,*([found[1]] if found is not None else []),*tail]
