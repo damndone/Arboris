@@ -11,11 +11,11 @@ from pathlib import Path
 from typing import Any
 
 from ..canonical import sha256_canonical
-from .context_compiler import read_completion_artifact
+from .context_compiler import read_completion_artifact, read_completion_dataset_source
 
 VERSION = 'analysis-completion/v1'
 PLAYBOOKS = {
-    'ols': ('ols', 'ols_robust', 'wls'),
+    'ols': ('ols', 'ols_robust', 'ols_clustered', 'ols_hac', 'wls'),
     'survival': ('survival_cox',),
     'panel': ('panel_ols',),
     'did': ('did', 'did_twfe', 'twfe_did'),
@@ -24,6 +24,7 @@ PLAYBOOKS = {
     'lmm': ('linear_mixed_effects',),
     'garch': ('time_series.arma_garch',),
 }
+_DATA_TYPES = frozenset({'processed_data', 'raw_data', 'derived_data'})
 MODEL_NAMES = {key: names[0] for key, names in PLAYBOOKS.items()}
 MODEL_NAMES.update(panel='panel', garch='arma_garch')
 _REF = {'type': 'object', 'required': ['run_id', 'artifact_id'], 'properties': {
@@ -101,6 +102,8 @@ class _Products:
     def __init__(self, project_root):
         self.runs = (Path(project_root) / 'runs').resolve()
         self.cache = {}
+        self.lineage_cache = {}
+        self.verified_lineage = {}
 
     def load(self, ref):
         if not isinstance(ref, dict):
@@ -131,13 +134,41 @@ class _Products:
                 continue
             found.append(value)
             pending.extend({'run_id': current['run_id'], 'artifact_id': item} for item in value.inputs)
+            if value.artifact_type == 'report_collection' and value.payload:
+                collection = value.payload
+                if (collection.get('schema_version') == 'workflow-report-collection.v1'
+                        and collection.get('status') == 'completed' and isinstance(collection.get('steps'), dict)):
+                    for step in collection['steps'].values():
+                        if not isinstance(step, dict) or step.get('status') != 'completed':
+                            continue
+                        references = step.get('artifact_ids')
+                        if not isinstance(references, list):
+                            continue
+                        for item in references:
+                            if not isinstance(item, str):
+                                continue
+                            # Native workflow model outputs are run-qualified;
+                            # statistical products in the target run are local.
+                            run_id, artifact_id = item.split(':', 1) if ':' in item else (current['run_id'], item)
+                            pending.append({'run_id': run_id, 'artifact_id': artifact_id})
+            if value.artifact_type == 'raw_data':
+                run_id = current['run_id']
+                if run_id not in self.lineage_cache:
+                    self.lineage_cache[run_id] = read_completion_dataset_source(self.runs / run_id)
+                lineage = self.lineage_cache[run_id]
+                if lineage is not None and value.sha256 == lineage['upload_sha256']:
+                    parent = self.load(lineage['source'])
+                    if (parent is not None and parent.artifact_type in _DATA_TYPES
+                            and parent.sha256 == lineage['source']['sha256']):
+                        self.verified_lineage[run_id] = {'run_id': run_id, 'sha256': lineage['sha256']}
+                        pending.append(lineage['source'])
         return found
 
 
 def source_receipt(project_root, ref):
     """Discover a registered dataset identity without exposing rows or paths."""
     value = _Products(project_root).load(ref)
-    if value is None or value.artifact_type not in {'processed_data', 'raw_data'}:
+    if value is None or value.artifact_type not in _DATA_TYPES:
         return None
     return {'run_id': ref['run_id'], 'artifact_id': ref['artifact_id'], 'sha256': value.sha256}
 
@@ -157,7 +188,7 @@ def evaluate(project_root, contract, evidence):
         families = contract['playbooks']
         source = products.load(contract['source'])
         if (source is None or source.sha256 != contract['source']['sha256']
-                or source.artifact_type not in {'processed_data', 'raw_data'}):
+                or source.artifact_type not in _DATA_TYPES):
             source = None
             missing.append('source:changed_or_unavailable')
     groups = {key: [(ref, products.load(ref)) for ref in evidence.get(key, [])]
@@ -191,7 +222,9 @@ def evaluate(project_root, contract, evidence):
                 missing.append('ols:sensitivity:influence_sample_comparison')
     report_ref = evidence.get('report')
     report = products.load(report_ref)
-    if report is None or report.artifact_type != 'report' or not report.payload or not report.payload.get('sections'):
+    json_report = report is not None and report.payload and report.payload.get('sections')
+    native_report = report is not None and report.suffix in {'.html', '.pdf', '.md'} and report.size_bytes > 0
+    if report is None or report.artifact_type != 'report' or not (json_report or native_report):
         missing.append('report:registered_nonempty')
     elif not bound(report_ref) or not all(
         artifact and any(a.sha256 == artifact.sha256 for a in products.ancestors(report_ref))
@@ -207,8 +240,10 @@ def _result(missing, products):
     return {'version': VERSION, 'status': 'partial' if missing else 'requirements_met',
             'missing': missing, 'scientific_validity': 'not_certified', 'verified_artifacts': verified[:8],
             'verified_artifact_count': len(verified), 'omitted_verified_artifacts': max(0, len(verified) - 8),
-            'verified_manifest_sha256': sha256_canonical(verified),
-            'limitations': ['Delivery requirements do not certify method choice, identification, inference validity or report fidelity.']}
+            'verified_lineage': list(products.verified_lineage.values())[:8],
+            'verified_lineage_count': len(products.verified_lineage),
+            'verified_manifest_sha256': sha256_canonical({'artifacts': verified, 'lineage': products.verified_lineage}),
+            'limitations': ['Delivery requirements do not certify method choice, identification, inference validity, report fidelity or export rendering quality.']}
 
 
 _CLAIM = re.compile(
@@ -263,8 +298,12 @@ def publication(content: str, result: dict, language: str, *, final=True, reques
     if (result['status'] == 'requirements_met'
             or (not claim and (not final or result['missing'] == ['completion_contract:select_playbooks_and_source']))):
         return content
-    heading = '部分完成：以下必需证据尚未核验。' if language == 'zh' else 'Partially complete: required evidence remains unverified.'
-    missing = list(dict.fromkeys(_missing_label(item, language) for item in result['missing']))
-    notice = heading + '\n' + '\n'.join('- ' + item for item in missing[:32])
+    notice = partial_notice(result, language)
     # Preserve useful interim findings, but never republish a rejected claim.
     return notice if claim else notice + '\n\n' + content
+
+
+def partial_notice(result, language):
+    heading = '部分完成：以下必需证据尚未核验。' if language == 'zh' else 'Partially complete: required evidence remains unverified.'
+    missing = list(dict.fromkeys(_missing_label(item, language) for item in result['missing']))
+    return heading + '\n' + '\n'.join('- ' + item for item in missing[:32])

@@ -918,13 +918,24 @@ class AgentCore:
         """An interrupted publication must not reuse an obsolete evidence check."""
         if self.completion_check is None:
             return payload, entry
-        from .completion import publication
+        from .completion import publication, partial_notice
 
         result = self.completion_check()
         if result == payload.get("completion_check"):
             return payload, entry
-        content = publication(payload["content"], result, detect_language(getattr(self, "_user_text", None)),
-                              request_text=getattr(self, "_user_text", ""))
+        language = detect_language(getattr(self, "_user_text", None))
+        previous = payload.get("completion_check")
+        if previous and previous["status"] == "partial":
+            if result["status"] == "partial":
+                content = partial_notice(result, language)
+            elif language == "zh":
+                content = "交付证据现已核验齐全。方法适用性、推断有效性和报告结论仍需分别审查。"
+            else:
+                content = ("Required delivery evidence is now verified. Method suitability, inference validity "
+                           "and report conclusions still require separate review.")
+        else:
+            content = publication(payload["content"], result, language,
+                                  request_text=getattr(self, "_user_text", ""))
         reviewed = {**payload, "content": content, "completion_check": result}
         if reviewed != payload:
             digest = hashlib.sha256(json.dumps(reviewed, sort_keys=True).encode()).hexdigest()

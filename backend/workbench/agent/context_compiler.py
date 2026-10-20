@@ -441,6 +441,8 @@ class VerifiedCompletionArtifact:
     sha256: str
     inputs: tuple[str, ...]
     payload: dict[str, Any] | None
+    suffix: str
+    size_bytes: int
 
 
 def read_completion_artifact(run_root: Path, artifact_id: str) -> VerifiedCompletionArtifact | None:
@@ -485,7 +487,43 @@ def read_completion_artifact(run_root: Path, artifact_id: str) -> VerifiedComple
     if (digest != entry.get("sha256") or not isinstance(kind, str)
             or not isinstance(inputs, list) or not all(isinstance(item, str) for item in inputs)):
         return None
-    return VerifiedCompletionArtifact(artifact_id, kind, digest, tuple(inputs), payload)
+    return VerifiedCompletionArtifact(artifact_id, kind, digest, tuple(inputs), payload, path.suffix.lower(), path.stat().st_size)
+
+
+def read_completion_dataset_source(run_root: Path) -> dict[str, Any] | None:
+    """Project the persisted v1 dataset binding, without reading a source path.
+
+    The declaration becomes an edge only when the caller has verified both
+    the child's raw upload digest and the named parent's current bytes.
+    """
+    import hashlib
+
+    try:
+        path = run_root / "run_inputs.json"
+        if path.stat().st_size > 2_000_000:
+            return None
+        raw = path.read_bytes()
+        value = json.loads(raw)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(value, dict) or value.get("run_input_schema_version") != 1:
+        return None
+    top = value.get("dataset_source")
+    lineage = value.get("source_lineage")
+    nested = lineage.get("dataset_source") if isinstance(lineage, dict) else None
+    if top is not None and nested is not None and top != nested:
+        return None
+    source = top if top is not None else nested
+    upload = value.get("upload")
+    if not isinstance(source, dict) or not isinstance(upload, dict):
+        return None
+    if not all(isinstance(source.get(key), str) and source[key] for key in ("source_run_id", "source_artifact_id")):
+        return None
+    hashes = (source.get("source_sha256"), upload.get("sha256"))
+    if not all(isinstance(h, str) and len(h) == 64 and all(c in "0123456789abcdef" for c in h) for h in hashes):
+        return None
+    return {"sha256": hashlib.sha256(raw).hexdigest(), "upload_sha256": hashes[1],
+            "source": {"run_id": source["source_run_id"], "artifact_id": source["source_artifact_id"], "sha256": hashes[0]}}
 
 
 def _digest(value: Any) -> str:
