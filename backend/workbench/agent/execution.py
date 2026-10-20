@@ -298,6 +298,7 @@ class WorkbenchOperationLifecycle:
             record.execution.get("approval_id"), proposal_id=record.proposal_id,
             fingerprint=record.proposal_fingerprint, execution_key=key,
             reconcile=bool(record.execution.get("bindings")) or record.effect_status == "committed")
+        first_dispatch = record.status == "pending" and not record.execution.get("execution_key")
         record = self.operation_store.claim_execution(
             record_id,
             execution_key=key,
@@ -319,6 +320,11 @@ class WorkbenchOperationLifecycle:
             validate_session = getattr(handler, "validate_session", None)
             if validate_session is not None:
                 validate_session(record)
+            admit_research = getattr(handler, "admit_research", None)
+            if admit_research is not None:
+                proof = admit_research(record, first_dispatch=first_dispatch)
+                record = self.operation_store.append_status(record.record_id, record.status,
+                    execution=merge_execution(record.execution, {"research_specification": proof}))
             prepare = getattr(handler, "prepare", None)
             if prepare is not None:
                 prepared = prepare(

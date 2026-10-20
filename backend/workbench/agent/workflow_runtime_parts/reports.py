@@ -15,6 +15,8 @@ def _execute_workflow_report(
     draft: WorkflowDraft,
     previous: Mapping[str, WorkflowStepResult],
     step: Any | None = None,
+    *,
+    source_rows: int,
 ) -> WorkflowStepResult:
     run_root = root / "runs" / str(draft.target["run_id"])
     log_path = root / "workbench" / "exploration" / f"{draft.workflow_id}.jsonl"
@@ -53,6 +55,7 @@ def _execute_workflow_report(
         "workflow_id": draft.workflow_id,
         "workflow_plan_fingerprint": draft.plan_fingerprint,
         "status": "completed",
+        "source_rows": source_rows,
         "steps": steps,
         "exploration_log": events,
     }
@@ -67,6 +70,25 @@ def _execute_workflow_report(
         review = collect_review(root, draft.target, step.spec["research_review"])
         review_table = review_rows(review)
         collection["research_review"] = review
+    from ... import analysis_disclosure, analysis_ledger
+    from ..operations import OperationRecordStore
+    record = next((item for item in OperationRecordStore(root / "workbench", create=False).list_records()
+                   if item.execution.get("workflow_id") == draft.workflow_id), None)
+    proof = record.execution.get("research_specification", {}) if record else {}
+    current = []
+    for member in draft.steps:
+        if member.step_id not in previous or analysis_ledger.step_category(member.operation_id) not in {"model", "inferential", "descriptive", "data_change"}:
+            continue
+        current.append({"record_id": record.record_id if record else None, "run_id": draft.target["run_id"],
+            "step_id": member.step_id, "operation_id": member.operation_id, "status": "completed",
+            "question_id": proof.get("question_id"), "specification_status": proof.get("specification_status", "exploratory"),
+            "verification": proof.get("verification", "unverified"), "reason": proof.get("reason", "no_pre_execution_evidence"),
+            "at": None, "specification_event_id": proof.get("specification_event_id")})
+    prior = analysis_disclosure.disclosure(root, draft.target["run_id"])["research_specifications"]
+    sections = {key: [row for row in prior[key] if not record or row["record_id"] != record.record_id]
+                + [row for row in current if row["specification_status"] == key]
+                for key in ("pre_specified", "exploratory")}
+    collection["research_specifications"] = sections
     collection_path = run_root / "artifacts" / "statistical_exploration" / f"{draft.workflow_id}.json"
     collection_path.parent.mkdir(parents=True, exist_ok=True)
     if collection_path.exists() and read_json(collection_path) != collection:
@@ -86,12 +108,13 @@ def _execute_workflow_report(
         "facts": [
             f"Workflow steps completed: {len(steps)}.",
             f"Workflow id: {draft.workflow_id}",
-            f"Source rows: {next(iter(previous.values())).row_counts.get('source', 0) if previous else 0}",
+            f"Source rows: {source_rows}",
         ],
         "claims": [],
         "warnings": [],
         "descriptive_stats": [],
         "exploration": collection,
+        "research_specifications": sections,
         **({"specification_curve": curve_view} if curve_view else {}),
         **({"research_review": review, "research_review_rows": review_table} if review else {}),
     }
@@ -99,6 +122,7 @@ def _execute_workflow_report(
     export_pdf(view_model, run_root, filename=f"{draft.workflow_id}.pdf", artifact_id=pdf_id, inputs=[collection_id])
     export_xlsx(
         {
+            **sections,
             **({"specification_curve": curve_view["rows"]} if curve_view else {}),
             **({"research_review": review_table} if review else {}),
             "workflow_steps": [

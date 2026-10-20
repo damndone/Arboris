@@ -151,6 +151,7 @@ class LedgerEntry:
     # The data this entry is about, resolved when it is written: a run that
     # is later deleted can no longer be traced back to its data.
     source_upload_sha256: str | None = None
+    research_specification: dict[str, Any] | None = None
     at: str = field(default_factory=lambda: datetime.now(UTC).isoformat(timespec="milliseconds"))
 
     @property
@@ -159,6 +160,12 @@ class LedgerEntry:
 
     def to_dict(self) -> dict[str, Any]:
         value = asdict(self)
+        if self.research_specification is None:
+            value.pop("research_specification")
+        else:
+            value["specification_status"] = self.research_specification["specification_status"]
+            value["specification_reason"] = self.research_specification["reason"]
+            value["question_id"] = self.research_specification["question_id"]
         value["steps"] = [asdict(step) for step in self.steps]
         value["inferential_steps"] = sum(step.tests for step in self.steps if step.category == "inferential")
         value["changes_data"] = bool(self.categories & CHANGING_CATEGORIES)

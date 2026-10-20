@@ -452,7 +452,7 @@ def build_workflow_step_executor(
                 )
             return result
         if dispatcher_key == "workbench.agent.workflow_runtime.report":
-            return _execute_workflow_report(root, draft, previous, step)
+            return _execute_workflow_report(root, draft, previous, step, source_rows=len(source_frame))
         raise WorkflowExecutionError(
             f"unsupported workflow operation: {step.operation_id}"
         )

@@ -3647,6 +3647,7 @@ export interface components {
             last_at: string | null;
             /** Markdown */
             markdown: string;
+            research_specifications: components["schemas"]["ResearchSpecificationSections"];
             /** Run Id */
             run_id: string;
             settings: components["schemas"]["DisclosureSettings-Output"];
@@ -9725,6 +9726,41 @@ export interface components {
             rerun_from: components["schemas"]["RerunFrom"];
             /** Run Id */
             run_id: string;
+        };
+        /** ResearchSpecificationLine */
+        ResearchSpecificationLine: {
+            /** At */
+            at: string | null;
+            /** Operation Id */
+            operation_id: string;
+            /** Question Id */
+            question_id: string | null;
+            /** Reason */
+            reason: string;
+            /** Record Id */
+            record_id: string | null;
+            /** Run Id */
+            run_id: string | null;
+            /** Specification Event Id */
+            specification_event_id: string | null;
+            /**
+             * Specification Status
+             * @enum {string}
+             */
+            specification_status: "pre_specified" | "exploratory";
+            /** Status */
+            status: string | null;
+            /** Step Id */
+            step_id: string;
+            /** Verification */
+            verification: string;
+        };
+        /** ResearchSpecificationSections */
+        ResearchSpecificationSections: {
+            /** Exploratory */
+            exploratory: components["schemas"]["ResearchSpecificationLine"][];
+            /** Pre Specified */
+            pre_specified: components["schemas"]["ResearchSpecificationLine"][];
         };
         /** ResolvedExecution */
         ResolvedExecution: {

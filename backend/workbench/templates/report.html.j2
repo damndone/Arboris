@@ -190,6 +190,21 @@
     </section>
     {% endif %}
 
+    {% if view_model.research_specifications %}
+    <section id="research-specifications">
+      <p>Labels describe Workbench's observed order on the same original data. They do not certify external preregistration or scientific validity. Unknown historical evidence stays exploratory / unverified.</p>
+      {% for key, title in [('pre_specified', 'Pre-specified analyses'), ('exploratory', 'Exploratory analyses')] %}
+      <h2>{{ title }}</h2>
+      {% if view_model.research_specifications[key] %}
+      <table><thead><tr><th>Step / operation</th><th>Status</th><th>Question</th><th>Classification evidence</th><th>Source / execution</th></tr></thead>
+      <tbody>{% for row in view_model.research_specifications[key] %}
+        <tr><td>{{ row.step_id }} / {{ row.operation_id }}</td><td>{{ row.status }}</td><td>{{ row.question_id or 'Unassigned' }}</td><td>{{ row.verification }}: {{ row.reason }}<br>{{ row.specification_event_id or 'No pre-execution evidence' }}</td><td>{{ row.run_id }}<br>{{ row.record_id or 'Unverified execution reference' }}</td></tr>
+      {% endfor %}</tbody></table>
+      {% else %}<p>No analyses with this classification are recorded.</p>{% endif %}
+      {% endfor %}
+    </section>
+    {% endif %}
+
     {% if view_model.research_review %}
     <section id="research-review" style="overflow-wrap:anywhere">
       <h2>Isolated research review</h2>

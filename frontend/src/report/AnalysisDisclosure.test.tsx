@@ -43,3 +43,19 @@ describe("AnalysisDisclosure", () => {
     expect(JSON.parse(String(init.body))).toEqual({ include_in_exports: false, detail: "summary" });
   });
 });
+
+it("shows evidence-based pre-specified and exploratory sections without hiding failures", async () => {
+  const fixed={record_id:"record-primary",run_id:"r1",step_id:"primary",operation_id:"test.t_tests",question_id:"question",specification_status:"pre_specified",verification:"verified",reason:"fixed_before_related_results",status:"completed",at:null,specification_event_id:"frozen-proof"};
+  vi.stubGlobal("fetch",vi.fn().mockResolvedValue(new Response(JSON.stringify({
+    ...value({include_in_exports:true,detail:"summary"}),research_specifications:{pre_specified:[fixed],
+      exploratory:[{...fixed,record_id:"record-exploratory",step_id:"alternative",specification_status:"exploratory",
+        verification:"unverified",reason:"no_pre_execution_evidence",status:"failed",specification_event_id:null}]},
+  }))));
+  render(<AnalysisDisclosure projectRoot="/p" runId="r1" />);
+  await screen.findByRole("heading",{name:"Pre-specified analyses"});
+  expect(screen.getByRole("heading",{name:"Exploratory analyses"})).toBeTruthy();
+  expect(screen.getByText(/frozen-proof/)).toBeTruthy();
+  expect(screen.getByText(/record-exploratory/)).toBeTruthy();
+  expect(screen.getByText(/no_pre_execution_evidence/)).toBeTruthy();
+  expect(screen.getByText(/failed/)).toBeTruthy();
+});

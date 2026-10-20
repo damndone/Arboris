@@ -82,6 +82,7 @@ def _record_operation_in_ledger(project_root: Any, record: OperationRecord) -> N
             produced_run_id=str(outputs.get("child_run_id") or outputs.get("run_id") or "") or None,
             session_id=record.agent_session_id,
             record_id=record.record_id,
+            research_specification=record.execution.get("research_specification"),
         ),
     )
 

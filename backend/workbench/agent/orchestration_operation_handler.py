@@ -40,6 +40,11 @@ class _OrchestratorOperationHandler:
         self.current_active_head_run_id = current_active_head_run_id
         self.rerun_executor = rerun_executor
 
+    def admit_research(self, record, *, first_dispatch):
+        from ..research_specifications import freeze_operation
+        return freeze_operation(self.project_root, record,
+            self.orchestrator.plan_store.current(record.agent_session_id), first_dispatch=first_dispatch)
+
     @staticmethod
     def _effect(record: OperationRecord) -> OperationEffect:
         return OperationEffect(

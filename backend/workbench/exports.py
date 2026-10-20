@@ -81,6 +81,15 @@ def export_pdf(
                 lines.extend(textwrap.wrap(f"{key}: {value if value is not None else 'Unavailable'}", width=78))
             lines.append("")
         _draw_section(pdf, "Specification curve native values", lines, height-72)
+    if report.get("research_specifications"):
+        sections = report["research_specifications"]
+        for key, title in (("pre_specified", "Pre-specified analyses"), ("exploratory", "Exploratory analyses")):
+            pdf.showPage()
+            lines = []
+            for row in sections[key]:
+                text = f"{row['step_id']} / {row['operation_id']} | {row['status']} | {row['verification']}: {row['reason']} | {row['run_id']} / {row['record_id']}"
+                lines.extend(textwrap.wrap(text, width=85))
+            _draw_section(pdf, title, lines or ["No analyses with this classification are recorded."], height-72)
     if report.get("research_review"):
         _draw_research_review_pdf(pdf, report["research_review"], report["research_review_rows"])
     pdf.save()

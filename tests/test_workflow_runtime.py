@@ -1698,7 +1698,7 @@ def test_report_collection_exports_one_complete_artifact_pack(tmp_path) -> None:
         if step.operation_id != "report.compose"
     }
 
-    result = _execute_workflow_report(project, draft, previous)
+    result = _execute_workflow_report(project, draft, previous, source_rows=len(frame))
 
     assert {
         f"workflow_report_{draft.workflow_id}_{suffix}"
@@ -1728,7 +1728,7 @@ def test_report_collection_uses_the_declared_report_step_id(tmp_path) -> None:
         if step.operation_id != "report.compose"
     }
 
-    result = _execute_workflow_report(project, renamed, previous, renamed_report)
+    result = _execute_workflow_report(project, renamed, previous, renamed_report, source_rows=len(frame))
 
     assert result.payload["collection_id"]
     collection = json.loads(

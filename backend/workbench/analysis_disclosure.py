@@ -115,8 +115,53 @@ def disclosure(project_root: Path | str, run_id: str) -> dict[str, Any]:
         "changes": [_line(entry) for entry in completed if entry.get("changes_data")],
         "entries": [_line(entry) for entry in entries[-_FULL_LIST_LIMIT:]],
         "entries_omitted": max(len(entries) - _FULL_LIST_LIMIT, 0),
+        "research_specifications": research_sections(entries),
         "settings": read_settings(root),
     }
+
+
+def research_sections(entries, *, current=()):
+    """Partition analyses by durable evidence, never by their significance."""
+    sections = {"pre_specified": [], "exploratory": []}
+    for entry in entries:
+        proof = entry.get("research_specification") or {}
+        status = proof.get("specification_status", "exploratory")
+        for step in entry.get("steps") or []:
+            if step.get("category") not in {"model", "inferential", "descriptive", "data_change"}:
+                continue
+            sections[status].append({
+                "record_id": entry.get("record_id"), "run_id": entry.get("produced_run_id") or entry.get("run_id"),
+                "step_id": step.get("detail") or step["operation_id"], "operation_id": step["operation_id"],
+                "question_id": proof.get("question_id"), "specification_status": status,
+                "verification": proof.get("verification", "unverified"),
+                "reason": proof.get("reason", "no_pre_execution_evidence"),
+                "status": entry.get("status"), "at": entry.get("at"),
+                "specification_event_id": proof.get("specification_event_id"),
+            })
+    for row in current:
+        sections[row["specification_status"]].append(row)
+    return sections
+
+
+def research_markdown(sections):
+    lines = ["", "Labels describe Workbench's observed order on the same original data. "
+             "They do not establish external preregistration or scientific validity."]
+    def cell(value):
+        return str(value or "Unverified").replace("|", "\\|").replace("\n", " ")
+    for key, title in (("pre_specified", "Pre-specified analyses"), ("exploratory", "Exploratory analyses")):
+        lines += ["", "### " + title, ""]
+        rows = sections[key]
+        if not rows:
+            lines.append("No analyses with this classification are recorded.")
+        else:
+            lines += ["| Step / operation | Result status | Classification evidence | Source / execution |",
+                      "|---|---|---|---|"]
+            for row in rows:
+                lines.append("| " + " | ".join(cell(value) for value in [
+                    row['step_id'] + ' / ' + row['operation_id'], row['status'],
+                    row['verification'] + ': ' + row['reason'],
+                    str(row['run_id']) + ' / ' + str(row['record_id'])]) + " |")
+    return lines
 
 
 def _estimated_groups(root: Path, run_id: Any) -> int:
@@ -142,6 +187,8 @@ _STANDING_LABELS = {
 
 
 def _who(entry: Mapping[str, Any]) -> str:
+    if entry.get("record_type") == "research_specification":
+        return "Workbench (classification evidence)"
     if entry.get("authorized_by") in _STANDING_AUTHORITIES:
         return _STANDING_LABELS[entry["authorized_by"]]
     return "Agent (confirmed by user)" if entry.get("actor") == "agent" else "User"
@@ -194,6 +241,8 @@ def markdown(value: Mapping[str, Any], *, detail: Detail) -> str:
         "Every test run on this data is counted, whether or not its result appears in this report. "
         "The more tests bear on one question, the likelier it is that one of them is significant by chance.",
     ]
+    if "research_specifications" in value:
+        lines += research_markdown(value["research_specifications"])
     changes = value.get("changes") or []
     if changes:
         lines += ["", "Data changes, in order:", ""]
