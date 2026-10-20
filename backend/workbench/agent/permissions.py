@@ -20,7 +20,7 @@ Design: ``docs/superpowers/specs/2026-10-18-v1.9.1-agent-autonomy-design.md`` §
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 
 from ..analysis_ledger import step_category
@@ -81,16 +81,18 @@ def permission_class(operation_id: str, *, risk_level: str | None = None) -> Per
 
 def request_for_operation(operation_id, changes, *, risk_level=None, within_budget=True, scope=None):
     """Classify the declaration once for every execution entry point."""
+    components = ()
     if operation_id == "operation.multi_step":
         from .workflow_contracts import WORKFLOW_STEP_SPEC_CONTRACTS
         steps = changes.get("steps") or ()
-        cls = strictest(permission_class(step["operation_id"],
-            risk_level=WORKFLOW_STEP_SPEC_CONTRACTS[step["operation_id"]].risk_level)
-            for step in steps) if steps else PermissionClass.MODIFY
+        components = tuple(request_for_operation(step["operation_id"], step.get("spec", {}),
+            risk_level=WORKFLOW_STEP_SPEC_CONTRACTS[step["operation_id"]].risk_level,
+            within_budget=within_budget, scope=scope) for step in steps)
+        cls = strictest(part.permission_class for part in components) if steps else PermissionClass.MODIFY
     else:
         cls = permission_class(operation_id, risk_level=risk_level)
     scope = scope or {}
-    return Request(operation_id=operation_id, permission_class=cls,
+    return Request(operation_id=operation_id, permission_class=cls, components=components,
         touches_source=operation_id in {"metadata.edit", "data.column.cast", "data.columns.cast"},
         in_plan=bool(scope.get("in_plan")), class_allowed_by_plan=cls.value in set(scope.get("allowed_classes") or ()),
         named_in_plan=bool(scope.get("named")), within_budget=within_budget and scope.get("within_budget") is not False)
@@ -139,6 +141,8 @@ class Request:
     within_budget: bool = True
     #: An unresolved estimand correction needs a specific human decision.
     target_decision_required: bool = False
+    #: Preserve constituent declarations so composition cannot erase restrictions.
+    components: tuple["Request", ...] = ()
 
 
 @dataclass(frozen=True)
@@ -166,11 +170,14 @@ class Decision:
 
 
 def on_floor(request: Request) -> bool:
-    return request.permission_class in {PermissionClass.EXTERNAL, PermissionClass.HIGH} or request.touches_source or request.target_decision_required
+    return (request.permission_class in {PermissionClass.EXTERNAL, PermissionClass.HIGH}
+            or request.touches_source or request.target_decision_required
+            or any(on_floor(part) for part in request.components))
 
 
 def decide(mode: Mode, request: Request, rules: Rules = Rules(), grants: Grants = Grants()) -> Decision:
-    if any(rule.matches(request) for rule in rules.deny):
+    members = (request, *request.components)
+    if any(rule.matches(member) for rule in rules.deny for member in members):
         return Decision(Outcome.DENY, "a project rule denies this operation")
     if on_floor(request):
         what = ("changes an unresolved analysis target" if request.target_decision_required
@@ -178,13 +185,22 @@ def decide(mode: Mode, request: Request, rules: Rules = Rules(), grants: Grants 
                 else "leaves the Workbench" if request.permission_class == PermissionClass.EXTERNAL
                 else "is registered as high risk")
         return Decision(Outcome.ASK, f"this operation {what}, which always needs your approval", floor=True)
-    if any(rule.matches(request) for rule in rules.ask):
+    if any(rule.matches(member) for rule in rules.ask for member in members):
         return Decision(Outcome.ASK, "a project rule asks before this operation")
     if any(rule.matches(request) for rule in rules.allow):
         return Decision(Outcome.ALLOW, "a project rule allows this operation", authority="project_rule")
     if grants.covers(request):
         return Decision(Outcome.ALLOW, "you allowed this kind of operation for this conversation",
                         authority="session_grant")
+    if request.components:
+        decisions = [decide(mode, replace(part, within_budget=part.within_budget and request.within_budget),
+                            rules, grants) for part in request.components]
+        for outcome in (Outcome.DENY, Outcome.ASK):
+            restricted = next((decision for decision in decisions if decision.outcome == outcome), None)
+            if restricted is not None:
+                return restricted
+        authority = next((decision.authority for decision in decisions if decision.authority != "default"), "default")
+        return Decision(Outcome.ALLOW, "every constituent operation is allowed", authority=authority)
     return _default(mode, request)
 
 
