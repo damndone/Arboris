@@ -70,6 +70,7 @@ def test_pinned_capability_exposes_only_fixed_read_operations(tmp_path: Path) ->
         "close",
         "read_execution_seal",
         "read_lmm_index",
+        "lmm_source_record",
         "read_lmm_terminal_packet",
         "read_lmm_analysis_source",
         "read_lmm_analysis_evidence",
