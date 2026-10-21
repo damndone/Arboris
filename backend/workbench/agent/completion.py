@@ -507,3 +507,147 @@ def partial_notice(result, language):
     heading = '部分完成：以下必需证据尚未核验。' if language == 'zh' else 'Partially complete: required evidence remains unverified.'
     missing = list(dict.fromkeys(_missing_label(item, language) for item in result['missing']))
     return heading + '\n' + '\n'.join('- ' + item for item in missing[:32])
+
+
+_DIAGNOSTIC_TYPES = frozenset({'model_diagnostic', 'lmm_analysis_evidence', 'analysis_completion_evidence'})
+#: Newest runs scanned for a source's products; each run lists at most 48.
+DERIVE_RUN_LIMIT = 12
+
+
+def derive_evidence(project_root, contract, evidence):
+    """Normalize the Agent's evidence and bind, from this source's own products, what it left out.
+
+    In the paid v1.9.1 round (candidate-small-20261021) every Ask task stalled
+    here although the fits and their diagnostics existed (panel estimate 0.514
+    for a true 0.5): the gate needed exact run/artifact ids for one primary,
+    its companion diagnostics, the alternative fits and a report composed after
+    them, and the Agent wrote ids that did not exist, listed workflow artifacts
+    and several fits as "models", or named a report collection as the report.
+
+    The Agent keeps the scientific choices: the analysis families (the
+    contract) and which eligible fit is primary. Of the eligible fits it names,
+    the first is primary and the others are alternatives; with none named, a
+    family with a single distinct specification binds it, while several stay
+    the Agent's choice and are listed. Everything else follows from verified,
+    source-bound products: references that do not resolve to the right kind
+    are dropped (and named), the primary's own diagnostics are added, the other
+    fits become alternatives when the Agent named none, and the newest report
+    whose ancestry covers them is used, or a ready ``report.compose`` is given.
+    ``evaluate`` then applies every check unchanged.
+    """
+    given = dict(evidence or {})
+    notes = {'bound_by_workbench': [], 'dropped': [], 'primary_candidates': {}}
+    if not contract:
+        return given, notes
+    products = _Products(project_root)
+    source = products.load(contract['source'])
+    if source is None or source.sha256 != contract['source'].get('sha256'):
+        return given, notes
+
+    def bound(ref):
+        return any(a.sha256 == source.sha256 for a in products.ancestors(ref))
+
+    def plain(ref):
+        return {'run_id': ref['run_id'], 'artifact_id': ref['artifact_id']}
+
+    runs = sorted((path.name for path in products.runs.iterdir()
+                   if path.is_dir() and not path.name.startswith(('_', '.'))), reverse=True)[:DERIVE_RUN_LIMIT]
+    models, diagnostics, reports = [], [], []
+    for run in runs:
+        for ref in completion_candidate_refs(products.runs / run):
+            artifact = products.load(ref)
+            if artifact is None:
+                continue
+            if artifact.artifact_type in _DIAGNOSTIC_TYPES:
+                diagnostics.append(ref)
+            elif artifact.artifact_type == 'report':
+                reports.append((ref, artifact))
+            elif (model := products.model(ref, artifact)) is not None and bound(ref):
+                models.append((ref, model))
+
+    def usable_report(ref):
+        artifact = products.load(ref)
+        return (artifact is not None and artifact.artifact_type == 'report'
+                and ((artifact.payload and artifact.payload.get('sections'))
+                     or (artifact.suffix in {'.html', '.pdf', '.md'} and artifact.size_bytes > 0)))
+
+    named = [plain(ref) for ref in given.get('models') or [] if isinstance(ref, dict)]
+    eligible = {(ref['run_id'], ref['artifact_id']) for ref, _ in models}
+    notes['dropped'] += [{'models': ref} for ref in named if (ref['run_id'], ref['artifact_id']) not in eligible]
+    primaries, alternates = [], []
+    for family in contract['playbooks']:
+        family_models = [(ref, model) for ref, model in models if model.get('model_type') in PLAYBOOKS[family]]
+        family_keys = {(ref['run_id'], ref['artifact_id']) for ref, _ in family_models}
+        chosen = [ref for ref in named if (ref['run_id'], ref['artifact_id']) in family_keys]
+        if chosen:
+            primaries.append(chosen[0])
+            alternates += chosen[1:]
+            continue
+        # Re-running one specification gives the same point estimates: not a choice.
+        distinct = {}
+        for ref, model in family_models:
+            distinct.setdefault(model.get('point_estimation_fingerprint') or (ref['run_id'], ref['artifact_id']), (ref, model))
+        if len(distinct) == 1:
+            primaries.append(plain(next(iter(distinct.values()))[0]))
+            notes['bound_by_workbench'].append(f'{family}:primary')
+        elif distinct:
+            notes['primary_candidates'][family] = [
+                {'run_id': ref['run_id'], 'artifact_id': ref['artifact_id'], 'model_type': model.get('model_type'),
+                 'nobs': model.get('nobs'), 'terms': list(model.get('coefficients') or {})[:8]}
+                for ref, model in list(distinct.values())[:6]]
+    if not primaries:
+        return {**given, 'models': named}, notes
+    result = {'models': primaries}
+    primary_keys = {(ref['run_id'], ref['artifact_id']) for ref in primaries}
+    given_alternates = [plain(ref) for ref in given.get('sensitivity') or [] if isinstance(ref, dict)
+                        and (ref['run_id'], ref['artifact_id']) in eligible - primary_keys]
+    notes['dropped'] += [{'sensitivity': ref} for ref in given.get('sensitivity') or []
+                         if isinstance(ref, dict) and plain(ref) not in given_alternates]
+    alternates += given_alternates
+    if not alternates:
+        alternates = [plain(ref) for ref, model in models if (ref['run_id'], ref['artifact_id']) not in primary_keys
+                      and any(model.get('model_type') in PLAYBOOKS[f] for f in contract['playbooks'])]
+        if alternates:
+            notes['bound_by_workbench'].append('sensitivity')
+    result['sensitivity'] = list({(r['run_id'], r['artifact_id']): r for r in alternates}.values())[:24]
+    given_diagnostics = [plain(ref) for ref in given.get('diagnostics') or []
+                         if isinstance(ref, dict) and products.load(ref) is not None]
+    notes['dropped'] += [{'diagnostics': ref} for ref in given.get('diagnostics') or []
+                         if isinstance(ref, dict) and plain(ref) not in given_diagnostics]
+    # Only a primary's own diagnostics, and only for a primary the Agent gave
+    # none for: every selected artifact must be covered by the report, so an
+    # extra one would make a correct report fail coverage.
+    own = []
+    for primary in primaries:
+        if any(ref['run_id'] == primary['run_id'] for ref in given_diagnostics):
+            continue
+        model = next(model for ref, model in models if plain(ref) == primary)
+        companion = {'run_id': primary['run_id'], 'artifact_id': model['model_id'] + '.completion'}
+        if companion in [plain(ref) for ref in diagnostics]:
+            own.append(companion)
+        else:
+            own += [plain(ref) for ref in diagnostics if ref['run_id'] == primary['run_id']
+                    and (products.diagnostic(ref, products.load(ref)) or {}).get('model_id') == model['model_id']]
+    result['diagnostics'] = list({(r['run_id'], r['artifact_id']): r for r in given_diagnostics + own}.values())[:24]
+    if own:
+        notes['bound_by_workbench'].append('diagnostics')
+    report = given.get('report')
+    if isinstance(report, dict) and usable_report(report):
+        result['report'] = plain(report)
+    else:
+        if report is not None:
+            notes['dropped'].append({'report': report})
+        selected = [products.load(ref) for key in ('models', 'diagnostics', 'sensitivity') for ref in result[key]]
+        for ref, artifact in reports:
+            ancestors = products.ancestors(ref)
+            if usable_report(ref) and bound(ref) and all(
+                    value is not None and any(a.sha256 == value.sha256 for a in ancestors) for value in selected):
+                result['report'] = plain(ref)
+                notes['bound_by_workbench'].append('report')
+                break
+        else:
+            notes['compose_report'] = {'operation_id': 'report.compose', 'spec': {'result_refs': (
+                [{**ref, 'role': 'primary'} for ref in result['models']]
+                + [{**ref, 'role': 'diagnostic'} for ref in result['diagnostics']]
+                + [{**ref, 'role': 'sensitivity'} for ref in result['sensitivity']])[:24]}}
+    return result, notes

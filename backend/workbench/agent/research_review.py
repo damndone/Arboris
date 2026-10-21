@@ -60,8 +60,10 @@ def _summary(value, depth=0):
 
 
 def build_context(root, plan, *, mode, candidate, config):
-    from .completion import evaluate
-    check = evaluate(root, plan.completion if plan else None, plan.completion_evidence if plan else None)
+    from .completion import derive_evidence, evaluate
+    # The reviewer judges the evidence the completion gate judged.
+    evidence, _bound = derive_evidence(root, plan.completion if plan else None, plan.completion_evidence if plan else None)
+    check = evaluate(root, plan.completion if plan else None, evidence)
     policy = load_policy(root)
     permitted = config is not None and 'model_result' in policy.allowed_classes(
         provider_id=config.provider_id, locality=provider_locality(config.base_url))
@@ -75,7 +77,7 @@ def build_context(root, plan, *, mode, candidate, config):
         'models': [], 'diagnostics': [], 'scope': 'Verified aggregate summaries; no observation-level access or independent numerical replication.'}
     complete = len(candidate) <= 12_000 and packet['source'] == plan.completion['source']
     keys = ['plan', 'candidate', 'source', 'completion']
-    refs = [(role, ref) for role in ['models', 'sensitivity'] for ref in (plan.completion_evidence or {}).get(role, [])]
+    refs = [(role, ref) for role in ['models', 'sensitivity'] for ref in (evidence or {}).get(role, [])]
     for role, ref in refs:
         artifact = products.load(ref)
         model = products.model(ref, artifact)
@@ -95,7 +97,7 @@ def build_context(root, plan, *, mode, candidate, config):
             'coefficients': {term: {k: row.get(k) for k in ['estimate','std_error','p_value','ci_lower','ci_upper']}
                              for term,row in list(coefficients.items())[:24]}})
         keys.append(key)
-    for ref in (plan.completion_evidence or {}).get('diagnostics', []):
+    for ref in (evidence or {}).get('diagnostics', []):
         artifact = products.load(ref)
         if artifact is None:
             complete = False
@@ -107,7 +109,7 @@ def build_context(root, plan, *, mode, candidate, config):
     return {'mode': mode, 'packet': packet, 'manifest_sha256': check['verified_manifest_sha256'],
             'evidence_keys': keys, 'complete_packet': complete, 'egress_allowed': permitted,
             'policy_sha256': sha256_canonical(policy.to_dict()),
-            'verification_inputs': {'contract':plan.completion, 'evidence':plan.completion_evidence}}
+            'verification_inputs': {'contract':plan.completion, 'evidence':evidence}}
 
 
 def _unverified(reason):

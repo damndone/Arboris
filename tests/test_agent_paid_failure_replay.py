@@ -206,5 +206,8 @@ def test_recorded_family_failures_recover_via_real_common_tools_without_nudges(n
             assert all(record.status == 'completed' for record in records)
             assert sum(record.actor_type == 'user' for record in records) == confirmations
             assert all(record.actor_type in {'user', 'approved_plan'} for record in records)
-            assert adapter.catalogs and adapter.catalogs[-1]['status'] == 'partial'  # report binding was still missing
+            # The recorded report id lacked its format suffix; the gate drops it, names it, and
+            # binds the composed report that covers the evidence (no second update_plan).
+            assert adapter.catalogs and adapter.catalogs[-1]['status'] == 'requirements_met'
+            assert 'report' in adapter.catalogs[-1]['bound_by_workbench']
             assert plan.completion == contract

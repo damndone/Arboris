@@ -657,12 +657,29 @@ class WorkbenchOrchestrator(OrchestrationWorkflows, OrchestrationProposals, Orch
 
 
     def _completion_check(self, session_id, *, suggest=False):
-        from .completion import evaluate
+        from .completion import derive_evidence, evaluate
 
         plan = self.plan_store.current(session_id)
         project_root = getattr(self.context_provider, "project_root", self.repository.root.parent)
-        result = evaluate(project_root, plan.completion if plan else None, plan.completion_evidence if plan else None, suggest=suggest)
-        if result['status'] == 'partial' and plan and (plan.completion_evidence or {}).get('models'):
+        evidence, bound = derive_evidence(project_root, plan.completion if plan else None,
+                                          plan.completion_evidence if plan else None)
+        result = evaluate(project_root, plan.completion if plan else None, evidence, suggest=suggest)
+        result['bound_by_workbench'] = bound['bound_by_workbench']
+        if bound['dropped']:
+            # Named back to the Agent: a reference that does not resolve to the right kind
+            # of verified product is not evidence, whatever it was meant to be.
+            result['dropped_references'] = bound['dropped'][:12]
+        if bound['primary_candidates']:
+            result['primary_candidates'] = bound['primary_candidates']
+            result['next_step'] = ('Several fits are eligible as the primary model. Choose one by the fixed '
+                                   'specification and question, never by significance, and call update_plan with '
+                                   'completion_evidence {"models": [its run_id and artifact_id]}; the Workbench binds '
+                                   'its diagnostics, the other fits and the report.')
+        elif 'compose_report' in bound and result['status'] == 'partial':
+            result['compose_report'] = bound['compose_report']
+            result['next_step'] = ('No report covers the bound results yet. Propose compose_report exactly as given '
+                                   '(run_operation, operation.multi_step with one report.compose step).')
+        if result['status'] == 'partial' and plan and (evidence or {}).get('models'):
             def repairable(code):
                 return (code.startswith('report:') or ':model:' in code or ':sensitivity:' in code
                     or code.endswith(':diagnostics:computed_and_model_bound')
