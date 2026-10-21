@@ -265,7 +265,10 @@ def test_natural_language_reachability_guard_pins_current_truth() -> None:
         len(report.reachable),
         len(report.exempt),
         len(report.gaps),
-    ) == (137, 5, 130, 135, 2, 0)  # v1.9.1: external.query joins the shared workflow.
+    ) == (138, 5, 131, 136, 2, 0)  # v1.9.1: explicit AR joins the shared workflow.
+    [ar] = [item for item in report.composition_reachable if item.capability_id == "iv.ar_confidence"]
+    assert ar.composition_reachable_by == ("iv.ar_confidence",)
+    assert ar.directly_reachable_by == ()
     [external] = [item for item in report.composition_reachable if item.capability_id == "external.query"]
     assert external.composition_reachable_by == ("external.query",)
     assert external.directly_reachable_by == ()

@@ -661,7 +661,17 @@ class WorkbenchOrchestrator(OrchestrationWorkflows, OrchestrationProposals, Orch
 
         plan = self.plan_store.current(session_id)
         project_root = getattr(self.context_provider, "project_root", self.repository.root.parent)
-        return evaluate(project_root, plan.completion if plan else None, plan.completion_evidence if plan else None, suggest=suggest)
+        result = evaluate(project_root, plan.completion if plan else None, plan.completion_evidence if plan else None, suggest=suggest)
+        if result['status'] == 'partial' and plan and (plan.completion_evidence or {}).get('models'):
+            def repairable(code):
+                return (code.startswith('report:') or ':model:' in code or ':sensitivity:' in code
+                    or code.endswith(':diagnostics:computed_and_model_bound')
+                    or code == 'iv:diagnostics:ar_unavailable')
+            if all(repairable(code) for code in result['missing']):
+                result['recovery_action'] = 'inspect_and_repair'
+                from ..canonical import sha256_canonical
+                result['recovery_question_sha256'] = sha256_canonical(plan.question)
+        return result
 
 
     def _chain(self, chain_id: str) -> tuple[str, AgentCore]:

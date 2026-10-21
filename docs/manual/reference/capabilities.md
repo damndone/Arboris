@@ -130,7 +130,7 @@ Everything Workbench can run, as registered. The Agent reaches the same list: an
 | `resample.smote` | Resample prediction-training data with SMOTE. |
 | `resample.undersample` | Resample prediction-training data with Undersample. |
 
-## Operations (35)
+## Operations (36)
 
 | Id | What it does |
 |---|---|
@@ -151,6 +151,7 @@ Everything Workbench can run, as registered. The Agent reaches the same list: an
 | `data.tsset` | Declare and stably order a time or panel-time index. Example spec: {"frequency": "Y", "time_column": "year"} |
 | `external.query` | Send reviewed query arguments to an admitted endpoint; never send data automatically. |
 | `graph.fork` | Create a new Chain branch from the current verified node. |
+| `iv.ar_confidence` | Compute the 95% Anderson-Rubin confidence set for a fixed native IV model. |
 | `metadata.edit` | Declare or change variable labels, value labels, measurement levels or missing-value codes for any column. Never changes which variables are in the model; the run is re-estimated with the new metadata (missing codes change the sample). |
 | `model.custom` | Run one explicitly admitted custom capability through the Proposal/Risk and containment gates. |
 | `model.genesis` | Create a first-run model Draft from a verified dataset source. |

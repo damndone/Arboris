@@ -4,6 +4,18 @@ from typing import Any
 from ..checks.iv_checks import first_stage_diagnostic
 
 
+def iv_point_definition(native):
+    from ..canonical import sha256_canonical
+    from ..services.completion_products import array_fingerprint
+    return {'family': 'iv_2sls', 'intercept': native.has_constant,
+        'outcome': native.dependent.cols, 'exogenous': native.exog.cols,
+        'endogenous': native.endog.cols, 'instruments': native.instruments.cols,
+        'actual_design_sha256': sha256_canonical({
+            'y': array_fingerprint(native.dependent.ndarray), 'w': array_fingerprint(native.exog.ndarray),
+            'x': array_fingerprint(native.endog.ndarray), 'z': array_fingerprint(native.instruments.ndarray),
+            'weights': array_fingerprint(native.weights.ndarray)})}
+
+
 def build_iv_diagnostics(fitted: Any, n_endog: int, n_instruments: int, strength_check: dict | None = None) -> dict:
     identification = 'under' if n_instruments < n_endog else 'just' if n_instruments == n_endog else 'over'
     evidence = (strength_check or {}).get('evidence') or {}

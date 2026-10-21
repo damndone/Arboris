@@ -688,6 +688,22 @@ def base_workflow_step_contracts() -> dict[str, StepSpecContract]:
             accepted_dataset_kinds=("derived_data", "prepared_data"),
             produces_model_branches=True,
         ),
+        "iv.ar_confidence": StepSpecContract(
+            summary="Explicitly compute the globally certified 95% Anderson-Rubin confidence set for a fixed completed native iv_2sls model; never computed by default. Validity still requires valid instruments and the stated error assumptions. Unsupported designs remain unavailable.",
+            fields={'model_ref': 'Exact completed native IV model, or step:<producer>:<branch>.',
+                    'model_run_id': 'Owner run of the completed native IV model.'},
+            required=('model_ref',), field_types={'model_ref': 'string', 'model_run_id': 'string'},
+            semantic_validator_key='postestimation',
+            risk_class='low', confirmation_policy='proposal_authorization',
+            output_schema_ref='iv-ar.evidence.v1',
+            dispatcher_key='workbench.agent.workflow_runtime.iv_ar', effect_level='read_only',
+            scope='native IV weak-instrument inference', risk_level='none',
+            reconciler_key='iv.ar_confidence', diff_builder_key='model.post_estimation.diff.v1',
+            verification_builder_key='model.post_estimation.verification.v1',
+            ui_description='Compute the 95% Anderson-Rubin confidence set for a fixed native IV model.',
+            consumes_input_frame=True, model_reference_fields=('model_ref',),
+            top_level_exposure_note=_p5_exposure_note('iv.ar_confidence'),
+        ),
         "model.joint_f_test": StepSpecContract(
             summary=(
                 "Test whether one or more declared OLS term groups are jointly zero. "
@@ -786,6 +802,7 @@ def base_workflow_step_contracts() -> dict[str, StepSpecContract]:
         "report.compose": StepSpecContract(
             summary="Assemble the completed steps into a report.",
             fields={
+                "result_refs": "Exact existing source-bound results to include: {run_id, artifact_id, role}, where role is primary, sensitivity, or diagnostic. No refit is needed to report completed models.",
                 "specification_curve": "Render all model members of a frozen prior workflow; retain failures and native uncertainty.",
                 "research_review": "Attach a saved isolated review, retaining its original verdict and checking whether its evidence is unchanged.",
                 "report_contract": "Report contract identifier.",
@@ -794,7 +811,12 @@ def base_workflow_step_contracts() -> dict[str, StepSpecContract]:
                 "sections": "Ordered report sections.",
                 "complete_on": "Completion condition.",
             },
-            field_schemas={"research_review": {"type":"object", "required":["session_id","review_id"],
+            field_schemas={"result_refs": {"type": "array", "minItems": 1, "maxItems": 24,
+                "items": {"type": "object", "required": ["run_id", "artifact_id", "role"],
+                    "properties": {"run_id": {"type": "string", "minLength": 1, "maxLength": 200},
+                        "artifact_id": {"type": "string", "minLength": 1, "maxLength": 200},
+                        "role": {"enum": ["primary", "sensitivity", "diagnostic"]}}, "additionalProperties": False}},
+                "research_review": {"type":"object", "required":["session_id","review_id"],
                 "properties":{"session_id":{"type":"string","pattern":"^[A-Za-z0-9_.-]{1,160}$"},
                     "review_id":{"type":"string","pattern":"^[a-f0-9]{64}$"}}, "additionalProperties":False},
                 "specification_curve": {"type": "object", "required": ["workflow_id", "term", "estimand"],

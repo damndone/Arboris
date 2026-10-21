@@ -1,0 +1,148 @@
+[
+  {
+    "task_id": "iv_weak.goal",
+    "seed": 1014,
+    "prompt": "合作者想在摘要里写'工具变量估计显示教育回报为 X%'。请做分析并告诉我这句话能不能这样写。",
+    "input_sha256": "588a5891163c7146be3908b9866665a2f6ac7802a526ed07db5053b1193daf72",
+    "playbook": "iv",
+    "recorded_completion_evidence": {
+      "diagnostics": [
+        {
+          "artifact_id": "workflow_p7_iv_weak_instruments_075622b735f2942f_697641eaf21059f9570630e3",
+          "run_id": "20261021_150319_756159_35a146fa"
+        },
+        {
+          "artifact_id": "workflow_p7_iv_weak_instruments_075622b735f2942f_140957f452460a3f99eee416",
+          "run_id": "20261021_150319_756159_35a146fa"
+        },
+        {
+          "artifact_id": "workflow_p7_iv_weak_instruments_075622b735f2942f_c2a7ff4e0105e7ad49aeb391",
+          "run_id": "20261021_150319_756159_35a146fa"
+        },
+        {
+          "artifact_id": "statistical_exploration_cb7421b440b1e49b2b9325b1",
+          "run_id": "20261021_150319_756159_35a146fa"
+        }
+      ],
+      "models": [
+        {
+          "artifact_id": "workflow_p7_iv_gmm_075622b735f2942f_5f7d053a8e0536d447a03659",
+          "run_id": "20261021_150319_756159_35a146fa"
+        },
+        {
+          "artifact_id": "workflow_p7_iv_gmm_075622b735f2942f_6d8ff077cd03ea709141ec8a",
+          "run_id": "20261021_150319_756159_35a146fa"
+        },
+        {
+          "artifact_id": "workflow_p7_iv_gmm_075622b735f2942f_733da3a6925b5f3168d1bce8",
+          "run_id": "20261021_150319_756159_35a146fa"
+        },
+        {
+          "artifact_id": "iv_2sls_1",
+          "run_id": "20261021_150826_276438_89b2c7e2"
+        },
+        {
+          "artifact_id": "iv_2sls_1",
+          "run_id": "20261021_150826_838993_b933fd55"
+        }
+      ],
+      "report": {
+        "artifact_id": "workflow_report_workflow_oprec_9a35f69e2a93a9b234fae1eb",
+        "run_id": "20261021_150319_756159_35a146fa"
+      },
+      "sensitivity": [
+        {
+          "artifact_id": "workflow_p7_iv_gmm_062f32a148bc4aa1_01fbf9321178b75d3aec5193",
+          "run_id": "20261021_150319_756159_35a146fa"
+        },
+        {
+          "artifact_id": "workflow_p7_iv_gmm_062f32a148bc4aa1_55c661128fc23036f7b121a4",
+          "run_id": "20261021_150319_756159_35a146fa"
+        }
+      ]
+    },
+    "stop_reason": "nudge_budget",
+    "tape_sha256": "c90119b0d5f223e60ffda3160bbfd470ef900aeca0250be99ae94fceb06d9802",
+    "evidence_role": "Recorded terminal binding failure; repair continuation is scripted, not a real-model success claim."
+  },
+  {
+    "task_id": "panel_fe.specific",
+    "seed": 1007,
+    "prompt": "Estimate the effect of training on productivity in this firm panel. Address unobserved firm differences, use appropriate standard errors, and report robustness.",
+    "input_sha256": "3dcdf85d664c651545e78168cf43eba9d5cb6fb2b44d585630f4089790d99c2e",
+    "playbook": "panel",
+    "recorded_completion_evidence": {
+      "diagnostics": [
+        {
+          "artifact_id": "20261021_151749_247509_92e0db2d:diagnostic_summary",
+          "run_id": "20261021_151749_247509_92e0db2d"
+        }
+      ],
+      "models": [
+        {
+          "artifact_id": "20261021_151749_247509_92e0db2d:cleaned_dataset",
+          "run_id": "20261021_151749_247509_92e0db2d"
+        },
+        {
+          "artifact_id": "20261021_151749_689588_f8d49128:cleaned_dataset",
+          "run_id": "20261021_151749_689588_f8d49128"
+        }
+      ],
+      "report": {
+        "artifact_id": "workflow_report_workflow_oprec_bf17dbd0c74597d2ab7b0c8d",
+        "run_id": "20261021_151548_001434_ded3925c"
+      },
+      "sensitivity": [
+        {
+          "artifact_id": "20261021_152148_635619_3df8d638:cleaned_dataset",
+          "run_id": "20261021_152148_635619_3df8d638"
+        }
+      ]
+    },
+    "stop_reason": "nudge_budget",
+    "tape_sha256": "9e0d6db7b61501e580e51873aeef552f72b40e163f97be70ab6664e98ca19d6d",
+    "evidence_role": "Recorded terminal binding failure; repair continuation is scripted, not a real-model success claim."
+  },
+  {
+    "task_id": "survival.open",
+    "seed": 1000,
+    "prompt": "新药是否延长了复发前的时间？months 是随访月数，event=1 表示复发。请完整分析。",
+    "input_sha256": "d984f64568b72157f0ef5ea3d8100021be89ad5c927383900f954f674e075b4b",
+    "playbook": "survival",
+    "recorded_completion_evidence": {
+      "diagnostics": [
+        {
+          "artifact_id": "survival_evidence",
+          "run_id": "20261021_155823_501266_ac4760be"
+        },
+        {
+          "artifact_id": "survival_cox_1.completion",
+          "run_id": "20261021_155823_501266_ac4760be"
+        },
+        {
+          "artifact_id": "diagnostic_summary",
+          "run_id": "20261021_155823_501266_ac4760be"
+        }
+      ],
+      "models": [
+        {
+          "artifact_id": "survival_cox_1",
+          "run_id": "20261021_155823_501266_ac4760be"
+        }
+      ],
+      "report": {
+        "artifact_id": "workflow_report_collection_workflow_oprec_436232548a3ec8863a87956c",
+        "run_id": "20261021_155548_283377_3db3e66d"
+      },
+      "sensitivity": [
+        {
+          "artifact_id": "survival_cox_1",
+          "run_id": "20261021_155823_830170_d8a92387"
+        }
+      ]
+    },
+    "stop_reason": "round_budget_stopped",
+    "tape_sha256": "27bda7df9d7ea196f7e5125875638d1efc834b20753db9e53964e8432a53ddd2",
+    "evidence_role": "Recorded terminal binding failure; repair continuation is scripted, not a real-model success claim."
+  }
+]

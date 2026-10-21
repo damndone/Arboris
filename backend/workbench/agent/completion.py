@@ -12,7 +12,7 @@ from typing import Any
 
 from ..canonical import sha256_canonical
 from .context_compiler import read_completion_artifact, read_completion_dataset_source, read_arima_completion_product, read_garch_completion_product, completion_candidate_refs
-from .completion_profiles import NATIVE_COMPANIONS, companion_model, native_diagnostics, native_findings
+from .completion_profiles import NATIVE_COMPANIONS, companion_model, native_diagnostics, native_findings, verified_iv_ar, with_iv_ar
 
 VERSION = 'analysis-completion/v1'
 PLAYBOOKS = {
@@ -158,6 +158,12 @@ class _Products:
             value = self.load(current)
             if value is None:
                 continue
+            if value.artifact_type == 'report_collection' and value.payload and 'result_sources' in value.payload:
+                pins = value.payload['result_sources']
+                if (not isinstance(pins, list) or len(pins) > 24
+                        or any(not isinstance(pin, dict) or not isinstance(pin.get('sha256'), str)
+                            or (owned := self.load(pin)) is None or owned.sha256 != pin['sha256'] for pin in pins)):
+                    continue
             found.append(value)
             pending.extend({'run_id': current['run_id'], 'artifact_id': item} for item in value.inputs)
             if value.artifact_type == 'report_collection' and value.payload:
@@ -182,6 +188,8 @@ class _Products:
                         pending.extend(ref for ref in review.get('result_refs', [])
                             if isinstance(ref, dict) and all(isinstance(ref.get(key), str)
                                 for key in ['run_id', 'artifact_id']))
+                    pending.extend({'run_id': pin['run_id'], 'artifact_id': pin['artifact_id']}
+                                   for pin in collection.get('result_sources', []))
             if value.artifact_type == 'raw_data':
                 run_id = current['run_id']
                 if run_id not in self.lineage_cache:
@@ -247,6 +255,14 @@ def evaluate(project_root, contract, evidence, *, suggest=False):
                              and (family != 'lmm' or artifact.artifact_type == 'lmm_analysis_evidence')
                              and (main.get('model_type') not in NATIVE_COMPANIONS
                                   or ref['artifact_id'] == main['model_id'] + '.completion')]
+        if family == 'iv' and main_ref:
+            diagnostic_values = with_iv_ar(products, main_ref, main, diagnostic_values,
+                [(ref, artifact) for ref, artifact in groups['diagnostics'] if artifact and bound(ref)])
+            if suggest and any(((v.get('diagnostics') or {}).get('iv', {}).get('weak_instruments') or {}).get('anderson_rubin_95', {}).get('kind') == 'not_computed' for v in diagnostic_values):
+                repairs.append({'family': 'iv', 'reason': 'ar_not_requested',
+                    'operation': {'operation_id': 'iv.ar_confidence',
+                                  'spec': {'model_run_id': main_ref['run_id'], 'model_ref': main['model_id']}},
+                    'action': 'Explicitly propose this fixed-model AR operation under the original permissions; do not change its specification or covariance. Include the resulting evidence in diagnostics and in a newly composed report.'})
         if not _diagnostics(family, diagnostic_values):
             reason = 'computed_and_model_bound' if family in {'ols', 'lmm', 'survival', 'iv', 'panel', 'did'} else 'native_profile_unverified'
             missing.append(f'{family}:diagnostics:{reason}')
@@ -274,6 +290,9 @@ def evaluate(project_root, contract, evidence, *, suggest=False):
         for _, artifact in groups['models'] + groups['diagnostics'] + groups['sensitivity']
     ):
         missing.append('report:result_sources')
+        if suggest:
+            repairs.append({'reason': 'report_does_not_cover_selected_evidence',
+                'action': 'Compose a report using the exact selected primary, diagnostics, sensitivity and AR references. An earlier report cannot cover evidence produced after it; do not relabel or reuse it as complete.'})
     catalog = _evidence_catalog(products, source, contract, evidence, bound, groups) if suggest else None
     result = _result(missing, products)
     if suggest:
@@ -315,6 +334,11 @@ def _evidence_catalog(products, source, contract, evidence, bound, groups):
                 if len(catalog['models']) < 8:
                     eligible = [dref for dref, _ in diagnostics]
                     values = [value for _, value in diagnostics]
+                    if family == 'iv':
+                        supplements = [(dref, d) for dref, d in candidates
+                            if verified_iv_ar(products, ref, model, dref, d) is not None]
+                        eligible.extend(dref for dref, _ in supplements)
+                        values = with_iv_ar(products, ref, model, values, supplements)
                     catalog['models'].append({'family': family, 'ref': ref, 'model_id': model['model_id'],
                         'diagnostics': eligible[:2], 'omitted_diagnostic_count': max(0, len(eligible)-2),
                         'diagnostics_meet_requirements': _diagnostics(family, values) and not native_findings(family, values),

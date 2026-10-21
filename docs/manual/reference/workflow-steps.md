@@ -292,6 +292,15 @@ Multiple Imputation by Chained Equations. Recommended when more than 5-10% of ro
 | `column_bindings` | yes | Which columns of the dataset play which role. |
 | `options` | yes | Settings for this method: plain values only; code, formulas, paths and callbacks are refused. |
 
+## `iv.ar_confidence`
+
+Explicitly compute the globally certified 95% Anderson-Rubin confidence set for a fixed completed native iv_2sls model; never computed by default. Validity still requires valid instruments and the stated error assumptions. Unsupported designs remain unavailable.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `model_ref` | yes | Exact completed native IV model, or step:<producer>:<branch>. |
+| `model_run_id` |  | Owner run of the completed native IV model. |
+
 ## `iv.gmm`
 
 Run the frozen iv_gmm statistical operation through its typed, bounded adapter.
@@ -782,6 +791,7 @@ Assemble the completed steps into a report.
 
 | Field | Required | Meaning |
 |---|---|---|
+| `result_refs` |  | Exact existing source-bound results to include: {run_id, artifact_id, role}, where role is primary, sensitivity, or diagnostic. No refit is needed to report completed models. |
 | `specification_curve` |  | Render all model members of a frozen prior workflow; retain failures and native uncertainty. |
 | `research_review` |  | Attach a saved isolated review, retaining its original verdict and checking whether its evidence is unchanged. |
 | `report_contract` |  | Report contract identifier. |

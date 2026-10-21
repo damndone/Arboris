@@ -993,6 +993,10 @@ class AgentCore:
         command_id = self._active_command_id
         if not completion_checked and payload["stop_reason"] == "stop" and not payload.get("tool_calls"):
             payload, entry = self._recheck_completion(payload, entry)
+        from .recovery import prepare_completion_recovery, continue_completion_recovery
+        if prepare_completion_recovery(self, payload, entry):
+            return await continue_completion_recovery(self, payload, entry, request_id=request_id,
+                context_fingerprint=context_fingerprint, tool_context=tool_context)
         if payload.get("review_pending"):
             from .research_review import start_review
             return await start_review(self, payload, entry, request_id=request_id,

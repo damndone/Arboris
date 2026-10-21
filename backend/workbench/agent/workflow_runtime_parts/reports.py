@@ -59,6 +59,14 @@ def _execute_workflow_report(
         "steps": steps,
         "exploration_log": events,
     }
+    selected = None
+    regression_table = None
+    if step is not None and step.spec.get('result_refs'):
+        from ..report_sources import collect_report_sources
+        from ...report_view_model import build_regression_table, regression_table_export_rows
+        selected = collect_report_sources(root, draft.target, step.spec['result_refs'])
+        collection['result_sources'] = selected['references']
+        regression_table = build_regression_table(selected['models'])
     curve = None
     review, review_table = None, None
     if step is not None and step.spec.get("specification_curve"):
@@ -96,6 +104,9 @@ def _execute_workflow_report(
     if not collection_path.exists():
         write_json(collection_path, collection)
     inputs = ([curve["artifact_id"]] if curve else []) + (review["local_artifact_inputs"] if review else [])
+    if selected:
+        inputs.extend([draft.target['artifact_id'], *(ref['artifact_id'] for ref in selected['references']
+                       if ref['run_id'] == draft.target['run_id'])])
     register_artifact(run_root, collection_id, collection_path, "report_collection", "report.compose", inputs)
     curve_view = None
     if curve:
@@ -118,11 +129,21 @@ def _execute_workflow_report(
         **({"specification_curve": curve_view} if curve_view else {}),
         **({"research_review": review, "research_review_rows": review_table} if review else {}),
     }
+    if selected:
+        view_model['regression_table'] = regression_table
+        view_model['facts'].extend([
+            'Selected existing results are source-verified; identification, inference validity and report completeness are not certified by provenance.',
+            'Coefficients retain the native model scale; Cox coefficients are log hazard coefficients, not hazard ratios.',
+            'AR global certification concerns the confidence-set inversion; instrument validity and sampling coverage remain assumptions.',
+            f"Omitted diagnostic scalar fields: {selected['omitted_diagnostic_fields']}. Refer to the pinned artifacts for complete details.",
+            *(f"{row['run_id']}:{row['artifact_id']} / {row['field']}: {row['value']}" for row in selected['diagnostic_rows'])])
     render_html_report(view_model, run_root, filename=f"{draft.workflow_id}.html", artifact_id=html_id, inputs=[collection_id])
     export_pdf(view_model, run_root, filename=f"{draft.workflow_id}.pdf", artifact_id=pdf_id, inputs=[collection_id])
     export_xlsx(
         {
             **sections,
+            **({'regression_table': regression_table_export_rows(regression_table),
+                'diagnostics': selected['diagnostic_rows'], 'result_sources': selected['references']} if selected else {}),
             **({"specification_curve": curve_view["rows"]} if curve_view else {}),
             **({"research_review": review_table} if review else {}),
             "workflow_steps": [

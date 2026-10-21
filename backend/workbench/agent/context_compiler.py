@@ -519,7 +519,7 @@ def completion_candidate_refs(run_root: Path) -> list[dict[str, str]]:
         return []
     kinds = {'model_result', 'workflow_result', 'model_result_packet', 'p7_analysis',
              'workflow_capability_result', 'model_diagnostic', 'lmm_analysis_evidence',
-             'analysis_completion_evidence', 'report'}
+             'analysis_completion_evidence', 'post_estimation', 'report'}
     refs = []
     for entry in entries:
         if (isinstance(entry, dict) and entry.get('artifact_type') in kinds

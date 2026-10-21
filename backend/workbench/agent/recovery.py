@@ -7,11 +7,74 @@ explicit user command has its own budget; this module never retries an effect.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping
 
 from ..canonical import sha256_canonical
 
 ATTEMPT_LIMIT = 2
+
+
+def prepare_completion_recovery(core, payload, entry):
+    """Persist one bounded correction; restart reuses it and the original budget."""
+    result = payload.get('completion_check') or {}
+    if (payload.get('stop_reason') != 'stop' or payload.get('tool_calls')
+            or result.get('status') != 'partial' or result.get('recovery_action') != 'inspect_and_repair'
+            or not core._has_step_left()):
+        return False
+    question = getattr(core, '_user_text', None)
+    if question:
+        # A partial plan can outlive its command. A coefficient question or
+        # a stop request must not silently resume that plan's full analysis.
+        if re.search(r'停止|暂停|取消|\b(?:stop|pause|cancel)\b', question, re.I):
+            return False
+        original = result.get('recovery_question_sha256')
+        explicit = re.fullmatch(r'\s*(?:请)?(?:继续|完成)(?:(?:原|全部|完整)?(?:分析|研究))?(?:和报告)?[。！!]?\s*'
+                                r'|\s*(?:please\s+)?(?:continue|complete|finish)(?:\s+the)?\s+(?:analysis|research)[.!]?\s*',
+                                question, re.I)
+        if original and sha256_canonical(question) != original and not explicit:
+            return False
+    previous = [e for e in core.repository.get_branch(core.session_id)
+                if e.entry_type == 'custom_message' and e.payload.get('message_type') == 'completion_recovery'
+                and e.payload.get('command_id') == core._active_command_id]
+    if any(e.payload.get('candidate_entry_id') == entry.entry_id for e in previous):
+        return True
+    if len(previous) >= ATTEMPT_LIMIT:
+        return False
+    content = ('The delivery gate still reports partial completion. Continue this same analysis within '
+        'the ORIGINAL remaining command budget, plan, source, permissions and approval rules. '
+        'Call inspect_analysis_completion to obtain exact verified artifact bindings and repair_steps. '
+        'Bind exactly one primary model chosen by the fixed research question/specification; other '
+        'predeclared fits belong in sensitivity. Do not select by significance, guess artifact IDs, '
+        'refit merely to repair a reference, or weaken completion. If AR has not been requested for '
+        'the fixed native IV fit, propose iv.ar_confidence explicitly through the shared operation path. '
+        'Use an actual report that covers all selected models, diagnostics, sensitivity and new AR '
+        'evidence, composing one through the existing operation path if needed. Stop for approval, '
+        'a scientific/method limitation, or an unresolved selection that needs the user; state the '
+        'precise remaining gap instead of claiming completion.\nMissing: '
+        + json.dumps(result.get('missing', [])[:32], ensure_ascii=False))[:6000]
+    core.repository.append_once(core.session_id, 'custom_message', {
+        'message_type': 'completion_recovery', 'audience': 'model', 'model_role': 'user',
+        'name': 'workbench_completion_recovery', 'content': content,
+        'command_id': core._active_command_id, 'candidate_entry_id': entry.entry_id,
+        'attempt': len(previous)+1, 'limit': ATTEMPT_LIMIT,
+    }, key=core._active_command_id, stage='completion_recovery:' + entry.entry_id)
+    return True
+
+
+async def continue_completion_recovery(core, payload, entry, *, request_id, context_fingerprint, tool_context):
+    command = core._active_command_id
+    core.events.emit(core.session_id, 'message_end', {'entry_id': entry.entry_id,
+        'content': payload['content'], 'stop_reason': 'revised', 'error': None}, command_id=command)
+    core.events.emit(core.session_id, 'turn_end', {'stop_reason': 'completion_recovery'}, command_id=command)
+    core.events.emit(core.session_id, 'save_point', {'entry_id': entry.entry_id,
+        'context_fingerprint': context_fingerprint}, command_id=command)
+    core._active_request_id = None
+    core._active_message_started = False
+    core._active_turn_started = False
+    if core.turn_journal:
+        core.turn_journal.save(core, 'ready')
+    return await core._run_turn(None, append_user=False, tool_context=tool_context)
 
 
 def record_failure(repository, session_id, command_id, provider_step, call, payload):

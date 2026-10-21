@@ -314,18 +314,11 @@ class DiagnosticsStage:
                 )
 
                 from ..completion_evidence import publish_completion_evidence
-                from ...canonical import sha256_canonical
-                from ...services.completion_products import array_fingerprint
+                from ..iv_diagnostics import iv_point_definition
 
                 native = iv_fitted.model
                 primary = dict(model_results)['iv_2sls_1']
-                definition = {'family': 'iv_2sls', 'intercept': native.has_constant,
-                    'outcome': native.dependent.cols, 'exogenous': native.exog.cols,
-                    'endogenous': native.endog.cols, 'instruments': native.instruments.cols,
-                    'actual_design_sha256': sha256_canonical({
-                        'y': array_fingerprint(native.dependent.ndarray), 'w': array_fingerprint(native.exog.ndarray),
-                        'x': array_fingerprint(native.endog.ndarray), 'z': array_fingerprint(native.instruments.ndarray),
-                        'weights': array_fingerprint(native.weights.ndarray)})}
+                definition = iv_point_definition(native)
                 publish_completion_evidence(ctx, env, primary, point_definition=definition,
                     retained_positions=np.flatnonzero(native.notnull),
                     diagnostics={'iv': iv_diag}, diagnostic_artifact_ids=['iv_diagnostics'])

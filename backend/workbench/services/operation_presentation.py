@@ -120,6 +120,7 @@ PRESENTATION: Mapping[str, Presentation] = {
     "diagnostics.vif": P("check", "Variance inflation (VIF)", "Collinearity among regressors."),
     "diagnostics.influence": P("check", "Influential observations", "Leverage, Cook's distance and other influence measures."),
     "iv.weak_instruments": P("check", "Weak-instrument tests", "Whether instruments are strong enough to trust IV estimates."),
+    "iv.ar_confidence": P("check", "Anderson–Rubin confidence set", "Compute the 95% AR set for a fixed IV model; validity remains an assumption."),
     "roc.curve": P("check", "ROC curve", "Discrimination of a predicted score: ROC and AUC."),
     "roc.calibration": P("check", "Calibration", "Whether predicted probabilities match observed rates."),
     # Time series

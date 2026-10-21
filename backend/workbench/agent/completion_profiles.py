@@ -6,6 +6,41 @@ from ..canonical import sha256_canonical
 NATIVE_COMPANIONS = {'survival_cox', 'iv_2sls', 'panel_ols', 'did'}
 
 
+def verified_iv_ar(products, main_ref, main, ref, artifact):
+    if artifact is None or artifact.artifact_type != 'post_estimation':
+        return None
+    wrapper = artifact.payload or {}
+    value = wrapper.get('result') or {}
+    source = wrapper.get('source') or {}
+    model = products.load(main_ref)
+    companion = products.load({**main_ref, 'artifact_id': main['model_id'] + '.completion'})
+    if (wrapper.get('schema_version') != 'workbench.workflow.post-estimation/v1'
+            or value.get('contract') != 'iv-ar.evidence.v1' or model is None or companion is None
+            or source.get('model_run_id') != main_ref['run_id']
+            or source.get('model_artifact_id') != main['model_id']
+            or value.get('model_run_id') != main_ref['run_id'] or value.get('model_id') != main['model_id']
+            or value.get('model_sha256') != model.sha256 or value.get('completion_sha256') != companion.sha256
+            or value.get('point_estimation_fingerprint') != main.get('point_estimation_fingerprint')
+            or value.get('analysis_sample_fingerprint') != main.get('analysis_sample_fingerprint')
+            or value.get('confidence_level') != .95
+            or value.get('covariance') != companion.payload['diagnostics']['iv']['weak_instruments']['covariance']):
+        return None
+    return value.get('anderson_rubin_95')
+
+
+def with_iv_ar(products, main_ref, main, values, supplements):
+    """Only explicitly supplied, unique native-bound AR evidence enriches diagnostics."""
+    from copy import deepcopy
+    matches = [ar for ref, artifact in supplements
+               if (ar := verified_iv_ar(products, main_ref, main, ref, artifact)) is not None]
+    if len(matches) != 1:
+        return values
+    augmented = deepcopy(values)
+    for value in augmented:
+        value['diagnostics']['iv']['weak_instruments']['anderson_rubin_95'] = matches[0]
+    return augmented
+
+
 def companion_model(products, ref, artifact, model):
     if model.get('model_type') not in NATIVE_COMPANIONS:
         return model
