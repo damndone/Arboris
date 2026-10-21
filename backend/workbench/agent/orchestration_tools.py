@@ -484,7 +484,7 @@ class OrchestrationTools:
         def inspect_analysis_completion(arguments, context):
             if context.session_id != session_id:
                 raise ValueError("tool session is outside the registered chain scope")
-            result = self._completion_check(session_id)
+            result = self._completion_check(session_id, suggest=True)
             if "source" in arguments:
                 from .completion import source_receipt
                 root = getattr(self.context_provider, "project_root", self.repository.root.parent)

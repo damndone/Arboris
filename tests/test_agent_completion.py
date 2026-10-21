@@ -59,6 +59,61 @@ def test_complete_is_an_evidence_check_not_a_scientific_certificate(tmp_path):
     assert all(item['sha256'] for item in result['verified_artifacts'])
 
 
+def test_inspection_distinguishes_ambiguous_primary_and_returns_exact_bindings(tmp_path):
+    contract, evidence = fixture(tmp_path)
+    evidence['models'].append(evidence['sensitivity'][0])
+    before = json.dumps(evidence, sort_keys=True)
+    result = api().evaluate(tmp_path, contract, evidence, suggest=True)
+    assert result['status'] == 'partial'
+    assert result['repair_steps'][0]['reason'] == 'ambiguous_primary'
+    assert result['repair_steps'][0]['candidates'] == evidence['models']
+    catalog = result['evidence_catalog']
+    assert {m['ref']['artifact_id'] for m in catalog['models']} == {'fit', 'alternate'}
+    main = next(m for m in catalog['models'] if m['ref']['artifact_id'] == 'fit')
+    assert main['diagnostics'] == evidence['diagnostics']
+    assert json.dumps(evidence, sort_keys=True) == before
+    assert 'evidence_catalog' not in api().evaluate(tmp_path, contract, evidence)
+
+
+def test_inspection_lists_registered_reports_without_guessing_suffixes(tmp_path):
+    contract, evidence = fixture(tmp_path)
+    actual = evidence['report'].copy()
+    evidence['report']['artifact_id'] = 'invented_report_without_suffix'
+    result = api().evaluate(tmp_path, contract, evidence, suggest=True)
+    assert result['missing'] == ['report:registered_nonempty']
+    assert result['evidence_catalog']['reports'] == [{'ref': actual, 'covers_submitted_evidence': True}]
+    assert result['repair_steps'][-1]['reason'] == 'unregistered_or_empty_report'
+    assert evidence['report']['artifact_id'] == 'invented_report_without_suffix'
+
+
+def test_inspection_never_suggests_changed_or_foreign_products(tmp_path):
+    contract, evidence = fixture(tmp_path)
+    (tmp_path / 'runs/r/alternate.json').write_text('{}')
+    artifact(tmp_path, 'r', 'foreign_fit', 'model_result', {
+        'model_type': 'ols', 'model_id': 'foreign', 'nobs': 80,
+        'coefficients': {'x': {'estimate': 10, 'std_error': .1}}})
+    result = api().evaluate(tmp_path, contract, evidence, suggest=True)
+    assert [m['ref']['artifact_id'] for m in result['evidence_catalog']['models']] == ['fit']
+    contract['source']['sha256'] = 'f' * 64
+    result = api().evaluate(tmp_path, contract, evidence, suggest=True)
+    assert not result['evidence_catalog']['models']
+    assert not result['evidence_catalog']['reports']
+
+
+def test_inspection_catalog_is_bounded_and_does_not_certify_alternatives(tmp_path):
+    contract, evidence = fixture(tmp_path)
+    for i in range(12):
+        artifact(tmp_path, 'r', f'other_{i}', 'model_result', {
+            'model_type': 'ols', 'model_id': f'ols_other_{i}', 'nobs': 80,
+            'coefficients': {'x': {'estimate': i, 'std_error': .2}}}, ['data'])
+    result = api().evaluate(tmp_path, contract, evidence, suggest=True)
+    catalog = result['evidence_catalog']
+    assert len(catalog['models']) == 8 and catalog['omitted_model_count'] == 6
+    assert result['status'] == 'requirements_met'
+    assert result['scientific_validity'] == 'not_certified'
+    assert all(m['ref'] in evidence['models'] or not m['diagnostics'] for m in catalog['models'])
+
+
 @pytest.mark.parametrize('playbook,required', [
     ('ols', 'ols'), ('survival', 'survival_cox'), ('panel', 'panel'),
     ('did', 'did'), ('iv', 'iv_2sls'), ('time_series', 'time_series'),

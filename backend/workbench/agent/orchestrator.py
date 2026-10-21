@@ -656,12 +656,12 @@ class WorkbenchOrchestrator(OrchestrationWorkflows, OrchestrationProposals, Orch
         agent.phase_restorer = restore_core_phase
 
 
-    def _completion_check(self, session_id):
+    def _completion_check(self, session_id, *, suggest=False):
         from .completion import evaluate
 
         plan = self.plan_store.current(session_id)
         project_root = getattr(self.context_provider, "project_root", self.repository.root.parent)
-        return evaluate(project_root, plan.completion if plan else None, plan.completion_evidence if plan else None)
+        return evaluate(project_root, plan.completion if plan else None, plan.completion_evidence if plan else None, suggest=suggest)
 
 
     def _chain(self, chain_id: str) -> tuple[str, AgentCore]:

@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from ..canonical import sha256_canonical
-from .context_compiler import read_completion_artifact, read_completion_dataset_source, read_arima_completion_product, read_garch_completion_product
+from .context_compiler import read_completion_artifact, read_completion_dataset_source, read_arima_completion_product, read_garch_completion_product, completion_candidate_refs
 from .completion_profiles import NATIVE_COMPANIONS, companion_model, native_diagnostics, native_findings
 
 VERSION = 'analysis-completion/v1'
@@ -204,7 +204,7 @@ def source_receipt(project_root, ref):
     return {'run_id': ref['run_id'], 'artifact_id': ref['artifact_id'], 'sha256': value.sha256}
 
 
-def evaluate(project_root, contract, evidence):
+def evaluate(project_root, contract, evidence, *, suggest=False):
     """Recheck actual products on every final answer, including after restart.
 
     Missing or unsupported evidence stays partial. There is no model-call path,
@@ -224,6 +224,7 @@ def evaluate(project_root, contract, evidence):
             missing.append('source:changed_or_unavailable')
     groups = {key: [(ref, products.load(ref)) for ref in evidence.get(key, [])]
               for key in ('models', 'diagnostics', 'sensitivity')}
+    repairs = []
 
     def bound(ref):
         return source is not None and any(a.sha256 == source.sha256 for a in products.ancestors(ref))
@@ -234,6 +235,10 @@ def evaluate(project_root, contract, evidence):
                    if (model := products.model(ref, artifact)) is not None and model.get('model_type') in names and bound(ref)]
         if len(matches) != 1:
             missing.append(f'{family}:model:{MODEL_NAMES[family]}')
+            if suggest:
+                repairs.append({'family': family, 'reason': 'ambiguous_primary' if matches else 'no_eligible_primary',
+                    'candidates': [ref for ref, _ in matches],
+                    'action': 'Bind exactly one eligible source-bound primary model. Use the fixed specification and research question, never significance, to choose; put other fitted specifications in sensitivity. Summary artifacts are not model results.'})
         main_ref, main = matches[0] if len(matches) == 1 else (None, None)
         diagnostic_values = [value for ref, artifact in groups['diagnostics']
                              if artifact is not None and artifact.artifact_type in {'model_diagnostic', 'lmm_analysis_evidence', 'analysis_completion_evidence', 'p7_analysis', 'workflow_capability_result', 'model_result'}
@@ -261,12 +266,72 @@ def evaluate(project_root, contract, evidence):
     native_report = report is not None and report.suffix in {'.html', '.pdf', '.md'} and report.size_bytes > 0
     if report is None or report.artifact_type != 'report' or not (json_report or native_report):
         missing.append('report:registered_nonempty')
+        if suggest:
+            repairs.append({'reason': 'unregistered_or_empty_report',
+                'action': 'Use an exact registered report reference from the catalog or completed-operation receipt, including its actual format suffix. Never invent or append an ID. Compose a report if no verified report covers the required results.'})
     elif not bound(report_ref) or not all(
         artifact and any(a.sha256 == artifact.sha256 for a in products.ancestors(report_ref))
         for _, artifact in groups['models'] + groups['diagnostics'] + groups['sensitivity']
     ):
         missing.append('report:result_sources')
-    return _result(missing, products)
+    catalog = _evidence_catalog(products, source, contract, evidence, bound, groups) if suggest else None
+    result = _result(missing, products)
+    if suggest:
+        result['evidence_catalog'] = catalog
+        result['repair_steps'] = repairs
+    return result
+
+
+def _evidence_catalog(products, source, contract, evidence, bound, groups):
+    """Explicit inspection only: exact verified references, no automatic selection."""
+    catalog = {'models': [], 'reports': [], 'run_limit': 4, 'references_per_run_limit': 48,
+               'model_limit': 8, 'report_limit': 4, 'omitted_model_count': 0, 'omitted_report_count': 0}
+    if source is None:
+        return catalog
+    refs = [contract['source'], *evidence.get('models', []), *evidence.get('diagnostics', []),
+            *evidence.get('sensitivity', []), *([evidence['report']] if evidence.get('report') else [])]
+    runs = list(dict.fromkeys(ref['run_id'] for ref in refs))
+    catalog['omitted_run_count'] = max(0, len(runs) - 4)
+    candidates = []
+    for run in runs[:4]:
+        root = (products.runs / run).resolve()
+        if root.parent == products.runs:
+            candidates.extend((ref, products.load(ref)) for ref in completion_candidate_refs(root))
+    candidates = [(ref, artifact) for ref, artifact in candidates if artifact is not None and bound(ref)]
+    for ref, artifact in candidates:
+        model = products.model(ref, artifact)
+        if model is not None:
+            for family in contract['playbooks']:
+                if model.get('model_type') not in PLAYBOOKS[family]:
+                    continue
+                diagnostics = [(dref, products.diagnostic(dref, diagnostic)) for dref, diagnostic in candidates
+                    if dref['run_id'] == ref['run_id']
+                    and (diagnostic.artifact_type in {'model_diagnostic', 'lmm_analysis_evidence', 'analysis_completion_evidence'}
+                         or (family in {'time_series', 'garch'} and dref == ref))
+                    and (model.get('model_type') not in NATIVE_COMPANIONS
+                         or dref['artifact_id'] == model['model_id'] + '.completion')
+                    and (value := products.diagnostic(dref, diagnostic)) and value.get('model_id') == model['model_id']
+                    and (family != 'lmm' or diagnostic.artifact_type == 'lmm_analysis_evidence')]
+                if len(catalog['models']) < 8:
+                    eligible = [dref for dref, _ in diagnostics]
+                    values = [value for _, value in diagnostics]
+                    catalog['models'].append({'family': family, 'ref': ref, 'model_id': model['model_id'],
+                        'diagnostics': eligible[:2], 'omitted_diagnostic_count': max(0, len(eligible)-2),
+                        'diagnostics_meet_requirements': _diagnostics(family, values) and not native_findings(family, values),
+                        'diagnostic_findings': native_findings(family, values)})
+                else:
+                    catalog['omitted_model_count'] += 1
+        elif artifact.artifact_type == 'report' and (
+                (artifact.payload and artifact.payload.get('sections'))
+                or (artifact.suffix in {'.html', '.pdf', '.md'} and artifact.size_bytes > 0)):
+            ancestors = products.ancestors(ref)
+            covers = all(value and any(a.sha256 == value.sha256 for a in ancestors)
+                         for _, value in groups['models'] + groups['diagnostics'] + groups['sensitivity'])
+            if len(catalog['reports']) < 4:
+                catalog['reports'].append({'ref': ref, 'covers_submitted_evidence': bool(covers)})
+            else:
+                catalog['omitted_report_count'] += 1
+    return catalog
 
 
 def _result(missing, products):

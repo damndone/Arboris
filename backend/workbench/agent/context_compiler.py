@@ -511,6 +511,25 @@ def read_completion_artifact(run_root: Path, artifact_id: str) -> VerifiedComple
     return VerifiedCompletionArtifact(artifact_id, kind, digest, tuple(inputs), payload, path.suffix.lower(), path.stat().st_size)
 
 
+def completion_candidate_refs(run_root: Path) -> list[dict[str, str]]:
+    """Bounded discovery only; every candidate still needs content/lineage verification."""
+    index = _read_json(run_root / 'artifacts_index.json')
+    entries = index.get('artifacts', []) if isinstance(index, dict) else []
+    if not isinstance(entries, list):
+        return []
+    kinds = {'model_result', 'workflow_result', 'model_result_packet', 'p7_analysis',
+             'workflow_capability_result', 'model_diagnostic', 'lmm_analysis_evidence',
+             'analysis_completion_evidence', 'report'}
+    refs = []
+    for entry in entries:
+        if (isinstance(entry, dict) and entry.get('artifact_type') in kinds
+                and isinstance(entry.get('artifact_id'), str) and len(entry['artifact_id']) <= 200):
+            refs.append({'run_id': run_root.name, 'artifact_id': entry['artifact_id']})
+            if len(refs) == 48:
+                break
+    return refs
+
+
 def read_completion_dataset_source(run_root: Path) -> dict[str, Any] | None:
     """Project the persisted v1 dataset binding, without reading a source path.
 

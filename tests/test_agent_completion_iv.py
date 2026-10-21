@@ -56,6 +56,21 @@ def test_default_iv_is_partial_until_explicit_ar_is_requested(products):
     assert diag['endogeneity']['test'] == 'wooldridge_regression'
 
 
+def test_explicit_iv_inspection_discovers_native_binding_but_keeps_ar_gap(products):
+    from workbench.agent.completion import evaluate
+    project, contract, evidence = products
+    supplied = {**evidence, 'models': evidence['models'] + evidence['sensitivity'],
+                'report': {**evidence['report'], 'artifact_id': 'wrong_report_id'}}
+    result = evaluate(project, contract, supplied, suggest=True)
+    assert result['status'] == 'partial'
+    assert result['repair_steps'][0]['reason'] == 'ambiguous_primary'
+    main = next(m for m in result['evidence_catalog']['models'] if m['ref'] == evidence['models'][0])
+    assert main['diagnostics'] == evidence['diagnostics']
+    assert main['diagnostics_meet_requirements'] is False
+    assert 'iv:diagnostics:ar_unavailable' in main['diagnostic_findings']
+    assert any(r['ref'] == evidence['report'] for r in result['evidence_catalog']['reports'])
+
+
 def test_same_iv_fit_is_not_a_sensitivity_comparison(products):
     from workbench.agent.completion import evaluate
     project, contract, evidence = products
