@@ -4,7 +4,7 @@
 
 import { useNavigate } from "react-router-dom";
 import type { NotebookMaterializationResponse } from "../notebook/notebookApi";
-import { LazyView, NotebookRouteView } from "../workbench/lazyViews";
+import { LazyView, ComparePlansView } from "../workbench/lazyViews";
 import { WorkbenchHomeView } from "../workbench/views/WorkbenchHomeView";
 import { rootToSlug } from "../workbench/projectSlug";
 import type { ViewMode } from "../workbench/state/urlSchema";
@@ -15,7 +15,7 @@ const NEEDS_DATA = "Import data first";
 
 export interface WorkspaceProjectStartProps {
   projectRoot: string;
-  /** The `view` URL parameter: "home", "notebook", or anything else for the start page. */
+  /** The `view` URL parameter: "home", "plans", or anything else for the start page. */
   view: string | null;
   legacyFamilyCount: number;
   legacyRunCount: number;
@@ -37,7 +37,7 @@ export function WorkspaceProjectStart({
 }: WorkspaceProjectStartProps) {
   const navigate = useNavigate();
   const path = typeof window === "undefined" ? "" : window.location.pathname;
-  const current: ViewMode = view === "home" ? "home" : view === "notebook" ? "notebook" : "graph";
+  const current: ViewMode = view === "home" ? "home" : (view === "plans" || view === "notebook") ? "plans" : "graph";
   const go = (next: ViewMode) => navigate(next === "graph" ? path : `${path}?view=${next}`);
   const legacyRuns = legacyRunCount > 0 ? legacyRunCount : legacyFamilyCount;
 
@@ -55,16 +55,16 @@ export function WorkspaceProjectStart({
           onNewAnalysis={onOpenWizard}
         />
       </header>
-      <main className="ws-page__body" aria-label={current === "home" ? "Project home" : current === "notebook" ? "Plans" : "Start"}>
+      <main className="ws-page__body" aria-label={current === "home" ? "Project home" : current === "plans" ? "Compare plans" : "Start"}>
         {current === "home" ? (
           <WorkbenchHomeView
             projectRoot={projectRoot}
             onOpenSettings={onOpenSettings}
             onOpenProject={(root) => navigate(`/p/${rootToSlug(root)}/graph`)}
           />
-        ) : current === "notebook" ? (
+        ) : current === "plans" ? (
           <LazyView>
-            <NotebookRouteView
+            <ComparePlansView
               projectRoot={projectRoot}
               activeRunId={notebookActiveRunId}
               onOpenMemorySettings={onOpenSettings}
@@ -82,8 +82,8 @@ export function WorkspaceProjectStart({
                 <PlusIcon />
                 Import data
               </button>
-              <button type="button" className="ws-button" onClick={() => go("notebook")}>
-                Plan the analysis first
+              <button type="button" className="ws-button" onClick={() => go("plans")}>
+                Compare analysis plans
               </button>
             </div>
             {legacyFamilyCount > 0 && (

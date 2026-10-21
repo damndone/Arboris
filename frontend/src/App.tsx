@@ -14,7 +14,6 @@ import { ThemeProvider, ThemeToggle } from "./theme";
 import { LauncherRoute } from "./launcher/LauncherRoute";
 import { ViewLoading } from "./workbench/lazyViews";
 import { rootToSlug, slugToRoot } from "./workbench/projectSlug";
-import { useWorkspaceMode } from "./workspace/workspaceMode";
 import "./theme/tokens.css";
 import "./styles.css";
 
@@ -139,7 +138,6 @@ function AppShell() {
   const [searchParams] = useSearchParams();
   const location = useLocation();
   const navigate = useNavigate();
-  const workspaceMode = useWorkspaceMode();
 
   const [projectRoot, setProjectRootState] = useState<string>(() => {
     const fromUrl = searchParams.get("project_root");
@@ -237,7 +235,7 @@ function AppShell() {
   const isLineageDarkScope = isProjectGraphRoute;
   // v1.9.0: the new workspace brings its own top bar (home, settings) and its
   // own main landmark (the stage), so the outer navigation row steps aside.
-  const workspaceActive = workspaceMode === "new" && (isProjectGraphRoute || isLauncherActive);
+  const workspaceActive = (isProjectGraphRoute || isLauncherActive);
   const Root = workspaceActive ? "div" : "main";
 
   return (

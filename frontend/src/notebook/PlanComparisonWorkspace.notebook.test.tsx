@@ -2,7 +2,7 @@ import "@testing-library/jest-dom/vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { NotebookSurface } from "./NotebookSurface";
+import { PlanComparisonWorkspace } from "./PlanComparisonWorkspace";
 import { rootToSlug } from "../workbench/projectSlug";
 import type { NotebookReadyView } from "./contracts";
 import {
@@ -43,13 +43,25 @@ function ready(overrides: Partial<NotebookReadyView["notebook"]> = {}): Notebook
   };
 }
 
-describe("NotebookSurface — six states, none of them lying", () => {
+describe("PlanComparisonWorkspace — six states, none of them lying", () => {
   afterEach(() => {
     vi.useRealTimers();
   });
 
+  it("puts the current comparison first and retains earlier choices as collapsed history", () => {
+    const old = canonicalOptionRevision();
+    const current = { ...old, option_id: "current", batch_id: "batch_new", created_at: "2026-10-21T01:00:00Z" };
+    render(<PlanComparisonWorkspace view={ready({ options: [old, current] })} />);
+    expect(screen.getByRole("heading", { name: "Compare analysis plans" })).toBeInTheDocument();
+    const batches = screen.getAllByTestId(/^notebook-option-batch-/);
+    expect(batches[0]).toHaveAttribute("open");
+    expect(batches[0]).toHaveTextContent("batch_new");
+    expect(batches[1]).not.toHaveAttribute("open");
+    expect(screen.getByText("Analysis record").closest("details")).not.toHaveAttribute("open");
+  });
+
   it("loading: says the context is being compiled and shows no options", () => {
-    render(<NotebookSurface view={{ status: "loading" }} />);
+    render(<PlanComparisonWorkspace view={{ status: "loading" }} />);
     expect(screen.getByTestId("notebook-loading")).toHaveTextContent(
       "Compiling the bounded notebook context…",
     );
@@ -59,7 +71,7 @@ describe("NotebookSurface — six states, none of them lying", () => {
   it("makes the user-selected Plan or Action mode explicit", () => {
     const onInteractionModeChange = vi.fn();
     render(
-      <NotebookSurface
+      <PlanComparisonWorkspace
         view={ready()}
         onInteractionModeChange={onInteractionModeChange}
       />,
@@ -74,7 +86,7 @@ describe("NotebookSurface — six states, none of them lying", () => {
   });
 
   it("uses one-Draft, non-executing language in Action mode", () => {
-    render(<NotebookSurface view={ready()} interactionMode="action" />);
+    render(<PlanComparisonWorkspace view={ready()} interactionMode="action" />);
 
     expect(screen.getByTestId("notebook-mode-action")).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByText("What should Workbench do?")).toBeInTheDocument();
@@ -87,7 +99,7 @@ describe("NotebookSurface — six states, none of them lying", () => {
     vi.useFakeTimers();
     const onCancelPlanning = vi.fn();
     render(
-      <NotebookSurface
+      <PlanComparisonWorkspace
         view={{ status: "loading", phase: "planning" }}
         onCancelPlanning={onCancelPlanning}
       />,
@@ -113,7 +125,7 @@ describe("NotebookSurface — six states, none of them lying", () => {
   it("planning: shows the server budget so a slow pass is not read as a hang", () => {
     vi.useFakeTimers();
     render(
-      <NotebookSurface
+      <PlanComparisonWorkspace
         view={{ status: "loading", phase: "planning" }}
         planningDeadlineSeconds={180}
       />,
@@ -135,7 +147,7 @@ describe("NotebookSurface — six states, none of them lying", () => {
   it("planning: marks the pass overdue once the published budget is exceeded", () => {
     vi.useFakeTimers();
     render(
-      <NotebookSurface
+      <PlanComparisonWorkspace
         view={{ status: "loading", phase: "planning" }}
         planningDeadlineSeconds={180}
       />,
@@ -156,7 +168,7 @@ describe("NotebookSurface — six states, none of them lying", () => {
     vi.useFakeTimers();
     const startedAtMs = Date.now();
     const { unmount } = render(
-      <NotebookSurface
+      <PlanComparisonWorkspace
         view={{ status: "loading", phase: "planning" }}
         planningDeadlineSeconds={180}
         planningStartedAtMs={startedAtMs}
@@ -173,7 +185,7 @@ describe("NotebookSurface — six states, none of them lying", () => {
     // barely touched.
     unmount();
     render(
-      <NotebookSurface
+      <PlanComparisonWorkspace
         view={{ status: "loading", phase: "planning" }}
         planningDeadlineSeconds={180}
         planningStartedAtMs={startedAtMs}
@@ -193,7 +205,7 @@ describe("NotebookSurface — six states, none of them lying", () => {
 
   it("planning: falls back to a plain elapsed counter without a published budget", () => {
     vi.useFakeTimers();
-    render(<NotebookSurface view={{ status: "loading", phase: "planning" }} />);
+    render(<PlanComparisonWorkspace view={{ status: "loading", phase: "planning" }} />);
 
     act(() => vi.advanceTimersByTime(5_000));
     expect(screen.getByTestId("notebook-planning-elapsed")).toHaveTextContent(
@@ -205,7 +217,7 @@ describe("NotebookSurface — six states, none of them lying", () => {
 
   it("error: shows the error code and message, and no success wording", () => {
     render(
-      <NotebookSurface
+      <PlanComparisonWorkspace
         view={{
           status: "error",
           error: {
@@ -226,7 +238,7 @@ describe("NotebookSurface — six states, none of them lying", () => {
   it("materialization failure exposes an explicit recovery action without success state", () => {
     const onReplan = vi.fn();
     render(
-      <NotebookSurface
+      <PlanComparisonWorkspace
         view={{
           status: "error",
           error: {
@@ -249,7 +261,7 @@ describe("NotebookSurface — six states, none of them lying", () => {
   it("planning timeout remains explicitly retryable", () => {
     const onReplan = vi.fn();
     render(
-      <NotebookSurface
+      <PlanComparisonWorkspace
         view={{
           status: "error",
           error: {
@@ -269,7 +281,7 @@ describe("NotebookSurface — six states, none of them lying", () => {
     const onReplan = vi.fn();
     const onExitPlanning = vi.fn();
     render(
-      <NotebookSurface
+      <PlanComparisonWorkspace
         view={{
           status: "error",
           error: {
@@ -293,7 +305,7 @@ describe("NotebookSurface — six states, none of them lying", () => {
     const onReplan = vi.fn();
     const onExitPlanning = vi.fn();
     render(
-      <NotebookSurface
+      <PlanComparisonWorkspace
         view={ready()}
         planningError={{
           code: "NOTEBOOK_PLANNING_UNAVAILABLE",
@@ -312,7 +324,7 @@ describe("NotebookSurface — six states, none of them lying", () => {
   });
 
   it("empty: says no options were proposed rather than rendering an empty list", () => {
-    render(<NotebookSurface view={ready({ options: [] })} />);
+    render(<PlanComparisonWorkspace view={ready({ options: [] })} />);
     expect(screen.getByTestId("notebook-empty")).toHaveTextContent(
       "No analysis options for this context yet",
     );
@@ -320,7 +332,7 @@ describe("NotebookSurface — six states, none of them lying", () => {
 
   it("pending: an executing option shows as running, never as a result", () => {
     render(
-      <NotebookSurface
+      <PlanComparisonWorkspace
         view={ready({
           options: [{ ...canonicalOptionRevision(), lifecycle_status: "executing" }],
           execution: { ...canonicalOptionExecution(), run_id: "run-9ab" },
@@ -340,7 +352,7 @@ describe("NotebookSurface — six states, none of them lying", () => {
       materializable: true,
     };
     render(
-      <NotebookSurface
+      <PlanComparisonWorkspace
         view={ready({
           options: [selected],
           confirmation: {
@@ -373,7 +385,7 @@ describe("NotebookSurface — six states, none of them lying", () => {
 
   it("success: renders the executed result exactly as the ETS packet states it", () => {
     render(
-      <NotebookSurface
+      <PlanComparisonWorkspace
         view={ready({
           options: [{ ...canonicalOptionRevision(), lifecycle_status: "executed" }],
           execution: { ...canonicalOptionExecution(), run_id: "run-9ab" },
@@ -395,7 +407,7 @@ describe("NotebookSurface — six states, none of them lying", () => {
 
   it("labels a composed workflow as sibling branches instead of an unassigned run", () => {
     render(
-      <NotebookSurface
+      <PlanComparisonWorkspace
         view={ready({
           executionResults: {
             opt_workflow: {
@@ -443,7 +455,7 @@ describe("NotebookSurface — six states, none of them lying", () => {
 
   it("shows a failed workflow root cause exactly once without raw exception prose", () => {
     render(
-      <NotebookSurface
+      <PlanComparisonWorkspace
         view={ready({
           executionResults: {
             opt_hurdle_failure: {
@@ -499,7 +511,7 @@ describe("NotebookSurface — six states, none of them lying", () => {
   it("renders a bounded model-neutral execution summary for non-ETS results", () => {
     const option = { ...canonicalOptionRevision(), lifecycle_status: "executed" as const };
     render(
-      <NotebookSurface
+      <PlanComparisonWorkspace
         view={ready({
           options: [option],
           executionResults: {
@@ -536,7 +548,7 @@ describe("NotebookSurface — six states, none of them lying", () => {
   });
   it("a run that finished but missed a required artifact is not shown as a result", () => {
     render(
-      <NotebookSurface
+      <PlanComparisonWorkspace
         view={ready({
           options: [{ ...canonicalOptionRevision(), lifecycle_status: "selected" }],
           execution: { ...canonicalOptionExecution(), run_id: "run-9ab" },
@@ -570,11 +582,11 @@ describe("NotebookSurface — six states, none of them lying", () => {
   });
 });
 
-describe("NotebookSurface — persisted option batches and the visible slice", () => {
+describe("PlanComparisonWorkspace — persisted option batches and the visible slice", () => {
   it("shows every persisted option while grouping options by generation batch", () => {
     const base = canonicalOptionRevision();
     render(
-      <NotebookSurface
+      <PlanComparisonWorkspace
         view={ready({
           options: [
             { ...base, option_id: "opt_a", rank: 1, batch_id: "batch_a" },
@@ -593,7 +605,7 @@ describe("NotebookSurface — persisted option batches and the visible slice", (
   it("collapses an older stale-only batch while keeping the latest actionable batch open", () => {
     const base = canonicalOptionRevision();
     render(
-      <NotebookSurface
+      <PlanComparisonWorkspace
         view={ready({
           options: [
             {
@@ -626,7 +638,7 @@ describe("NotebookSurface — persisted option batches and the visible slice", (
   it("orders batches by generation time and labels only the newest batch as current", () => {
     const base = canonicalOptionRevision();
     render(
-      <NotebookSurface
+      <PlanComparisonWorkspace
         view={ready({
           options: [
             {
@@ -657,9 +669,9 @@ describe("NotebookSurface — persisted option batches and the visible slice", (
 
     const batches = screen.getAllByTestId(/^notebook-option-batch-/);
     expect(batches.map((batch) => batch.dataset.testid)).toEqual([
-      "notebook-option-batch-batch_old",
-      "notebook-option-batch-batch_middle",
       "notebook-option-batch-batch_new",
+      "notebook-option-batch-batch_middle",
+      "notebook-option-batch-batch_old",
     ]);
     expect(screen.getAllByText("Current option batch")).toHaveLength(1);
     expect(screen.getByTestId("notebook-option-batch-batch_old")).toHaveTextContent(
@@ -675,14 +687,14 @@ describe("NotebookSurface — persisted option batches and the visible slice", (
 
   it("keeps replan out of the header because the goal composer owns it", () => {
     const onReplan = vi.fn();
-    render(<NotebookSurface view={ready()} onReplan={onReplan} />);
+    render(<PlanComparisonWorkspace view={ready()} onReplan={onReplan} />);
 
     expect(screen.queryByTestId("notebook-replan-options")).toBeNull();
     expect(onReplan).not.toHaveBeenCalled();
   });
 
   it("always keeps the context slice visible next to the options", () => {
-    render(<NotebookSurface view={ready()} />);
+    render(<PlanComparisonWorkspace view={ready()} />);
     expect(screen.getByTestId("context-omission-artifact_summaries")).toHaveTextContent(
       "5 of 59 included",
     );
@@ -690,7 +702,7 @@ describe("NotebookSurface — persisted option batches and the visible slice", (
 
   it("opens a materialized Draft inside the project Graph with Notebook context", () => {
     render(
-      <NotebookSurface
+      <PlanComparisonWorkspace
         projectRoot="/tmp/project"
         view={ready({
           materialization: {
@@ -729,7 +741,7 @@ describe("NotebookSurface — persisted option batches and the visible slice", (
 
   it("uses a rerun-child Draft node key without inventing a genesis model node", () => {
     render(
-      <NotebookSurface
+      <PlanComparisonWorkspace
         projectRoot="/tmp/project"
         view={ready({
           materialization: {
@@ -766,7 +778,7 @@ describe("NotebookSurface — persisted option batches and the visible slice", (
   it("offers the selected-text actions when text is selected", () => {
     const onSaveNote = vi.fn();
     render(
-      <NotebookSurface
+      <PlanComparisonWorkspace
         view={ready({
           selection: {
             text: "structure at lag 12",
@@ -789,7 +801,7 @@ describe("NotebookSurface — persisted option batches and the visible slice", (
       anchorNode: document.createTextNode("structure at lag 12"),
     } as unknown as Selection);
 
-    render(<NotebookSurface view={ready()} onTextSelection={onTextSelection} />);
+    render(<PlanComparisonWorkspace view={ready()} onTextSelection={onTextSelection} />);
     const narrative = screen.getByTestId("narrative-nar_2");
     narrative.appendChild(document.createTextNode("structure at lag 12"));
     fireEvent.mouseUp(narrative);

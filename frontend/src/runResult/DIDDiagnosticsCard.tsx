@@ -56,7 +56,7 @@ export function DIDDiagnosticsCard({ diagnostics }: { diagnostics: DIDDiagnostic
   if (!d) return null;
   const esOk = d.event_study.applicable !== false && d.event_study.event_time.length > 0;
   const baconOk = d.goodman_bacon.applicable !== false;
-  const ptColor = d.parallel_trends.verdict === "unavailable" ? "var(--text-secondary)"
+  const ptColor = d.parallel_trends.verdict === "unavailable" ? "var(--label-secondary)"
     : d.parallel_trends.verdict === "not_rejected" ? "var(--status-holds-fg)" : "var(--status-fails-fg)";
   const ptText = d.parallel_trends.verdict === "unavailable" ? "not testable"
     : d.parallel_trends.verdict === "not_rejected" ? "not rejected" : "rejected";

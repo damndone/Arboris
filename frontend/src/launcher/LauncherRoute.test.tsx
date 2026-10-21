@@ -101,7 +101,7 @@ describe("LauncherRoute", () => {
   it("V10: bare / with NO recents still shows the launcher (no dead end)", () => {
     renderAt("/");
     expect(screen.getByRole("button", { name: "New project" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Workbench" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Projects" })).toBeInTheDocument();
     expect(screen.queryByText(/Econometrics/i)).toBeNull();
   });
 

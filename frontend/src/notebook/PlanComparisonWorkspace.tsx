@@ -22,7 +22,7 @@ import {
 import type { DomainMemoryCandidate, DomainMemoryPreferences } from "./domainMemoryContracts";
 
 /**
- * The Notebook surface: a narrative stream, persisted option batches, the
+ * The comparison workspace: current candidates first, with saved analysis history, the
  * confirmation step, and the visible slice. Plan mode caps a batch at three
  * options, while Action mode verifies one requested path; the Notebook must
  * still show older batches and deferred siblings so navigation never turns
@@ -35,7 +35,7 @@ import type { DomainMemoryCandidate, DomainMemoryPreferences } from "./domainMem
  * and this surface refuses to print one.
  */
 
-export interface NotebookSurfaceProps {
+export interface PlanComparisonWorkspaceProps {
   view: NotebookView;
   projectRoot?: string;
   busy?: boolean;
@@ -213,7 +213,7 @@ function PlanningRecoveryActions({
   );
 }
 
-export function NotebookSurface(props: NotebookSurfaceProps) {
+export function PlanComparisonWorkspace(props: PlanComparisonWorkspaceProps) {
   const { view } = props;
   const interactionMode = props.interactionMode ?? "plan";
   const actionMode = interactionMode === "action";
@@ -272,7 +272,7 @@ export function NotebookSurface(props: NotebookSurfaceProps) {
       ? "Planning analysis options with the agent…"
       : "Compiling the bounded notebook context…";
     return (
-      <div className="nb-surface" data-testid="notebook-surface" data-state="loading">
+      <div className="nb-surface plan-comparison-workspace" data-testid="notebook-surface" data-state="loading">
         <p data-testid="notebook-loading" data-phase={view.phase ?? "compiling"}>
           {loadingMessage}
         </p>
@@ -299,7 +299,7 @@ export function NotebookSurface(props: NotebookSurfaceProps) {
     );
     const canExitPlanning = props.onExitPlanning && view.error.code.startsWith("NOTEBOOK_PLANNING_");
     return (
-      <div className="nb-surface" data-testid="notebook-surface" data-state="error">
+      <div className="nb-surface plan-comparison-workspace" data-testid="notebook-surface" data-state="error">
         <div className="nb-error" data-testid="notebook-error" role="alert">
           <span className="nb-error-code">{view.error.code}</span>
           <p className="nb-error-message">{view.error.message}</p>
@@ -326,17 +326,17 @@ export function NotebookSurface(props: NotebookSurfaceProps) {
       groups.set(option.batch_id, batch);
       return groups;
     }, new Map<string, NotebookOptionRevision[]>()),
-  ).sort(([, left], [, right]) => {
+  ).reverse().sort(([, left], [, right]) => {
     const leftCreatedAt = Math.max(
       ...left.map((option) => Date.parse(option.created_at)),
     );
     const rightCreatedAt = Math.max(
       ...right.map((option) => Date.parse(option.created_at)),
     );
-    return leftCreatedAt - rightCreatedAt;
+    return rightCreatedAt - leftCreatedAt;
   });
   const currentBatchId =
-    batches.length > 0 ? batches[batches.length - 1][0] : null;
+    batches.length > 0 ? batches[0][0] : null;
   const executing = notebook.options.find((option) => option.lifecycle_status === "executing");
   const outcome = notebook.outcome ?? null;
   const executionResults = Object.values(notebook.executionResults ?? {});
@@ -362,7 +362,7 @@ export function NotebookSurface(props: NotebookSurfaceProps) {
 
   return (
     <div
-      className="nb-surface"
+      className="nb-surface plan-comparison-workspace"
       data-testid="notebook-surface"
       data-state={state}
       onPointerDown={(event) => {
@@ -378,7 +378,7 @@ export function NotebookSurface(props: NotebookSurfaceProps) {
     >
       <header className="nb-surface-header">
         <div className="nb-surface-header-title">
-          <span className="nb-label">Notebook</span>
+          <h1 className="plan-comparison-title">Compare analysis plans</h1>
           <details><summary>Source</summary><span>{`${notebook.notebook_id} · ${notebook.run_family_id}`}</span></details>
         </div>
         {props.onStartNewAnalysis ? (
@@ -396,7 +396,7 @@ export function NotebookSurface(props: NotebookSurfaceProps) {
             </button>
             {newAnalysisOpen ? (
               <div className="nb-notebook-new-analysis-popover" role="menu">
-                <p>Creates a separate Notebook. The current analysis is unchanged.</p>
+                <p>Creates a separate analysis. The current analysis is unchanged.</p>
                 <button
                   type="button"
                   className="nb-button"
@@ -425,7 +425,7 @@ export function NotebookSurface(props: NotebookSurfaceProps) {
           if (goal) props.onUserIntent?.(goal);
         }}
       >
-        <div className="nb-interaction-mode" role="group" aria-label="Notebook mode">
+        <div className="nb-interaction-mode" role="group" aria-label="Planning approach">
           <button
             type="button"
             className="nb-interaction-mode-button"
@@ -434,7 +434,7 @@ export function NotebookSurface(props: NotebookSurfaceProps) {
             disabled={props.planning || props.busy}
             onClick={() => props.onInteractionModeChange?.("plan")}
           >
-            Plan
+            Compare approaches
           </button>
           <button
             type="button"
@@ -444,7 +444,7 @@ export function NotebookSurface(props: NotebookSurfaceProps) {
             disabled={props.planning || props.busy}
             onClick={() => props.onInteractionModeChange?.("action")}
           >
-            Action
+            Specify an analysis
           </button>
         </div>
         <p className="nb-interaction-mode-help">
@@ -531,6 +531,75 @@ export function NotebookSurface(props: NotebookSurfaceProps) {
         </div>
       ) : null}
 
+      {notebook.options.length === 0 ? (
+        <p className="nb-empty" data-testid="notebook-empty">
+          No analysis options for this context yet — the agent has not proposed one.
+        </p>
+      ) : (
+        <section className="nb-option-list" data-testid="notebook-option-list">
+          {batches.map(([batchId, options]) => {
+            const isCurrentBatch = batchId === currentBatchId;
+            const isHistoricalStaleBatch =
+              !isCurrentBatch &&
+              options.every((option) => option.freshness_status === "stale");
+            return (
+            <details
+              className="nb-option-batch"
+              data-testid={`notebook-option-batch-${batchId}`}
+              key={batchId}
+              open={isCurrentBatch}
+            >
+              <summary className="nb-option-batch-header">
+                <span className="nb-label">
+                  {isCurrentBatch ? "Current option batch" : "Previous option batch"}
+                </span>
+                <code>{batchId}</code>
+                <span>
+                  {`${options.length} persisted option${options.length === 1 ? "" : "s"}${
+                    isHistoricalStaleBatch ? " · stale history" : ""
+                  }`}
+                </span>
+                <span className="nb-option-batch-action">Show / hide</span>
+              </summary>
+              <div className="nb-option-batch-body">
+                {!actionMode ? <PlanComparisonTable options={options} /> : null}
+                {options.map((option) => (
+                  <Fragment key={option.option_id}>
+                    <OptionCard
+                      option={option}
+                      interactionMode={props.interactionMode ?? "plan"}
+                      outcome={outcome && outcome.observed.length > 0 ? outcome : null}
+                      onSelect={props.onSelectOption}
+                      onDefer={props.onDeferOption}
+                      onReject={props.onRejectOption}
+                      onRevalidate={props.onRevalidateOption}
+                      onConfirmAndExecute={props.onConfirmAndExecute}
+                    />
+                    {notebook.confirmation?.option.option_id === option.option_id ? (
+                      <div
+                        ref={confirmationSlotRef}
+                        data-testid="notebook-confirmation-slot"
+                        tabIndex={-1}
+                      >
+                        <PlanDiffConfirmation
+                          confirmation={notebook.confirmation}
+                          busy={props.busy}
+                          onConfirm={props.onConfirm}
+                          onCancel={props.onCancelConfirmation}
+                        />
+                      </div>
+                    ) : null}
+                  </Fragment>
+                ))}
+              </div>
+            </details>
+            );
+          })}
+        </section>
+      )}
+
+      <details className="plan-comparison-record">
+        <summary>Analysis record</summary>
       <section className="nb-narrative" data-testid="notebook-narrative">
         {notebook.narrative.map((entry) => (
           <p
@@ -544,6 +613,8 @@ export function NotebookSurface(props: NotebookSurfaceProps) {
           </p>
         ))}
       </section>
+
+      </details>
 
       <SelectionActions
         selection={notebook.selection}
@@ -698,73 +769,6 @@ export function NotebookSurface(props: NotebookSurfaceProps) {
           ))}
         </section>
       ) : null}
-
-      {notebook.options.length === 0 ? (
-        <p className="nb-empty" data-testid="notebook-empty">
-          No analysis options for this context yet — the agent has not proposed one.
-        </p>
-      ) : (
-        <section className="nb-option-list" data-testid="notebook-option-list">
-          {batches.map(([batchId, options]) => {
-            const isCurrentBatch = batchId === currentBatchId;
-            const isHistoricalStaleBatch =
-              !isCurrentBatch &&
-              options.every((option) => option.freshness_status === "stale");
-            return (
-            <details
-              className="nb-option-batch"
-              data-testid={`notebook-option-batch-${batchId}`}
-              key={batchId}
-              open={!isHistoricalStaleBatch}
-            >
-              <summary className="nb-option-batch-header">
-                <span className="nb-label">
-                  {isCurrentBatch ? "Current option batch" : "Previous option batch"}
-                </span>
-                <code>{batchId}</code>
-                <span>
-                  {`${options.length} persisted option${options.length === 1 ? "" : "s"}${
-                    isHistoricalStaleBatch ? " · stale history" : ""
-                  }`}
-                </span>
-                <span className="nb-option-batch-action">Show / hide</span>
-              </summary>
-              <div className="nb-option-batch-body">
-                {!actionMode ? <PlanComparisonTable options={options} /> : null}
-                {options.map((option) => (
-                  <Fragment key={option.option_id}>
-                    <OptionCard
-                      option={option}
-                      interactionMode={props.interactionMode ?? "plan"}
-                      outcome={outcome && outcome.observed.length > 0 ? outcome : null}
-                      onSelect={props.onSelectOption}
-                      onDefer={props.onDeferOption}
-                      onReject={props.onRejectOption}
-                      onRevalidate={props.onRevalidateOption}
-                      onConfirmAndExecute={props.onConfirmAndExecute}
-                    />
-                    {notebook.confirmation?.option.option_id === option.option_id ? (
-                      <div
-                        ref={confirmationSlotRef}
-                        data-testid="notebook-confirmation-slot"
-                        tabIndex={-1}
-                      >
-                        <PlanDiffConfirmation
-                          confirmation={notebook.confirmation}
-                          busy={props.busy}
-                          onConfirm={props.onConfirm}
-                          onCancel={props.onCancelConfirmation}
-                        />
-                      </div>
-                    ) : null}
-                  </Fragment>
-                ))}
-              </div>
-            </details>
-            );
-          })}
-        </section>
-      )}
 
       {notebook.contextSlice ? <ContextSlicePanel slice={notebook.contextSlice} resultBlind={!actionMode} /> : null}
 

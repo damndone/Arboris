@@ -10,7 +10,7 @@
 import { useWorkbench } from "./WorkbenchStateProvider";
 import { GraphView } from "./views/GraphView";
 import { WorkbenchHomeView } from "./views/WorkbenchHomeView";
-import { DataView, LazyView, NotebookRouteView, PipelineView, ReportView, TableView } from "./lazyViews";
+import { DataView, LazyView, ComparePlansView, PipelineView, ReportView, TableView } from "./lazyViews";
 import { useForest } from "./ForestContext";
 
 export function WorkbenchMain({
@@ -57,8 +57,8 @@ export function WorkbenchMain({
         {state.view === "table" && <TableView projectRoot={projectRoot} />}
         {state.view === "pipeline" && <PipelineView />}
         {state.view === "report" && <ReportView projectRoot={projectRoot} focusRequest={reportFocusRequest} />}
-        {state.view === "notebook" && (
-          <NotebookRouteView
+        {state.view === "plans" && (
+          <ComparePlansView
             projectRoot={projectRoot}
             activeRunId={notebookActiveRunId}
             onOpenMemorySettings={onOpenSettings}

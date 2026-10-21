@@ -647,3 +647,6 @@
   background: var(--bg-card-2);
   outline: none;
 }
+
+.ws-document-inspector { display: flex; min-width: 0; min-height: 0; height: 100%; }
+.ws-document-inspector__main { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; overflow: auto; }

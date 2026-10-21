@@ -1,3 +1,4 @@
+import { useWorkspaceCommands } from "../workspace/workspaceCommands";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
@@ -31,7 +32,7 @@ import {
   listDomainMemoryCandidates,
   reviewDomainMemoryCandidate,
 } from "./domainMemoryApi";
-import { NotebookSurface } from "./NotebookSurface";
+import { PlanComparisonWorkspace } from "./PlanComparisonWorkspace";
 import { useAgentSurfaceOptional } from "../workbench/agent/AgentSurfaceContext";
 import { useWorkbenchOptional } from "../workbench/WorkbenchStateProvider";
 import { useForest } from "../workbench/ForestContext";
@@ -461,7 +462,7 @@ function replaceOption(
   );
 }
 
-export interface NotebookRouteViewProps {
+export interface ComparePlansViewProps {
   projectRoot: string;
   activeRunId?: string | null;
   onMaterializedDraft?: (response: NotebookMaterializationResponse) => void;
@@ -470,13 +471,14 @@ export interface NotebookRouteViewProps {
   onReplan?: () => void;
 }
 
-export function NotebookRouteView({
+export function ComparePlansView({
   projectRoot,
   activeRunId = null,
   onMaterializedDraft,
   onOpenMemorySettings,
   onReplan: onExternalReplan,
-}: NotebookRouteViewProps) {
+}: ComparePlansViewProps) {
+  const commands = useWorkspaceCommands();
   const agent = useAgentSurfaceOptional();
   const workbench = useWorkbenchOptional();
   const forest = useForest();
@@ -678,22 +680,6 @@ export function NotebookRouteView({
         completedPlanningTokenRef.current = refreshToken;
       } else {
         snapshot = await listNotebookOptions(projectRoot, notebook.notebook_id);
-      }
-      if (snapshot.options.length === 0 && userGoal) {
-        const request = proposeNotebookOptionsOnce(
-          projectRoot,
-          notebook.notebook_id,
-          refreshToken,
-          interactionMode,
-          userGoal,
-        );
-        activePlanningRef.current = request;
-        setPlanningError(null);
-        setPlanningStartedAt(request.startedAt);
-        setPlanning(true);
-        if (!preserved) setView({ status: "loading", phase: "planning" });
-        snapshot = await request.promise;
-        completedPlanningTokenRef.current = refreshToken;
       }
       const traceId = snapshot.trace_id ?? compiled.trace_id;
       const trace = traceId
@@ -1173,6 +1159,7 @@ export function NotebookRouteView({
     onSelectionAction(selection, "follow_up");
     if (agent && workbench) {
       workbench.dispatch.setBottomPanel("agent");
+      commands?.showAgent();
       setSelectionNotice("Added to the Agent side chat. Edit or send it there.");
     } else {
       setSelectionNotice("Prepared the question, but this runless view has no side chat mounted.");
@@ -1193,7 +1180,7 @@ export function NotebookRouteView({
     return (
       <section className="nb-dataset-start" data-testid="notebook-route-chooser">
         <span className="nb-label">Choose an existing analysis</span>
-        <h2>Several durable Notebooks are available</h2>
+        <h2>Choose a saved analysis</h2>
         <p>
           Workbench cannot safely infer which analysis you meant. Choose one to open it,
           or start a new analysis from verified source data.
@@ -1219,11 +1206,11 @@ export function NotebookRouteView({
     return (
       <section className="nb-dataset-start" data-testid="notebook-dataset-start">
         <span className="nb-label">Start with a verified dataset</span>
-        <h2>Bring the raw data into a bounded Notebook context</h2>
+        <h2>Choose data for your comparison</h2>
         <p>
-          This uses the same project data store as Import data and create analysis.
-          The Agent first inspects a bounded profile and evidence pack, but this path
-          does not create a Run until you review, confirm, and execute an option.
+          Use the same verified data store as Import data.
+          Planning uses a bounded profile and evidence pack. This step
+          does not call a model or create a Run. Review and confirm a proposal before execution.
         </p>
         <label htmlFor="notebook-dataset-upload">Dataset</label>
         <input
@@ -1245,7 +1232,7 @@ export function NotebookRouteView({
 
   return (
     <div
-      data-testid="notebook-route-view"
+      data-testid="plan-comparison-view"
       style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 20 }}
       onPointerDown={(event) => {
         const target = event.target as HTMLElement | null;
@@ -1267,7 +1254,7 @@ export function NotebookRouteView({
           {domainMemoryCandidateError}
         </p>
       ) : null}
-      <section aria-label="Notebook memory" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 16 }}>
+      <section aria-label="Project memory" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 16 }}>
         <span>Memory is managed per project in Settings and never applies automatically.</span>
         <button
           type="button"
@@ -1286,7 +1273,7 @@ export function NotebookRouteView({
           Manage memory
         </button>
       </section>
-      <NotebookSurface
+      <PlanComparisonWorkspace
         view={view}
         projectRoot={projectRoot}
         busy={busy}
@@ -1372,6 +1359,8 @@ export function NotebookRouteView({
           type="button"
           className="nb-button nb-button-primary"
           data-testid="notebook-propose-options"
+          disabled={!notebookIntent.trim() || planning || busy}
+          title={!notebookIntent.trim() ? "Describe your research question first" : undefined}
           onClick={() => setRefreshToken((token) => token + 1)}
         >
           Generate analysis options

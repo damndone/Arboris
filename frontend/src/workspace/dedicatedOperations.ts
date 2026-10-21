@@ -18,7 +18,7 @@ export interface DedicatedContext {
   proposeFork(target: Target & { run_id: string; node_id: string }): Promise<void>;
 }
 
-const VIEW: Partial<Record<Surface, ViewMode>> = { graph: "graph", data: "data", table: "table", notebook: "notebook" };
+const VIEW: Partial<Record<Surface, ViewMode>> = { graph: "graph", data: "data", table: "table", notebook: "plans" };
 
 /** Resolves to an error message for the person, or null when it went through. */
 export async function openDedicated(op: Operation, target: Target | undefined, ctx: DedicatedContext): Promise<string | null> {

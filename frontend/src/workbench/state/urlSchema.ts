@@ -20,7 +20,7 @@
 
 import type { BottomPanelId } from "../registry/bottomPanelRegistry";
 
-export type ViewMode = "home" | "graph" | "data" | "table" | "pipeline" | "report" | "notebook";
+export type ViewMode = "home" | "graph" | "data" | "table" | "pipeline" | "report" | "plans";
 
 const VIEW_MODES: readonly ViewMode[] = [
   "home",
@@ -29,7 +29,7 @@ const VIEW_MODES: readonly ViewMode[] = [
   "table",
   "pipeline",
   "report",
-  "notebook",
+  "plans",
 ];
 // v1.6.12: shell/pending/timeline placeholder panels removed; legacy URLs
 // carrying them fall back to the "logs" default via pickEnum.
@@ -69,7 +69,7 @@ export function parseWorkbenchUrl(
   params: URLSearchParams,
   validNodeKeys?: ReadonlySet<string>,
 ): WorkbenchUrlSlice {
-  const view = pickEnum(params.get("view"), VIEW_MODES, "graph");
+  const view = pickEnum(params.get("view") === "notebook" ? "plans" : params.get("view"), VIEW_MODES, "graph");
   const searchQuery = params.get("q") ?? "";
   const panelId = pickEnum(params.get("panel"), PANEL_IDS, "logs");
 

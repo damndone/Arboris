@@ -772,7 +772,7 @@ test("HF2: /runs/:id?tab=overview does NOT apply lineage dark shell", async () =
   await waitFor(() => {
     expect(screen.getByRole("tab", { name: "Overview" })).toBeInTheDocument();
   });
-  const shell = document.querySelector("main.workbench-shell");
+  const shell = document.querySelector(".workbench-shell");
   expect(shell).not.toBeNull();
   expect(shell?.classList.contains("workbench-shell--lineage")).toBe(false);
 });
@@ -781,9 +781,9 @@ test("HF2: /runs/:id?tab=lineage DOES apply lineage dark shell", async () => {
   stubRunDetailAndArtifacts("run-hf2");
   renderAt("/runs/run-hf2?project_root=/tmp/demo&tab=lineage");
   await waitFor(() => {
-    expect(screen.getByRole("tab", { name: "Workbench" })).toBeInTheDocument();
+    expect(screen.getByTestId("project-graph-route")).toBeInTheDocument();
   });
-  const shell = document.querySelector("main.workbench-shell");
+  const shell = document.querySelector(".workbench-shell");
   expect(shell).not.toBeNull();
   expect(shell?.classList.contains("workbench-shell--lineage")).toBe(true);
 });
@@ -897,7 +897,7 @@ test("/p/:slug/graph on a zero-run project shows the empty canvas with the genes
   });
   expect(await screen.findByTestId("genesis-cta")).toBeInTheDocument();
   expect(
-    screen.getByText("This project has no imported data or analysis yet."),
+    screen.getByText("Start with your data"),
   ).toBeInTheDocument();
 });
 
@@ -915,15 +915,12 @@ test("project Home activates the Home tab instead of Workbench", async () => {
   const { rootToSlug } = await import("./workbench/projectSlug");
   renderAt(`/p/${rootToSlug("/tmp/p1")}/graph?view=home`);
 
-  expect(screen.getByRole("tab", { name: "Home" })).toHaveAttribute(
+  expect(await screen.findByRole("tab", { name: "Home" })).toHaveAttribute(
     "aria-selected",
     "true",
   );
-  expect(screen.getByRole("tab", { name: "Workbench" })).toHaveAttribute(
-    "aria-selected",
-    "false",
-  );
-  expect(document.querySelector("main.workbench-shell")).toHaveClass(
+  expect(screen.getByRole("tab", { name: "Analysis" })).toHaveAttribute("aria-selected", "false");
+  expect(document.querySelector(".workbench-shell")).toHaveClass(
     "workbench-shell--lineage",
   );
   await waitFor(() => {
@@ -931,7 +928,7 @@ test("project Home activates the Home tab instead of Workbench", async () => {
   });
 });
 
-test("project navigation places a Settings gear immediately before the theme control and opens Settings", async () => {
+test("project navigation keeps Settings beside the theme control and opens Settings", async () => {
   const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
   fetchMock.mockImplementation((input: RequestInfo | URL) => {
     const url = String(input);
@@ -954,9 +951,9 @@ test("project navigation places a Settings gear immediately before the theme con
   const { rootToSlug } = await import("./workbench/projectSlug");
   renderAt(`/p/${rootToSlug("/tmp/p1")}/graph`);
 
-  const settings = screen.getByRole("button", { name: "Settings" });
+  const settings = await screen.findByRole("button", { name: "Settings" });
   const theme = screen.getByRole("radiogroup", { name: "Theme" });
-  expect(settings.nextElementSibling).toBe(theme);
+  expect(theme.nextElementSibling).toBe(settings);
 
   fireEvent.click(settings);
   expect(await screen.findByTestId("llm-provider-manager")).toBeInTheDocument();

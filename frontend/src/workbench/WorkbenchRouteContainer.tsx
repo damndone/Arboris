@@ -1,29 +1,6 @@
-// frontend/src/workbench/WorkbenchRouteContainer.tsx
-//
-// V1.5.2 P8 — full layout per plan §2.
-//
-//   <WorkbenchRouteContainer>
-//     <WorkbenchStateProvider>
-//       <LineageContext.Provider>
-//         WorkbenchTopbar       (40px row)
-//         ┌────────────────────────────────────────┐
-//         │ RunHistoryRail   WorkbenchMain   Drawer │  (flex row, flex:1)
-//         │ (240px)          (flex:1)        (320px)│
-//         └────────────────────────────────────────┘
-//         BottomPanel           (auto height, splitter)
-//         <portals: ContextMenu, SearchPalette, RawJsonModal>
-//
-// What this container owns:
-//   - data load (useGraphData)
-//   - loading / error branching
-//   - both providers
-//   - RunHistoryRail mount (shared across all views)
-//   - DetailDrawer mount + ⌘J / Escape keyboard
-//   - RawJsonModal mount (selection-scoped, not canvas-scoped)
-//
-// GraphView is now slim: canvas + legacy banner + legacy hint only.
-// Table / Pipeline views compose into the same shell so the drawer +
-// rail + panel + search palette work identically across them.
+// Workbench route data, providers and shared node/report window state.
+// The workspace owns the only layout; legacy run URLs enter the same shell.
+// Draft execution, selection, overlays and pending-index recovery remain here.
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -41,29 +18,17 @@ import { useGraphKeyboard } from "../lineage/hooks/useGraphKeyboard";
 import { DetailDrawer } from "../lineage/detail/DetailDrawer";
 import { DetailDrawerTabs } from "../lineage/detail/DetailDrawerTabs";
 import { RawJsonModal } from "../lineage/modals/RawJsonModal";
-import {
-  RunHistoryRail,
-  persistRunHistoryOpen,
-  readRunHistoryOpen,
-} from "../lineage/runRail/RunHistoryRail";
 import "../lineage/tokens/lineage.css";
 import { WorkbenchStateProvider } from "./WorkbenchStateProvider";
 import { useWorkbench, type WorkbenchState } from "./WorkbenchStateProvider";
 import { rootToSlug } from "./projectSlug";
 import { CompareProvider } from "../lineage/compare/CompareContext";
 import { LineageBridge } from "./LineageBridge";
-import { ProjectSwitcher, WorkbenchTopbar } from "./WorkbenchTopbar";
-import { WorkbenchMain } from "./WorkbenchMain";
-import { WorkbenchHomeView } from "./views/WorkbenchHomeView";
 import { ContextMenu } from "./ContextMenu";
 import { SelectionMenu } from "../workspace/SelectionMenu";
 import { useGlobalShortcuts } from "./useGlobalShortcuts";
-import { BottomPanel } from "./BottomPanel";
-import { RunHistoryToggle } from "./RunHistoryToggle";
 import { WorkbenchWorkspace } from "../workspace/WorkbenchWorkspace";
 import { WorkspaceProjectStart } from "../workspace/WorkspaceProjectStart";
-import { HomeOnlyShell } from "./HomeOnlyShell";
-import { useWorkspaceMode } from "../workspace/workspaceMode";
 import { SearchPalette } from "./SearchPalette";
 import { CommandPalette } from "./CommandPalette";
 import { ProjectRootProvider } from "./ProjectRootContext";
@@ -91,7 +56,6 @@ import { completeNotebookOptionExecution } from "../notebook/notebookApi";
 import type { GraphViewNode, HeadSetNode } from "../lineage/api/graphViewTypes";
 import { usePendingRun, type PendingRun } from "./usePendingRun";
 import { AgentSurfaceProvider } from "./agent/AgentSurfaceContext";
-import { PanelHost } from "./PanelHost";
 import "./panelHost.css";
 import { PanelWindowControls, PanelWindowDragHandle } from "./PanelWindowControls";
 import { REPORT_REVIEW_TAB_ID } from "./state/tabsSchema";
@@ -104,8 +68,6 @@ import {
   applyAgentNavigationRef,
 } from "./agent/agentNavigation";
 import { registerBuiltinFeatureViews } from "./agent/builtinFeatureViews";
-import { LazyView, NotebookRouteView } from "./lazyViews";
-import type { NotebookMaterializationResponse } from "../notebook/notebookApi";
 
 type PendingFocusTarget = {
   runId: string;
@@ -335,7 +297,6 @@ function ForestWorkbench({
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const { forest, loading, error, refetch } = useForestData(projectRoot);
-  const workspaceMode = useWorkspaceMode();
   const appShellContext = useOutletContext<AppShellStatusContext>();
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [pendingFocusTarget, setPendingFocusTarget] =
@@ -860,11 +821,11 @@ function ForestWorkbench({
     !shellRunId &&
     forest.heads.length === 0 &&
     !draftHandlers.persistedDraftsHydrated &&
-    selectedView !== "notebook" &&
+    selectedView !== "notebook" && selectedView !== "plans" &&
     selectedView !== "home";
   const body = waitForPersistedGenesisDrafts ? (
     <Loading />
-  ) : !shellRunId && workspaceMode === "new" ? (
+  ) : !shellRunId ? (
     <WorkspaceProjectStart
       projectRoot={projectRoot}
       view={selectedView}
@@ -877,28 +838,6 @@ function ForestWorkbench({
         draftHandlers.onForkDraft(response);
         void refetch();
       }}
-    />
-  ) : !shellRunId && selectedView === "notebook" ? (
-    <NotebookOnlyShell
-      projectRoot={projectRoot}
-      activeRunId={notebookActiveRunId}
-      onOpenMemorySettings={() => setSettingsOpen(true)}
-      onMaterializedDraft={(response) => {
-        draftHandlers.onForkDraft(response);
-        void refetch();
-      }}
-    />
-  ) : !shellRunId && selectedView === "home" ? (
-    <HomeOnlyShell
-      projectRoot={projectRoot}
-      onOpenSettings={() => setSettingsOpen(true)}
-    />
-  ) : !shellRunId ? (
-    <EmptyProjectCanvas
-      projectRoot={projectRoot}
-      legacyFamilyCount={forest.familyCount}
-      legacyRunCount={forest.familyRunCount}
-      onOpenWizard={openGenesisWizard}
     />
   ) : (
     <RerunProvider projectRoot={projectRoot} runId={effectiveActiveRunId} onRerun={handleRerun}>
@@ -964,199 +903,6 @@ function ForestWorkbench({
         </RailRefreshContext.Provider>
         {genesisWizardDrawer}
       </ProjectRootProvider>
-    </div>
-  );
-}
-
-function NotebookOnlyShell({
-  projectRoot,
-  activeRunId,
-  onOpenMemorySettings,
-  onMaterializedDraft,
-}: {
-  projectRoot: string;
-  activeRunId: string | null;
-  onOpenMemorySettings: () => void;
-  onMaterializedDraft: (response: NotebookMaterializationResponse) => void;
-}) {
-  const navigate = useNavigate();
-
-  return (
-    <div
-      data-testid="workbench-notebook-shell"
-      style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}
-    >
-      <div
-        role="toolbar"
-        aria-label="Project toolbar"
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          padding: "0 16px",
-          height: 40,
-          borderBottom: "1px solid var(--separator)",
-        }}
-      >
-        <ProjectSwitcher projectRoot={projectRoot} />
-        <span style={{ color: "var(--label-secondary)", fontSize: 12 }}>Notebook</span>
-        <button
-          type="button"
-          data-testid="workbench-notebook-graph"
-          onClick={() => navigate(window.location.pathname)}
-          style={{
-            marginLeft: "auto",
-            padding: "4px 10px",
-            borderRadius: 6,
-            border: "1px solid var(--separator)",
-            background: "transparent",
-            color: "var(--label)",
-            cursor: "pointer",
-            fontSize: 12,
-          }}
-        >
-          Graph
-        </button>
-      </div>
-      <LazyView>
-        <NotebookRouteView
-          projectRoot={projectRoot}
-          activeRunId={activeRunId}
-          onOpenMemorySettings={onOpenMemorySettings}
-          onMaterializedDraft={onMaterializedDraft}
-        />
-      </LazyView>
-    </div>
-  );
-}
-
-/**
- * v1.6.8 T11 — the empty-canvas state for a zero-run project. Dark canvas
- * surface consistent with the workbench shell, a centered empty-state card
- * with the genesis CTA. The topbar row keeps the project switcher reachable
- * even before any run exists.
- */
-function EmptyProjectCanvas({
-  projectRoot,
-  legacyFamilyCount = 0,
-  legacyRunCount = 0,
-  onOpenWizard,
-}: {
-  projectRoot: string;
-  legacyFamilyCount?: number;
-  legacyRunCount?: number;
-  onOpenWizard: () => void;
-}) {
-  const navigate = useNavigate();
-  const hasLegacyFamilies = legacyFamilyCount > 0;
-  const legacyDisplayRunCount =
-    legacyRunCount > 0 ? legacyRunCount : legacyFamilyCount;
-  return (
-    <div
-      data-testid="workbench-empty-canvas"
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        height: "100%",
-        minHeight: 0,
-      }}
-    >
-      <div
-        role="toolbar"
-        aria-label="Project toolbar"
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 16,
-          padding: "0 16px",
-          height: 40,
-          borderBottom: "1px solid var(--separator)",
-          background: "var(--bg-card, transparent)",
-        }}
-      >
-          <ProjectSwitcher projectRoot={projectRoot} />
-          <button
-            type="button"
-            data-testid="notebook-cta"
-            onClick={() => navigate(`${window.location.pathname}?view=notebook`)}
-            style={{
-              padding: "4px 10px",
-              borderRadius: 6,
-              border: "1px solid var(--separator)",
-              background: "transparent",
-              color: "var(--label)",
-              cursor: "pointer",
-              fontSize: 12,
-            }}
-          >
-            Notebook
-          </button>
-      </div>
-      <div style={{ display: "flex", flexDirection: "row", flex: 1, minHeight: 0 }}>
-        <div
-          style={{
-            flex: 1,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            background: "var(--bg-canvas)",
-          }}
-        >
-          <div
-            style={{
-              textAlign: "center",
-              padding: "28px 36px",
-              borderRadius: 12,
-              background: "var(--bg-card-2)",
-              boxShadow: "0 0 0 1px var(--separator)",
-            }}
-          >
-            <p style={{ margin: "0 0 6px", fontSize: 15, color: "var(--label)" }}>
-              {hasLegacyFamilies
-                ? `This project has ${legacyDisplayRunCount} run${legacyDisplayRunCount === 1 ? "" : "s"} from before lineage indexing; they cannot be shown in the graph.`
-                : "This project has no imported data or analysis yet."}
-            </p>
-            {hasLegacyFamilies && (
-              <p
-                style={{
-                  margin: "0 0 10px",
-                  fontSize: 12,
-                  color: "var(--label-secondary)",
-                }}
-              >
-                Open the run details page (?tab=overview) to view legacy results.
-              </p>
-            )}
-            <p
-              className="mono"
-              style={{
-                margin: "0 0 16px",
-                fontSize: 12,
-                color: "var(--label-tertiary)",
-              }}
-            >
-              {projectRoot}
-            </p>
-            <button
-              type="button"
-              data-testid="genesis-cta"
-              onClick={onOpenWizard}
-              style={{
-                padding: "8px 18px",
-                borderRadius: 8,
-                border: 0,
-                background: "var(--tint-fill)",
-                color: "var(--on-tint)",
-                fontSize: 13,
-                fontWeight: 600,
-                cursor: "pointer",
-              }}
-            >
-              ＋ Import data and create analysis
-            </button>
-          </div>
-        </div>
-      </div>
     </div>
   );
 }
@@ -1308,11 +1054,9 @@ function WorkbenchShell({
 }) {
   const { model, selectedKey, select } = useLineage();
   const { state, dispatch } = useWorkbench();
-  const workspaceMode = useWorkspaceMode();
   const navigate = useNavigate();
   const [navigationParams, setNavigationParams] = useSearchParams();
   const [rawJsonOpen, setRawJsonOpen] = useState(false);
-  const [runHistoryOpen, setRunHistoryOpen] = useState(() => readRunHistoryOpen(projectRoot));
   const [reportReviewUi, setReportReviewUi] = useState<ReportReviewUiState>(() => readReportReviewUiState(projectRoot));
   const [nodePanelUi, setNodePanelUi] = useState<NodePanelUiState>(() => readNodePanelUiState(projectRoot));
   const [reportReviewDragging, setReportReviewDragging] = useState(false);
@@ -1337,7 +1081,6 @@ function WorkbenchShell({
   const nodePanelResizeRef = useRef<NodePanelResizeState | null>(null);
 
   useEffect(() => {
-    setRunHistoryOpen(readRunHistoryOpen(projectRoot));
   }, [projectRoot]);
 
   useEffect(() => {
@@ -1369,11 +1112,6 @@ function WorkbenchShell({
   const nodePanelPinned = nodePanelUi.pinned;
   const nodePanelCollapsed = nodePanelUi.collapsed;
   const nodePanelPosition = nodePanelUi.position;
-
-  const onRunHistoryOpenChange = useCallback((open: boolean) => {
-    persistRunHistoryOpen(projectRoot, open);
-    setRunHistoryOpen(open);
-  }, [projectRoot]);
 
   const floatReportReview = useCallback(() => {
     setReportReviewUi((state) => ({ ...state, layout: "floating", collapsed: false }));
@@ -1922,8 +1660,8 @@ function WorkbenchShell({
     <>
       {state.view !== "home" && <ContextMenu />}
       <SelectionMenu />
-      {(state.view !== "home" || workspaceMode === "new") && <SearchPalette />}
-      {(state.view !== "home" || workspaceMode === "new") && <CommandPalette projectRoot={projectRoot} />}
+      {<SearchPalette />}
+      {<CommandPalette projectRoot={projectRoot} />}
       {state.view !== "home" && <RawJsonModal open={rawJsonOpen} onClose={() => setRawJsonOpen(false)} node={selectedNode} />}
       {reportReviewFloating}
       {nodePanelFloating}
@@ -1940,13 +1678,13 @@ function WorkbenchShell({
     />
   );
 
-  if (workspaceMode === "new") {
-    return (
+  return (
       <AgentNavigationContext.Provider value={openAgentNavigation}>
         <WorkbenchWorkspace
           runId={runId}
           projectRoot={projectRoot}
           stageTabs={stageTabs}
+          stagePanelKind={reportReviewTabActive && reportReviewLayout === "docked" ? "report-review" : nodePanelTabActive ? "node" : null}
           stagePanel={reportReviewTabActive && reportReviewLayout === "docked" ? reportReviewPanel : nodePanelTabActive ? nodePanelContent : null}
           reportFocusRequest={reportFocusRequest}
           newAnalysis={onOpenGenesisWizard ? { label: hasGenesisDraft ? "Resume new analysis" : "New analysis", open: onOpenGenesisWizard } : undefined}
@@ -1955,120 +1693,4 @@ function WorkbenchShell({
         />
       </AgentNavigationContext.Provider>
     );
-  }
-
-  return (
-    <div
-      data-testid="workbench-route"
-      className="workbench-route"
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        height: "100%",
-        minHeight: 0,
-        overflow: "hidden",
-      }}
-    >
-      <WorkbenchTopbar
-        projectRoot={projectRoot}
-        leadingActions={
-          state.view !== "home" ? (
-            <RunHistoryToggle open={runHistoryOpen} onToggle={() => onRunHistoryOpenChange(!runHistoryOpen)} />
-          ) : null
-        }
-        extraActions={
-          onOpenGenesisWizard ? (
-            <button
-              type="button"
-              data-testid={hasGenesisDraft ? "genesis-resume-cta" : "genesis-open-cta"}
-              aria-label={hasGenesisDraft ? "Resume new analysis" : "New analysis"}
-              onClick={onOpenGenesisWizard}
-              style={{
-                padding: "4px 10px",
-                borderRadius: 6,
-                border: 0,
-                background: "var(--tint-bg)",
-                color: "var(--tint)",
-                cursor: "pointer",
-                fontSize: 12,
-              }}
-            >
-              {hasGenesisDraft ? "Resume new analysis" : "New analysis"}
-            </button>
-          ) : null
-        }
-      />
-      <AgentNavigationContext.Provider value={openAgentNavigation}>
-        <div
-          data-testid="workbench-main-row"
-          style={{
-            display: "flex",
-            flexDirection: "row",
-            flex: 1,
-            minHeight: 0,
-            minWidth: 0,
-            overflow: "hidden",
-          }}
-        >
-          {state.view !== "home" && (
-            <RunHistoryRail
-              projectRoot={projectRoot}
-              open={runHistoryOpen}
-              onOpenChange={onRunHistoryOpenChange}
-            />
-          )}
-          <div
-                data-testid="workbench-center-column"
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  flex: 1,
-                  minHeight: 0,
-                  minWidth: 0,
-                  overflow: "hidden",
-                }}
-              >
-                <WorkbenchMain
-                  projectRoot={projectRoot}
-                  reportFocusRequest={reportFocusRequest}
-                  onOpenSettings={onOpenSettings}
-                  onOpenProject={(root) => {
-                    navigate(`/p/${rootToSlug(root)}/graph`);
-                  }}
-                />
-                {state.view !== "home" && (
-                  <BottomPanel runId={runId} projectRoot={projectRoot} />
-                )}
-              </div>
-              {state.view !== "home" && (
-                <PanelHost
-                  projectRoot={projectRoot}
-                  collapseLabel={reportReviewTabActive ? "report review" : "node panel"}
-                  activeKind={
-                    reportReviewLayout === "docked" && reportReviewTabActive
-                      ? "report-review"
-                      : nodePanelTabActive && nodePanelLayout === "docked"
-                        ? "node"
-                        : null
-                  }
-                  collapsed={reportReviewTabActive && reportReviewLayout === "docked"
-                    ? reportReviewCollapsed
-                    : nodePanelTabActive && nodePanelLayout === "docked"
-                      ? nodePanelCollapsed
-                      : undefined}
-                  onCollapsedChange={reportReviewTabActive && reportReviewLayout === "docked"
-                    ? (collapsed) => setReportReviewUi((current) => ({ ...current, collapsed }))
-                    : nodePanelTabActive && nodePanelLayout === "docked"
-                      ? (collapsed) => setNodePanelUi((current) => ({ ...current, collapsed }))
-                      : undefined}
-                  tabs={stageTabs}
-                  nodePanel={nodePanelLayout === "docked" ? nodePanelContent : null}
-                  reportPanel={reportReviewLayout === "docked" ? reportReviewPanel : null}
-                />
-              )}
-        </div>
-      </AgentNavigationContext.Provider>
-      {overlays}
-    </div>
-  );
 }

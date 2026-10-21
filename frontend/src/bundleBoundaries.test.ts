@@ -25,7 +25,7 @@ const ON_DEMAND: Record<string, string[]> = {
   "./pipelineDrafts/DraftGraphRoute": [],
   "dataView/DataView": [],
   "report/ReportView": [],
-  "notebook/NotebookRouteView": [],
+  "notebook/ComparePlansView": [],
   "views/TableView": [],
   "views/PipelineView": [],
 };

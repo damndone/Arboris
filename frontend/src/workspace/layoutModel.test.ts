@@ -60,7 +60,7 @@ describe("wide views and memory", () => {
 
   test("Data, Tables, Report and Plans borrow the wide stage in lineage first", () => {
     expect(effectiveLayout("lineage", "data")).toBe("results");
-    expect(effectiveLayout("lineage", "notebook")).toBe("results");
+    expect(effectiveLayout("lineage", "plans")).toBe("results");
     expect(effectiveLayout("lineage", "graph")).toBe("lineage");
     expect(effectiveLayout("results", "report")).toBe("results");
   });

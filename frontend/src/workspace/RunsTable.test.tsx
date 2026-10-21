@@ -1,51 +1,67 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
-import { describe, expect, test, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter, useLocation } from "react-router-dom";
+import { beforeEach, expect, test, vi } from "vitest";
 import { RunsTable } from "./RunsTable";
+import { RailRefreshContext } from "../workbench/RailRefreshContext";
+import { fetchRuns } from "../api";
+import { runDetailFixture } from "../apiFixtures";
 
-vi.mock("../lineage/runRail/useRunHistory", () => ({
-  useRunHistory: () => ({
-    runs: [
-      { run_id: "20261007_100000_000000_aaaaaaaa", started_at: "2026-10-07T10:00:00Z", status: "completed", y: "wage", x: ["educ", "age"], mode: null },
-      { run_id: "20261008_100000_000000_bbbbbbbb", started_at: "2026-10-08T10:00:00Z", status: "failed", y: null, x: null, mode: "statistical" },
-    ],
-    loading: false,
-    error: null,
-    refresh: () => undefined,
-  }),
-}));
-vi.mock("../workbench/ForestContext", () => ({ useForest: () => ({ activeRunId: "20261007_100000_000000_aaaaaaaa" }) }));
+vi.mock("../api", async (original) => ({ ...await original<typeof import("../api")>(), fetchRuns: vi.fn() }));
+vi.mock("../workbench/ForestContext", () => ({ useForest: () => ({ activeRunId: "new" }) }));
 
-function Where() {
+function Probe() {
   const location = useLocation();
-  return <output data-testid="where">{location.pathname + location.search}</output>;
+  return <output data-testid="location">{location.pathname}{location.search}</output>;
 }
-
-describe("RunsTable", () => {
-  test("lists runs newest first with what they contain and their status; the shown run is marked", () => {
-    render(
-      <MemoryRouter initialEntries={["/p/x/graph"]}>
-        <RunsTable projectRoot="/proj" />
-      </MemoryRouter>,
-    );
-    const rows = screen.getAllByRole("row").slice(1);
-    expect(rows[0]).toHaveTextContent("Analysis 2");
-    expect(screen.getByText("20261008_100000_000000_bbbbbbbb")).not.toBeVisible();
-    expect(rows[0]).toHaveTextContent("failed");
-    expect(rows[1]).toHaveTextContent("wage on educ, age");
-    expect(rows[1]).toHaveAttribute("aria-current", "true");
-    expect(screen.getByRole("link", { name: "View all runs" })).toHaveAttribute("href", "/runs?project_root=%2Fproj");
-  });
-
-  test("Show on map opens the run the way the rail did", () => {
-    render(
-      <MemoryRouter initialEntries={["/p/x/graph?view=graph"]}>
-        <Routes>
-          <Route path="*" element={<><RunsTable projectRoot="/proj" /><Where /></>} />
-        </Routes>
-      </MemoryRouter>,
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Show on map" }));
-    expect(screen.getByTestId("where")).toHaveTextContent("/runs/20261008_100000_000000_bbbbbbbb?project_root=%2Fproj&tab=lineage&view=graph");
-  });
+function mount(token = 0) {
+  return render(<MemoryRouter initialEntries={["/p/x/graph?view=table"]}>
+    <RailRefreshContext.Provider value={token}><RunsTable projectRoot="/proj" /></RailRefreshContext.Provider>
+    <Probe />
+  </MemoryRouter>);
+}
+beforeEach(() => {
+  vi.mocked(fetchRuns).mockReset();
+  vi.mocked(fetchRuns).mockResolvedValue({ runs: [
+    runDetailFixture({ run_id: "old", y: "wage", x: ["educ", "age"], started_at: "2026-10-19T01:00:00Z", status: "completed" }),
+    runDetailFixture({ run_id: "new", started_at: "2026-10-21T01:00:00Z", status: "completed" }),
+    runDetailFixture({ run_id: "" }),
+  ] });
+});
+test("keeps run status, ordering, active identity and the complete history link", async () => {
+  mount();
+  const rows = await screen.findAllByTestId(/^ws-run-/);
+  expect(rows.map(row => row.dataset.testid)).toEqual(["ws-run-new", "ws-run-old"]);
+  expect(rows[0]).toHaveAttribute("aria-current", "true");
+  expect(rows[0]).toHaveTextContent("completed");
+  expect(rows[1]).toHaveTextContent("wage on educ, age");
+  expect(screen.getByText("new", { exact: true })).not.toBeVisible();
+  expect(screen.getByRole("link", { name: "View all runs" })).toHaveAttribute("href", "/runs?project_root=%2Fproj");
+});
+test("switching runs preserves the view and project without a model call", async () => {
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Show on map" }));
+  expect(screen.getByTestId("location")).toHaveTextContent("/runs/old?project_root=%2Fproj&tab=lineage&view=table");
+});
+test("surfaces loading, empty history and fetch failures", async () => {
+  vi.mocked(fetchRuns).mockResolvedValue({ runs: [] });
+  mount();
+  expect(screen.getByText("Loading runs…")).toBeInTheDocument();
+  expect(await screen.findByText(/No runs yet/)).toBeInTheDocument();
+});
+test("keeps fetch failures visible", async () => {
+  vi.mocked(fetchRuns).mockRejectedValue(new Error("history unavailable"));
+  mount();
+  expect(await screen.findByRole("alert")).toHaveTextContent("history unavailable");
+});
+test("refreshes immediately after a newly indexed run without waiting for polling", async () => {
+  const renderTree = (token: number) => <MemoryRouter><RailRefreshContext.Provider value={token}>
+    <RunsTable projectRoot="/proj" />
+  </RailRefreshContext.Provider></MemoryRouter>;
+  const { rerender } = render(renderTree(0));
+  await screen.findByTestId("ws-run-new");
+  expect(fetchRuns).toHaveBeenCalledTimes(1);
+  vi.mocked(fetchRuns).mockResolvedValue({ runs: [runDetailFixture({ run_id: "indexed" })] });
+  rerender(renderTree(1));
+  await waitFor(() => expect(fetchRuns).toHaveBeenCalledTimes(2));
+  expect(await screen.findByTestId("ws-run-indexed")).toBeInTheDocument();
 });

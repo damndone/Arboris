@@ -3,7 +3,8 @@
 // run opens it the way the rail did.
 
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
+import { useRailRefreshToken } from "../workbench/RailRefreshContext";
 import type { RunSummary } from "../api";
 import { useForest } from "../workbench/ForestContext";
 import { useRunHistory } from "../lineage/runRail/useRunHistory";
@@ -16,7 +17,14 @@ function contents(run: RunSummary): string {
 }
 
 export function RunsTable({ projectRoot }: { projectRoot: string }) {
-  const { runs, loading, error } = useRunHistory(projectRoot);
+  const { runs, loading, error, refresh } = useRunHistory(projectRoot);
+  const refreshToken = useRailRefreshToken();
+  const previousToken = useRef(refreshToken);
+  useEffect(() => {
+    if (previousToken.current === refreshToken) return;
+    previousToken.current = refreshToken;
+    refresh();
+  }, [refreshToken, refresh]);
   const activeRunId = useForest()?.activeRunId ?? null;
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();

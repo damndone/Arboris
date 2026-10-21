@@ -2,7 +2,7 @@ import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { NotebookSurface } from "./NotebookSurface";
+import { PlanComparisonWorkspace } from "./PlanComparisonWorkspace";
 import type { NotebookReadyView } from "./contracts";
 import { canonicalOptionRevision } from "./fixtures/canonicalMocks";
 import { provisionalContextSlice } from "./fixtures/provisionalContextSlice";
@@ -24,7 +24,7 @@ function ready(): NotebookReadyView {
   };
 }
 
-describe("NotebookSurface domain memory integration", () => {
+describe("PlanComparisonWorkspace domain memory integration", () => {
   it("shows bounded hints and keeps both controls explicit", () => {
     const onChange = vi.fn();
     const view = ready();
@@ -55,7 +55,7 @@ describe("NotebookSurface domain memory integration", () => {
     };
 
     render(
-      <NotebookSurface
+      <PlanComparisonWorkspace
         view={view}
         domainMemoryPreferences={{
           cross_project_domain_memory_use: false,

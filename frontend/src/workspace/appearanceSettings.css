@@ -43,10 +43,3 @@
   margin: 2px 0 0;
   accent-color: var(--tint-fill);
 }
-
-.appearance-settings__hint {
-  display: block;
-  margin-top: 2px;
-  font-size: var(--text-small);
-  color: var(--label-secondary);
-}

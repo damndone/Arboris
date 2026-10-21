@@ -69,7 +69,7 @@ export function releaseLayout(
 }
 
 /** Data, Tables, Report and Plans need width: in lineage first they borrow the wide stage. */
-export const WIDE_VIEWS: ReadonlySet<ViewMode> = new Set<ViewMode>(["data", "table", "report", "notebook"]);
+export const WIDE_VIEWS: ReadonlySet<ViewMode> = new Set<ViewMode>(["data", "table", "report", "plans"]);
 
 export function effectiveLayout(chosen: Layout, view: ViewMode): Layout {
   return chosen === "lineage" && WIDE_VIEWS.has(view) ? "results" : chosen;

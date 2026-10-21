@@ -4,7 +4,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { NotebookRouteView } from "./NotebookRouteView";
+import { ComparePlansView } from "./ComparePlansView";
 import { readCanonicalFixture } from "./fixtures/canonicalMocks";
 import { uploadDataset } from "../api";
 import { loadAiActivity } from "../aiActivity/aiActivityLog";
@@ -131,7 +131,7 @@ const context = planningContextFixture({
   source_manifest: [],
 });
 
-describe("NotebookRouteView", () => {
+describe("ComparePlansView", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     window.localStorage.clear();
@@ -189,6 +189,15 @@ describe("NotebookRouteView", () => {
     vi.mocked(reviewDomainMemoryCandidate).mockResolvedValue(candidateRejectedFixture());
   });
 
+  it("opens a saved goal without silently requesting paid planning when there are no options", async () => {
+    vi.mocked(listNotebookOptions).mockResolvedValue({ options: [], trace_id: null } as unknown as NotebookOptionsResponse);
+    render(<MemoryRouter><ComparePlansView projectRoot="/tmp/project" activeRunId="run_head" /></MemoryRouter>);
+    expect(await screen.findByTestId("notebook-empty")).toBeInTheDocument();
+    expect(proposeNotebookOptions).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("notebook-propose-options"));
+    await waitFor(() => expect(proposeNotebookOptions).toHaveBeenCalledOnce());
+  });
+
   it("loads the current project's candidate queue and dispatches explicit review", async () => {
     vi.mocked(listDomainMemoryCandidates).mockResolvedValue({
       candidates: [{
@@ -204,7 +213,7 @@ describe("NotebookRouteView", () => {
 
     render(
       <MemoryRouter initialEntries={["/p/project/graph?view=notebook"]}>
-        <NotebookRouteView projectRoot="/tmp/project" activeRunId="run_head" />
+        <ComparePlansView projectRoot="/tmp/project" activeRunId="run_head" />
       </MemoryRouter>,
     );
 
@@ -234,7 +243,7 @@ describe("NotebookRouteView", () => {
 
     render(
       <MemoryRouter initialEntries={["/p/project/graph?view=notebook"]}>
-        <NotebookRouteView projectRoot="/tmp/project" activeRunId="run_head" />
+        <ComparePlansView projectRoot="/tmp/project" activeRunId="run_head" />
       </MemoryRouter>,
     );
 
@@ -265,12 +274,12 @@ describe("NotebookRouteView", () => {
 
     const view = render(
       <MemoryRouter initialEntries={["/p/project/graph?view=notebook"]}>
-        <NotebookRouteView projectRoot="/tmp/project-a" activeRunId="run_head" />
+        <ComparePlansView projectRoot="/tmp/project-a" activeRunId="run_head" />
       </MemoryRouter>,
     );
     view.rerender(
       <MemoryRouter initialEntries={["/p/project/graph?view=notebook"]}>
-        <NotebookRouteView projectRoot="/tmp/project-b" activeRunId="run_head" />
+        <ComparePlansView projectRoot="/tmp/project-b" activeRunId="run_head" />
       </MemoryRouter>,
     );
 
@@ -289,12 +298,14 @@ describe("NotebookRouteView", () => {
     render(
       <StrictMode>
         <MemoryRouter initialEntries={["/p/project/graph?view=notebook"]}>
-          <NotebookRouteView projectRoot="/tmp/project" activeRunId="run_head" />
+          <ComparePlansView projectRoot="/tmp/project" activeRunId="run_head" />
         </MemoryRouter>
       </StrictMode>,
     );
 
-    await waitFor(() => expect(screen.getByTestId("notebook-route-view")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("plan-comparison-view")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("notebook-propose-options"));
+    await screen.findByTestId("notebook-option-list");
     expect(screen.getByTestId("notebook-option-list")).toBeInTheDocument();
     expect(ensureNotebookProjection).toHaveBeenCalledOnce();
     expect(ensureNotebookProjection).toHaveBeenCalledWith("/tmp/project", {
@@ -348,7 +359,7 @@ describe("NotebookRouteView", () => {
 
     render(
       <MemoryRouter initialEntries={["/p/project/graph?view=notebook"]}>
-        <NotebookRouteView projectRoot="/tmp/project" activeRunId="run_head" />
+        <ComparePlansView projectRoot="/tmp/project" activeRunId="run_head" />
       </MemoryRouter>,
     );
 
@@ -361,7 +372,7 @@ describe("NotebookRouteView", () => {
   it("opens shared Settings through a navigation intent instead of local memory switches", async () => {
     render(
       <MemoryRouter initialEntries={["/p/project/graph?view=notebook"]}>
-        <NotebookRouteView projectRoot="/tmp/project" activeRunId="run_head" />
+        <ComparePlansView projectRoot="/tmp/project" activeRunId="run_head" />
         <LocationProbe />
       </MemoryRouter>,
     );
@@ -377,7 +388,7 @@ describe("NotebookRouteView", () => {
     const onOpenMemorySettings = vi.fn();
     render(
       <MemoryRouter initialEntries={["/p/project/graph?view=notebook"]}>
-        <NotebookRouteView
+        <ComparePlansView
           projectRoot="/tmp/project"
           activeRunId="run_head"
           onOpenMemorySettings={onOpenMemorySettings}
@@ -398,7 +409,7 @@ describe("NotebookRouteView", () => {
 
     render(
       <MemoryRouter initialEntries={["/p/project/graph?view=notebook"]}>
-        <NotebookRouteView projectRoot="/tmp/project" activeRunId="run_head" />
+        <ComparePlansView projectRoot="/tmp/project" activeRunId="run_head" />
       </MemoryRouter>,
     );
 
@@ -419,7 +430,7 @@ describe("NotebookRouteView", () => {
 
     render(
       <MemoryRouter initialEntries={["/p/project/graph?view=notebook&notebook=nb_1"]}>
-        <NotebookRouteView projectRoot="/tmp/project" activeRunId="run_head" />
+        <ComparePlansView projectRoot="/tmp/project" activeRunId="run_head" />
       </MemoryRouter>,
     );
 
@@ -427,22 +438,23 @@ describe("NotebookRouteView", () => {
     expect(proposeNotebookOptions).not.toHaveBeenCalled();
 
     expect(screen.getByTestId("notebook-submit-intent")).toBeDisabled();
+    expect(screen.getByTestId("notebook-propose-options")).toBeDisabled();
     expect(proposeNotebookOptions).not.toHaveBeenCalled();
   });
 
   it("uploads a zero-run dataset and binds the Notebook to the verified upload", async () => {
     render(
       <MemoryRouter initialEntries={["/p/project/graph?view=notebook"]}>
-        <NotebookRouteView projectRoot="/tmp/project" />
+        <ComparePlansView projectRoot="/tmp/project" />
       </MemoryRouter>,
     );
 
     expect(screen.getByTestId("notebook-dataset-start")).toBeInTheDocument();
     expect(screen.getByTestId("notebook-dataset-start")).toHaveTextContent(
-      "same project data store",
+      "same verified data store",
     );
     expect(screen.getByTestId("notebook-dataset-start")).toHaveTextContent(
-      "does not create a Run",
+      "does not call a model or create a Run",
     );
     fireEvent.change(screen.getByLabelText("Dataset"), {
       target: { files: [new File(["outcome,predictor\n1,2"], "data.csv", { type: "text/csv" })] },
@@ -462,11 +474,11 @@ describe("NotebookRouteView", () => {
   it("starts a fresh dataset-rooted Notebook from the header's New analysis menu", async () => {
     render(
       <MemoryRouter initialEntries={["/p/project/graph?view=notebook&notebook=nb_1"]}>
-        <NotebookRouteView projectRoot="/tmp/project" activeRunId="run_head" />
+        <ComparePlansView projectRoot="/tmp/project" activeRunId="run_head" />
       </MemoryRouter>,
     );
 
-    await waitFor(() => expect(screen.getByTestId("notebook-route-view")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("plan-comparison-view")).toBeInTheDocument());
     expect(screen.queryByTestId("notebook-source-restart")).toBeNull();
     fireEvent.click(screen.getByTestId("notebook-new-analysis-menu"));
     fireEvent.click(screen.getByTestId("notebook-start-from-source"));
@@ -491,7 +503,7 @@ describe("NotebookRouteView", () => {
     render(
       <StrictMode>
         <MemoryRouter initialEntries={["/p/project/graph?view=notebook"]}>
-          <NotebookRouteView projectRoot="/tmp/project-dedupe" />
+          <ComparePlansView projectRoot="/tmp/project-dedupe" />
         </MemoryRouter>
       </StrictMode>,
     );
@@ -500,6 +512,9 @@ describe("NotebookRouteView", () => {
       target: { files: [new File(["outcome,predictor\n1,2"], "data.csv", { type: "text/csv" })] },
     });
 
+    await screen.findByTestId("notebook-empty");
+    expect(proposeNotebookOptions).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("notebook-propose-options"));
     await waitFor(() => expect(proposeNotebookOptions).toHaveBeenCalledTimes(1));
     const proposed = readCanonicalFixture("notebook_option_revision");
     vi.mocked(listNotebookOptions).mockResolvedValue(notebookOptionsFixture({
@@ -536,7 +551,7 @@ describe("NotebookRouteView", () => {
 
     render(
       <MemoryRouter initialEntries={["/p/project/graph?view=notebook"]}>
-        <NotebookRouteView projectRoot="/tmp/project" />
+        <ComparePlansView projectRoot="/tmp/project" />
       </MemoryRouter>,
     );
 
@@ -574,7 +589,7 @@ describe("NotebookRouteView", () => {
     render(
       <MemoryRouter initialEntries={["/p/project/graph?view=notebook"]}>
         <LocationProbe />
-        <NotebookRouteView projectRoot="/tmp/project" />
+        <ComparePlansView projectRoot="/tmp/project" />
       </MemoryRouter>,
     );
 
@@ -613,7 +628,7 @@ describe("NotebookRouteView", () => {
 
     render(
       <MemoryRouter initialEntries={["/p/project/graph?view=notebook"]}>
-        <NotebookRouteView projectRoot="/tmp/project" activeRunId="run_current" />
+        <ComparePlansView projectRoot="/tmp/project" activeRunId="run_current" />
       </MemoryRouter>,
     );
 
@@ -639,7 +654,7 @@ describe("NotebookRouteView", () => {
     render(
       <MemoryRouter initialEntries={["/p/project/graph?view=notebook&notebook=nb_stale"]}>
         <LocationProbe />
-        <NotebookRouteView projectRoot="/tmp/project" activeRunId="run_head" />
+        <ComparePlansView projectRoot="/tmp/project" activeRunId="run_head" />
       </MemoryRouter>,
     );
 
@@ -670,7 +685,7 @@ describe("NotebookRouteView", () => {
 
     render(
       <MemoryRouter initialEntries={["/p/project/graph?view=notebook"]}>
-        <NotebookRouteView projectRoot="/tmp/project" activeRunId="run_head" />
+        <ComparePlansView projectRoot="/tmp/project" activeRunId="run_head" />
       </MemoryRouter>,
     );
 
@@ -683,7 +698,7 @@ describe("NotebookRouteView", () => {
   it("opens Draft confirmation for an already-selected materializable option without reselecting it", async () => {
     const selected = readCanonicalFixture("notebook_option_revision_v11");
     selected.lifecycle_status = "selected";
-    vi.mocked(proposeNotebookOptions).mockResolvedValue(notebookOptionsFixture({
+    vi.mocked(listNotebookOptions).mockResolvedValue(notebookOptionsFixture({
       context,
       options: [selected],
       trace_id: "trace_1",
@@ -691,7 +706,7 @@ describe("NotebookRouteView", () => {
 
     render(
       <MemoryRouter initialEntries={["/p/project/graph?view=notebook"]}>
-        <NotebookRouteView projectRoot="/tmp/project" activeRunId="run_head" />
+        <ComparePlansView projectRoot="/tmp/project" activeRunId="run_head" />
       </MemoryRouter>,
     );
 
@@ -710,7 +725,7 @@ describe("NotebookRouteView", () => {
     const proposed = readCanonicalFixture("notebook_option_revision_v11");
     proposed.lifecycle_status = "proposed";
     const selected = { ...proposed, lifecycle_status: "selected" as const };
-    vi.mocked(proposeNotebookOptions).mockResolvedValue(notebookOptionsFixture({
+    vi.mocked(listNotebookOptions).mockResolvedValue(notebookOptionsFixture({
       context,
       options: [proposed],
       trace_id: "trace_1",
@@ -719,7 +734,7 @@ describe("NotebookRouteView", () => {
 
     render(
       <MemoryRouter initialEntries={["/p/project/graph?view=notebook"]}>
-        <NotebookRouteView projectRoot="/tmp/project" activeRunId="run_head" />
+        <ComparePlansView projectRoot="/tmp/project" activeRunId="run_head" />
       </MemoryRouter>,
     );
 
@@ -741,7 +756,7 @@ describe("NotebookRouteView", () => {
   it("cancels Draft confirmation without silently deferring the selected option", async () => {
     const selected = readCanonicalFixture("notebook_option_revision_v11");
     selected.lifecycle_status = "selected";
-    vi.mocked(proposeNotebookOptions).mockResolvedValue(notebookOptionsFixture({
+    vi.mocked(listNotebookOptions).mockResolvedValue(notebookOptionsFixture({
       context,
       options: [selected],
       trace_id: "trace_1",
@@ -749,7 +764,7 @@ describe("NotebookRouteView", () => {
 
     render(
       <MemoryRouter initialEntries={["/p/project/graph?view=notebook"]}>
-        <NotebookRouteView projectRoot="/tmp/project" activeRunId="run_head" />
+        <ComparePlansView projectRoot="/tmp/project" activeRunId="run_head" />
       </MemoryRouter>,
     );
 
@@ -783,7 +798,7 @@ describe("NotebookRouteView", () => {
         initialEntries={["/p/project/graph?view=notebook&notebook=nb_1"]}
       >
         <LocationProbe />
-        <NotebookRouteView
+        <ComparePlansView
           projectRoot="/tmp/project"
           onMaterializedDraft={onMaterializedDraft}
         />
@@ -882,7 +897,7 @@ describe("NotebookRouteView", () => {
         }}
       >
         <MemoryRouter initialEntries={["/p/project/graph?view=notebook&notebook=nb_1"]}>
-          <NotebookRouteView projectRoot="/tmp/project" />
+          <ComparePlansView projectRoot="/tmp/project" />
         </MemoryRouter>
       </ForestContext.Provider>,
     );
@@ -925,7 +940,7 @@ describe("NotebookRouteView", () => {
     const replan = vi.fn();
     render(
       <MemoryRouter initialEntries={["/p/project/graph?view=notebook&notebook=nb_1"]}>
-        <NotebookRouteView projectRoot="/tmp/project" onReplan={replan} />
+        <ComparePlansView projectRoot="/tmp/project" onReplan={replan} />
       </MemoryRouter>,
     );
 
@@ -956,7 +971,7 @@ describe("NotebookRouteView", () => {
   it("replans persisted options only after an explicit user action", async () => {
     const proposed = readCanonicalFixture("notebook_option_revision_v11");
     vi.mocked(proposeNotebookOptions).mockClear();
-    vi.mocked(proposeNotebookOptions).mockResolvedValue(notebookOptionsFixture({
+    vi.mocked(listNotebookOptions).mockResolvedValue(notebookOptionsFixture({
       context,
       options: [proposed],
       trace_id: "trace_1",
@@ -964,16 +979,16 @@ describe("NotebookRouteView", () => {
 
     render(
       <MemoryRouter initialEntries={["/p/project/graph?view=notebook"]}>
-        <NotebookRouteView projectRoot="/tmp/project" activeRunId="run_head" />
+        <ComparePlansView projectRoot="/tmp/project" activeRunId="run_head" />
       </MemoryRouter>,
     );
 
     await waitFor(() => expect(screen.getByTestId("notebook-option-list")).toBeInTheDocument());
-    expect(proposeNotebookOptions).toHaveBeenCalledTimes(1);
+    expect(proposeNotebookOptions).toHaveBeenCalledTimes(0);
 
     fireEvent.click(screen.getByTestId("notebook-submit-intent"));
 
-    await waitFor(() => expect(proposeNotebookOptions).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(proposeNotebookOptions).toHaveBeenCalledTimes(1));
   });
 
   it("cancels replanning, preserves current options, and ignores a late response", async () => {
@@ -997,7 +1012,7 @@ describe("NotebookRouteView", () => {
 
     render(
       <MemoryRouter initialEntries={["/p/project/graph?view=notebook&notebook=nb_1"]}>
-        <NotebookRouteView projectRoot="/tmp/project" />
+        <ComparePlansView projectRoot="/tmp/project" />
       </MemoryRouter>,
     );
 
@@ -1050,7 +1065,7 @@ describe("NotebookRouteView", () => {
 
     render(
       <MemoryRouter initialEntries={["/p/project/graph?view=notebook&notebook=nb_1"]}>
-        <NotebookRouteView projectRoot="/tmp/project" />
+        <ComparePlansView projectRoot="/tmp/project" />
       </MemoryRouter>,
     );
 
@@ -1089,7 +1104,7 @@ describe("NotebookRouteView", () => {
 
     render(
       <MemoryRouter initialEntries={["/p/project/graph?view=notebook&notebook=nb_1"]}>
-        <NotebookRouteView projectRoot="/tmp/project" />
+        <ComparePlansView projectRoot="/tmp/project" />
       </MemoryRouter>,
     );
 
@@ -1127,8 +1142,7 @@ describe("NotebookRouteView", () => {
     });
     const idle = { ...focused, user_focus: {} };
     vi.mocked(getNotebook)
-      .mockResolvedValueOnce(focused)
-      .mockResolvedValue(idle);
+      .mockResolvedValue(focused);
     vi.mocked(updateNotebookFocus).mockResolvedValue(idle);
     vi.mocked(proposeNotebookOptions).mockRejectedValue(
       Object.assign(new Error("LLMUpstreamError"), {
@@ -1138,12 +1152,14 @@ describe("NotebookRouteView", () => {
 
     render(
       <MemoryRouter initialEntries={["/p/project/graph?view=notebook&notebook=nb_1"]}>
-        <NotebookRouteView projectRoot="/tmp/project" />
+        <ComparePlansView projectRoot="/tmp/project" />
       </MemoryRouter>,
     );
 
+    await screen.findByTestId("notebook-empty");
+    fireEvent.click(screen.getByTestId("notebook-propose-options"));
     await waitFor(() =>
-      expect(screen.getByTestId("notebook-error")).toHaveTextContent(
+      expect(screen.getByTestId("notebook-planning-error")).toHaveTextContent(
         "NOTEBOOK_PLANNING_UNAVAILABLE",
       ),
     );
@@ -1152,6 +1168,7 @@ describe("NotebookRouteView", () => {
     ).toBeVisible();
     expect(screen.getByRole("button", { name: "Retry planning" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Exit planning" })).toBeVisible();
+    vi.mocked(getNotebook).mockResolvedValue(idle);
     fireEvent.click(screen.getByRole("button", { name: "Exit planning" }));
 
     await waitFor(() =>
@@ -1184,7 +1201,7 @@ describe("NotebookRouteView", () => {
 
     render(
       <MemoryRouter initialEntries={["/p/project/graph?view=notebook&notebook=nb_1"]}>
-        <NotebookRouteView projectRoot="/tmp/project" />
+        <ComparePlansView projectRoot="/tmp/project" />
       </MemoryRouter>,
     );
 
@@ -1225,7 +1242,7 @@ describe("NotebookRouteView", () => {
 
     render(
       <MemoryRouter initialEntries={["/p/project/graph?view=notebook&notebook=nb_1"]}>
-        <NotebookRouteView projectRoot="/tmp/project" />
+        <ComparePlansView projectRoot="/tmp/project" />
       </MemoryRouter>,
     );
 
@@ -1280,7 +1297,7 @@ describe("NotebookRouteView", () => {
 
     render(
       <MemoryRouter initialEntries={["/p/project/graph?view=notebook&notebook=nb_1"]}>
-        <NotebookRouteView projectRoot="/tmp/project" />
+        <ComparePlansView projectRoot="/tmp/project" />
       </MemoryRouter>,
     );
 
@@ -1333,7 +1350,7 @@ describe("NotebookRouteView", () => {
 
     render(
       <MemoryRouter initialEntries={["/p/project/graph?view=notebook&notebook=nb_1"]}>
-        <NotebookRouteView projectRoot="/tmp/project" />
+        <ComparePlansView projectRoot="/tmp/project" />
       </MemoryRouter>,
     );
 
@@ -1369,7 +1386,7 @@ describe("NotebookRouteView", () => {
 
     render(
       <MemoryRouter initialEntries={["/p/project/graph?view=notebook&notebook=nb_1"]}>
-        <NotebookRouteView projectRoot="/tmp/project" />
+        <ComparePlansView projectRoot="/tmp/project" />
       </MemoryRouter>,
     );
 
@@ -1385,7 +1402,7 @@ describe("NotebookRouteView", () => {
   it("turns selected narrative text into an editable next-question composer", async () => {
     render(
       <MemoryRouter initialEntries={["/p/project/graph?view=notebook"]}>
-        <NotebookRouteView projectRoot="/tmp/project" activeRunId="run_head" />
+        <ComparePlansView projectRoot="/tmp/project" activeRunId="run_head" />
       </MemoryRouter>,
     );
 
@@ -1412,7 +1429,7 @@ describe("NotebookRouteView", () => {
         <WorkbenchStateProvider runId="run_1">
           <AgentSurfaceContext.Provider value={agent}>
             <PanelProbe />
-        <NotebookRouteView projectRoot="/tmp/project" activeRunId="run_head" />
+        <ComparePlansView projectRoot="/tmp/project" activeRunId="run_head" />
           </AgentSurfaceContext.Provider>
         </WorkbenchStateProvider>
       </MemoryRouter>,

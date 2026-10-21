@@ -1,8 +1,7 @@
-// v1.9.0 — the workbench in the new workspace shell. The classic shell keeps
-// owning tab, panel, focus and float state; this component only places the
-// pieces it already builds (stage tabs, docked node or review panel, floating
-// overlays) into the new regions, so both shells share one source of state
-// while the new one is behind its switch (design spec §8.8).
+import { PanelHost, type PanelHostActiveKind } from "../workbench/PanelHost";
+// The workspace composes the shared execution state into map, documents,
+// Agent and history regions. Manual actions and Agent proposals keep the same
+// backend capability, approval and operation-record owners.
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
@@ -43,10 +42,11 @@ import { WorkspaceCommandsContext, type WorkspaceCommands } from "./workspaceCom
 export interface WorkbenchWorkspaceProps {
   runId: string;
   projectRoot: string;
-  /** Open-item tabs for the Analysis stage (the classic right-panel tabs). */
+  /** Open-item tabs for the Analysis stage (the shared detail tabs). */
   stageTabs: ReactNode;
   /** The active docked item: node details or report review; null when none. */
   stagePanel: ReactNode | null;
+  stagePanelKind: PanelHostActiveKind;
   reportFocusRequest: number;
   newAnalysis?: { label: string; open: () => void };
   onOpenSettings: () => void;
@@ -54,8 +54,7 @@ export interface WorkbenchWorkspaceProps {
   overlays: ReactNode;
 }
 
-// Ask AI is the Agent column in the workspace; the analysis-loop status is an
-// internal record (design spec §8.7). Both stay in the classic shell.
+// Ask AI lives in the Agent column; analysis-loop status is an internal record.
 const STAGE_HIDDEN_SECTIONS: ReadonlySet<string> = new Set(["askAi", "analysisLoop"]);
 
 function TopbarActions() {
@@ -88,6 +87,7 @@ export function WorkbenchWorkspace({
   projectRoot,
   stageTabs,
   stagePanel,
+  stagePanelKind,
   reportFocusRequest,
   newAnalysis,
   onOpenSettings,
@@ -247,7 +247,7 @@ export function WorkbenchWorkspace({
   ];
   const map = (presentation: MapPresentation) => (
     <>
-      <DeferredMap visible={presentation === "graph" && model.nodes.length > 0}>
+      <DeferredMap visible={presentation === "graph" && (model.nodes.length > 0 || model.legacy)}>
         <GraphAutoFitContext.Provider value={true}>
           <GraphView />
         </GraphAutoFitContext.Provider>
@@ -277,7 +277,10 @@ export function WorkbenchWorkspace({
               <StageHost tabs={stageTabs} panel={stagePanel} onFold={() => setStageFolded(true)} />
             </DetailSlotsContext.Provider>
           ) : (
-            main
+            <div className="ws-document-inspector">
+              <div className="ws-document-inspector__main">{main}</div>
+              <PanelHost projectRoot={projectRoot} activeKind={stagePanelKind} tabs={stageTabs} nodePanel={stagePanelKind === "node" ? stagePanel : null} reportPanel={stagePanelKind === "report-review" ? stagePanel : null} collapseLabel={stagePanelKind === "report-review" ? "report review" : "node panel"} />
+            </div>
           )
         }
         agent={<AgentPanel runId={runId} projectRoot={projectRoot} composer={<AgentColumnComposer />} compactHeader />}

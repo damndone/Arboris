@@ -1,6 +1,10 @@
 // frontend/src/workbench/WorkbenchRouteContainer.perRun.test.tsx
 // The per-run entry (runDetail ?tab=lineage) on the classic graph shell.
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { ThemeProvider } from "../theme";
+import type { ReactNode } from "react";
+import { fireEvent, render as renderRaw, screen, waitFor } from "@testing-library/react";
+const render = (ui: ReactNode) => renderRaw(<ThemeProvider>{ui}</ThemeProvider>);
+
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WorkbenchRouteContainer } from "./WorkbenchRouteContainer";
@@ -27,7 +31,8 @@ beforeEach(() => {
   // Explicitly exercise the retained classic graph shell.
   localStorage.setItem("workbench:workspace", "classic");
   fetchMock = vi.fn<typeof fetch>();
-  vi.stubGlobal("fetch", fetchMock);
+  vi.stubGlobal("fetch", (...args: Parameters<typeof fetch>) => String(args[0]).includes("/analysis-disclosure")
+    ? Promise.resolve(jsonResponse({ entries: [], counts: {} })) : fetchMock(...args));
 });
 
 afterEach(() => {

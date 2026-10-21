@@ -137,27 +137,6 @@ button:disabled {
   outline-offset: 2px;
 }
 
-.bottom-panel {
-  background: var(--bg-canvas);
-}
-
-.bottom-panel__tabs {
-  border-bottom: 1px solid var(--separator);
-  box-sizing: border-box;
-  overflow: hidden;
-}
-
-.bottom-panel__tab {
-  align-self: stretch;
-  height: 31px;
-  min-height: 0;
-}
-
-.bottom-panel__collapse {
-  height: 31px;
-  min-height: 0;
-}
-
 /* V1.5.1 T6 — segmented theme toggle. Token-only colours so it adapts
  * automatically when the user flips between dark and light. */
 .theme-toggle {

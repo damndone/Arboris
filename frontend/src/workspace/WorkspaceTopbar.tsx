@@ -16,7 +16,7 @@ export const WORKSPACE_VIEWS: ReadonlyArray<{ id: ViewMode; label: string }> = [
   { id: "graph", label: "Analysis" },
   { id: "table", label: "Tables" },
   { id: "report", label: "Report" },
-  { id: "notebook", label: "Plans" },
+  { id: "plans", label: "Compare" },
 ];
 
 export interface WorkspaceTopbarProps {
