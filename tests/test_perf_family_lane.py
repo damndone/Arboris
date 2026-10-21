@@ -99,8 +99,9 @@ def test_trace_memory_noise_does_not_claim_native_rss_is_stable(lane):
 
 @pytest.mark.parametrize('candidate_seconds,expected_exit,baseline_seconds', [(10.1, 0, 10.), (10000., 1, 10.), (14., 1, 14.)])
 @pytest.mark.parametrize('traced', [False, True])
+@pytest.mark.parametrize('rss_jump', [False, True])
 def test_trace_lane_journals_then_deletes_each_run_and_gates_relative_time(lane, tmp_path, monkeypatch,
-                                                                       candidate_seconds, expected_exit, baseline_seconds, traced):
+                                                                       candidate_seconds, expected_exit, baseline_seconds, traced, rss_jump):
     import shutil
     import subprocess
     # Protocol unit test: mock the machine resource boundary along with the
@@ -139,7 +140,8 @@ def test_trace_lane_journals_then_deletes_each_run_and_gates_relative_time(lane,
         run = destination/'benchmark/runs/r1'
         (run/'model_results').mkdir(parents=True)
         (run/'model_results/panel_ols_1.json').write_text('{"coefficients":{"x":{"estimate":1.0,"std_error":0.5}}}')
-        metrics = dict(seconds=candidate_seconds if candidate else baseline_seconds, rss_bytes=100, ru_maxrss=100,
+        rss = 1000 if rss_jump and len(calls) == 6 else 100
+        metrics = dict(seconds=candidate_seconds if candidate else baseline_seconds, rss_bytes=rss, ru_maxrss=rss,
                        run_bytes=1, tracemalloc_peak_bytes=10, input_sha256=manifest['sha256'],
                        run_root=str(run), numeric_signature={'coefficient': '0x1p0'})
         (destination / 'metrics.json').write_text(json.dumps(metrics))
@@ -151,13 +153,16 @@ def test_trace_lane_journals_then_deletes_each_run_and_gates_relative_time(lane,
     if traced:
         command.append('--trace-memory')
     # Traced time is diagnostic; only the uninstrumented lane certifies time.
-    assert lane.ab_main(command) == (0 if traced else expected_exit)
+    assert lane.ab_main(command) == (0 if traced else (1 if rss_jump else expected_exit))
     assert calls == ['A']*5+list('AB'*5)
     assert not (out/'active').exists()
     report = json.loads((out/'ab-results.json').read_text())
     assert report['default_product_path'] is True
     assert report['time_acceptance_eligible'] is not traced
-    assert set(report['cases']['panel']['budgets']) == ({'rss_bytes', 'tracemalloc_peak_bytes', 'run_bytes'} if traced else {'seconds', 'rss_bytes', 'run_bytes'})
+    keys = {'tracemalloc_peak_bytes', 'run_bytes'} if traced else {'seconds', 'run_bytes'}
+    if not rss_jump:
+        keys.add('rss_bytes')
+    assert set(report['cases']['panel']['budgets']) == keys
 
 
 def test_traced_stage_memory_difference_is_reported_separately_from_rss(lane):

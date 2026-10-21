@@ -517,6 +517,10 @@ def ab_main(argv):
         for label in report['order']:
             records[label[0]].append(run(label))
             save()
+        case_report['all_baseline_noise'] = baseline_noise(calibration+records['A'],metrics=noise_keys)
+        case_report['calibration_native_rss_noise'] = case_report['native_rss_noise']
+        case_report['all_baseline_native_rss_noise'] = baseline_noise(calibration+records['A'],metrics=('rss_bytes',))['rss_bytes']
+        case_report['native_rss_noise'] = max(case_report['calibration_native_rss_noise'],case_report['all_baseline_native_rss_noise'])
         keys = RESOURCE_METRICS+(('tracemalloc_peak_bytes',) if args.trace_memory else ())
         medians = {lane:{key:statistics.median(r[key] for r in runs) for key in keys} for lane,runs in records.items()}
         accepted = noise_keys+(('rss_bytes',) if case_report['native_rss_noise'] < .05 else ())
@@ -525,6 +529,8 @@ def ab_main(argv):
         if absolute_cap is not None:
             budgets['seconds'] = min(budgets['seconds'],absolute_cap)
         misses = [key for key,limit in budgets.items() if medians['B'][key]>limit]
+        if not noise_accepted(case_report['all_baseline_noise']):
+            misses.append('measurement_noise')
         if not args.trace_memory and case_report['native_rss_noise'] >= .05:
             misses.append('native_rss_noise_requires_tracemalloc')
         signatures = [r['numeric_signature'] for runs in records.values() for r in runs]
