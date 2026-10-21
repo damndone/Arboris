@@ -98,3 +98,31 @@ def test_auto_mode_runs_an_approved_plan_step_and_marks_it_done(tmp_path: Path) 
     assert receipt["executed"] is True and seen == ["approved_plan"]
     assert store.current("chain-session").steps[0].status == "done"
     assert store.current("chain-session").status == "completed"
+
+
+def test_a_status_update_without_question_or_criteria_keeps_them_and_the_approval(tmp_path: Path) -> None:
+    """Paid fix2 round (panel, Auto): an update that left out criteria read as clearing them,
+    and every progress update reopened the approved plan."""
+    fixture = _Fixture(tmp_path)
+    orchestrator = fixture.orchestrator
+    orchestrator.execution_mode = "auto"
+    registry = orchestrator.tool_registry("chain-a")
+    step = {"step_id": "recode", "title": "Recode wage", "operation_ids": ["data.recode"]}
+
+    def update(arguments):
+        return asyncio.run(registry.execute({"tool_call_id": "p", "tool_id": "update_plan", "arguments": arguments},
+                                            session_id="chain-session"))
+
+    update({"question": "Does group predict wage?", "criteria": ["report the recoded share"], "steps": [step]})
+    store = orchestrator.plan_store
+    store.save("chain-session", plans.approve(store.current("chain-session")))
+
+    progress = update({"steps": [{**step, "status": "running"}]})
+    plan = store.current("chain-session")
+    assert progress.ok and plan.status == "approved"
+    assert plan.question == "Does group predict wage?" and plan.criteria == ("report the recoded share",)
+    assert "approval_reopened" not in progress.output
+
+    loosened = update({"criteria": ["report any share"], "steps": [step]})
+    assert store.current("chain-session").status == "needs_approval"
+    assert "send update_plan without them" in loosened.output["approval_reopened"]

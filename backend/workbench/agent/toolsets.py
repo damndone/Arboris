@@ -11,7 +11,9 @@ from .completion import CONTRACT_SCHEMA, EVIDENCE_SCHEMA, INSPECT_SCHEMA
 
 _UPDATE_PLAN_SCHEMA: dict[str, Any] = {
     "type": "object",
-    "required": ["question", "steps"],
+    # The question is required for a first plan (the server refuses a plan
+    # without one); later updates may leave question and criteria out to keep them.
+    "required": ["steps"],
     "properties": {
         "question": {"type": "string"},
         "completion": CONTRACT_SCHEMA,

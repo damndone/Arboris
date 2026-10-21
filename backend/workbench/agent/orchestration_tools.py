@@ -428,10 +428,17 @@ class OrchestrationTools:
                         raise plan_module.PlanError("completion source is unavailable or changed; inspect_analysis_completion with source first")
                 steps = plan_module.parse_steps(arguments.get("steps"), self.known_plan_operations())
                 def revise(previous):
+                    # A status update that leaves out the question or criteria keeps them:
+                    # reading the omission as "now empty" made each such update a change
+                    # of criteria needing approval again (paid fix2 round, panel, Auto).
+                    question = (str(arguments["question"]).strip()[:1000] if "question" in arguments
+                                else previous.question if previous is not None else "")
+                    criteria = ([str(c)[:300] for c in arguments.get("criteria") or ()][:12] if "criteria" in arguments
+                                else list(previous.criteria) if previous is not None else [])
                     plan = plan_module.merge(
                         previous,
-                        question=str(arguments.get("question") or "").strip()[:1000],
-                        criteria=[str(c)[:300] for c in arguments.get("criteria") or ()][:12],
+                        question=question,
+                        criteria=criteria,
                         steps=steps,
                         budget={k: int(v) for k, v in (arguments.get("budget") or {}).items()
                                 if k in {"steps", "wall_s", "inferential"} and str(v).isdigit()},
@@ -457,9 +464,14 @@ class OrchestrationTools:
                 return {"saved": False, "error": str(exc),
                         "guidance": "Fix the plan as the error says and call update_plan again."}
             needs_person = self.execution_mode == "auto" and plan.status in {"draft", "needs_approval"}
+            reopened = plan.status == "needs_approval" and plan.approved_version is not None
             return {
                 "saved": True,
                 "plan": plan.to_dict(),
+                **({"approval_reopened": (
+                    "The approved plan's question, criteria, budget or allowed kinds changed, so it needs the "
+                    "person's approval again, and the change is recorded. Question and criteria are fixed "
+                    "once approved: to record progress, send update_plan without them.")} if reopened else {}),
                 **({"requires_confirmation": True, "awaiting": "plan_approval"} if needs_person else {}),
                 "guidance": (
                     "The plan is shown to the person, who approves it before anything in it runs. End your turn "
