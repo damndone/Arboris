@@ -896,15 +896,18 @@ def _record_planning_terminal_error(
 def _planning_agent(root: Path, service: NotebookService, notebook_id: str,
                     context: NotebookPlanningContextV1, trace: TraceWriter) -> NotebookPlanningAgent:
     from ..agent.planning.factory import build_planner
-    config = load_llm_config()
+    # The same factory as Agent turns: a headless or offline runtime scope
+    # (replay, fake model) governs Notebook planning too, with its own config.
+    from ..agent.runtime_adapter import active_runtime, make_adapter, resolve_config
+    config = resolve_config(load_llm_config)
     if not config.is_configured():
         raise NotebookPlanningUnavailable(config.configuration_error_message())
     notebook_config = (
         config
-        if config.timeout_s >= NOTEBOOK_PROVIDER_TIMEOUT_S
+        if active_runtime() or config.timeout_s >= NOTEBOOK_PROVIDER_TIMEOUT_S
         else replace(config, timeout_s=NOTEBOOK_PROVIDER_TIMEOUT_S)
     )
-    adapter = CancellableOpenAICompatibleModelAdapter(notebook_config)
+    adapter = make_adapter(notebook_config, default_factory=CancellableOpenAICompatibleModelAdapter)
 
     async def run_planning_phase(phase):
         # The endpoint owns the project identity. The planning context is a

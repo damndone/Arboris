@@ -226,3 +226,26 @@ def test_resume_keeps_checkpoint_context_and_passes_safe_runtime_identity(tmp_pa
     identity=seen[0]['model_config_identity']
     assert set(identity)=={'base_url','model','provider_id','provider_name','timeout_s','context_window_tokens','supports_1m','supports_vision'}
     assert config.api_key not in json.dumps(identity) and 'source' not in identity
+
+
+def test_notebook_planning_uses_the_shared_runtime_factory(tmp_path, monkeypatch):
+    """A runtime scope (replay, fake model) governs Notebook planning as it does Agent turns."""
+    from workbench.agent.runtime_adapter import headless_runtime_scope
+    from workbench.http import notebook_routes
+    from workbench.llm.config import LLMConfig
+
+    made = []
+
+    class Fake:
+        def __init__(self, config):
+            made.append(config)
+
+    config = LLMConfig(base_url="https://api.example.test", api_key="offline", model="fake",
+                       context_window_tokens=64_000, provider_id="fake", provider_name="Fake", source="local")
+    monkeypatch.setattr(notebook_routes, "load_llm_config", lambda: config)
+    with headless_runtime_scope(adapter_factory=Fake, config=config):
+        try:
+            notebook_routes._planning_agent(tmp_path, None, "nb", None, None)
+        except Exception:
+            pass  # only the adapter construction matters here
+    assert made, "Notebook planning built its own provider adapter outside the runtime scope"

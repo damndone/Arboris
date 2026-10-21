@@ -88,6 +88,11 @@ def headless_runtime_scope(*, adapter_factory: Callable[[LLMConfig], ModelAdapte
         _active.reset(token)
 
 
+def active_runtime() -> bool:
+    """Whether a headless or offline runtime scope governs this context."""
+    return _active.get() is not None
+
+
 def resolve_config(default_loader: Callable[[], LLMConfig]) -> LLMConfig:
     runtime = _active.get()
     if runtime is None:

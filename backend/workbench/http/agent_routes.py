@@ -56,7 +56,6 @@ from ..agent.plan_control import PlanControl, PlanControlError
 from .agent_plan_requests import AgentPlanApproveRequest, AgentPlanPatchRequest
 from .responses.agent import AgentPlanResponse, AgentPlanMutationResponse, AgentTurnStateResponse
 from ..agent.events import AgentEventStream
-from ..agent.model import OpenAICompatibleModelAdapter
 from ..agent.runtime_adapter import (
     make_adapter as _runtime_model_adapter,
     resolve_config as _runtime_llm_config,
