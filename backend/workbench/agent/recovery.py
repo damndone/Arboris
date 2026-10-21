@@ -32,7 +32,14 @@ def prepare_completion_recovery(core, payload, entry):
         explicit = re.fullmatch(r'\s*(?:请)?(?:继续|完成)(?:(?:原|全部|完整)?(?:分析|研究))?(?:和报告)?[。！!]?\s*'
                                 r'|\s*(?:please\s+)?(?:continue|complete|finish)(?:\s+the)?\s+(?:analysis|research)[.!]?\s*',
                                 question, re.I)
-        if original and sha256_canonical(question) != original and not explicit:
+        # A request to finish this analysis, in any wording (the harness's
+        # "请继续，把这项分析做完……" failed the exact match above, so three
+        # nudges in the paid fix2 round ended with the bare partial note).
+        # A narrowed request ("继续，但只告诉我系数") does not match.
+        finish = re.search(r'(?:继续|做完|完成|接着做).{0,12}(?:分析|研究)|(?:分析|研究).{0,8}(?:做完|完成)'
+                           r'|\b(?:continue|finish|complete)\b.{0,24}\b(?:analysis|analyses|research)\b',
+                           question, re.I)
+        if original and sha256_canonical(question) != original and not explicit and not finish:
             return False
     previous = [e for e in core.repository.get_branch(core.session_id)
                 if e.entry_type == 'custom_message' and e.payload.get('message_type') == 'completion_recovery'
@@ -52,7 +59,8 @@ def prepare_completion_recovery(core, payload, entry):
         'evidence, composing one through the existing operation path if needed. Stop for approval, '
         'a scientific/method limitation, or an unresolved selection that needs the user; state the '
         'precise remaining gap instead of claiming completion.\nMissing: '
-        + json.dumps(result.get('missing', [])[:32], ensure_ascii=False))[:6000]
+        + json.dumps(result.get('missing', [])[:32], ensure_ascii=False)
+        + _next_step(result))[:6000]
     core.repository.append_once(core.session_id, 'custom_message', {
         'message_type': 'completion_recovery', 'audience': 'model', 'model_role': 'user',
         'name': 'workbench_completion_recovery', 'content': content,
@@ -60,6 +68,18 @@ def prepare_completion_recovery(core, payload, entry):
         'attempt': len(previous)+1, 'limit': ATTEMPT_LIMIT,
     }, key=core._active_command_id, stage='completion_recovery:' + entry.entry_id)
     return True
+
+
+def _next_step(result):
+    """The gate's concrete next action, so the repair is a proposal, not a guess."""
+    lines = []
+    if result.get('next_step'):
+        lines.append('Next step: ' + str(result['next_step']))
+    if result.get('compose_report'):
+        lines.append('compose_report: ' + json.dumps(result['compose_report'], ensure_ascii=False))
+    if result.get('primary_candidates'):
+        lines.append('primary_candidates: ' + json.dumps(result['primary_candidates'], ensure_ascii=False))
+    return ('\n' + '\n'.join(lines)) if lines else ''
 
 
 async def continue_completion_recovery(core, payload, entry, *, request_id, context_fingerprint, tool_context):
