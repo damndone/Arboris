@@ -43,3 +43,12 @@ model, containment, browser, performance, or release acceptance evidence.
   measurements and median comparisons; sampling noise must be below 5%.
   Retain failed measurements. Numerical coefficients, standard errors and test
   statistics must remain bit-identical; do not widen reference tolerances.
+- Check free disk space before every measurement; below 10 GB, report and do
+  not start. Keep one fixed CSV per family under `local/perf-inputs/`, with
+  its registered SHA256; reuse it without physical per-run copies.
+- Only one active benchmark run directory may exist. Before removing it,
+  durably journal commit, case, elapsed time, ru_maxrss, optional same-run
+  tracemalloc peak, directory bytes, every file's path/size/SHA256 and principal
+  numerical results; verify the journal and file count. Keep one verified
+  tar.gz representative per family/release, logs and scripts. This cleanup
+  authorization applies to benchmark products only, never other data/worktrees.

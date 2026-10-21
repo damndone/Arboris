@@ -45,7 +45,8 @@ def test_worker_only_runs_workflow_on_registered_input(lane, tmp_path, monkeypat
     assert lane.family_run('panel', out, manifest=manifest) == 0
     metrics = json.loads((out / 'metrics.json').read_text())
     assert metrics['input_sha256'] == json.loads(manifest.read_text())['sha256']
-    assert metrics['measurement_scope'] == 'fresh_worker_without_input_generation'
+    assert metrics['measurement_scope'] == 'fresh_worker_shared_input_tracemalloc_enabled'
+    assert metrics['tracemalloc_peak_bytes'] > 0
     assert metrics['run_bytes'] > 0
 
 
@@ -61,8 +62,10 @@ def test_noise_uses_all_baseline_repeats_and_all_resource_metrics(lane):
 
 def test_stage_samples_current_rss_not_cumulative_high_water(lane):
     rows = [dict(stage='source', seconds=1., rss_before=100, rss_after=80,
+                 traced_before=10, traced_after=15,
                  high_water_before=200, high_water_after=200)]
     assert lane.stage_summary(rows)['source']['rss_delta_bytes'] == -20
+    assert lane.stage_summary(rows)['source']['traced_delta_bytes'] == 5
 
 
 def test_rss_sampler_reports_current_resident_bytes(lane):
@@ -94,7 +97,9 @@ def test_trace_memory_noise_does_not_claim_native_rss_is_stable(lane):
     assert lane.noise_accepted(lane.baseline_noise(runs, metrics=('tracemalloc_peak_bytes', 'run_bytes')))
 
 
-def test_trace_lane_runs_five_pairs_without_certifying_its_instrumented_time(lane, tmp_path, monkeypatch):
+@pytest.mark.parametrize('candidate_seconds,expected_exit', [(10.1, 0), (10000., 1)])
+def test_trace_lane_journals_then_deletes_each_run_and_gates_relative_time(lane, tmp_path, monkeypatch,
+                                                                       candidate_seconds, expected_exit):
     import shutil
     import subprocess
     # Protocol unit test: mock the machine resource boundary along with the
@@ -117,18 +122,51 @@ def test_trace_lane_runs_five_pairs_without_certifying_its_instrumented_time(lan
         destination = Path(command[command.index('--out')+1])
         destination.mkdir(parents=True)
         manifest = json.loads(Path(command[command.index('--manifest')+1]).read_text())
-        candidate = destination.name.startswith('B')
-        calls.append(destination.name)
-        metrics = dict(seconds=10000. if candidate else 10., rss_bytes=100000 if candidate else 100,
+        assert destination.name == 'active'
+        # The previous worker must have been recorded and removed before this
+        # sole active tree is created again.
+        previous = lane.finalize_active.__globals__['read_records'](destination.parent/'measurements.jsonl')
+        assert len(previous) == len(calls)
+        candidate = kwargs['cwd'] != baseline
+        calls.append('B' if candidate else 'A')
+        run = destination/'benchmark/runs/r1'
+        (run/'model_results').mkdir(parents=True)
+        (run/'model_results/panel_ols_1.json').write_text('{"coefficients":{"x":{"estimate":1.0,"std_error":0.5}}}')
+        metrics = dict(seconds=candidate_seconds if candidate else 10., rss_bytes=100, ru_maxrss=100,
                        run_bytes=1, tracemalloc_peak_bytes=10, input_sha256=manifest['sha256'],
-                       numeric_signature={'coefficient': '0x1p0'})
+                       run_root=str(run), numeric_signature={'coefficient': '0x1p0'})
         (destination / 'metrics.json').write_text(json.dumps(metrics))
         return SimpleNamespace(returncode=0)
     monkeypatch.setattr(subprocess, 'run', worker)
     out = tmp_path / 'measured'
     assert lane.ab_main(['--ab', '--baseline-repo', str(baseline), '--out', str(out),
-                         '--cases', 'panel', '--trace-memory']) == 0
-    assert calls == [f'A0_{i:02}' for i in range(1, 6)]+[f'{s}{i}' for i in range(1, 6) for s in 'AB']
+                         '--cases', 'panel', '--trace-memory']) == expected_exit
+    assert calls == ['A']*5+list('AB'*5)
+    assert not (out/'active').exists()
     report = json.loads((out/'ab-results.json').read_text())
-    assert report['time_acceptance_eligible'] is False
-    assert set(report['cases']['panel']['budgets']) == {'tracemalloc_peak_bytes', 'run_bytes'}
+    assert report['absolute_uninstrumented_caps'] == 'not_certified_by_instrumented_timings'
+    assert set(report['cases']['panel']['budgets']) == {'seconds', 'rss_bytes', 'tracemalloc_peak_bytes', 'run_bytes'}
+
+
+def test_traced_stage_memory_difference_is_reported_separately_from_rss(lane):
+    a = dict(seconds=10., rss_bytes=1000, tracemalloc_peak_bytes=100,
+             stages={'source':dict(seconds=5., rss_delta_bytes=0, traced_delta_bytes=10)})
+    b = dict(seconds=10., rss_bytes=1000, tracemalloc_peak_bytes=100,
+             stages={'source':dict(seconds=5., rss_delta_bytes=0, traced_delta_bytes=20)})
+    difference = lane.compare_stages(a, b)['source']
+    assert difference['traced_increment_delta_bytes'] == 10
+    assert difference['over_one_percent']
+
+
+def test_real_workflow_reuses_registered_input_and_retains_numeric_results(lane, tmp_path, monkeypatch):
+    import shutil
+    monkeypatch.setattr(shutil, 'disk_usage', lambda _: SimpleNamespace(free=10**12))
+    manifest = lane.prepare_family('panel', tmp_path/'input', rows=40)
+    payload = json.loads(manifest.read_text())
+    assert lane.family_run('panel', tmp_path/'active', manifest=manifest) == 0
+    metrics = json.loads((tmp_path/'active/metrics.json').read_text())
+    assert metrics['input_io']['input_hardlinks'] == 2
+    links = [p for p in (tmp_path/'active').rglob('*') if p.is_file()
+             and p.stat().st_ino == Path(payload['source']).stat().st_ino]
+    assert len(links) == 2
+    assert metrics['numeric_signature']['coefficients']['x1']['estimate']['binary64']

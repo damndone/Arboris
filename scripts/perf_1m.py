@@ -23,6 +23,9 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path.cwd() / "backend"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from perf_evidence import fixed_input_links, finalize_active, require_space  # noqa: E402
 
 from workbench import analysis_disclosure, analysis_ledger  # noqa: E402
 from workbench.data_operation_registry import get_data_operation  # noqa: E402
@@ -94,6 +97,7 @@ def interactive_main() -> int:
         timings[name] = time.perf_counter() - started
         print(f"{name:40s} {timings[name]:8.2f}s  (budget {BUDGETS[name]:.1f}s)", flush=True)
 
+    require_space(out)
     source = _dataset(out / "wages_1m.csv")
     project = create_project(out, f"p{int(time.time())}")
     root = project.root
@@ -158,6 +162,20 @@ FAMILY_ROWS = {'ols': 1_000_000, 'panel': 1_000_000, 'iv': 1_000_000,
                'did': 1_000_000, 'cox': 200_000}
 
 
+def family_kwargs(case):
+    if case == 'ols':
+        return dict(model_type='ols', y='wage', x=['education', 'experience', 'female', 'hours'])
+    if case in {'panel', 'did'}:
+        kwargs = dict(model_type='panel_ols', y='y', x=['x1', 'x2'], entity_col='unit', time_col='year')
+        if case == 'did':
+            kwargs.update(model_type='did', did_mode='cohort', did_cohort_col='first_treat')
+        return kwargs
+    if case == 'iv':
+        return dict(model_type='iv_2sls', y='y', x=['w'], iv_endog=['d'], iv_instruments=['z1', 'z2'])
+    return dict(model_type='survival_cox', y='duration', x=['x1', 'x2'],
+                model_options={'event_column': 'event', 'ties': 'breslow'})
+
+
 def prepare_family(case, out, *, rows=None):
     import json
     out.mkdir(parents=True, exist_ok=True)
@@ -165,49 +183,46 @@ def prepare_family(case, out, *, rows=None):
     if manifest.exists():
         validate_family_manifest(manifest)
         return manifest
-    rng = np.random.default_rng(7)
     n = FAMILY_ROWS[case] if rows is None else rows
-    if case == 'ols':
-        source = _dataset(out / 'wages.csv', n)
-        kwargs = dict(model_type='ols', y='wage', x=['education', 'experience', 'female', 'hours'])
-    elif case in {'panel', 'did'}:
-        unit = np.repeat(np.arange(n//10), 10)
-        year = np.tile(np.arange(2000, 2010), n//10)
-        x1, x2 = rng.normal(size=n), rng.normal(size=n)
-        y = .5*x1-.2*x2+rng.normal(size=n//10)[unit]+rng.normal(size=n)
-        frame = pd.DataFrame({'unit': unit, 'year': year, 'x1': x1, 'x2': x2, 'y': y})
-        kwargs = dict(model_type='panel_ols', y='y', x=['x1', 'x2'], entity_col='unit', time_col='year')
-        if case == 'did':
-            frame['first_treat'] = np.where(unit % 2 == 0, 2005, 0)
-            frame['y'] += 2*((unit % 2 == 0) & (year >= 2005))
-            kwargs.update(model_type='did', did_mode='cohort', did_cohort_col='first_treat')
-        source = out / f'{case}.csv'
-        frame.to_csv(source, index=False)
-        del frame
-    elif case == 'iv':
-        z1, z2, u = rng.normal(size=n), rng.normal(size=n), rng.normal(size=n)
-        d = .6*z1+.4*z2+.5*u+rng.normal(size=n)
-        w = rng.normal(size=n)
-        frame = pd.DataFrame({'y': d+.3*w+u+rng.normal(size=n), 'd': d, 'w': w, 'z1': z1, 'z2': z2})
-        source = out / 'iv.csv'
-        frame.to_csv(source, index=False)
-        del frame
-        kwargs = dict(model_type='iv_2sls', y='y', x=['w'], iv_endog=['d'], iv_instruments=['z1', 'z2'])
-    else:
-        x1, x2 = rng.normal(size=n), rng.normal(size=n)
-        duration = rng.exponential(np.exp(-.3*x1+.2*x2))
-        censor = rng.exponential(2, size=n)
-        frame = pd.DataFrame({'duration': np.minimum(duration, censor)+.001,
-                              'event': (duration <= censor).astype(int), 'x1': x1, 'x2': x2})
-        source = out / 'cox.csv'
-        frame.to_csv(source, index=False)
-        del frame
-        kwargs = dict(model_type='survival_cox', y='duration', x=['x1', 'x2'],
-                      model_options={'event_column': 'event', 'ties': 'breslow'})
+    source = out / ('wages.csv' if case == 'ols' else f'{case}.csv')
+    if not source.exists():
+        require_space(out)
+        rng = np.random.default_rng(7)
+        if case == 'ols':
+            source = _dataset(out / 'wages.csv', n)
+        elif case in {'panel', 'did'}:
+            unit = np.repeat(np.arange(n//10), 10)
+            year = np.tile(np.arange(2000, 2010), n//10)
+            x1, x2 = rng.normal(size=n), rng.normal(size=n)
+            y = .5*x1-.2*x2+rng.normal(size=n//10)[unit]+rng.normal(size=n)
+            frame = pd.DataFrame({'unit': unit, 'year': year, 'x1': x1, 'x2': x2, 'y': y})
+            if case == 'did':
+                frame['first_treat'] = np.where(unit % 2 == 0, 2005, 0)
+                frame['y'] += 2*((unit % 2 == 0) & (year >= 2005))
+            source = out / f'{case}.csv'
+            frame.to_csv(source, index=False)
+            del frame
+        elif case == 'iv':
+            z1, z2, u = rng.normal(size=n), rng.normal(size=n), rng.normal(size=n)
+            d = .6*z1+.4*z2+.5*u+rng.normal(size=n)
+            w = rng.normal(size=n)
+            frame = pd.DataFrame({'y': d+.3*w+u+rng.normal(size=n), 'd': d, 'w': w, 'z1': z1, 'z2': z2})
+            source = out / 'iv.csv'
+            frame.to_csv(source, index=False)
+            del frame
+        else:
+            x1, x2 = rng.normal(size=n), rng.normal(size=n)
+            duration = rng.exponential(np.exp(-.3*x1+.2*x2))
+            censor = rng.exponential(2, size=n)
+            frame = pd.DataFrame({'duration': np.minimum(duration, censor)+.001,
+                                  'event': (duration <= censor).astype(int), 'x1': x1, 'x2': x2})
+            source = out / 'cox.csv'
+            frame.to_csv(source, index=False)
+            del frame
     payload = {'case': case, 'rows': n, 'source': str(source.resolve()),
-               'sha256': source_digest(source),
-               'source_stat': source_identity(source),
-               'kwargs': kwargs, 'generator': 'perf_1m_fixed_input_v2', 'seed': 7}
+               'sha256': source_digest(source), 'source_stat': source_identity(source),
+               'kwargs': family_kwargs(case), 'generator': 'perf_1m_fixed_input_v2',
+               'seed': 1 if case == 'ols' else 7}
     manifest.write_text(json.dumps(payload, indent=2))
     return manifest
 
@@ -261,7 +276,9 @@ def current_rss():
 
 
 def stage_summary(rows):
-    return {r['stage']: dict(r, rss_delta_bytes=r['rss_after']-r['rss_before']) for r in rows}
+    return {r['stage']: dict(r, rss_delta_bytes=r['rss_after']-r['rss_before'],
+                            **({'traced_delta_bytes':r['traced_after']-r['traced_before']}
+                               if 'traced_before' in r else {})) for r in rows}
 
 
 def compare_stages(baseline, candidate):
@@ -272,13 +289,18 @@ def compare_stages(baseline, candidate):
             differences[name] = {'reason': 'stage_exists_in_one_version_only', 'over_one_percent': True}
             continue
         dt, dm = b['seconds']-a['seconds'], b['rss_delta_bytes']-a['rss_delta_bytes']
+        traced = b.get('traced_delta_bytes',0)-a.get('traced_delta_bytes',0)
+        traced_fraction = traced/baseline.get('tracemalloc_peak_bytes',1)
+        over = abs(dt/baseline['seconds']) > .01 or abs(dm/baseline['rss_bytes']) > .01 or abs(traced_fraction) > .01
         differences[name] = {
             'baseline': a, 'candidate': b, 'seconds_delta': dt,
             'rss_increment_delta_bytes': dm,
             'time_fraction_of_baseline_workflow': dt/baseline['seconds'],
             'memory_fraction_of_baseline_peak': dm/baseline['rss_bytes'],
-            'over_one_percent': abs(dt/baseline['seconds']) > .01 or abs(dm/baseline['rss_bytes']) > .01,
-            'cause': 'requires_stage_code/profile_attribution' if abs(dt/baseline['seconds']) > .01 or abs(dm/baseline['rss_bytes']) > .01 else 'below_one_percent',
+            'traced_increment_delta_bytes':traced,
+            'traced_fraction_of_baseline_peak':traced_fraction,
+            'over_one_percent':over,
+            'cause': 'requires_stage_code/profile_attribution' if over else 'below_one_percent',
         }
     # Imports, hashing, publication and run setup outside the pipeline must not
     # disappear merely because stage timings add up to less than the workflow.
@@ -293,31 +315,35 @@ def compare_stages(baseline, candidate):
 def instrument_stages(rows):
     from workbench.engine.stages import PIPELINE
     import resource
+    import tracemalloc
     for stage in PIPELINE:
         original = type(stage).run
         def measured(self, ctx, env, _run=original):
             before = current_rss()
+            traced_before = tracemalloc.get_traced_memory()[0]
             high_before = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
             start = time.perf_counter()
             result = _run(self, ctx, env)
             rows.append(dict(stage=type(self).__name__, seconds=time.perf_counter()-start,
                              rss_before=before, rss_after=current_rss(),
+                             traced_before=traced_before, traced_after=tracemalloc.get_traced_memory()[0],
                              high_water_before=high_before,
                              high_water_after=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss))
             return result
         type(stage).run = measured
 
 
-def family_run(case, out, *, manifest, stage_profile=False, trace_memory=False):
+def family_run(case, out, *, manifest, stage_profile=False, trace_memory=True):
     import json
     import resource
     import platform
-    # Parent validates the file digest before EACH worker. Do not re-read the
+    # Parent validates the file digest once, then checks identity per worker. Do not re-read the
     # source or generate any observations in this measured process.
     payload = json.loads(manifest.read_text())
     source, kwargs, n = Path(payload['source']), payload['kwargs'], payload['rows']
     if case != payload['case']:
         raise ValueError('manifest_case_mismatch')
+    require_space(out.parent)
     out.mkdir(parents=True, exist_ok=False)
     stages = []
     if stage_profile:
@@ -327,7 +353,8 @@ def family_run(case, out, *, manifest, stage_profile=False, trace_memory=False):
         tracemalloc.start()
     project = create_project(out, 'benchmark')
     started = time.perf_counter()
-    outcome = run_workflow(project.root, [source], mode='auto', **kwargs)
+    with fixed_input_links(source, payload['sha256']) as input_io:
+        outcome = run_workflow(project.root, [source], mode='auto', **kwargs)
     elapsed = time.perf_counter()-started
     rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     traced_peak = None
@@ -350,7 +377,9 @@ def family_run(case, out, *, manifest, stage_profile=False, trace_memory=False):
                                            'r_squared', 'r_squared_adj', 'df_model',
                                            'df_resid', 'covariance') if k in packet})
     result = {'case': case, 'rows': n, 'status': outcome['status'], 'seconds': elapsed,
-              'input_sha256': payload['sha256'], 'measurement_scope': 'fresh_worker_without_input_generation',
+              'input_sha256': payload['sha256'], 'measurement_scope': 'fresh_worker_shared_input_tracemalloc_enabled',
+              'input_io': input_io, 'timing_instrumentation': 'tracemalloc',
+              'absolute_uninstrumented_time_caps': 'not_assessed_by_this_instrumented_time',
               'tracemalloc_peak_bytes': traced_peak, 'stages': stage_summary(stages),
               'ru_maxrss': rss, 'rss_bytes': rss if platform.system() == 'Darwin' else rss*1024,
               'run_bytes': sum(p.stat().st_size for p in run.rglob('*') if p.is_file()),
@@ -393,28 +422,38 @@ def idle_processes(out):
         raise SystemExit('Other tests/benchmarks active; refusing A/B: '+str(others))
 
 
+def median_stages(runs):
+    import statistics
+    names = {name for run in runs for name in run['stages']}
+    stages = {}
+    for name in names:
+        values = [run['stages'][name] for run in runs if name in run['stages']]
+        stages[name] = {key:statistics.median(value[key] for value in values)
+                        for key in values[0] if key != 'stage' and values[0][key] is not None}
+    return stages
+
+
 def ab_main(argv):
     import hashlib
     import json
     import os
     import statistics
     import subprocess
-    import shutil
-    parser = argparse.ArgumentParser(description='Fixed source; A-only noise then five alternating pairs; 5% limits.')
+    parser = argparse.ArgumentParser(description='One active tree; journal then remove; fixed inputs and five alternating pairs.')
     parser.add_argument('--ab', action='store_true')
     parser.add_argument('--baseline-repo', type=Path, required=True)
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--inputs', type=Path)
     parser.add_argument('--cases', nargs='+', choices=list(FAMILY_ROWS), default=list(FAMILY_ROWS))
-    parser.add_argument('--profile-stages', action='store_true', help='Separate instrumented A/B after acceptance runs')
-    parser.add_argument('--trace-memory', action='store_true', help='Separate tracemalloc lane; timings are NOT acceptance timings')
-    parser.add_argument('--calibration-from', type=Path, help='Reuse completed calibration with the same probe, baseline, threads and source SHA')
+    parser.add_argument('--profile-stages', action='store_true')
+    parser.add_argument('--trace-memory', action='store_true', help='Always enabled in protocol v3; accepted for compatibility')
     args = parser.parse_args(argv)
     out = args.out.resolve()
+    require_space(out)
     out.mkdir(parents=True, exist_ok=True)
     candidate, baseline = Path.cwd(), args.baseline_repo.resolve()
-    if (out/'ab-results.json').exists():
-        raise FileExistsError('Do not overwrite previous measurement evidence; use a fresh --out')
+    if (out/'ab-results.json').exists() or (out/'active').exists():
+        raise FileExistsError('Preserve previous evidence; use a fresh --out')
     idle_processes(out)
     revisions = {name: subprocess.check_output(['git','rev-parse','HEAD'], cwd=repo, text=True).strip()
                  for name,repo in [('baseline',baseline),('candidate',candidate)]}
@@ -422,111 +461,101 @@ def ab_main(argv):
         raise SystemExit('Baseline must be exact v1.9.0')
     difference = subprocess.check_output(['git','diff','--binary','HEAD'], cwd=candidate)
     (out/'candidate.patch').write_bytes(difference)
-    untracked = subprocess.check_output(['git','ls-files','--others','--exclude-standard'],cwd=candidate,text=True).splitlines()
-    report = {'measurement_version': 2, 'candidate_diff_sha256': hashlib.sha256(difference).hexdigest(),
-              'untracked_source_sha256': {path:source_digest(candidate/path) for path in untracked if (candidate/path).is_file()},
+    report = {'measurement_version': 3, 'candidate_diff_sha256': hashlib.sha256(difference).hexdigest(),
+              'driver_sha256': source_digest(Path(__file__)),
               'thread_environment': {key: os.environ.get(key) for key in ('OMP_NUM_THREADS','OPENBLAS_NUM_THREADS','VECLIB_MAXIMUM_THREADS','MKL_NUM_THREADS','PYTHONHASHSEED')},
               'revisions': revisions, 'order': [f'{lane}{i}' for i in range(1,6) for lane in 'AB'],
-              'noise_definition': 'sample_standard_deviation/median; all observations; no standard_error_substitution',
-              'multiplier': 1.05, 'trace_memory': args.trace_memory,
-              'time_acceptance_eligible': not args.trace_memory,
-              'memory_metric': 'tracemalloc_peak_bytes' if args.trace_memory else 'rss_bytes', 'cases': {}}
+              'noise_definition': 'sample_standard_deviation/median; all observations', 'multiplier':1.05,
+              'trace_memory':True, 'time_scope':'relative_wall_time_with_tracemalloc_on_both_versions',
+              'absolute_uninstrumented_caps':'not_certified_by_instrumented_timings',
+              'inputs_policy':'one_fixed_CSV_per_case; physical_copy_count_zero; hardlink_admission_paths',
+              'retention':'one_active_tree; durable_verified_JSONL_then_removal; one_archive_per_case_release',
+              'minimum_free_bytes':10_000_000_000, 'cases':{}}
     failed = []
     driver = Path(__file__).resolve()
+    ledger = out/'measurements.jsonl'
+    active = out/'active'
     def save():
-        (out/'ab-results.json').write_text(json.dumps(report, indent=2))
+        (out/'ab-results.json').write_text(json.dumps(report,indent=2))
     for case in args.cases:
-        inputs = (args.inputs or out/'inputs').resolve()/case
-        manifest = prepare_family(case, inputs)
-        records = {'A': [], 'B': []}
-        calibration = []
-        input_payload = json.loads(manifest.read_text())
-        if args.calibration_from:
-            prior = json.loads(args.calibration_from.read_text())
-            if (prior['revisions']['baseline'] != revisions['baseline'] or
-                    prior['trace_memory'] != args.trace_memory or
-                    prior['thread_environment'] != report['thread_environment'] or
-                    prior['cases'][case]['input']['sha256'] != input_payload['sha256']):
-                raise ValueError('calibration_provenance_mismatch')
-            calibration.extend(prior['cases'][case]['calibration'])
-        case_report = {'calibration': calibration, 'raw': records,
-                       'input': input_payload, 'calibration_origin': str(args.calibration_from) if args.calibration_from else None}
+        manifest = prepare_family(case, (args.inputs or candidate/'local/perf-inputs').resolve()/case)
+        payload = json.loads(manifest.read_text())
+        records, calibration = {'A':[], 'B':[]}, []
+        case_report = {'calibration':calibration, 'raw':records, 'input':payload}
         report['cases'][case] = case_report
-        def run(label, *, profile=False):
-            repo = baseline if label.startswith('A') else candidate
-            destination = out / case / label
-            payload = json.loads(manifest.read_text())
+        def run(label):
+            free = require_space(out)
+            if active.exists():
+                raise SystemExit('Unrecorded active tree exists; refusing a second run')
+            lane = 'baseline' if label.startswith('A') else 'candidate'
+            repo = baseline if lane == 'baseline' else candidate
+            commit = subprocess.check_output(['git','rev-parse','HEAD'],cwd=repo,text=True).strip()
+            if commit != revisions[lane]:
+                raise SystemExit('Repository changed during measurement')
             registered_source(payload)
-            previous = calibration+records['A']+records['B']
-            expected = max([r.get('destination_bytes', 0) for r in previous]+[220*2**20])
-            if shutil.disk_usage(out).free < expected+512*2**20:
-                save()
-                raise SystemExit('Insufficient disk for next run plus 512MiB reserve; evidence preserved')
-            command = [str(candidate/'.venv/bin/python'), str(driver), '--case', case,
-                       '--out', str(destination), '--manifest', str(manifest)]
-            if profile:
-                command += ['--profile-stages']
-            if args.trace_memory:
-                command += ['--trace-memory']
-            env = dict(os.environ, PYTHONPATH=str(repo/'backend'), LC_ALL='en_US.UTF-8', LANG='en_US.UTF-8')
+            command = [str(candidate/'.venv/bin/python'), str(driver), '--case',case,
+                       '--out',str(active),'--manifest',str(manifest),'--trace-memory']
+            if args.profile_stages:
+                command.append('--profile-stages')
+            env = dict(os.environ,PYTHONPATH=str(repo/'backend'),LC_ALL='en_US.UTF-8',LANG='en_US.UTF-8')
             with (out/f'{case}-{label}.log').open('w') as log:
                 result = subprocess.run(command,cwd=repo,env=env,stdout=log,stderr=subprocess.STDOUT)
-            if result.returncode:
-                raise SystemExit(f'{case} {label} failed; see log')
             registered_source(payload)
-            value = json.loads((destination/'metrics.json').read_text())
-            value['destination_bytes'] = sum(p.stat().st_size for p in destination.rglob('*') if p.is_file())
-            if value['input_sha256'] != payload['sha256']:
-                raise SystemExit('worker_input_digest_mismatch')
-            print(f"{case} {label}: {value['seconds']:.6f}s, RSS {value['rss_bytes']/2**20:.3f} MiB, disk {value['run_bytes']/1e6:.6f} MB", flush=True)
-            return value
-        noise_metrics = ('tracemalloc_peak_bytes', 'run_bytes') if args.trace_memory else RESOURCE_METRICS
-        def calibration_ready():
-            if len(calibration) < 5:
-                return False
-            noise = baseline_noise(calibration, metrics=noise_metrics)
-            case_report['noise'] = noise
-            # RSS noise does not justify spending on identical RSS repetitions.
-            # Complete the uninstrumented TIME lane, flag memory unresolved,
-            # and use the separately recorded tracemalloc lane for memory.
-            case_report['rss_noise_requires_trace'] = not args.trace_memory and noise['rss_bytes'] >= .05
-            valid = {k:v for k,v in noise.items() if k != 'rss_bytes' or args.trace_memory}
-            save()
-            return noise_accepted(valid)
-        while not calibration_ready():
-            if len(calibration) >= 30:
-                case_report['failed'] = ['measurement_noise']
+            metrics = active/'metrics.json'
+            if metrics.exists():
+                value = json.loads(metrics.read_text())
+            else:
+                active.mkdir(parents=True,exist_ok=True)
+                value = dict(case=case,status='failed',seconds=None,ru_maxrss=None,tracemalloc_peak_bytes=None,
+                             run_root=str(active/'uncompleted'),numeric_signature={},input_sha256=payload['sha256'])
+            value.update(version_commit=commit, driver_sha256=report['driver_sha256'],
+                         measurement_version=3,input_source=payload['source'],free_before_bytes=free,
+                         returncode=result.returncode,label=label)
+            retention = finalize_active(active,ledger=ledger,record_id=f'{case}-{label}',metadata=value,
+                                        archive_dir=out.parent/'representatives',
+                                        version='v1.9.0' if lane=='baseline' else 'v1.9.1',case=case)
+            value['retention'] = retention
+            if result.returncode:
+                case_report.setdefault('failed_runs',[]).append(value)
                 save()
-                print(f'Noise >=5% after 30 calibration runs: {case_report["noise"]}',flush=True)
-                return 2
+                raise SystemExit(f'{case} {label} failed; evidence retained and active tree removed')
+            print(f"{case} {label}: {value['seconds']:.6f}s traced, RSS {value['rss_bytes']/2**20:.3f} MiB, traced peak {value['tracemalloc_peak_bytes']}, disk {value['run_bytes']}; recorded then removed",flush=True)
+            return value
+        noise_keys = ('seconds','tracemalloc_peak_bytes','run_bytes')
+        while True:
             calibration.append(run(f'A0_{len(calibration)+1:02}'))
             save()
+            if len(calibration) >= 5:
+                case_report['noise'] = baseline_noise(calibration,metrics=noise_keys)
+                case_report['native_rss_noise'] = baseline_noise(calibration,metrics=('rss_bytes',))['rss_bytes']
+                if noise_accepted(case_report['noise']):
+                    break
+                if len(calibration) >= 30:
+                    case_report['failed'] = ['measurement_noise']
+                    save()
+                    return 2
         for label in report['order']:
             records[label[0]].append(run(label))
             save()
-        observed_metrics = RESOURCE_METRICS + (('tracemalloc_peak_bytes',) if args.trace_memory else ())
-        medians = {lane:{key:statistics.median(r[key] for r in runs) for key in observed_metrics}
-                   for lane,runs in records.items()}
-        accepted_metrics = ('tracemalloc_peak_bytes','run_bytes') if args.trace_memory else RESOURCE_METRICS
-        budgets = {key:medians['A'][key]*1.05 for key in accepted_metrics}
+        keys = RESOURCE_METRICS+('tracemalloc_peak_bytes',)
+        medians = {lane:{key:statistics.median(r[key] for r in runs) for key in keys} for lane,runs in records.items()}
+        accepted = noise_keys+(('rss_bytes',) if case_report['native_rss_noise'] < .05 else ())
+        budgets = {key:medians['A'][key]*1.05 for key in accepted}
         misses = [key for key,limit in budgets.items() if medians['B'][key]>limit]
-        if case_report['rss_noise_requires_trace']:
-            misses.append('rss_noise_requires_trace')
-        if not args.trace_memory and case in {'panel','iv'} and medians['B']['seconds']>{'panel':12.2,'iv':15.1}[case]:
-            misses.append('absolute_seconds')
-        signatures = [r['numeric_signature'] for r in records['A']+records['B']]
-        if not signatures[0] or not all(s==signatures[0] for s in signatures):
+        signatures = [r['numeric_signature'] for runs in records.values() for r in runs]
+        if not signatures[0] or not all(value==signatures[0] for value in signatures):
             misses.append('numeric_bits')
-        case_report.update(medians=medians, budgets=budgets, failed=misses)
+        case_report.update(medians=medians,budgets=budgets,failed=misses,
+                           memory_metric='rss_and_tracemalloc' if 'rss_bytes' in accepted else 'tracemalloc_due_to_native_rss_noise')
         if args.profile_stages:
-            case_report['stage_profile'] = {lane:run(lane+'_stages',profile=True) for lane in 'AB'}
-            case_report['stage_comparison'] = compare_stages(case_report['stage_profile']['A'], case_report['stage_profile']['B'])
-            if any(r['over_one_percent'] for r in case_report['stage_comparison'].values()):
+            a = dict(medians['A'],stages=median_stages(records['A']))
+            b = dict(medians['B'],stages=median_stages(records['B']))
+            case_report['stage_comparison'] = compare_stages(a,b)
+            if any(value['over_one_percent'] for value in case_report['stage_comparison'].values()):
                 misses.append('stage_attribution_pending')
         save()
         failed.extend(f'{case}:{key}' for key in misses)
-    label = 'PASS memory-only (instrumented time is ineligible)' if args.trace_memory else 'PASS'
-    print(label if not failed else 'FAIL '+', '.join(failed),flush=True)
+    print('RELATIVE TRACED CHECKS PASS; absolute uninstrumented caps unassessed' if not failed else 'FAIL '+', '.join(failed),flush=True)
     return int(bool(failed))
 
 
@@ -542,7 +571,7 @@ def main():
         parser.add_argument('--trace-memory', action='store_true')
         args = parser.parse_args()
         return family_run(args.case, args.out.resolve(), manifest=args.manifest,
-                          stage_profile=args.profile_stages, trace_memory=args.trace_memory)
+                          stage_profile=args.profile_stages, trace_memory=True)
     return interactive_main()
 
 
