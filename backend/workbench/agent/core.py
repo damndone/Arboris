@@ -151,6 +151,7 @@ class AgentCore:
         self.model_name = model_name
         self.model_config_identity = dict(model_config_identity or {})
         self._overflow_retried = False
+        self._argument_corrected = False
         self._core_phase: CorePhase | None = None
         self._phase_messages: list[dict[str, Any]] = []
         self._phase_result: Any = None
@@ -539,6 +540,7 @@ class AgentCore:
         self._phase_completed = False
         self._phase_result = None
         self._overflow_retried = False
+        self._argument_corrected = False
         self._final_status = None
         self._last_tool_call_fingerprint = None
         self._consecutive_identical_tool_calls = 0
@@ -900,6 +902,23 @@ class AgentCore:
             tokens = self.context_tokens(context.messages)
             if await self.compact("overflow", tokens_before=tokens, command_id=command_id) is not None:
                 return await self._run_turn(None, append_user=False, tool_context=tool_context)
+
+        if (finish_reason == "error" and error == "provider_tool_arguments_invalid"
+                and not self._argument_corrected and self._has_step_left()):
+            # The provider ended a tool call with arguments that are not JSON, so
+            # nothing ran. One bounded correction per command instead of failing the
+            # turn (paid fix4 round, survival, Ask: a whole nudge turn was lost).
+            self._argument_corrected = True
+            self._active_request_id = None
+            self._active_message_started = False
+            self.repository.append(self.session_id, "custom_message", {
+                "message_type": "tool_arguments_correction", "audience": "model", "model_role": "user",
+                "name": "workbench_tool_arguments",
+                "content": ("[Workbench -- an automatic message, not from the user] Your last tool call's "
+                            "arguments were not valid JSON, so nothing ran. Send that call again with valid "
+                            "JSON arguments, or continue without it."),
+            })
+            return await self._run_turn(None, append_user=False, tool_context=tool_context)
 
         content = "".join(chunks)
         if finish_reason == "error" and not content.strip() and not tool_calls and error != "tool_runtime_unavailable":
