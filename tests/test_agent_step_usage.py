@@ -210,3 +210,38 @@ def test_absent_upstream_id_is_not_replaced_by_local_request_id(monkeypatch):
     [done] = asyncio.run(collect())
     assert done.request_id == 'local-request' and done.provider_request_id is None
     assert done.usage is None
+
+
+@pytest.mark.parametrize('index', [0, 1, 2])
+def test_frozen_original_usage_frame_matches_persisted_event(monkeypatch, tmp_path, index):
+    import hashlib
+    fixture = json.loads((Path(__file__).parent / 'fixtures/agent_usage/development_frames.json').read_text())
+    record = fixture['records'][index]
+    frame = json.loads(record['frame'][6:])
+    assert frame['usage'] == record['usage']
+    local = Path(__file__).parents[1] / fixture['source']
+    if local.exists():
+        raw = local.read_bytes()
+        assert hashlib.sha256(raw).hexdigest() == fixture['source_sha256']
+        original = json.loads(raw.splitlines()[record['line'] - 1])
+        assert hashlib.sha256(original['response_raw'].encode()).hexdigest() == record['response_sha256']
+        assert record['frame'] in original['response_raw'].splitlines()
+    wire = (record['frame'] + '\n\ndata: [DONE]\n\n').encode()
+    _install_async_upstream(monkeypatch, lambda request: httpx.Response(200, content=wire))
+    adapter = OpenAICompatibleModelAdapter(LLMConfig(base_url='https://offline.invalid/v1',api_key='unused',model='offline'))
+    core, repository, events = _core(tmp_path, adapter)
+    asyncio.run(core.prompt('Inspect.', budget={'max_steps': 1}))
+    [observation] = [e for e in events.replay('s') if e.event_type == 'provider_step']
+    assert observation.payload['usage'] == frame['usage']
+    assert observation.payload['provider_request_id'] == frame['id']
+
+
+def test_repeated_snapshots_are_not_counted_as_extra_steps_or_summed(tmp_path):
+    class Model:
+        async def stream(self, request):
+            yield ModelStreamEvent(type='text_delta',request_id=request.request_id,delta='Ready.',usage={'prompt_tokens':70})
+            yield ModelStreamEvent(type='done',request_id=request.request_id,usage=USAGE)
+    core, repository, events = _core(tmp_path, Model())
+    asyncio.run(core.prompt('Inspect.', budget={'max_steps':1}))
+    [observation] = [e for e in events.replay('s') if e.event_type == 'provider_step']
+    assert observation.payload['usage'] == USAGE

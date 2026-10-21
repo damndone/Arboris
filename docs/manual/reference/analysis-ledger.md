@@ -9,6 +9,7 @@ Every executed step is recorded in `workbench/analysis_ledger.jsonl` under one c
 | Operation | Category |
 |---|---|
 | `code.execute` | `data_change` |
+| `external.query` | `export` |
 | `graph.fork` | `descriptive` |
 | `iv.gmm` | `model` |
 | `matching.att` | `model` |

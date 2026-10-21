@@ -177,6 +177,7 @@ PRESENTATION: Mapping[str, Presentation] = {
     "script.export": P("share", "Export a script", "Reproduce this analysis as a Stata, R or Python script."),
     # Advanced
     "graph.fork": P("advanced", "Branch from here", "Start a new branch from the selected step."),
+    "external.query": P("advanced", "Query an external tool", "Send reviewed arguments to an admitted HTTPS tool with your approval."),
     "operation.multi_step": P("advanced", "Multi-step workflow", "Run several steps under one confirmation."),
     "code.execute": P("advanced", "Run Python code", "Transform the dataset with sandboxed Python."),
     "model.custom": P("advanced", "Custom model", "Run an admitted custom model from a notebook."),

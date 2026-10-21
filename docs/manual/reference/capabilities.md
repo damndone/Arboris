@@ -130,7 +130,7 @@ Everything Workbench can run, as registered. The Agent reaches the same list: an
 | `resample.smote` | Resample prediction-training data with SMOTE. |
 | `resample.undersample` | Resample prediction-training data with Undersample. |
 
-## Operations (34)
+## Operations (35)
 
 | Id | What it does |
 |---|---|
@@ -149,6 +149,7 @@ Everything Workbench can run, as registered. The Agent reaches the same list: an
 | `data.reshape` | Reshape the current dataset with an explicitly declared direction. Example spec: {"direction": "wide_to_long", "id_columns": ["id"], "value_columns": ["y2020", "y2021"], "value_name": "income", "var_name": "year"} |
 | `data.subset` | Subset rows and columns with closed comparison operators. Example spec: {"columns": ["id", "age"], "filters": [{"column": "age", "op": "between", "value": [25, 55]}]} |
 | `data.tsset` | Declare and stably order a time or panel-time index. Example spec: {"frequency": "Y", "time_column": "year"} |
+| `external.query` | Send reviewed query arguments to an admitted endpoint; never send data automatically. |
 | `graph.fork` | Create a new Chain branch from the current verified node. |
 | `metadata.edit` | Declare or change variable labels, value labels, measurement levels or missing-value codes for any column. Never changes which variables are in the model; the run is re-estimated with the new metadata (missing codes change the sample). |
 | `model.custom` | Run one explicitly admitted custom capability through the Proposal/Risk and containment gates. |

@@ -7,6 +7,7 @@ from ...analysis_loop.recovery import RECOVERY_ACTIONS
 from ..operations import OperationRegistry
 from ..tools import ToolContext, ToolDefinition, ToolVisibleError
 from ..skill_tools import skill_tool_definitions
+from ..extension_tools import extension_tool
 from ..statistical_claim_tools import statistical_claim_tool
 from .analysis_loop import (
     AnalysisLoopContextError,
@@ -479,6 +480,7 @@ class RegistrationMixin:
         return [
             self.show_dataset_rows_tool(session_id=session_id, scope_requirements=("project", "chain")),
             *skill_tool_definitions(self.project_root, session_id=session_id),
+            extension_tool(self.project_root, session_id=session_id),
             statistical_claim_tool(self, session_id=session_id),
             self.calculate_tool(session_id=session_id, scope_requirements=("project", "chain")),
             *self.conversation_recall_tools(session_id=session_id, scope_requirements=("project", "chain")),
@@ -1358,6 +1360,7 @@ class RegistrationMixin:
         return [
             notebook_state_tool(self.project_root, session_id=session_id),
             *skill_tool_definitions(self.project_root, session_id=session_id),
+            extension_tool(self.project_root, session_id=session_id),
             statistical_claim_tool(self, session_id=session_id),
             self.show_dataset_rows_tool(session_id=session_id, scope_requirements=("project",)),
             self.calculate_tool(session_id=session_id, scope_requirements=("project",)),

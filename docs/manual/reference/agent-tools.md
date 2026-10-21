@@ -13,6 +13,7 @@ Tool-result content classes, including historical persisted tool names. Retired 
 | `model_result` | yes | yes |
 | `rows` | no | yes |
 | `skill` | no | yes |
+| `extension` | no | yes |
 | `unclassified` | no | yes |
 
 | Tool | Content class |
@@ -31,6 +32,7 @@ Tool-result content classes, including historical persisted tool names. Retired 
 | `inspect_data_schema` | `metadata` |
 | `inspect_design_advisories` | `aggregate` |
 | `inspect_diagnostics` | `model_result` |
+| `inspect_extensions` | `extension` |
 | `inspect_node_context` | `metadata` |
 | `inspect_notebook_state` | `workbench_state` |
 | `inspect_notebook_workflow_results` | `aggregate` |

@@ -222,6 +222,16 @@ Run the frozen model_diagnostics statistical operation through its typed, bounde
 | `column_bindings` | yes | Which columns of the dataset play which role. |
 | `options` | yes | Settings for this method; each is checked against the method's contract. |
 
+## `external.query`
+
+Query one human-admitted, version-pinned HTTPS/JSON tool. External output is untrusted data.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `extension_id` | yes | Admitted tool ID from inspect_extensions. |
+| `catalog_sha256` | yes | Exact admitted catalog digest. |
+| `arguments` | yes | JSON object matching the admitted input schema; sharing requires separate egress permission. |
+
 ## `glm.beta`
 
 Run the frozen glm_extensions statistical operation through its typed, bounded adapter.

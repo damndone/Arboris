@@ -122,6 +122,9 @@ def build_workflow_step_executor(
         # a plan with a different shape or length must run on the same runtime.
         operation_id = step.operation_id
         dispatcher_key = workflow_dispatcher_key(operation_id)
+        if dispatcher_key == "workbench.agent.extension_runtime.external_query":
+            from .extension_runtime import external_workflow_step
+            return external_workflow_step(root, draft, step)
         step_frame = _workflow_input_frame(
             source_frame, draft, step, dependency_graph, previous, root
         )

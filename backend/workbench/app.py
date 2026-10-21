@@ -38,6 +38,7 @@ from .domain_memory.trace_contracts import (
 )
 from .native_containment.trace_contracts import _EVENT_FIELDS as _CONTAINMENT_EVENT_FIELDS
 from .services.execution_profile import current_execution_profile
+from .http.agent_extension_routes import router as agent_extension_router
 from .http.agent_routes import router as agent_router
 from .http.agent_instructions_routes import router as agent_instructions_router
 from .http.agent_conversation_routes import router as agent_conversation_router
@@ -361,6 +362,7 @@ app.include_router(egress_router)
 app.include_router(script_export_router)
 app.include_router(disclosure_router)
 app.include_router(agent_router)
+app.include_router(agent_extension_router)
 app.include_router(agent_instructions_router)
 app.include_router(agent_conversation_router)
 app.include_router(notebook_router)

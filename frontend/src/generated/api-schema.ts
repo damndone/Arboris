@@ -1999,6 +1999,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/agent-extensions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** View */
+        get: operations["view_projects_agent_extensions_get"];
+        /** Admit */
+        put: operations["admit_projects_agent_extensions_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/agent-extensions/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Disable */
+        post: operations["disable_projects_agent_extensions_disable_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/agent-extensions/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Review */
+        post: operations["review_projects_agent_extensions_review_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/egress": {
         parameters: {
             query?: never;
@@ -2752,7 +2804,7 @@ export interface components {
         /** ActiveProviderEgress */
         ActiveProviderEgress: {
             /** Allowed Classes */
-            allowed_classes: ("workbench_state" | "schema" | "metadata" | "aggregate" | "model_result" | "rows" | "skill" | "unclassified")[];
+            allowed_classes: ("workbench_state" | "schema" | "metadata" | "aggregate" | "model_result" | "rows" | "skill" | "extension" | "unclassified")[];
             /**
              * Locality
              * @enum {string}
@@ -2821,6 +2873,17 @@ export interface components {
             verification: {
                 [key: string]: unknown;
             };
+        };
+        /** Admission */
+        Admission: {
+            /** Expected Sha256 */
+            expected_sha256: string;
+            /** Manifest */
+            manifest: {
+                [key: string]: unknown;
+            };
+            /** Previous Sha256 */
+            previous_sha256?: string | null;
         };
         /** AgentActivity */
         AgentActivity: {
@@ -5794,6 +5857,15 @@ export interface components {
              */
             trust_label: "analysis_running" | "ready_to_interpret" | "interpret_with_caution" | "not_ready_to_interpret" | "run_failed" | "lifecycle_unavailable" | "legacy_unavailable" | "contract_unavailable";
         };
+        /** Disable */
+        Disable: {
+            /** Disabled */
+            disabled: boolean;
+            /** Expected Sha256 */
+            expected_sha256: string;
+            /** Id */
+            id: string;
+        };
         /** DisclosureCounts */
         DisclosureCounts: {
             /** Data Changes */
@@ -6071,7 +6143,7 @@ export interface components {
              * Content Class
              * @enum {string}
              */
-            content_class: "workbench_state" | "schema" | "metadata" | "aggregate" | "model_result" | "rows" | "skill" | "unclassified";
+            content_class: "workbench_state" | "schema" | "metadata" | "aggregate" | "model_result" | "rows" | "skill" | "extension" | "unclassified";
             /** Decision */
             decision: string;
             /** Index */
@@ -6090,9 +6162,9 @@ export interface components {
         /** EgressDefaults */
         EgressDefaults: {
             /** Local */
-            local: ("workbench_state" | "schema" | "metadata" | "aggregate" | "model_result" | "rows" | "skill" | "unclassified")[];
+            local: ("workbench_state" | "schema" | "metadata" | "aggregate" | "model_result" | "rows" | "skill" | "extension" | "unclassified")[];
             /** Remote */
-            remote: ("workbench_state" | "schema" | "metadata" | "aggregate" | "model_result" | "rows" | "skill" | "unclassified")[];
+            remote: ("workbench_state" | "schema" | "metadata" | "aggregate" | "model_result" | "rows" | "skill" | "extension" | "unclassified")[];
         };
         /** EgressPolicyDocument */
         EgressPolicyDocument: {
@@ -6111,7 +6183,7 @@ export interface components {
         EgressPolicyView: {
             active_provider: components["schemas"]["ActiveProviderEgress"] | null;
             /** Content Classes */
-            content_classes: ("workbench_state" | "schema" | "metadata" | "aggregate" | "model_result" | "rows" | "skill" | "unclassified")[];
+            content_classes: ("workbench_state" | "schema" | "metadata" | "aggregate" | "model_result" | "rows" | "skill" | "extension" | "unclassified")[];
             defaults: components["schemas"]["EgressDefaults"];
             policy: components["schemas"]["EgressPolicyDocument"];
             /** Policy Source */
@@ -6447,6 +6519,68 @@ export interface components {
             schema_version: string;
             /** Selected Columns */
             selected_columns: string[];
+        };
+        /** ExtensionCatalogView */
+        ExtensionCatalogView: {
+            /** Disabled */
+            disabled: string[];
+            manifest: components["schemas"]["ExtensionManifestView"];
+            /** Sha256 */
+            sha256: string | null;
+        };
+        /** ExtensionHookView */
+        ExtensionHookView: {
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "record" | "deny";
+            /**
+             * Event
+             * @enum {string}
+             */
+            event: "before_operation" | "after_operation" | "turn_end" | "plan_approved";
+            /** Id */
+            id: string;
+            /** Operation Ids */
+            operation_ids: string[];
+            /** Origin */
+            origin: string;
+            /** Reason */
+            reason: string;
+            /** Version */
+            version: string;
+        };
+        /** ExtensionManifestView */
+        ExtensionManifestView: {
+            /** Hooks */
+            hooks: components["schemas"]["ExtensionHookView"][];
+            /**
+             * Schema
+             * @constant
+             */
+            schema: "arboris.extensions.v1";
+            /** Tools */
+            tools: components["schemas"]["ExtensionToolView"][];
+        };
+        /** ExtensionToolView */
+        ExtensionToolView: {
+            /** Endpoint */
+            endpoint: string;
+            /** Id */
+            id: string;
+            /** Input Schema */
+            input_schema: {
+                [key: string]: unknown;
+            };
+            /** Origin */
+            origin: string;
+            /** Output Schema */
+            output_schema: {
+                [key: string]: unknown;
+            };
+            /** Version */
+            version: string;
         };
         /** FeatureRecipeApplied */
         FeatureRecipeApplied: {
@@ -9440,7 +9574,7 @@ export interface components {
         /** ProviderAllowance */
         ProviderAllowance: {
             /** Allow */
-            allow: ("workbench_state" | "schema" | "metadata" | "aggregate" | "model_result" | "rows" | "skill" | "unclassified")[];
+            allow: ("workbench_state" | "schema" | "metadata" | "aggregate" | "model_result" | "rows" | "skill" | "extension" | "unclassified")[];
         };
         /** ProviderList */
         ProviderList: {
@@ -9872,6 +10006,13 @@ export interface components {
             rank: number;
             /** Rationale */
             rationale: string;
+        };
+        /** Review */
+        Review: {
+            /** Manifest */
+            manifest: {
+                [key: string]: unknown;
+            };
         };
         /** RiskAuthorizationView */
         RiskAuthorizationView: {
@@ -14676,6 +14817,142 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectCreated"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    view_projects_agent_extensions_get: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExtensionCatalogView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admit_projects_agent_extensions_put: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Admission"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExtensionCatalogView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    disable_projects_agent_extensions_disable_post: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Disable"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExtensionCatalogView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    review_projects_agent_extensions_review_post: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Review"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExtensionCatalogView"];
                 };
             };
             /** @description Validation Error */

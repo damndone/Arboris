@@ -1460,6 +1460,7 @@ def test_main_role_turn_exposes_project_evidence_and_permissioned_operation_tool
         # Reference discovery and checks read evidence without changing it.
         "inspect_builtin_skills",
         "inspect_custom_skills",
+        "inspect_extensions",
         "check_model_claims",
         "inspect_analysis_completion",
     }

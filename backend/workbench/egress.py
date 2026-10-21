@@ -53,6 +53,7 @@ ContentClass = Literal[
     "model_result",  # coefficients, standard errors, fit statistics
     "rows",  # row-level records
     "skill",  # arbitrary personal/project skill metadata and reference text; opt in remotely
+    "extension",  # admitted external metadata, requests and responses; explicit sharing only
     "unclassified",  # not declared: handled as the most restrictive class
 ]
 CONTENT_CLASSES: tuple[ContentClass, ...] = get_args(ContentClass)
@@ -76,6 +77,7 @@ TOOL_CONTENT_CLASSES: Mapping[str, str] = {
     "update_plan": "workbench_state",
     "inspect_builtin_skills": "workbench_state",
     "inspect_custom_skills": "skill",
+    "inspect_extensions": "extension",
     "check_model_claims": "model_result",
     "inspect_analysis_completion": "model_result",
     "submit_analysis_loop_intent": "workbench_state",
@@ -117,6 +119,7 @@ TOOL_CONTENT_CLASSES: Mapping[str, str] = {
 # classified by protocol wherever they appear.
 EVIDENCE_PROTOCOL_CLASSES: Mapping[str, str] = {
     "research-review/v1": "model_result",
+    "external-tool/v1": "extension",
     "profile/v1": "aggregate",
     "quality/v1": "aggregate",
     "time-index/v1": "aggregate",
@@ -654,6 +657,15 @@ def _append_audit_line(path: Path, record: Mapping[str, Any]) -> None:
 
 def authorize_local_artifact_export(project_root: Path, *, columns: Sequence[str], content_classes: Sequence[str]) -> None:
     """Audit and enforce local export policy before a bundle is persisted."""
+    from uuid import uuid4
+    from .agent.extension_runtime import dispatch_hooks
+    from .agent.extensions import ExtensionError
+    # All local script-export entrances meet here before persisting the export.
+    try:
+        dispatch_hooks(project_root, "before_operation", {"operation_ids": ["script.export"]},
+                       key="export:" + uuid4().hex)
+    except ExtensionError as exc:
+        raise EgressPolicyError(str(exc)) from exc
     policy = load_policy(project_root)
     allowed = policy.allowed_classes(provider_id="script-export", locality="local")
     blocked = sorted(set(content_classes) - set(allowed))

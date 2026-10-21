@@ -18,6 +18,7 @@ const CLASS_LABELS: Record<ContentClass, string> = {
   model_result: "Model results",
   rows: "Individual rows",
   skill: "Personal and project skill content",
+  extension: "External tool content and project extension metadata",
   unclassified: "Tool output with no declared class",
 };
 

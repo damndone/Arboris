@@ -161,6 +161,7 @@ class AgentCore:
         self.command_check = None
         self.input_checkpoint = None
         self.completion_check = None
+        self.turn_end_observer = None
         self.research_review_context = None
         self.research_review_mode = lambda: "ask"
 
@@ -549,6 +550,13 @@ class AgentCore:
         self._numeric_repairs_left = numeric_grounding.MAX_REPAIRS
 
     def _end(self) -> None:
+        if self.turn_end_observer is not None and self._active_command_id is not None:
+            from .extensions import ExtensionError
+            try:
+                self.turn_end_observer(self._active_command_id, self._final_status or "idle")
+            except (ExtensionError, OSError):
+                self.events.emit(self.session_id, "extension_hook_error", {"event": "turn_end"},
+                                 command_id=self._active_command_id)
         self.repository.update_status(self.session_id, self._final_status or "idle")
         if self._active_tool_task is not None and not self._active_tool_task.done():
             self._active_tool_task.cancel()

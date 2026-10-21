@@ -265,7 +265,10 @@ def test_natural_language_reachability_guard_pins_current_truth() -> None:
         len(report.reachable),
         len(report.exempt),
         len(report.gaps),
-    ) == (136, 5, 129, 134, 2, 0)  # v1.8.10: +5 postestimation.* steps (wald, lincom, nlcom, lr, margins), composable
+    ) == (137, 5, 130, 135, 2, 0)  # v1.9.1: external.query joins the shared workflow.
+    [external] = [item for item in report.composition_reachable if item.capability_id == "external.query"]
+    assert external.composition_reachable_by == ("external.query",)
+    assert external.directly_reachable_by == ()
     assert {item.capability_id for item in report.gaps} == set()
     assert {item.capability_id for item in report.exempt} == {
         "code.execute",

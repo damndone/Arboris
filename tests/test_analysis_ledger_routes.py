@@ -44,6 +44,9 @@ EXEMPT: dict[tuple[str, str], str] = {
     ("PATCH", "/agent/conversations/{session_id}"): "renames, archives or restores a conversation",
     ("DELETE", "/agent/conversations/{session_id}"): "deletes a conversation log; ledger, proposals and records stay",
     ("PUT", "/agent/instructions"): "writes the person's or the project's AGENTS.md",
+    ("PUT", "/projects/agent-extensions"): "pins a human-reviewed extension catalog; does not run a tool or analysis",
+    ("POST", "/projects/agent-extensions/disable"): "changes catalog availability only; queries still use the recorded lifecycle",
+    ("POST", "/projects/agent-extensions/review"): "validates and hashes a manifest without changing project state",
     # Manual execution shares the same recorded operation lifecycle.
     ("POST", "/operations/run"): LIFECYCLE,
     # Typed UI data operations that run through the operation lifecycle.

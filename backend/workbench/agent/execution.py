@@ -244,8 +244,10 @@ class WorkbenchOperationLifecycle:
         lease_owner: str,
         failpoint: OperationFailpoint | None = None,
         risk_authorization_store: RiskAuthorizationStore | None = None,
+        project_root: Path | None = None,
     ) -> None:
         self.operation_store = operation_store
+        self.project_root = project_root
         self.operation_registry = operation_registry
         self.handlers = handlers
         self.lease_owner = lease_owner
@@ -320,6 +322,12 @@ class WorkbenchOperationLifecycle:
             validate_session = getattr(handler, "validate_session", None)
             if validate_session is not None:
                 validate_session(record)
+            from .extension_runtime import dispatch_hooks
+            hook_facts = {"operation_ids": sorted({record.operation_id, *(
+                item["operation_id"] for item in record.changes.get("steps", []))}),
+                "record_id": record.record_id}
+            if self.project_root is not None and not record.execution.get("bindings") and record.effect_status != "committed":
+                dispatch_hooks(self.project_root, "before_operation", hook_facts, key=key)
             admit_research = getattr(handler, "admit_research", None)
             if admit_research is not None:
                 proof = admit_research(record, first_dispatch=first_dispatch)
@@ -466,7 +474,7 @@ class WorkbenchOperationLifecycle:
                 published = publish_state(terminal, phase=terminal.status)
                 if inspect.isawaitable(published):
                     await published
-            return terminal
+            return self._after_operation(terminal, key=key)
         except (InjectedOperationCrash, OperationClaimConflict):
             raise
         except Exception as exc:
@@ -515,7 +523,7 @@ class WorkbenchOperationLifecycle:
                 published = publish_state(failed, phase="failed")
                 if inspect.isawaitable(published):
                     await published
-            return failed
+            return self._after_operation(failed, key=key)
         finally:
             release_domain_lease = getattr(handler, "release_domain_lease", None)
             if domain_lease is not None and release_domain_lease is not None:
@@ -526,3 +534,19 @@ class WorkbenchOperationLifecycle:
                 )
                 if inspect.isawaitable(released):
                     await released
+
+    def _after_operation(self, record, *, key):
+        if self.project_root is None:
+            return record
+        from .extension_runtime import dispatch_hooks
+        from .extensions import ExtensionError
+        try:
+            dispatch_hooks(self.project_root, "after_operation",
+                {"operation_ids": sorted({record.operation_id, *(
+                    item["operation_id"] for item in record.changes.get("steps", []))}),
+                 "record_id": record.record_id, "status": record.status}, key=key)
+        except (ExtensionError, OSError):
+            # An observer cannot change a committed success or the original failure.
+            return self.operation_store.append_status(record.record_id, record.status,
+                execution=merge_execution(record.execution, {"extension_hook_error": "after_operation"}))
+        return record

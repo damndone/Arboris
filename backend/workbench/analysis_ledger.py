@@ -73,6 +73,7 @@ _EXACT: Mapping[str, str] = {
     "metadata.edit": "metadata_change",
     "graph.fork": "descriptive",
     "code.execute": "data_change",
+    "external.query": "export",
     # UI actions that are not workflow steps
     "run.delete": "deletion",
     "run.submit": "model",

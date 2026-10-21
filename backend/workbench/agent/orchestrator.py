@@ -450,6 +450,7 @@ class WorkbenchOrchestrator(OrchestrationWorkflows, OrchestrationProposals, Orch
                 error=record.error,
             )
         lifecycle = WorkbenchOperationLifecycle(
+            project_root=Path(project_root),
             operation_store=self.operation_store,
             operation_registry=self.operation_registry,
             handlers={definition.executor_key: handler},
@@ -636,6 +637,11 @@ class WorkbenchOrchestrator(OrchestrationWorkflows, OrchestrationProposals, Orch
         agent.input_checkpoint = lambda command: capture_checkpoint(self.repository, session_id, command)
         from .planning.agent_phase import restore_phase
         agent.completion_check = lambda: self._completion_check(session_id)
+        from .extension_runtime import dispatch_hooks
+        hook_root = getattr(self.context_provider, "project_root", None)
+        if hook_root is not None:
+            agent.turn_end_observer = lambda command_id, status: dispatch_hooks(
+                hook_root, "turn_end", {"session_id": session_id, "status": status}, key=command_id)
         from .research_review import build_context
         agent.research_review_mode = lambda: self.execution_mode
         agent.research_review_context = lambda candidate: build_context(

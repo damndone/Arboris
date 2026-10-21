@@ -970,7 +970,7 @@ def test_graph_fork_recovery_after_durable_lifecycle_crash_binds_one_effect(
         main_session_id="main-session",
     )
     recovered = asyncio.run(
-        restarted.recover_operations(project_root=tmp_path / "project")
+        restarted.recover_operations(project_root=orchestrator.repository.root.parent)
     )[0]
 
     assert recovered.status == "completed"

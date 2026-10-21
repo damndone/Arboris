@@ -62,6 +62,10 @@ class PlanControl:
             "content": (f"Workbench: the person approved plan {approved.plan_id} version {approved.version}. "
                         "Its question and criteria are now fixed; planned steps of the allowed kinds run without a card."),
         }, key=f"{approved.plan_id}:{approved.version}", stage="plan_approved")
+        from .extension_runtime import dispatch_hooks
+        dispatch_hooks(self.root, "plan_approved", {"session_id": self.session_id,
+            "plan_id": approved.plan_id, "plan_version": approved.version},
+            key=f"{approved.plan_id}:{approved.version}")
         return {"plan": approved.to_dict()}
 
     def revise(self, version, changes):
