@@ -174,7 +174,7 @@ def _turn(client, root: Path, session_id: str, text: str | None, execution_polic
 
 
 def run_conversation(client, root: Path, run_id: str, prompt: str, policy: Policy,
-                     *, focus_node: str = "model:ols_1") -> dict[str, Any]:
+                     *, focus_node: str = "model:ols_1", progress_path: Path | None = None) -> dict[str, Any]:
     if policy.transport not in {"http", "headless"}:
         raise ValueError(f"unknown Agent evaluation transport: {policy.transport}")
     # As the UI does after an import: a chain session on the run, focused on
@@ -192,61 +192,67 @@ def run_conversation(client, root: Path, run_id: str, prompt: str, policy: Polic
     confirmed_note = CONFIRMED_ZH if policy.language == "zh" else CONFIRMED_EN
     started = time.monotonic()
     turn = lambda text: _turn(client, root, session_id, text, policy.execution_policy, policy.mode, transport=policy.transport)  # noqa: E731
-    turns: list[dict[str, Any]] = [turn(prompt)]
+    turns: list[dict[str, Any]] = []
     confirmations: list[dict[str, Any]] = []
     plan_approvals = 0
     continuations = 0
     nudges = 0
     completed = False
     stop_reason = "nudge_budget"
-    while time.monotonic() - started < policy.max_wall_s:
-        if any(marker in turns[-1]["reply"] for marker in COMPLETION_MARKERS):
-            completed, stop_reason = True, "completion_marker"
-            break
-        if policy.mode == "auto" and _approve_plan_if_waiting(client, root, session_id):
-            plan_approvals += 1
-            continuations += 1
-            turns.append(turn(None))
-            continue
-        pending = _pending_proposals(client, root, session_id)
-        if pending:
-            head = _active_head(client, root, session_id, run_id)
-            for proposal in pending:
-                confirmations.append(_confirm(client, root, session_id, head, proposal))
-            if policy.mode in {"ask", "auto"}:
-                # v1.9.1: the Workbench resumes the Agent; the person says nothing.
+    try:
+        turns.append(turn(prompt))
+        while time.monotonic() - started < policy.max_wall_s:
+            if any(marker in turns[-1]["reply"] for marker in COMPLETION_MARKERS):
+                completed, stop_reason = True, "completion_marker"
+                break
+            if policy.mode == "auto" and _approve_plan_if_waiting(client, root, session_id):
+                plan_approvals += 1
                 continuations += 1
-                if continuations > 4 * policy.max_nudges:
-                    break
                 turns.append(turn(None))
                 continue
-            # After confirming, v1.9.0 needs the person to speak again; the
-            # nudge that follows is counted separately.
+            pending = _pending_proposals(client, root, session_id)
+            if pending:
+                head = _active_head(client, root, session_id, run_id)
+                for proposal in pending:
+                    confirmations.append(_confirm(client, root, session_id, head, proposal))
+                if policy.mode in {"ask", "auto"}:
+                    # v1.9.1: the Workbench resumes the Agent; the person says nothing.
+                    continuations += 1
+                    if continuations > 4 * policy.max_nudges:
+                        break
+                    turns.append(turn(None))
+                    continue
+                # After confirming, v1.9.0 needs the person to speak again; the
+                # nudge that follows is counted separately.
+                if nudges >= policy.max_nudges:
+                    break
+                nudges += 1
+                turns.append(turn(f"{confirmed_note}{nudge}"))
+                continue
             if nudges >= policy.max_nudges:
                 break
             nudges += 1
-            turns.append(turn(f"{confirmed_note}{nudge}"))
-            continue
-        if nudges >= policy.max_nudges:
-            break
-        nudges += 1
-        turns.append(turn(nudge))
-    else:
-        stop_reason = "wall_clock"
-    return {
-        "session_id": session_id,
-        "transport": policy.transport,
-        "requested_mode": policy.mode,
-        "execution_mode_request": policy.mode if policy.mode in {"ask", "auto"} else "server_default",
-        "execution_policy": policy.execution_policy,
-        "turns": turns,
-        "confirmations": confirmations,
-        "plan_approvals": plan_approvals,
-        "continuations": continuations,
-        "nudges": nudges,
-        "user_actions": len(confirmations) + nudges + plan_approvals,
-        "completed_marker": completed,
-        "stop_reason": stop_reason,
-        "wall_s": round(time.monotonic() - started, 1),
-        "entries": _session_entries(root, session_id),
-    }
+            turns.append(turn(nudge))
+        else:
+            stop_reason = "wall_clock"
+    finally:
+        result = {
+            "session_id": session_id,
+            "transport": policy.transport,
+            "requested_mode": policy.mode,
+            "execution_mode_request": policy.mode if policy.mode in {"ask", "auto"} else "server_default",
+            "execution_policy": policy.execution_policy,
+            "turns": turns,
+            "confirmations": confirmations,
+            "plan_approvals": plan_approvals,
+            "continuations": continuations,
+            "nudges": nudges,
+            "user_actions": len(confirmations) + nudges + plan_approvals,
+            "completed_marker": completed,
+            "stop_reason": stop_reason,
+            "wall_s": round(time.monotonic() - started, 1),
+            "entries": _session_entries(root, session_id),
+        }
+        if progress_path is not None:
+            progress_path.write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding="utf-8")
+    return result

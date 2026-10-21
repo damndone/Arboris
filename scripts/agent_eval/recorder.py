@@ -82,9 +82,10 @@ class _Tape:
 
 
 class _RecordingTransport(httpx.AsyncBaseTransport):
-    def __init__(self, tape: _Tape, inner: httpx.AsyncBaseTransport | None) -> None:
+    def __init__(self, tape: _Tape, inner: httpx.AsyncBaseTransport | None, *, budget=None) -> None:
         self.tape = tape
         self.inner = inner
+        self.budget = budget
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         body = request.content if isinstance(request.content, bytes) else await request.aread()
@@ -95,8 +96,20 @@ class _RecordingTransport(httpx.AsyncBaseTransport):
             return httpx.Response(record["status"], headers={"content-type": record["content_type"]}, content=raw)
         started = time.time()
         assert self.inner is not None
-        response = await self.inner.handle_async_request(request)
-        raw = await response.aread()
+        reservation = self.budget.reserve(body) if self.budget is not None else None
+        try:
+            response = await self.inner.handle_async_request(request)
+            raw = await response.aread()
+        except BaseException as exc:
+            self.tape.write({**self.tape.context, "at": started, "elapsed_s": time.time() - started,
+                "url_path": request.url.path, "status": 0, "content_type": "", "request_sha256": digest,
+                "request": json.loads(body), "request_bytes": len(body), "response_raw": "", "usage": None,
+                "transport_error": type(exc).__name__, "budget_reservation": reservation})
+            if self.budget is not None:
+                self.budget.stop("transport interrupted; preserve reservation until billing is reconciled")
+                from .budget import BudgetStop
+                raise BudgetStop("unknown usage after transport failure") from exc
+            raise
         elapsed = time.time() - started
         content_type = response.headers.get("content-type", "")
         try:
@@ -104,6 +117,7 @@ class _RecordingTransport(httpx.AsyncBaseTransport):
         except ValueError:
             request_json = None
         stream = "event-stream" in content_type
+        usage = _usage_from_stream(raw) if stream else _usage_from_json(raw)
         self.tape.write({
             **self.tape.context,
             "at": started,
@@ -115,8 +129,11 @@ class _RecordingTransport(httpx.AsyncBaseTransport):
             "request": request_json,
             "request_bytes": len(body),
             "response_raw": raw.decode("utf-8", "replace"),
-            "usage": _usage_from_stream(raw) if stream else _usage_from_json(raw),
+            "usage": usage,
+            "budget_reservation": reservation,
         })
+        if self.budget is not None:
+            self.budget.settle(reservation, usage)
         # ``aread`` already decoded the body: pass it on without the
         # encoding and length headers, or the client decodes it a second time,
         # fails, and the adapter retries a request that had succeeded.
@@ -126,7 +143,7 @@ class _RecordingTransport(httpx.AsyncBaseTransport):
 
 
 @contextmanager
-def provider_tape(path: Path, *, mode: str = "record") -> Iterator[_Tape]:
+def provider_tape(path: Path, *, mode: str = "record", budget=None) -> Iterator[_Tape]:
     """Install the recording (or replaying) transport for the provider client."""
 
     from workbench.llm import client as llm_client
@@ -139,7 +156,7 @@ def provider_tape(path: Path, *, mode: str = "record") -> Iterator[_Tape]:
 
     def factory(config):
         inner = None if mode == "replay" else httpx.AsyncHTTPTransport()
-        return httpx.AsyncClient(timeout=config.timeout_s, transport=_RecordingTransport(tape, inner))
+        return httpx.AsyncClient(timeout=config.timeout_s, transport=_RecordingTransport(tape, inner, budget=budget))
 
     llm_client._async_client_factory = factory
     try:

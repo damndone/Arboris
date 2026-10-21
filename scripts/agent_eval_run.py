@@ -35,6 +35,7 @@ from agent_eval.runner import Policy, run_conversation  # noqa: E402
 from agent_eval.external import ExternalTask, blade_tasks, qrdata_subset, replication_tasks, seed_model_for  # noqa: E402
 from agent_eval.heldout import heldout_tasks  # noqa: E402
 from agent_eval.tasks import dev_tasks  # noqa: E402
+from agent_eval.budget import BudgetStop, RoundBudget  # noqa: E402
 from workbench.app import app  # noqa: E402
 from workbench.dev_fixtures.agent_navigation import _wait_for_terminal_run  # noqa: E402
 from workbench.events import get_event_manager  # noqa: E402
@@ -78,12 +79,28 @@ def main() -> int:
                         help="headless = candidate CLI entry; http = explicit legacy HTTP reproduction")
     parser.add_argument("--suite", choices=("dev", "heldout", "external"), default="dev",
                         help="heldout is run once, at the final evaluation only")
+    parser.add_argument("--round-budget-cny", type=str, help="shared CNY stop; maximum authorized for this batch is 5")
+    parser.add_argument("--budget-ledger", type=Path, help="same ledger for both modes, never reset between tasks")
     args = parser.parse_args()
+    if args.round_budget_cny is not None:
+        from decimal import Decimal
+        if not args.budget_ledger or not Decimal(0) < Decimal(args.round_budget_cny) <= Decimal(5):
+            parser.error("a shared ledger and a positive cap no greater than CNY 5 are required")
 
     config = load_llm_config()
     if not config.is_configured():
         print("no model provider configured", file=sys.stderr)
         return 2
+    budget = None
+    if args.round_budget_cny is not None:
+        if config.model != "deepseek-flash" or args.suite != "dev":
+            parser.error("the authorized small budget is pinned to deepseek-flash development tasks")
+        # The approved handoff pins this provider's 1M context. An absent
+        # request max_tokens reserves that whole window; no model config is changed.
+        budget = RoundBudget(args.budget_ledger, cap_cny=args.round_budget_cny, context_tokens=1_048_576)
+        if budget.stopped:
+            print("shared round budget already stopped; no provider call", flush=True)
+            return 86
     selected = {item for item in args.tasks.split(",") if item}
     suite = {"dev": dev_tasks, "heldout": heldout_tasks,
              "external": lambda: [*qrdata_subset(), *blade_tasks(), *replication_tasks()]}[args.suite]()
@@ -111,6 +128,7 @@ def main() -> int:
                    "execution_mode_request": args.mode if args.mode in {"ask", "auto"} else "server_default"},
         "suite": args.suite,
         "tasks": [task.id for task in tasks],
+        "round_budget": str(args.budget_ledger) if budget is not None else None,
     }
     (out / "run_meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -152,10 +170,18 @@ def main() -> int:
                 record["project_root"] = str(project.root)
                 policy = Policy(max_nudges=args.max_nudges, max_wall_s=args.max_wall_s, language=task.language,
                                 mode=args.mode, transport=args.transport)
-                with provider_tape(directory / "provider_tape.jsonl") as tape:
+                with provider_tape(directory / "provider_tape.jsonl", budget=budget) as tape:
                     tape.context = {"task": name}
-                    record["conversation"] = run_conversation(client, project.root, run_id, task.prompt, policy)
+                    record["conversation"] = run_conversation(client, project.root, run_id, task.prompt, policy,
+                        progress_path=directory / "conversation-progress.json")
                 record["status"] = "ran"
+            except BudgetStop as exc:
+                record["status"] = "round_budget_stopped"
+                record["error"] = str(exc)
+                progress = directory / "conversation-progress.json"
+                if progress.exists():
+                    record["conversation"] = json.loads(progress.read_text())
+                    record["conversation"]["stop_reason"] = "round_budget_stopped"
             except RuntimeError as exc:
                 # The person's first step (import plus a first model) failed, so in
                 # v1.9.0 there is no run for the Agent to talk to: the task is
@@ -173,6 +199,9 @@ def main() -> int:
                 record["traceback"] = traceback.format_exc()
             record["elapsed_s"] = round(time.monotonic() - started, 1)
             (directory / "record.json").write_text(json.dumps(record, ensure_ascii=False, indent=1), encoding="utf-8")
+            if record["status"] == "round_budget_stopped":
+                print(f"{name}: shared budget stop; no further tasks or provider requests", flush=True)
+                return 86
             conversation = record.get("conversation") or {}
             # Stop the round when the provider stops serving (402 balance, 5xx):
             # every further task would only record the same failure.
