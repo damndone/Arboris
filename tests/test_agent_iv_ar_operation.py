@@ -167,3 +167,25 @@ def test_report_cannot_cover_a_changed_diagnostic_even_if_current_ar_is_still_va
         'report': {'run_id': run.name, 'artifact_id': report['artifact_id']}})
     assert result['status'] == 'partial' and 'report:result_sources' in result['missing']
     assert not any('iv:diagnostics:' in code for code in result['missing'])
+
+
+def test_the_gate_binds_one_of_repeated_ar_runs_for_the_primary(tmp_path):
+    """Paid fix3 round (iv_weak, Ask): the Agent ran the same AR twice; stored as
+    post_estimation, neither was bound and the gate's one-AR rule would refuse two."""
+    from workbench.agent.completion import derive_evidence, evaluate
+    from workbench.agent.workflow import execute_workflow
+    project, contract, evidence = build_products(tmp_path / 'repeat')
+    run = contract['source']['run_id']
+    artifacts = []
+    for name in ('ar-first', 'ar-again'):
+        state = execute_workflow(project, ar_workflow(project, contract, name=name))
+        assert state.status == 'completed', state.to_dict()
+        artifacts += state.steps['ar'].artifact_ids
+    named_both = {'models': evidence['models'], 'diagnostics': [
+        *evidence['diagnostics'], *({'run_id': run, 'artifact_id': a} for a in artifacts)]}
+    for given in ({'models': evidence['models']}, named_both):
+        derived, notes = derive_evidence(project, contract, given)
+        ars = [d for d in derived['diagnostics'] if d['artifact_id'] in artifacts]
+        assert len(ars) == 1
+        result = evaluate(project, contract, derived)
+        assert not any(code.startswith('iv:diagnostics:') for code in result['missing']), result['missing']

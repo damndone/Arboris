@@ -552,7 +552,7 @@ def derive_evidence(project_root, contract, evidence):
 
     runs = sorted((path.name for path in products.runs.iterdir()
                    if path.is_dir() and not path.name.startswith(('_', '.'))), reverse=True)[:DERIVE_RUN_LIMIT]
-    models, diagnostics, reports = [], [], []
+    models, diagnostics, reports, post_estimation = [], [], [], []
     for run in runs:
         for ref in completion_candidate_refs(products.runs / run):
             artifact = products.load(ref)
@@ -560,6 +560,8 @@ def derive_evidence(project_root, contract, evidence):
                 continue
             if artifact.artifact_type in _DIAGNOSTIC_TYPES:
                 diagnostics.append(ref)
+            elif artifact.artifact_type == 'post_estimation':
+                post_estimation.append((ref, artifact))
             elif artifact.artifact_type == 'report':
                 reports.append((ref, artifact))
             elif (model := products.model(ref, artifact)) is not None and bound(ref):
@@ -628,6 +630,24 @@ def derive_evidence(project_root, contract, evidence):
         else:
             own += [plain(ref) for ref in diagnostics if ref['run_id'] == primary['run_id']
                     and (products.diagnostic(ref, products.load(ref)) or {}).get('model_id') == model['model_id']]
+    # An IV primary's AR set: the gate accepts exactly one verified result for the
+    # model, and re-running the same request is not a choice, so the newest is
+    # used and any others are left out (paid fix3 round: two identical AR runs,
+    # stored as post_estimation, were never bound and the task could not finish).
+    ar_refs = set()
+    for primary in primaries:
+        model = next(model for ref, model in models if plain(ref) == primary)
+        if model.get('model_type') not in PLAYBOOKS['iv']:
+            continue
+        matches = [plain(ref) for ref, artifact in post_estimation
+                   if verified_iv_ar(products, primary, model, ref, artifact) is not None]
+        if matches:
+            newest_run = matches[0]['run_id']  # runs are scanned newest first
+            chosen = [ref for ref in matches if ref['run_id'] == newest_run][-1]
+            ar_refs.update((ref['run_id'], ref['artifact_id']) for ref in matches)
+            own.append(chosen)
+            ar_refs.discard((chosen['run_id'], chosen['artifact_id']))
+    given_diagnostics = [ref for ref in given_diagnostics if (ref['run_id'], ref['artifact_id']) not in ar_refs]
     result['diagnostics'] = list({(r['run_id'], r['artifact_id']): r for r in given_diagnostics + own}.values())[:24]
     if own:
         notes['bound_by_workbench'].append('diagnostics')
