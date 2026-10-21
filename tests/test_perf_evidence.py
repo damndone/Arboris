@@ -125,24 +125,6 @@ def test_existing_ols_sample_arrays_are_not_reencoded_in_the_journal(evidence, t
     assert tests['ols_1']['x']['estimate_over_se'] == 2.
 
 
-def test_fixed_input_uses_links_for_snapshot_and_upload_not_copies(evidence, tmp_path):
-    import shutil
-    from workbench.lineage import upload_store
-    source = tmp_path/'fixed.csv'
-    source.write_bytes(b'x,y\n1,2\n')
-    project = tmp_path/'project'
-    target = project/'raw_snapshot/fixed.csv'
-    target.parent.mkdir(parents=True)
-    original = shutil.copy2
-    with evidence.fixed_input_links(source, evidence.digest(source)) as counts:
-        shutil.copy2(source, target)
-        sha = upload_store.store_upload_bytes(project, source.read_bytes(), filename='fixed.csv')
-        assert source.stat().st_ino == target.stat().st_ino
-        assert (project/'data/uploads'/sha).stat().st_ino == source.stat().st_ino
-        assert counts['input_hardlinks'] == 2
-    assert shutil.copy2 is original
-
-
 def test_ten_gb_floor_blocks_measurement(evidence, tmp_path, monkeypatch):
     import shutil
     from types import SimpleNamespace

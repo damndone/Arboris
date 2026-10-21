@@ -45,8 +45,8 @@ def test_worker_only_runs_workflow_on_registered_input(lane, tmp_path, monkeypat
     assert lane.family_run('panel', out, manifest=manifest) == 0
     metrics = json.loads((out / 'metrics.json').read_text())
     assert metrics['input_sha256'] == json.loads(manifest.read_text())['sha256']
-    assert metrics['measurement_scope'] == 'fresh_worker_shared_input_tracemalloc_enabled'
-    assert metrics['tracemalloc_peak_bytes'] > 0
+    assert metrics['measurement_scope'] == 'fresh_worker_default_product_path'
+    assert metrics['tracemalloc_peak_bytes'] is None
     assert metrics['run_bytes'] > 0
 
 
@@ -97,9 +97,10 @@ def test_trace_memory_noise_does_not_claim_native_rss_is_stable(lane):
     assert lane.noise_accepted(lane.baseline_noise(runs, metrics=('tracemalloc_peak_bytes', 'run_bytes')))
 
 
-@pytest.mark.parametrize('candidate_seconds,expected_exit', [(10.1, 0), (10000., 1)])
+@pytest.mark.parametrize('candidate_seconds,expected_exit,baseline_seconds', [(10.1, 0, 10.), (10000., 1, 10.), (14., 1, 14.)])
+@pytest.mark.parametrize('traced', [False, True])
 def test_trace_lane_journals_then_deletes_each_run_and_gates_relative_time(lane, tmp_path, monkeypatch,
-                                                                       candidate_seconds, expected_exit):
+                                                                       candidate_seconds, expected_exit, baseline_seconds, traced):
     import shutil
     import subprocess
     # Protocol unit test: mock the machine resource boundary along with the
@@ -122,6 +123,9 @@ def test_trace_lane_journals_then_deletes_each_run_and_gates_relative_time(lane,
     monkeypatch.setattr(subprocess, 'check_output', git)
     calls = []
     def worker(command, **kwargs):
+        assert 'env' not in kwargs, 'benchmark must inherit the environment unchanged'
+        assert '--profile-stages' not in command
+        assert ('--trace-memory' in command) is traced
         destination = Path(command[command.index('--out')+1])
         destination.mkdir(parents=True)
         manifest = json.loads(Path(command[command.index('--manifest')+1]).read_text())
@@ -135,21 +139,25 @@ def test_trace_lane_journals_then_deletes_each_run_and_gates_relative_time(lane,
         run = destination/'benchmark/runs/r1'
         (run/'model_results').mkdir(parents=True)
         (run/'model_results/panel_ols_1.json').write_text('{"coefficients":{"x":{"estimate":1.0,"std_error":0.5}}}')
-        metrics = dict(seconds=candidate_seconds if candidate else 10., rss_bytes=100, ru_maxrss=100,
+        metrics = dict(seconds=candidate_seconds if candidate else baseline_seconds, rss_bytes=100, ru_maxrss=100,
                        run_bytes=1, tracemalloc_peak_bytes=10, input_sha256=manifest['sha256'],
                        run_root=str(run), numeric_signature={'coefficient': '0x1p0'})
         (destination / 'metrics.json').write_text(json.dumps(metrics))
         return SimpleNamespace(returncode=0)
     monkeypatch.setattr(subprocess, 'run', worker)
     out = tmp_path / 'measured'
-    assert lane.ab_main(['--ab', '--baseline-repo', str(baseline), '--out', str(out),
-                         '--inputs', str(tmp_path/'inputs'),
-                         '--cases', 'panel', '--trace-memory']) == expected_exit
+    command = ['--ab', '--baseline-repo', str(baseline), '--out', str(out),
+               '--inputs', str(tmp_path/'inputs'), '--cases', 'panel']
+    if traced:
+        command.append('--trace-memory')
+    # Traced time is diagnostic; only the uninstrumented lane certifies time.
+    assert lane.ab_main(command) == (0 if traced else expected_exit)
     assert calls == ['A']*5+list('AB'*5)
     assert not (out/'active').exists()
     report = json.loads((out/'ab-results.json').read_text())
-    assert report['absolute_uninstrumented_caps'] == 'not_certified_by_instrumented_timings'
-    assert set(report['cases']['panel']['budgets']) == {'seconds', 'rss_bytes', 'tracemalloc_peak_bytes', 'run_bytes'}
+    assert report['default_product_path'] is True
+    assert report['time_acceptance_eligible'] is not traced
+    assert set(report['cases']['panel']['budgets']) == ({'rss_bytes', 'tracemalloc_peak_bytes', 'run_bytes'} if traced else {'seconds', 'rss_bytes', 'run_bytes'})
 
 
 def test_traced_stage_memory_difference_is_reported_separately_from_rss(lane):
@@ -169,8 +177,31 @@ def test_real_workflow_reuses_registered_input_and_retains_numeric_results(lane,
     payload = json.loads(manifest.read_text())
     assert lane.family_run('panel', tmp_path/'active', manifest=manifest) == 0
     metrics = json.loads((tmp_path/'active/metrics.json').read_text())
-    assert metrics['input_io']['input_hardlinks'] == 2
+    assert metrics['default_product_path'] is True
     links = [p for p in (tmp_path/'active').rglob('*') if p.is_file()
              and p.stat().st_ino == Path(payload['source']).stat().st_ino]
-    assert len(links) == 2
+    assert len(links) == 0
+    copies = [p for p in (tmp_path/'active').rglob('*') if p.is_file() and p.stat().st_size == Path(payload['source']).stat().st_size]
+    assert len(copies) == 2
+    assert all(lane.source_digest(p) == payload['sha256'] for p in copies)
     assert metrics['numeric_signature']['coefficients']['x1']['estimate']['binary64']
+
+
+def test_default_worker_does_not_replace_product_io_or_stage_functions(lane, tmp_path, monkeypatch):
+    import shutil
+    from workbench.lineage import upload_store
+    from workbench.engine.stages import PIPELINE
+    monkeypatch.setattr(shutil, 'disk_usage', lambda _: SimpleNamespace(free=10**12))
+    manifest = lane.prepare_family('panel', tmp_path/'input', rows=40)
+    copy, store = shutil.copy2, upload_store.store_upload_bytes
+    stages = [type(stage).run for stage in PIPELINE]
+    def workflow(root, sources, **kwargs):
+        assert shutil.copy2 is copy
+        assert upload_store.store_upload_bytes is store
+        assert [type(stage).run for stage in PIPELINE] == stages
+        run = root/'runs/r1/model_results'
+        run.mkdir(parents=True)
+        (run/'panel_ols_1.json').write_text('{"nobs":40,"coefficients":{"x":{"estimate":1.0,"std_error":0.5}}}')
+        return {'status':'completed','run_id':'r1'}
+    monkeypatch.setattr(lane, 'run_workflow', workflow)
+    assert lane.family_run('panel', tmp_path/'active', manifest=manifest) == 0

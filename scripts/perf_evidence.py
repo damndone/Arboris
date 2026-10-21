@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-from contextlib import contextmanager
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -310,37 +309,6 @@ def require_space(path):
     if free < MIN_FREE_BYTES:
         raise SystemExit(f'Only {free/1e9:.3f} GB free; 10 GB minimum. Measurement not started.')
     return free
-
-
-@contextmanager
-def fixed_input_links(source, expected_sha256):
-    """Benchmark-only I/O policy; numerical workflow and byte identities stay real."""
-    from workbench.lineage import upload_store
-    copy = shutil.copy2
-    store = upload_store.store_upload_bytes
-    source = source.absolute()
-    counts = {'input_hardlinks': 0, 'input_physical_copies': 0}
-    def copy_input(src, dst, *args, **kwargs):
-        if Path(src).absolute() == source:
-            os.link(source, dst)
-            counts['input_hardlinks'] += 1
-            return str(dst)
-        return copy(src, dst, *args, **kwargs)
-    def store_input(project_root, data, *, filename):
-        sha = hashlib.sha256(data).hexdigest()
-        if sha != expected_sha256:
-            raise ValueError('unexpected benchmark upload bytes')
-        target = project_root/'data/uploads'/sha
-        target.parent.mkdir(parents=True, exist_ok=True)
-        if not target.exists():
-            os.link(source, target)
-            counts['input_hardlinks'] += 1
-        return sha
-    shutil.copy2, upload_store.store_upload_bytes = copy_input, store_input
-    try:
-        yield counts
-    finally:
-        shutil.copy2, upload_store.store_upload_bytes = copy, store
 
 
 def finalize_active(active, *, ledger, record_id, metadata, archive_dir, version, case):

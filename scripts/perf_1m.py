@@ -25,16 +25,10 @@ import pandas as pd
 sys.path.insert(0, str(Path.cwd() / "backend"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from perf_evidence import fixed_input_links, finalize_active, require_space  # noqa: E402
+from perf_evidence import finalize_active, require_space  # noqa: E402
 
-from workbench import analysis_disclosure, analysis_ledger  # noqa: E402
-from workbench.data_operation_registry import get_data_operation  # noqa: E402
 from workbench.orchestrator import run_workflow  # noqa: E402
 from workbench.projects import create_project  # noqa: E402
-from workbench.services.data_export import export_dataset, preview_export  # noqa: E402
-from workbench.services.dataset_view import dataset_page, dataset_variables, load_dataset  # noqa: E402
-from workbench.services.results_service import read_model_results  # noqa: E402
-from workbench.statistical_exploration import ExplorationSpec, execute_exploration  # noqa: E402
 
 ROWS = 1_000_000
 
@@ -83,6 +77,13 @@ def _dataset(path: Path, rows: int = ROWS) -> Path:
 
 
 def interactive_main() -> int:
+    from workbench import analysis_disclosure, analysis_ledger
+    from workbench.data_operation_registry import get_data_operation
+    from workbench.services.data_export import export_dataset, preview_export
+    from workbench.services.dataset_view import dataset_page, dataset_variables, load_dataset
+    from workbench.services.results_service import read_model_results
+    from workbench.statistical_exploration import ExplorationSpec, execute_exploration
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", type=Path, default=Path(tempfile.gettempdir()) / "perf-1m")
     args = parser.parse_args()
@@ -312,28 +313,7 @@ def compare_stages(baseline, candidate):
     return differences
 
 
-def instrument_stages(rows):
-    from workbench.engine.stages import PIPELINE
-    import resource
-    import tracemalloc
-    for stage in PIPELINE:
-        original = type(stage).run
-        def measured(self, ctx, env, _run=original):
-            before = current_rss()
-            traced_before = tracemalloc.get_traced_memory()[0]
-            high_before = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-            start = time.perf_counter()
-            result = _run(self, ctx, env)
-            rows.append(dict(stage=type(self).__name__, seconds=time.perf_counter()-start,
-                             rss_before=before, rss_after=current_rss(),
-                             traced_before=traced_before, traced_after=tracemalloc.get_traced_memory()[0],
-                             high_water_before=high_before,
-                             high_water_after=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss))
-            return result
-        type(stage).run = measured
-
-
-def family_run(case, out, *, manifest, stage_profile=False, trace_memory=True):
+def family_run(case, out, *, manifest, trace_memory=False):
     import json
     import resource
     import platform
@@ -345,16 +325,12 @@ def family_run(case, out, *, manifest, stage_profile=False, trace_memory=True):
         raise ValueError('manifest_case_mismatch')
     require_space(out.parent)
     out.mkdir(parents=True, exist_ok=False)
-    stages = []
-    if stage_profile:
-        instrument_stages(stages)
     if trace_memory:
         import tracemalloc
         tracemalloc.start()
     project = create_project(out, 'benchmark')
     started = time.perf_counter()
-    with fixed_input_links(source, payload['sha256']) as input_io:
-        outcome = run_workflow(project.root, [source], mode='auto', **kwargs)
+    outcome = run_workflow(project.root, [source], mode='auto', **kwargs)
     elapsed = time.perf_counter()-started
     rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     traced_peak = None
@@ -377,10 +353,10 @@ def family_run(case, out, *, manifest, stage_profile=False, trace_memory=True):
                                            'r_squared', 'r_squared_adj', 'df_model',
                                            'df_resid', 'covariance') if k in packet})
     result = {'case': case, 'rows': n, 'status': outcome['status'], 'seconds': elapsed,
-              'input_sha256': payload['sha256'], 'measurement_scope': 'fresh_worker_shared_input_tracemalloc_enabled',
-              'input_io': input_io, 'timing_instrumentation': 'tracemalloc',
-              'absolute_uninstrumented_time_caps': 'not_assessed_by_this_instrumented_time',
-              'tracemalloc_peak_bytes': traced_peak, 'stages': stage_summary(stages),
+              'input_sha256': payload['sha256'], 'measurement_scope': 'fresh_worker_default_product_path', 'default_product_path': True,
+              'input_io': 'unmodified_product_writes', 'timing_instrumentation': 'tracemalloc' if trace_memory else 'none',
+              'time_acceptance_eligible': not trace_memory,
+              'tracemalloc_peak_bytes': traced_peak,
               'ru_maxrss': rss, 'rss_bytes': rss if platform.system() == 'Darwin' else rss*1024,
               'run_bytes': sum(p.stat().st_size for p in run.rglob('*') if p.is_file()),
               'numeric_signature': signature, 'run_root': str(run)}
@@ -445,8 +421,7 @@ def ab_main(argv):
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--inputs', type=Path)
     parser.add_argument('--cases', nargs='+', choices=list(FAMILY_ROWS), default=list(FAMILY_ROWS))
-    parser.add_argument('--profile-stages', action='store_true')
-    parser.add_argument('--trace-memory', action='store_true', help='Always enabled in protocol v3; accepted for compatibility')
+    parser.add_argument('--trace-memory', action='store_true', help='Same-run allocation tracing; memory lane only, no absolute time acceptance')
     args = parser.parse_args(argv)
     out = args.out.resolve()
     require_space(out)
@@ -461,14 +436,14 @@ def ab_main(argv):
         raise SystemExit('Baseline must be exact v1.9.0')
     difference = subprocess.check_output(['git','diff','--binary','HEAD'], cwd=candidate)
     (out/'candidate.patch').write_bytes(difference)
-    report = {'measurement_version': 3, 'candidate_diff_sha256': hashlib.sha256(difference).hexdigest(),
+    report = {'measurement_version': 4, 'candidate_diff_sha256': hashlib.sha256(difference).hexdigest(),
               'driver_sha256': source_digest(Path(__file__)),
               'thread_environment': {key: os.environ.get(key) for key in ('OMP_NUM_THREADS','OPENBLAS_NUM_THREADS','VECLIB_MAXIMUM_THREADS','MKL_NUM_THREADS','PYTHONHASHSEED')},
               'revisions': revisions, 'order': [f'{lane}{i}' for i in range(1,6) for lane in 'AB'],
               'noise_definition': 'sample_standard_deviation/median; all observations', 'multiplier':1.05,
-              'trace_memory':True, 'time_scope':'relative_wall_time_with_tracemalloc_on_both_versions',
-              'absolute_uninstrumented_caps':'not_certified_by_instrumented_timings',
-              'inputs_policy':'one_fixed_CSV_per_case; physical_copy_count_zero; hardlink_admission_paths',
+              'trace_memory':args.trace_memory, 'time_acceptance_eligible':not args.trace_memory,
+              'default_product_path':True, 'worker_environment':'inherited unchanged',
+              'inputs_policy':'one_fixed_CSV_per_case; product snapshots/uploads written normally',
               'retention':'one_active_tree; durable_verified_JSONL_then_removal; one_archive_per_case_release',
               'minimum_free_bytes':10_000_000_000, 'cases':{}}
     failed = []
@@ -485,6 +460,7 @@ def ab_main(argv):
         report['cases'][case] = case_report
         def run(label):
             free = require_space(out)
+            idle_processes(out)
             if active.exists():
                 raise SystemExit('Unrecorded active tree exists; refusing a second run')
             lane = 'baseline' if label.startswith('A') else 'candidate'
@@ -494,12 +470,16 @@ def ab_main(argv):
                 raise SystemExit('Repository changed during measurement')
             registered_source(payload)
             command = [str(candidate/'.venv/bin/python'), str(driver), '--case',case,
-                       '--out',str(active),'--manifest',str(manifest),'--trace-memory']
-            if args.profile_stages:
-                command.append('--profile-stages')
-            env = dict(os.environ,PYTHONPATH=str(repo/'backend'),LC_ALL='en_US.UTF-8',LANG='en_US.UTF-8')
+                       '--out',str(active),'--manifest',str(manifest)]
+            if args.trace_memory:
+                command.append('--trace-memory')
             with (out/f'{case}-{label}.log').open('w') as log:
-                result = subprocess.run(command,cwd=repo,env=env,stdout=log,stderr=subprocess.STDOUT)
+                result = subprocess.run(command,cwd=repo,stdout=log,stderr=subprocess.STDOUT)
+            overlap = None
+            try:
+                idle_processes(out)
+            except SystemExit as error:
+                overlap = str(error)
             registered_source(payload)
             metrics = active/'metrics.json'
             if metrics.exists():
@@ -509,19 +489,19 @@ def ab_main(argv):
                 value = dict(case=case,status='failed',seconds=None,ru_maxrss=None,tracemalloc_peak_bytes=None,
                              run_root=str(active/'uncompleted'),numeric_signature={},input_sha256=payload['sha256'])
             value.update(version_commit=commit, driver_sha256=report['driver_sha256'],
-                         measurement_version=3,input_source=payload['source'],free_before_bytes=free,
-                         returncode=result.returncode,label=label)
+                         measurement_version=4,input_source=payload['source'],free_before_bytes=free,
+                         returncode=result.returncode,label=label,host_overlap=overlap)
             retention = finalize_active(active,ledger=ledger,record_id=f'{case}-{label}',metadata=value,
                                         archive_dir=out.parent/'representatives',
                                         version='v1.9.0' if lane=='baseline' else 'v1.9.1',case=case)
             value['retention'] = retention
-            if result.returncode:
+            if result.returncode or overlap:
                 case_report.setdefault('failed_runs',[]).append(value)
                 save()
                 raise SystemExit(f'{case} {label} failed; evidence retained and active tree removed')
-            print(f"{case} {label}: {value['seconds']:.6f}s traced, RSS {value['rss_bytes']/2**20:.3f} MiB, traced peak {value['tracemalloc_peak_bytes']}, disk {value['run_bytes']}; recorded then removed",flush=True)
+            print(f"{case} {label}: {value['seconds']:.6f}s, trace={args.trace_memory}, RSS {value['rss_bytes']/2**20:.3f} MiB, traced peak {value['tracemalloc_peak_bytes']}, disk {value['run_bytes']}; recorded then removed",flush=True)
             return value
-        noise_keys = ('seconds','tracemalloc_peak_bytes','run_bytes')
+        noise_keys = ('tracemalloc_peak_bytes','run_bytes') if args.trace_memory else ('seconds','run_bytes')
         while True:
             calibration.append(run(f'A0_{len(calibration)+1:02}'))
             save()
@@ -537,25 +517,25 @@ def ab_main(argv):
         for label in report['order']:
             records[label[0]].append(run(label))
             save()
-        keys = RESOURCE_METRICS+('tracemalloc_peak_bytes',)
+        keys = RESOURCE_METRICS+(('tracemalloc_peak_bytes',) if args.trace_memory else ())
         medians = {lane:{key:statistics.median(r[key] for r in runs) for key in keys} for lane,runs in records.items()}
         accepted = noise_keys+(('rss_bytes',) if case_report['native_rss_noise'] < .05 else ())
         budgets = {key:medians['A'][key]*1.05 for key in accepted}
+        absolute_cap = None if args.trace_memory else {'panel':12.2,'iv':15.1}.get(case)
+        if absolute_cap is not None:
+            budgets['seconds'] = min(budgets['seconds'],absolute_cap)
         misses = [key for key,limit in budgets.items() if medians['B'][key]>limit]
+        if not args.trace_memory and case_report['native_rss_noise'] >= .05:
+            misses.append('native_rss_noise_requires_tracemalloc')
         signatures = [r['numeric_signature'] for runs in records.values() for r in runs]
         if not signatures[0] or not all(value==signatures[0] for value in signatures):
             misses.append('numeric_bits')
         case_report.update(medians=medians,budgets=budgets,failed=misses,
-                           memory_metric='rss_and_tracemalloc' if 'rss_bytes' in accepted else 'tracemalloc_due_to_native_rss_noise')
-        if args.profile_stages:
-            a = dict(medians['A'],stages=median_stages(records['A']))
-            b = dict(medians['B'],stages=median_stages(records['B']))
-            case_report['stage_comparison'] = compare_stages(a,b)
-            if any(value['over_one_percent'] for value in case_report['stage_comparison'].values()):
-                misses.append('stage_attribution_pending')
+                           absolute_seconds_cap=absolute_cap,
+                           memory_metric=('rss_and_tracemalloc' if args.trace_memory else 'rss') if 'rss_bytes' in accepted else ('tracemalloc_due_to_native_rss_noise' if args.trace_memory else 'unaccepted_rss_noise'))
         save()
         failed.extend(f'{case}:{key}' for key in misses)
-    print('RELATIVE TRACED CHECKS PASS; absolute uninstrumented caps unassessed' if not failed else 'FAIL '+', '.join(failed),flush=True)
+    print(('DEFAULT PATH MEMORY CHECKS PASS; traced time is diagnostic' if args.trace_memory else 'DEFAULT PATH CHECKS PASS') if not failed else 'FAIL '+', '.join(failed),flush=True)
     return int(bool(failed))
 
 
@@ -567,11 +547,10 @@ def main():
         parser.add_argument('--case', choices=list(FAMILY_ROWS), required=True)
         parser.add_argument('--out', type=Path, required=True)
         parser.add_argument('--manifest', type=Path, required=True)
-        parser.add_argument('--profile-stages', action='store_true')
         parser.add_argument('--trace-memory', action='store_true')
         args = parser.parse_args()
         return family_run(args.case, args.out.resolve(), manifest=args.manifest,
-                          stage_profile=args.profile_stages, trace_memory=True)
+                          trace_memory=args.trace_memory)
     return interactive_main()
 
 

@@ -45,7 +45,11 @@ model, containment, browser, performance, or release acceptance evidence.
   statistics must remain bit-identical; do not widen reference tolerances.
 - Check free disk space before every measurement; below 10 GB, report and do
   not start. Keep one fixed CSV per family under `local/perf-inputs/`, with
-  its registered SHA256; reuse it without physical per-run copies.
+  its registered SHA256; the reproducer must not make per-run input copies.
+  Product snapshots/uploads remain normal product outputs. Do not patch product
+  functions, replace file writes, change configuration or alter the worker
+  environment for measurement. Timing/memory observation stays outside product
+  functions; traced timings do not certify uninstrumented time limits.
 - Only one active benchmark run directory may exist. Before removing it,
   durably journal commit, case, elapsed time, ru_maxrss, optional same-run
   tracemalloc peak, directory bytes, every file's path/size/SHA256 and principal
