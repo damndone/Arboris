@@ -669,7 +669,13 @@ class WorkbenchOrchestrator(OrchestrationWorkflows, OrchestrationProposals, Orch
             # Named back to the Agent: a reference that does not resolve to the right kind
             # of verified product is not evidence, whatever it was meant to be.
             result['dropped_references'] = bound['dropped'][:12]
-        if bound['primary_candidates']:
+        if result['status'] == 'requirements_met':
+            # In the paid fix2 round (iv_weak, Auto) the Agent met every requirement and still
+            # would not call the analysis complete, reading not_certified as unfinished.
+            result['next_step'] = ('Delivery requirements are met: report this analysis as complete and state its '
+                                   'scientific limitations. A finding that the data cannot support the requested '
+                                   'claim is a complete answer, not a missing step.')
+        elif bound['primary_candidates']:
             result['primary_candidates'] = bound['primary_candidates']
             result['next_step'] = ('Several fits are eligible as the primary model. Choose one by the fixed '
                                    'specification and question, never by significance, and call update_plan with '
