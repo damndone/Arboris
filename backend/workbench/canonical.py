@@ -38,6 +38,11 @@ def _normalize(value: Any) -> Any:
             normalized[normalized_key] = _normalize(item)
         return normalized
     if isinstance(value, (list, tuple)):
+        if _numeric_list(value):
+            # Same text as normalizing each item: zero is encoded "0" either way.
+            if not all(map(math.isfinite, value)):
+                raise CanonicalJSONError("canonical JSON does not allow NaN or Infinity")
+            return list(value)
         return [_normalize(item) for item in value]
     if value is None or isinstance(value, (bool, int)):
         return value
@@ -67,6 +72,8 @@ def _encode_json(value: Any) -> str:
     if isinstance(value, str):
         return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
     if isinstance(value, list):
+        if _numeric_list(value):
+            return "[" + ",".join(_encode_numbers(value)) + "]"
         return "[" + ",".join(_encode_json(item) for item in value) + "]"
     if isinstance(value, dict):
         items = (
@@ -79,6 +86,30 @@ def _encode_json(value: Any) -> str:
     raise CanonicalJSONError(
         f"unsupported canonical JSON value: {type(value).__name__}"
     )
+
+
+def _numeric_list(value: list | tuple) -> bool:
+    """Only ints and floats (bool is an int subclass and is excluded)."""
+    return all(type(item) is float or type(item) is int for item in value)
+
+
+def _encode_numbers(values: list | tuple) -> list[str]:
+    """Each distinct number is formatted once.
+
+    Data columns repeat values heavily, and a 1,000,000-row OLS fingerprint
+    formatted six million numbers one by one (about 6 s of the 20.9 s import
+    + OLS run). Dict keys treat -0.0 and 0.0 as equal, and both encode as "0".
+    """
+    cache: dict[float | int, str] = {}
+    out = []
+    append = out.append
+    for item in values:
+        text = cache.get(item)
+        if text is None:
+            text = _canonical_int(item) if type(item) is int else _canonical_float(item)
+            cache[item] = text
+        append(text)
+    return out
 
 
 def _canonical_float(value: float) -> str:
