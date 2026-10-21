@@ -94,11 +94,11 @@ class TurnJournal:
         return json.loads(json.dumps(payload, ensure_ascii=False, allow_nan=False))
 
     def save(self, core, stage, **details):
-        states = [e for e in self.repository.get_branch(self.session_id)
-                  if e.entry_type == "turn_state" and e.payload.get("command_id") == self.record.command_id]
+        # turn_state entries are written only here, keyed by their command id.
+        states = self.repository.count_on_branch(self.session_id, entry_type="turn_state", key=self.record.command_id)
         payload = self._payload(core, stage, command_id=self.record.command_id, turn_id=self.record.turn_id, **details)
         entry = self.repository.append_once(self.session_id, "turn_state", payload,
-                                            key=self.record.command_id, stage=f"checkpoint:{len(states)}")
+                                            key=self.record.command_id, stage=f"checkpoint:{states}")
         self._edit(self.store.checkpoint, steps_used=core._steps_used,
                    wall_s_used=max(self.record.wall_s_used, time.time() - self.started_at),
                    checkpoint={"state_entry_id": entry.entry_id})

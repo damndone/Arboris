@@ -13,8 +13,9 @@ import os
 import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from collections import OrderedDict
 from pathlib import Path
-from threading import RLock
+from threading import Lock, RLock
 from typing import Any
 from uuid import uuid4
 
@@ -138,6 +139,87 @@ class SessionHasBranchesError(ValueError):
         self.branches = branches
 
 
+@dataclass
+class _LogIndex:
+    """One version of a session log: its lines and where each entry is.
+
+    Payloads are not kept parsed: every reader still gets objects of its own,
+    so a caller that changes what it was given cannot change another's view.
+    """
+
+    identity: tuple[int, int, int]
+    data: bytes
+    lines: list[str]
+    by_id: dict[str, list[int]]
+    by_key: dict[tuple[str, str], list[int]]
+    #: Per line: entry type, parent reference and idempotency key, enough to
+    #: walk and count a branch without parsing payloads.
+    meta: list[tuple[str, dict[str, Any] | None, str | None]]
+
+
+#: Parsed-log indexes shared by every repository in the process (routes build a
+#: repository per request). Reading the whole log for every entry lookup made
+#: one real 52-step v1.9.1 session spend about 45 s per turn parsing JSON.
+_LOG_INDEXES: OrderedDict[str, _LogIndex] = OrderedDict()
+_LOG_INDEX_LOCK = Lock()
+_LOG_INDEX_LIMIT = 32
+
+
+def _index_line(index: _LogIndex, line: str) -> None:
+    position = len(index.lines)
+    value = json.loads(line)
+    index.lines.append(line)
+    entry_id = str(value["entry_id"])
+    index.by_id.setdefault(entry_id, []).append(position)
+    identity = value.get("idempotency")
+    if identity is not None:
+        index.by_key.setdefault((str(identity["key"]), str(identity["stage"])), []).append(position)
+    index.meta.append((str(value["entry_type"]), value.get("parent_ref"),
+                       str(identity["key"]) if identity is not None else None))
+
+
+def _log_index(path: Path) -> _LogIndex:
+    """The current log, parsing only what was appended since the last read.
+
+    Every write replaces the file (new inode), so a changed identity is noticed
+    whoever wrote it; an appended log keeps the cached bytes as its prefix.
+    """
+
+    try:
+        stat = path.stat()
+        identity = (stat.st_ino, stat.st_size, stat.st_mtime_ns)
+        key = str(path.resolve())
+        with _LOG_INDEX_LOCK:
+            cached = _LOG_INDEXES.get(key)
+            if cached is not None and cached.identity == identity:
+                _LOG_INDEXES.move_to_end(key)
+                return cached
+        data = path.read_bytes()
+    except FileNotFoundError as exc:
+        raise KeyError(f"unknown session: {path.stem}") from exc
+    if (cached is not None and (not cached.data or cached.data.endswith(b"\n"))
+            and data.startswith(cached.data)):
+        index = _LogIndex(identity, data, list(cached.lines), {k: list(v) for k, v in cached.by_id.items()},
+                          {k: list(v) for k, v in cached.by_key.items()}, list(cached.meta))
+        tail = data[len(cached.data):]
+    else:
+        index = _LogIndex(identity, data, [], {}, {}, [])
+        tail = data
+    for line in tail.decode("utf-8").splitlines():
+        if line.strip():
+            _index_line(index, line)
+    with _LOG_INDEX_LOCK:
+        _LOG_INDEXES[key] = index
+        _LOG_INDEXES.move_to_end(key)
+        while len(_LOG_INDEXES) > _LOG_INDEX_LIMIT:
+            _LOG_INDEXES.popitem(last=False)
+    return index
+
+
+def _entry_at(index: _LogIndex, position: int) -> "SessionTreeEntry":
+    return SessionTreeEntry.from_dict(json.loads(index.lines[position]))
+
+
 class JsonlSessionRepository:
     """Small file-backed repository with append-only entry semantics."""
 
@@ -240,9 +322,8 @@ class JsonlSessionRepository:
                 if intent["idempotency"] != identity:
                     raise SessionAppendPendingError("pending append belongs to a different key, stage or payload")
                 return self._finish_append_intent(session_id, intent, payload=payload)
-            entries = self._read_entries(session_id)
-            matches = [entry for entry in entries if entry.idempotency is not None
-                       and (entry.idempotency["key"], entry.idempotency["stage"]) == (key, stage)]
+            index = _log_index(self._session_path(session_id))
+            matches = [_entry_at(index, position) for position in index.by_key.get((key, stage), ())]
             if matches:
                 if len(matches) != 1:
                     raise SessionAppendConflict("append-once identity conflict: duplicate recorded entries")
@@ -283,11 +364,10 @@ class JsonlSessionRepository:
         current = self._pointer_state(metadata)
         if current != base and current != committed:
             raise SessionAppendPendingError("pending append does not match the current metadata branch")
-        entries = self._read_entries(session_id)
-        matches = [entry for entry in entries if entry.entry_id == intent["entry_id"]]
-        same_keys = [entry for entry in entries if entry.idempotency is not None
-                     and (entry.idempotency["key"], entry.idempotency["stage"]) == (
-                         intent["idempotency"]["key"], intent["idempotency"]["stage"])]
+        index = _log_index(self._session_path(session_id))
+        matches = [_entry_at(index, position) for position in index.by_id.get(intent["entry_id"], ())]
+        same_keys = [_entry_at(index, position) for position in index.by_key.get(
+            (intent["idempotency"]["key"], intent["idempotency"]["stage"]), ())]
         if len(matches) > 1 or any(entry.entry_id != intent["entry_id"] for entry in same_keys):
             raise SessionAppendPendingError("pending append identity conflicts with the recorded log")
         if matches:
@@ -497,9 +577,10 @@ class JsonlSessionRepository:
 
     def get_entry(self, ref: EntryRef) -> SessionTreeEntry:
         with self._lock:
-            for entry in self._read_entries(ref.session_id):
-                if entry.entry_id == ref.entry_id:
-                    return entry
+            index = _log_index(self._session_path(ref.session_id))
+            positions = index.by_id.get(ref.entry_id)
+            if positions:
+                return _entry_at(index, positions[0])
         raise KeyError(f"unknown session entry: {ref.session_id}/{ref.entry_id}")
 
     def get_branch(
@@ -510,45 +591,55 @@ class JsonlSessionRepository:
     ) -> list[SessionTreeEntry]:
         """Return the resolved branch without copying ancestor entries."""
 
+        with self._lock:
+            return [_entry_at(index, position)
+                    for index, position in self._branch_positions(session_id, leaf_entry_id)]
+
+    def count_on_branch(self, session_id: str, *, entry_type: str, key: str) -> int:
+        """Entries of ``entry_type`` appended with idempotency ``key`` on the current branch.
+
+        Walks the branch on the log index; no payload is parsed.
+        """
+
+        with self._lock:
+            return sum(1 for index, position in self._branch_positions(session_id, None)
+                       if index.meta[position][0] == entry_type and index.meta[position][2] == key)
+
+    def _branch_positions(self, session_id: str, leaf_entry_id: str | None) -> list[tuple[_LogIndex, int]]:
+        """(log, line) of every branch entry, root first; the caller holds the lock."""
+
         metadata = self.get_metadata(session_id)
         leaf = leaf_entry_id or metadata.get("leaf_entry_id")
         current = EntryRef(session_id, leaf) if leaf else None
         if current is None and metadata.get("inherited_parent_ref"):
             current = EntryRef.from_dict(metadata["inherited_parent_ref"])
-
-        branch: list[SessionTreeEntry] = []
+        positions: list[tuple[_LogIndex, int]] = []
         visited: set[EntryRef] = set()
-        # Each session file is read once per call, not once per entry: the
-        # branch is rebuilt every model step and grows with the conversation.
-        indexes: dict[str, dict[str, SessionTreeEntry]] = {}
-        with self._lock:
-            while current is not None:
-                if current in visited:
-                    raise ValueError("cycle detected in agent session tree")
-                visited.add(current)
-                index = indexes.get(current.session_id)
-                if index is None:
-                    index = {entry.entry_id: entry for entry in self._read_entries(current.session_id)}
-                    indexes[current.session_id] = index
-                entry = index.get(current.entry_id)
-                if entry is None:
-                    raise KeyError(f"unknown session entry: {current.session_id}/{current.entry_id}")
-                branch.append(entry)
-                current = entry.parent_ref
-        branch.reverse()
-        return branch
+        # The branch is rebuilt every model step and grows with the
+        # conversation: walk it on the index; callers parse only what they use.
+        indexes: dict[str, _LogIndex] = {}
+        while current is not None:
+            if current in visited:
+                raise ValueError("cycle detected in agent session tree")
+            visited.add(current)
+            index = indexes.get(current.session_id)
+            if index is None:
+                index = _log_index(self._session_path(current.session_id))
+                indexes[current.session_id] = index
+            found = index.by_id.get(current.entry_id)
+            if not found:
+                raise KeyError(f"unknown session entry: {current.session_id}/{current.entry_id}")
+            # The last line with an id wins, as the former dict build did.
+            position = found[-1]
+            positions.append((index, position))
+            parent = index.meta[position][1]
+            current = EntryRef.from_dict(parent) if parent else None
+        positions.reverse()
+        return positions
 
     def _read_entries(self, session_id: str) -> list[SessionTreeEntry]:
-        path = self._session_path(session_id)
-        try:
-            lines = path.read_text(encoding="utf-8").splitlines()
-        except FileNotFoundError as exc:
-            raise KeyError(f"unknown session: {session_id}") from exc
-        entries: list[SessionTreeEntry] = []
-        for line in lines:
-            if line.strip():
-                entries.append(SessionTreeEntry.from_dict(json.loads(line)))
-        return entries
+        index = _log_index(self._session_path(session_id))
+        return [SessionTreeEntry.from_dict(json.loads(line)) for line in index.lines]
 
     @staticmethod
     def _atomic_append(path: Path, value: dict[str, Any]) -> None:

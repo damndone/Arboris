@@ -13,7 +13,12 @@ from ..services.dataset_view import run_labels
 def _messages(repository: JsonlSessionRepository, session_id: str) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     projector = AgentNavigationProjector(repository.root.parent)
-    for entry in repository.get_branch(session_id):
+    branch = repository.get_branch(session_id)
+    try:
+        links = projector.entry_links(session_id, [entry for entry in branch if entry.entry_type == "message"])
+    except (KeyError, ValueError):
+        links = {}
+    for entry in branch:
         if entry.entry_type == "compaction" and isinstance(entry.payload.get("summary"), str):
             result.append({
                 "entry_id": entry.entry_id,
@@ -52,14 +57,8 @@ def _messages(repository: JsonlSessionRepository, session_id: str) -> list[dict[
         }
         if isinstance(entry.payload.get("numeric_check"), dict):
             message["numeric_check"] = entry.payload["numeric_check"]
-        try:
-            message["navigation"] = [
-                link.to_dict()
-                for link in projector.entry(session_id, entry.entry_id).links
-            ]
-        except (KeyError, ValueError):
-            # A legacy/corrupt entry must not make the whole session unreadable.
-            message["navigation"] = []
+        # A legacy/corrupt entry must not make the whole session unreadable.
+        message["navigation"] = [link.to_dict() for link in links.get(entry.entry_id) or ()]
         result.append(message)
     return result
 

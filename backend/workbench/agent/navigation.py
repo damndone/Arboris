@@ -376,6 +376,36 @@ class AgentNavigationProjector:
             last_event_seq=self._last_event_seq(session_id),
         )
 
+    def entry_links(self, session_id: str, entries) -> dict[str, tuple[AgentNavigationRef, ...] | None]:
+        """``entry(...).links`` for many entries of one session, listing records once.
+
+        Projecting a transcript called ``entry`` per message, and each call
+        listed every operation record and re-read the event log: quadratic in
+        the conversation's length. ``None`` marks an entry ``entry`` refuses
+        (another session's inherited entry, or links that cannot be built).
+        """
+
+        self.repository.get_metadata(session_id)
+        by_command: dict[str, list[Any]] = {}
+        for record in self.operations.list_records():
+            if record.agent_session_id == session_id and record.command_id is not None:
+                by_command.setdefault(record.command_id, []).append(record)
+        result: dict[str, tuple[AgentNavigationRef, ...] | None] = {}
+        for entry in entries:
+            if entry.session_id != session_id:
+                result[entry.entry_id] = None
+                continue
+            links: list[AgentNavigationRef] = []
+            command_id = _optional_str(entry.payload.get("command_id"))
+            try:
+                for record in by_command.get(command_id, ()) if command_id is not None else ():
+                    self._append_record_links(links, record)
+            except (KeyError, ValueError):
+                result[entry.entry_id] = None
+                continue
+            result[entry.entry_id] = tuple(links)
+        return result
+
     def graph(
         self,
         *,
