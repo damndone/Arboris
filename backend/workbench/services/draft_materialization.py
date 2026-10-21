@@ -480,6 +480,13 @@ def _genesis_model_editor_schema(
                         if key == "did_mode"
                         else list(columns)
                     ),
+                    # An any-of requirement (panel_ols: entity or time) is met by
+                    # any member; each alone is not required.
+                    **(
+                        {"satisfied_by": [f for f in family.required_spec_fields if f != field_name]}
+                        if family.required_spec_field_mode == "any" and field_name in family.required_spec_fields
+                        else {}
+                    ),
                 }
             )
         for field_name in family.model_options_column_fields:

@@ -1825,3 +1825,35 @@ def test_model_custom_requires_an_authorized_gateway_and_can_be_injected(tmp_pat
     assert state.status == "completed"
     assert state.steps["custom_capability"].artifact_ids == ("custom-result",)
     assert calls and calls[0][1:3] == ("wf-custom-gateway", "custom_capability")
+
+
+@pytest.mark.parametrize("columns", [{"entity_col": "school"}, {"time_col": "year"}])
+def test_panel_genesis_step_runs_one_way_fixed_effects(tmp_path, columns) -> None:
+    """The family contract accepts entity or time; the paid fix2 round failed after
+    confirmation because the absent column reached the draft as None."""
+
+    pytest.importorskip("linearmodels")
+    frame = _panel_frame()
+    project, run_id, artifact_id = _source_project(tmp_path, frame)
+    upload_sha = store_upload_bytes(
+        project, frame.to_csv(index=False).encode("utf-8"), filename="panel_fixture.csv"
+    )
+    write_run_inputs(
+        project / "runs" / run_id,
+        form={"model_type": "auto", "y": "", "x": ""},
+        upload={"sha256": upload_sha, "filename": "panel_fixture.csv"},
+        rerun_of=None, from_node=None, rerun_reason="initial", override_hash=None,
+        dag_hash="panel-fixture-dag",
+    )
+    draft = _compile(
+        (run_id, artifact_id),
+        frame,
+        workflow_id="wf-panel-one-way",
+        steps=[{"step_id": "estimate_panel", "operation_id": "model.genesis", "spec": {
+            "model_family": "panel_ols", "covariance": "robust", **columns,
+            "branches": [{"branch_id": "one_way", "outcome": "outcome", "predictors": ["exposure"]}]}}],
+    )
+
+    state = WorkflowExecutor(project).execute(draft, build_workflow_step_executor(project, draft))
+
+    assert state.status == "completed", state.steps["estimate_panel"].error

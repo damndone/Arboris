@@ -231,6 +231,13 @@ def _execute_model_genesis_branches(
             # they are merged once here instead of in eighteen parameter
             # builders -- which is where they were being dropped.
             model_params.update(genesis_run_params(branch_spec))
+            # An optional column the spec leaves unset (one-way panel effects) is
+            # absent from the draft, not None: the draft validator reads a present
+            # None as a malformed column name and failed the step after the
+            # person had confirmed it (paid fix2 round, panel_fe.specific).
+            for field in family_contract.column_spec_fields:
+                if field in model_params and model_params[field] is None:
+                    del model_params[field]
             stored = create_genesis_draft(
                 root,
                 upload_sha256=branch_upload_sha,
