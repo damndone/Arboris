@@ -68,8 +68,17 @@ class NodeToolsMixin:
             )
         except KeyError:
             return requested
-        except ChainHeadConflict:
-            raise
+        except ChainHeadConflict as exc:
+            # Told to the Agent: surfaced only as its class name, it kept passing a
+            # model's own branch run as the head (paid fix4 round, panel, Ask: 8
+            # refused reads and three nudges). The head is this conversation's own.
+            from ..tools import ToolVisibleError
+            head = ChainStore(self.project_root / "workbench", create=False).resolve_active_head(chain_id)
+            raise ToolVisibleError(
+                f"ACTIVE_HEAD_MISMATCH: active_head_run_id must be this conversation's current head {head}, "
+                f"not {requested}. To read a result in another run (for example a model's branch run), pass "
+                f"that run as owner_run_id and keep active_head_run_id {head}."
+            ) from exc
 
     def inspect_node_context(
         self,

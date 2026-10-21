@@ -1617,7 +1617,10 @@ def test_managed_chain_context_tool_rejects_a_forged_active_head(
     )
 
     assert result.ok is False
-    assert result.error == "ChainHeadConflict"
+    # Still refused; the refusal now names this conversation's own head.
+    assert result.error == "ToolVisibleError"
+    message = result.error_details[0]["message"]
+    assert message.startswith("ACTIVE_HEAD_MISMATCH") and "current head run-b" in message
 
 
 def test_invalid_node_probe_returns_one_visible_error_with_valid_targets(
