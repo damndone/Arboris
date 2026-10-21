@@ -11,6 +11,19 @@ const plan = () => ({ plan_id:"p1",version:3,status:"draft",question:"Compare gr
 beforeEach(() => { state.agent = {plan:plan(),planVersions:[{version:3,status:"draft",updated_at:"today"}],planBusy:false,planError:null,
   approvePlan:vi.fn().mockResolvedValue(undefined),savePlan:vi.fn().mockResolvedValue(undefined),refreshPlan:vi.fn().mockResolvedValue(undefined),
   executionMode:"ask",setExecutionMode:vi.fn(),isSubmitting:false,sessionStatus:"idle",prompt:"new direction",queueTurnMessage:vi.fn().mockResolvedValue(undefined),sendPrompt:vi.fn(),continueTurn:vi.fn(),durableTurns:[]}; });
+it("observes plan-event to DOM latency separately from browser paint", () => {
+  const view = render(<AgentPlanPanel />);
+  const samples: number[] = [];
+  for (let index = 0; index < 20; index += 1) {
+    const started = performance.now();
+    state.agent.plan = { ...plan(), version: index + 4, question: `Recorded plan update ${index}` };
+    view.rerender(<AgentPlanPanel />);
+    expect(screen.getByText(`Recorded plan update ${index}`)).toBeInTheDocument();
+    samples.push(performance.now() - started);
+  }
+  console.info("PLAN_DOM_LATENCY_MS", JSON.stringify(samples));
+  expect(Math.max(...samples)).toBeLessThanOrEqual(200);
+});
 it("shows server states and dependencies; approves exactly the displayed version without continuing", () => {
   render(<AgentPlanPanel />);
   expect(screen.getByText("Compare groups")).toBeInTheDocument();
