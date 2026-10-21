@@ -81,6 +81,11 @@ class _Tape:
             return record
 
 
+#: Failures to establish the connection (TCP, proxy CONNECT or TLS handshake):
+#: the request was never sent. Anything later may have been billed.
+_NOT_SENT = (httpx.ConnectError, httpx.ConnectTimeout)
+
+
 class _RecordingTransport(httpx.AsyncBaseTransport):
     def __init__(self, tape: _Tape, inner: httpx.AsyncBaseTransport | None, *, budget=None) -> None:
         self.tape = tape
@@ -104,7 +109,14 @@ class _RecordingTransport(httpx.AsyncBaseTransport):
             self.tape.write({**self.tape.context, "at": started, "elapsed_s": time.time() - started,
                 "url_path": request.url.path, "status": 0, "content_type": "", "request_sha256": digest,
                 "request": json.loads(body), "request_bytes": len(body), "response_raw": "", "usage": None,
-                "transport_error": type(exc).__name__, "budget_reservation": reservation})
+                "transport_error": type(exc).__name__, "budget_reservation": reservation,
+                "sent": not isinstance(exc, _NOT_SENT)})
+            if self.budget is not None and isinstance(exc, _NOT_SENT):
+                # No connection, so no request reached the provider: nothing can be
+                # billed. Release it and let the product's own retry run (the paid
+                # fix1 round froze on one such ConnectError).
+                self.budget.release(reservation)
+                raise
             if self.budget is not None:
                 self.budget.stop("transport interrupted; preserve reservation until billing is reconciled")
                 from .budget import BudgetStop

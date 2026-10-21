@@ -147,6 +147,12 @@ class RoundBudget:
             raise BudgetStop(self.state["reason"])
         return key
 
+    def release(self, key):
+        """Return a reservation whose request never reached the provider (nothing can be billed)."""
+        with self._change() as state:
+            state["reservations"].pop(key, None)
+            state.setdefault("released", []).append(key)
+
     def settle(self, key, usage):
         try:
             cost = cost_usd(usage)

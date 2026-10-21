@@ -181,3 +181,44 @@ def test_budget_stop_keeps_session_and_actions_before_first_response(tmp_path, r
     value = json.loads(progress.read_text())
     assert value["session_id"] == "preserved-session" and value["turns"] == []
     assert value["confirmations"] == [] and value["nudges"] == 0
+
+
+@pytest.mark.parametrize("failure, released", [
+    (httpx.ConnectError("refused"), True),
+    (httpx.ConnectTimeout("handshake timed out"), True),
+    (httpx.ReadTimeout("no response"), False),
+    (httpx.RemoteProtocolError("dropped"), False),
+])
+def test_only_a_request_that_never_left_releases_its_reservation(tmp_path, failure, released):
+    """The fix1 round froze on a ConnectError: no connection, so nothing could be billed."""
+    api = budget_api()
+    from agent_eval.recorder import _Tape, _RecordingTransport
+    usage = {"prompt_tokens": 10, "prompt_cache_hit_tokens": 5,
+             "prompt_cache_miss_tokens": 5, "completion_tokens": 10}
+    attempts = []
+
+    def handle(request):
+        attempts.append(request)
+        if len(attempts) == 1:
+            raise failure
+        return httpx.Response(200, json={"usage": usage})
+
+    budget = api.RoundBudget(tmp_path / "budget.json", cap_cny="5", context_tokens=100)
+    tape = _Tape(tmp_path / "tape.jsonl", "record")
+
+    async def scenario():
+        transport = _RecordingTransport(tape, httpx.MockTransport(handle), budget=budget)
+        async with httpx.AsyncClient(transport=transport) as client:
+            with pytest.raises(type(failure) if released else api.BudgetStop):
+                await client.post("https://provider.invalid/chat", json={"max_tokens": 10})
+            if released:  # the product's retry goes through and is charged normally
+                await client.post("https://provider.invalid/chat", json={"max_tokens": 10})
+    asyncio.run(scenario())
+    state = json.loads((tmp_path / "budget.json").read_text())
+    first = json.loads(tape.path.read_text().splitlines()[0])
+    assert first["sent"] is (not released)
+    assert budget.stopped is (not released)
+    if released:
+        assert state["reservations"] == {} and budget.spent_usd == api.cost_usd(usage)
+    else:
+        assert len(state["reservations"]) == 1
