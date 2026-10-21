@@ -24,6 +24,7 @@ from typing import Any
 import pandas as pd
 
 from ..artifacts import read_json, register_artifact, write_json
+from ..egress import export_boundary
 from ..data_operations import DataColumnCastValidationError, _execute_subset, _read_frame, resolve_data_column_cast_context
 from ..lineage.run_inputs import read_run_inputs
 from ..repository.run_repository import _resolve_run_root
@@ -182,6 +183,7 @@ def _filename(node_id: str, options: ExportOptions, digest: str) -> str:
     return f"{_slug(node_id)}{'-' + digest if digest else ''}.{extension}"
 
 
+@export_boundary("export.dataset")
 def export_dataset(project_root: Path | str, run_id: str, node_id: str,
                    options: ExportOptions | str | Mapping[str, Any]) -> dict[str, Any]:
     options = ExportOptions.of(options)

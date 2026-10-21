@@ -17,6 +17,7 @@ import {
 } from "../aiActivity/aiActivityLog";
 import { askAiAboutFigure, type FigureAiPacket } from "../workbench/views/figureAi";
 import { renderMarkdown } from "../report/markdown";
+import { fetchArtifactJson } from "../api";
 
 const W = 560;
 const H = 180;
@@ -63,7 +64,18 @@ function Frame({
   ai?: ChartAiSpec;
 }) {
   const bodyRef = useRef<HTMLDivElement>(null);
-  const downloadSvg = () => {
+  const [exportError, setExportError] = useState<string | null>(null);
+  const downloadSvg = async () => {
+    setExportError(null);
+    try {
+      if (!ai?.projectRoot || !ai.runId) throw new Error("Open this chart in a project before exporting.");
+      // Recheck the common server export boundary, including rules admitted
+      // after this chart was loaded. Never export a cached SVG on refusal.
+      await fetchArtifactJson(ai.projectRoot, ai.runId, ai.artifactId);
+    } catch (error) {
+      setExportError(error instanceof Error ? error.message : "Chart export was denied.");
+      return;
+    }
     const source = bodyRef.current?.querySelector("svg");
     if (!source) return;
     const svg = source.cloneNode(true) as SVGSVGElement;
@@ -106,6 +118,7 @@ function Frame({
           </button>
         ) : null}
       </figcaption>
+      {exportError && <p role="alert">{exportError}</p>}
       <div ref={bodyRef} style={{ overflowX: "auto" }}>{children}</div>
       {ai && <ChartAskAi title={title} spec={ai} />}
     </figure>

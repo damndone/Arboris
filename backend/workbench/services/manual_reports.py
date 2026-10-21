@@ -30,6 +30,7 @@ from ..predictive_research.schema import default_v1_prediction_registry
 from .manual_report_text import draft_text, render_values, resolved_ids
 from ..report_contract import validate_report_packet, validate_report_response
 from ..report_export import export_report
+from ..egress import export_boundary
 from ..report_view_model import build_regression_table
 from ..repository.run_repository import _read_artifacts_index
 from .lmm_result_adapter import read_lmm_public_results
@@ -447,6 +448,7 @@ def _register_report(run_root: Path, path: Path, report_id: str) -> None:
         raise _error("MANUAL_REPORT_CONFLICT", "Stored report registration differs from the immutable revision.", 409)
 
 
+@export_boundary("report.export", run_root=True)
 def export_manual_report(run_root: Path, report_id: str, format: str) -> tuple[bytes, str, str]:
     record = _read_report(run_root, report_id)["record"]
     by_id = {fact["id"]: fact for fact in record["facts"]}

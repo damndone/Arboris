@@ -191,8 +191,7 @@ describe("ArmaGarchChartGallery", () => {
     expect(screen.getByText(/ts.chart.quantile_exceptions: malformed rows payload/)).toBeInTheDocument();
   });
 
-  it("downloads rendered SVG with an explicit displayed-data description", () => {
-    vi.useFakeTimers();
+  it("downloads rendered SVG after the common artifact export check", async () => {
     const createObjectUrl = vi.fn(() => "blob:chart");
     const revokeObjectUrl = vi.fn();
     Object.defineProperty(URL, "createObjectURL", { configurable: true, value: createObjectUrl });
@@ -202,17 +201,31 @@ describe("ArmaGarchChartGallery", () => {
     ) {
       expect(this.isConnected).toBe(true);
     });
-    render(<ArmaGarchChartGallery charts={CHARTS} />);
+    const request = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+    vi.stubGlobal("fetch", request);
+    render(<ArmaGarchChartGallery charts={CHARTS} projectRoot="/project" runId="run" />);
 
     fireEvent.click(screen.getByRole("button", { name: "Download Source series SVG" }));
 
-    expect(createObjectUrl).toHaveBeenCalledWith(expect.any(Blob));
+    await waitFor(() => expect(createObjectUrl).toHaveBeenCalledWith(expect.any(Blob)));
+    expect(request).toHaveBeenCalledWith(expect.stringContaining("/runs/run/artifacts/"));
     expect(click).toHaveBeenCalled();
-    expect(revokeObjectUrl).not.toHaveBeenCalled();
-    vi.runAllTimers();
-    expect(revokeObjectUrl).toHaveBeenCalledWith("blob:chart");
+    await waitFor(() => expect(revokeObjectUrl).toHaveBeenCalledWith("blob:chart"));
     click.mockRestore();
-    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("cannot export displayed SVG when the project hook denies download", async () => {
+    const create = vi.fn();
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: create });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 403,
+      headers: new Headers({ "content-type": "application/json" }),
+      json: async () => ({ error: { code: "EXPORT_EGRESS_DENIED", message: "EXTENSION_HOOK_DENIED: block-exports" } }) }));
+    render(<ArmaGarchChartGallery charts={CHARTS} projectRoot="/project" runId="run" />);
+    fireEvent.click(screen.getByRole("button", { name: "Download Source series SVG" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("HOOK_DENIED");
+    expect(create).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
   });
 
   it("degrades to a stated reason instead of an empty frame", () => {

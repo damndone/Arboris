@@ -30,6 +30,13 @@ class WorkbenchAPIError(Exception):
 
 
 def register_error_handlers(app: FastAPI) -> None:
+    from .egress import EgressPolicyError
+
+    @app.exception_handler(EgressPolicyError)
+    async def _handle_export_policy_error(_request: Request, exc: EgressPolicyError) -> JSONResponse:
+        return JSONResponse(status_code=403, content={"error": {
+            "code": "EXPORT_EGRESS_DENIED", "message": str(exc), "details": {}}})
+
     @app.exception_handler(WorkbenchAPIError)
     async def _handle_workbench_error(
         _request: Request, exc: WorkbenchAPIError

@@ -53,10 +53,17 @@ metadata/results; that choice is separate from sharing with the endpoint.
 
 The four hook events are `before_operation`, `after_operation`, `turn_end` and
 `plan_approved`. They run in the shared operation/turn/approval lifecycle;
-the script-export policy boundary also emits `before_operation` under the
-existing `script.export` identity for HTTP and Agent exports. This does not
-claim hook coverage of every legacy dedicated HTTP route outside those
-boundaries. Empty `operation_ids` matches all events in the selected slot.
+all file-export services and delivery entrances share an actor-independent
+export boundary before writing or returning bytes. Use `operation_ids: ["export"]`
+to deny every dataset, script, report, result-table, audit and artifact export.
+Specific creation identities remain `export.dataset`, `script.export`,
+`report.export`, `result_table.export` and `audit.export`; artifact delivery
+uses `artifact.export`. Downloads are rechecked even for previously created
+files, and client-rendered SVG downloads recheck the artifact boundary.
+Nested report rendering uses the original project policy once, including
+when figures are pinned to temporary storage. The boundary can only deny;
+existing user approvals and sharing rules remain in force. Empty
+`operation_ids` matches all events in the selected slot.
 `record` is supported for all four; `deny` only before an operation. There are
 no approval, shell or prompt actions. Hook receipts are bounded, atomically
 published, and deduplicated by lifecycle identity and catalog digest.

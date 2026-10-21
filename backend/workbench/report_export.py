@@ -20,6 +20,7 @@ from typing import Any
 from xml.sax.saxutils import escape as xml_escape
 
 from .artifacts import read_json
+from .egress import export_boundary
 
 FIGURE_MARKER = re.compile(r"\[\[fig:([A-Za-z0-9._-]+)\]\]")
 _HEADING = re.compile(r"^(#{1,4})\s+(.*)$")
@@ -415,6 +416,7 @@ def render_report_docx(markdown: str, assets: dict[str, dict[str, Any]]) -> byte
     return output.getvalue()
 
 
+@export_boundary("report.export", run_root=True)
 def export_report(
     run_root: Path,
     *,

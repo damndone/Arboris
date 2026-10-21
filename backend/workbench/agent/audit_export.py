@@ -6,6 +6,7 @@ from html import escape
 from pathlib import Path
 from typing import Any
 
+from ..egress import export_boundary
 from .operations import OperationRecord, OperationRecordStore
 from .session import JsonlSessionRepository, SessionTreeEntry
 
@@ -106,6 +107,7 @@ def _operation_view(
     }
 
 
+@export_boundary("audit.export")
 def build_agent_audit(project_root: Path | str, session_id: str) -> dict[str, object]:
     """Assemble a session, its operation records, and child terminal evidence."""
 

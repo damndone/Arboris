@@ -20,6 +20,7 @@ from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response, StreamingResponse
+from ..egress import EgressPolicyError, authorize_export
 from pydantic import BaseModel, ConfigDict, Field
 
 from .. import analysis_disclosure
@@ -692,6 +693,7 @@ def export_result_table_endpoint(
     """
 
     run_root = _resolve_run_root(project_root, run_id)
+    authorize_export(project_root, "result_table.export")
     sections = request.sections or ["regression_table", "table_1", "statistical_evidence", "model_family_evidence"]
     unknown = sorted(set(sections) - _RESULT_TABLE_SECTIONS)
     if unknown:
@@ -970,6 +972,8 @@ def export_dataset_endpoint(
 
     try:
         exported = export_dataset(project_root, run_id, request.node_id, request.options())
+    except EgressPolicyError:
+        raise
     except (DataColumnCastValidationError, StatisticalFileError, ValueError) as exc:
         raise WorkbenchAPIError(
             status_code=422,
@@ -1077,6 +1081,7 @@ def download_artifact_endpoint(
             details={"artifact_id": artifact_id, "run_id": run_id},
         )
     path = _resolve_artifact_path(run_root, matched)
+    authorize_export(project_root, "artifact.export")
     return FileResponse(
         path,
         filename=path.name,
@@ -1103,6 +1108,7 @@ def get_report_endpoint(run_id: str, project_root: str) -> Annotated[FileRespons
                 "errors": errors,
             },
         )
+    authorize_export(project_root, "report.export")
     return FileResponse(report_path, media_type="text/html")
 
 

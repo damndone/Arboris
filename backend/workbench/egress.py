@@ -33,6 +33,8 @@ import json
 import os
 import re
 import threading
+from functools import wraps
+from inspect import signature
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -655,17 +657,44 @@ def _append_audit_line(path: Path, record: Mapping[str, Any]) -> None:
             handle.write(line)
 
 
-def authorize_local_artifact_export(project_root: Path, *, columns: Sequence[str], content_classes: Sequence[str]) -> None:
-    """Audit and enforce local export policy before a bundle is persisted."""
+_EXPORT_ACTIVE = contextvars.ContextVar("workbench_export_active", default=False)
+
+
+def authorize_export(project_root: Path | str, operation_id: str) -> None:
+    """The actor-independent hook decision for export creation and delivery."""
     from uuid import uuid4
     from .agent.extension_runtime import dispatch_hooks
     from .agent.extensions import ExtensionError
-    # All local script-export entrances meet here before persisting the export.
+    if _EXPORT_ACTIVE.get():
+        return
     try:
-        dispatch_hooks(project_root, "before_operation", {"operation_ids": ["script.export"]},
+        dispatch_hooks(Path(project_root), "before_operation", {"operation_ids": ["export", operation_id]},
                        key="export:" + uuid4().hex)
     except ExtensionError as exc:
         raise EgressPolicyError(str(exc)) from exc
+
+
+def export_boundary(operation_id: str, *, run_root: bool = False):
+    """Guard shared service effects once, including nested/pinned renderers."""
+    def decorate(function):
+        first = next(iter(signature(function).parameters))
+        @wraps(function)
+        def guarded(*args, **kwargs):
+            root = Path(args[0] if args else kwargs[first])
+            project = root.parent.parent if run_root else root
+            authorize_export(project, operation_id)
+            token = _EXPORT_ACTIVE.set(True)
+            try:
+                return function(*args, **kwargs)
+            finally:
+                _EXPORT_ACTIVE.reset(token)
+        return guarded
+    return decorate
+
+
+def authorize_local_artifact_export(project_root: Path, *, columns: Sequence[str], content_classes: Sequence[str]) -> None:
+    """Audit and enforce local export policy before a bundle is persisted."""
+    authorize_export(project_root, "script.export")
     policy = load_policy(project_root)
     allowed = policy.allowed_classes(provider_id="script-export", locality="local")
     blocked = sorted(set(content_classes) - set(allowed))
