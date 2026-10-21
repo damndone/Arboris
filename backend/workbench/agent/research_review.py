@@ -173,6 +173,12 @@ def _publication(payload, result, *, language, mode, review_count, remaining):
     return reviewed
 
 
+#: Reasoning plus the reviewer's JSON. With 2048, DeepSeek V4.1 Flash spent every
+#: token reasoning and returned no answer (paid fix4 round, iv_weak, Auto: eight
+#: reviews, each finish_reason=length, so every completion claim was withheld).
+REVIEW_MAX_TOKENS = 16_384
+
+
 class ResearchReviewPhase:
     """Pure transition: Core alone owns requests, budgets, audit and publication."""
     replay_safe = True
@@ -201,7 +207,7 @@ class ResearchReviewPhase:
         self.state['dispatched'] = True
         return PhaseRequest(messages=[{'role':'system','content':PROMPT},
             {'role':'user','content':self.state['encoded_packet']}], tools=[],
-            response_schema=SCHEMA, model_config={'max_tokens':2048})
+            response_schema=SCHEMA, model_config={'max_tokens': REVIEW_MAX_TOKENS})
 
     async def consume(self, events, *, error=None):
         text = ''.join(event.delta for event in events if event.type == 'text_delta')

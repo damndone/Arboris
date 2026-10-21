@@ -81,7 +81,10 @@ def deepseek_v4_request_config(config: LLMConfig) -> dict[str, Any]:
     host = (urlparse(config.base_url).hostname or "").casefold()
     model = config.model.casefold()
     is_deepseek = "deepseek" in provider or host == "api.deepseek.com"
-    if is_deepseek and model.startswith("deepseek-v4"):
+    # "deepseek-flash" is the V4.1 Flash alias this Workbench is configured with;
+    # matching only "deepseek-v4*" left planner, report writer and conversation
+    # summaries in default high-effort thinking with a bounded output.
+    if is_deepseek and model.startswith(("deepseek-v4", "deepseek-flash")):
         return {"thinking": {"type": "disabled"}, "max_tokens": 8192}
     return {}
 
