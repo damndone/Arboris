@@ -16,6 +16,40 @@ def _run(tmp_path: Path):
     return create_run(project.root, mode="auto")
 
 
+def test_saved_figure_releases_coordinates_without_waiting_for_gc(tmp_path):
+    import gc
+    import weakref
+    from workbench import visualization as viz
+    run = _run(tmp_path)
+    enabled = gc.isenabled()
+    gc.disable()
+    try:
+        fig, ax = viz.plt.subplots()
+        ax.plot(np.arange(10000), np.arange(10000))
+        coordinates = weakref.ref(ax.lines[0].get_path().vertices)
+        viz._save(fig, run.root/'line.png', run.root, 'line', {})
+        assert not fig.axes
+        assert coordinates() is None
+    finally:
+        if enabled:
+            gc.enable()
+
+
+def test_disposing_exported_figure_preserves_png_bytes(tmp_path, monkeypatch):
+    from workbench import visualization as viz
+    run = _run(tmp_path)
+    def draw(name):
+        fig, ax = viz.plt.subplots()
+        ax.plot([0, 1, 2], [0.5, 1.5, -1.0])
+        path = run.root/f'{name}.png'
+        viz._save(fig, path, run.root, name, {})
+        return path.read_bytes()
+    with monkeypatch.context() as old:
+        old.setattr(viz, '_close_figure', viz.plt.close)
+        baseline = draw('before')
+    assert draw('after') == baseline
+
+
 # ── role-awareness (v1.6.6 V) ───────────────────────────────────────────
 
 

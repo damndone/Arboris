@@ -208,10 +208,17 @@ def _value_label_for(frame: pd.DataFrame, column: str, value: object) -> str:
     return str(value)
 
 
+def _close_figure(fig) -> None:
+    plt.close(fig)
+    # Closing only unregisters the window. Clear the exported artists so their
+    # observation-sized coordinate buffers do not wait for cyclic collection.
+    fig.clear()
+
+
 def _save(fig, path: Path, run_root: Path, artifact_id: str, figures: dict[str, str]) -> None:
     fig.tight_layout()
     fig.savefig(path)
-    plt.close(fig)
+    _close_figure(fig)
     record = register_artifact(run_root, artifact_id, path, "figure", "visualization", [])
     figures[artifact_id] = record.path
 
@@ -246,7 +253,7 @@ def write_statistical_scatter(
     fig.tight_layout()
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path)
-    plt.close(fig)
+    _close_figure(fig)
     return int(len(aligned))
 
 

@@ -106,7 +106,10 @@ def test_trace_lane_journals_then_deletes_each_run_and_gates_relative_time(lane,
     # worker. Real acceptance measurements retain the actual free-space gate.
     monkeypatch.setattr(shutil, 'disk_usage', lambda _: SimpleNamespace(free=10**12))
     original_prepare = lane.prepare_family
-    monkeypatch.setattr(lane, 'prepare_family', lambda case, out: original_prepare(case, out, rows=40))
+    def temporary_prepare(case, out):
+        assert out.is_relative_to(tmp_path), 'unit test must never register real benchmark inputs'
+        return original_prepare(case, out, rows=40)
+    monkeypatch.setattr(lane, 'prepare_family', temporary_prepare)
     monkeypatch.setattr(lane, 'idle_processes', lambda _: None)
     baseline = tmp_path / 'baseline'
     baseline.mkdir()
@@ -140,6 +143,7 @@ def test_trace_lane_journals_then_deletes_each_run_and_gates_relative_time(lane,
     monkeypatch.setattr(subprocess, 'run', worker)
     out = tmp_path / 'measured'
     assert lane.ab_main(['--ab', '--baseline-repo', str(baseline), '--out', str(out),
+                         '--inputs', str(tmp_path/'inputs'),
                          '--cases', 'panel', '--trace-memory']) == expected_exit
     assert calls == ['A']*5+list('AB'*5)
     assert not (out/'active').exists()
