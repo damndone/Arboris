@@ -1,6 +1,7 @@
-"""One durable paid-round cap, using the user's archived M4 USD price table."""
+"""Native-CNY peak-price cap; retain the user's M4 USD table for comparison."""
 from contextlib import contextmanager
 from decimal import Decimal
+import hashlib
 import json
 from pathlib import Path
 from uuid import uuid4
@@ -10,9 +11,14 @@ from filelock import FileLock
 MISS = Decimal("0.14") / 1_000_000
 HIT = Decimal("0.0028") / 1_000_000
 OUTPUT = Decimal("0.28") / 1_000_000
-# A conservative accounting multiplier, NOT a current exchange-rate quote.
-# Actual CNY billing is separately reconciled from before/after balance.
+# Historical comparison only: NOT a guaranteed CNY billing bound.
 CNY_PER_USD = Decimal("8")
+CNY_MISS = Decimal("2") / 1_000_000
+CNY_HIT = Decimal("0.04") / 1_000_000
+CNY_OUTPUT = Decimal("8") / 1_000_000
+QUOTE = "deepseek-flash-cny-peak-2026-10-21"
+# https://api-docs.deepseek.com/zh-cn/quick_start/pricing/
+# https://api-docs.deepseek.com/zh-cn/api/create-chat-completion/
 
 
 class BudgetStop(BaseException):
@@ -32,6 +38,13 @@ def cost_usd(usage):
     return miss * MISS + hit * HIT + output * OUTPUT
 
 
+def cost_cny_upper(usage):
+    cost_usd(usage)  # Validate the original external usage with the same definitions.
+    hit = usage.get("prompt_cache_hit_tokens", 0)
+    return ((usage["prompt_tokens"] - hit) * CNY_MISS + hit * CNY_HIT
+            + usage["completion_tokens"] * CNY_OUTPUT)
+
+
 class RoundBudget:
     def __init__(self, path, *, cap_cny, context_tokens):
         self.path = Path(path)
@@ -42,6 +55,24 @@ class RoundBudget:
         with self._change() as state:
             if Decimal(state["cap_cny"]) != self.cap or state["context_tokens"] != context_tokens:
                 raise ValueError("round budget configuration changed")
+            if state["schema"] == 1:
+                if state["reservations"]:
+                    raise ValueError("unsettled old reservations need billing reconciliation before migration")
+                original = self.path.read_bytes()
+                backup = self.path.with_suffix(".v1.json")
+                if backup.exists():
+                    if backup.read_bytes() != original:
+                        raise ValueError("prior ledger backup differs")
+                else:
+                    with backup.open("xb") as stream:
+                        stream.write(original)
+                for charge in state["charges"]:
+                    charge["cost_cny_upper"] = str(cost_cny_upper(charge["usage"]))
+                state.update(schema=2, quote=QUOTE,
+                    spent_cny_upper=str(sum((cost_cny_upper(c["usage"]) for c in state["charges"]), Decimal(0))),
+                    prior_ledger_sha256=hashlib.sha256(original).hexdigest())
+            if state["quote"] != QUOTE:
+                raise ValueError("round tariff quote changed")
 
     @contextmanager
     def _change(self):
@@ -60,8 +91,9 @@ class RoundBudget:
     def state(self):
         if self.path.exists():
             return json.loads(self.path.read_text())
-        return {"schema": 1, "cap_cny": str(self.cap), "context_tokens": self.context_tokens,
-            "cny_per_usd_accounting_upper": str(CNY_PER_USD), "spent_usd": "0",
+        return {"schema": 2, "cap_cny": str(self.cap), "context_tokens": self.context_tokens,
+            "quote": QUOTE, "m4_comparison_cny_factor": str(CNY_PER_USD),
+            "spent_usd": "0", "spent_cny_upper": "0",
             "reservations": {}, "charges": [], "stopped": False, "reason": None}
 
     @property
@@ -76,21 +108,37 @@ class RoundBudget:
         with self._change() as state:
             state.update(stopped=True, reason=reason)
 
+    def resume_storage_stop(self):
+        """Apply the user's one-round storage exception without resetting spending."""
+        with self._change() as state:
+            if not state["stopped"]:
+                return
+            if (not str(state["reason"]).startswith("storage threshold")
+                    or state["reservations"]
+                    or Decimal(state["spent_cny_upper"]) >= self.cap):
+                raise BudgetStop("storage exception cannot release a financial stop")
+            state["storage_exception"] = {"previous_reason": state["reason"]}
+            state.update(stopped=False, reason=None)
+
     def reserve(self, body):
         request = json.loads(body)
-        # No request override: absent max_tokens reserves the entire pinned
-        # context window. A byte upper bound plus framing is conservative for
-        # this UTF-8 tokenizer; all prompt tokens are priced as cache misses.
-        output_bound = request.get("max_tokens", self.context_tokens)
-        if type(output_bound) is not int or not 0 < output_bound <= self.context_tokens:
+        # Observe documented server defaults; do not override the request.
+        # All prompt bytes plus framing are reserved at the native peak miss price.
+        effort = request.get("reasoning_effort", "high")
+        disabled = effort == "none" or (request.get("thinking") or {}).get("type") == "disabled"
+        default_output = 8192 if disabled else (131072 if effort == "max" else 65536)
+        output_bound = request.get("max_tokens")
+        if output_bound is None:
+            output_bound = default_output
+        if type(output_bound) is not int or not 0 < output_bound <= min(self.context_tokens, 393216):
             self.stop("unbounded output request")
             raise BudgetStop("unbounded output request")
-        ceiling = ((len(body) + 2048) * MISS + output_bound * OUTPUT) * CNY_PER_USD
+        ceiling = (len(body) + 2048) * CNY_MISS + output_bound * CNY_OUTPUT
         key = uuid4().hex
         refused = False
         with self._change() as state:
             reserved = sum(map(Decimal, state["reservations"].values()), Decimal(0))
-            if state["stopped"] or Decimal(state["spent_usd"]) * CNY_PER_USD + reserved + ceiling > self.cap:
+            if state["stopped"] or Decimal(state["spent_cny_upper"]) + reserved + ceiling > self.cap:
                 state.update(stopped=True, reason="remaining cap cannot cover the next request's worst case")
                 refused = True
             else:
@@ -102,14 +150,16 @@ class RoundBudget:
     def settle(self, key, usage):
         try:
             cost = cost_usd(usage)
+            cost_cny = cost_cny_upper(usage)
         except ValueError:
             self.stop("unknown usage; keep worst-case reservation and stop")
             raise BudgetStop("unknown usage; cannot safely continue")
         with self._change() as state:
             reserved = Decimal(state["reservations"].pop(key))
             state["spent_usd"] = str(Decimal(state["spent_usd"]) + cost)
-            state["charges"].append({"key": key, "usage": usage, "cost_usd": str(cost)})
-            if cost * CNY_PER_USD > reserved or Decimal(state["spent_usd"]) * CNY_PER_USD >= self.cap:
+            state["spent_cny_upper"] = str(Decimal(state["spent_cny_upper"]) + cost_cny)
+            state["charges"].append({"key": key, "usage": usage, "cost_usd": str(cost), "cost_cny_upper": str(cost_cny)})
+            if cost_cny > reserved or Decimal(state["spent_cny_upper"]) >= self.cap:
                 state.update(stopped=True, reason="cost bound reached")
         if self.stopped:
             raise BudgetStop(self.state["reason"])

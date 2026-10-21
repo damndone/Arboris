@@ -27,6 +27,53 @@ def test_original_usage_price_and_reasoning_is_not_charged_twice():
     assert api.cost_usd(usage) == Decimal("0.0023764888")
 
 
+def test_native_cny_peak_quote_guards_output_cost_above_archived_usd_estimate():
+    api = budget_api()
+    usage = {"prompt_tokens": 30037, "prompt_cache_hit_tokens": 13696,
+             "prompt_cache_miss_tokens": 16341, "completion_tokens": 180}
+    assert api.cost_cny_upper(usage) == Decimal("0.03466984")
+    assert api.cost_cny_upper(usage) > api.cost_usd(usage) * 8
+
+
+def test_schema_one_ledger_migration_keeps_charges_and_storage_stop(tmp_path):
+    api = budget_api()
+    usage = {"prompt_tokens": 10, "completion_tokens": 10}
+    original = {"schema": 1, "cap_cny": "5", "context_tokens": 1_048_576,
+        "spent_usd": str(api.cost_usd(usage)), "reservations": {},
+        "charges": [{"key": "original", "usage": usage, "cost_usd": str(api.cost_usd(usage))}],
+        "stopped": True, "reason": "storage threshold"}
+    path = tmp_path / "budget.json"; path.write_text(json.dumps(original))
+    budget = api.RoundBudget(path, cap_cny="5", context_tokens=1_048_576)
+    assert budget.state["schema"] == 2 and budget.stopped
+    assert budget.spent_usd == api.cost_usd(usage)
+    assert Decimal(budget.state["spent_cny_upper"]) == api.cost_cny_upper(usage)
+    assert json.loads(path.with_suffix(".v1.json").read_text()) == original
+
+
+def test_explicit_storage_exception_preserves_all_spending(tmp_path):
+    api = budget_api()
+    budget = api.RoundBudget(tmp_path / "budget.json", cap_cny="5", context_tokens=1_048_576)
+    key = budget.reserve(b'{"max_tokens":100}')
+    budget.settle(key, {"prompt_tokens": 10, "completion_tokens": 20})
+    before = budget.state
+    budget.stop("storage threshold: less than 10 GB free")
+    budget.resume_storage_stop()
+    assert not budget.stopped
+    assert budget.state["charges"] == before["charges"]
+    assert budget.state["spent_cny_upper"] == before["spent_cny_upper"]
+    assert budget.spent_usd == Decimal(before["spent_usd"])
+
+
+@pytest.mark.parametrize("reason", ["cost bound reached", "unknown usage"])
+def test_storage_exception_never_releases_financial_stops(tmp_path, reason):
+    api = budget_api()
+    budget = api.RoundBudget(tmp_path / "budget.json", cap_cny="5", context_tokens=1_048_576)
+    budget.stop(reason)
+    with pytest.raises(api.BudgetStop):
+        budget.resume_storage_stop()
+    assert budget.stopped
+
+
 def test_shared_budget_reserves_inflight_cost_and_survives_mode_restart(tmp_path):
     api = budget_api()
     path = tmp_path / "budget.json"
@@ -74,19 +121,48 @@ def test_paid_transport_journals_usage_and_refuses_next_call_before_network(tmp_
 
 def test_two_simultaneous_reservations_cannot_overbook_the_cap(tmp_path):
     api = budget_api()
-    budget = api.RoundBudget(tmp_path / "budget.json", cap_cny="0.003", context_tokens=100)
+    budget = api.RoundBudget(tmp_path / "budget.json", cap_cny="0.008", context_tokens=100)
     budget.reserve(b'{"max_tokens":10}')
     with pytest.raises(api.BudgetStop):
         budget.reserve(b'{"max_tokens":10}')
 
 
-def test_missing_max_tokens_reserves_entire_pinned_context_without_changing_request(tmp_path):
+def test_missing_max_tokens_reserves_documented_thinking_default_without_changing_request(tmp_path):
     api = budget_api()
     budget = api.RoundBudget(tmp_path / "budget.json", cap_cny="5", context_tokens=1_048_576)
     request = b'{"model":"deepseek-flash","messages":[]}'
     key = budget.reserve(request)
-    assert Decimal(budget.state["reservations"][key]) > Decimal("2")
+    assert Decimal(budget.state["reservations"][key]) >= Decimal("0.524288")
     assert json.loads(request) == {"model": "deepseek-flash", "messages": []}
+
+
+@pytest.mark.parametrize("controls,output", [({}, 65536), ({"thinking": {"type": "disabled"}}, 8192),
+    ({"reasoning_effort": "max"}, 131072), ({"max_tokens": 393216}, 393216)])
+def test_server_defaults_and_explicit_output_ceiling_use_native_peak_tariff(tmp_path, controls, output):
+    api = budget_api()
+    budget = api.RoundBudget(tmp_path / "budget.json", cap_cny="5", context_tokens=1_048_576)
+    body = json.dumps(controls).encode()
+    key = budget.reserve(body)
+    assert Decimal(budget.state["reservations"][key]) == (len(body) + 2048) * api.CNY_MISS + output * api.CNY_OUTPUT
+
+
+def test_each_task_checks_storage_before_seed_or_provider(tmp_path, monkeypatch):
+    import importlib.util
+    from types import SimpleNamespace
+    spec = importlib.util.spec_from_file_location("agent_eval_run_storage_test", Path(__file__).resolve().parents[1] / "scripts/agent_eval_run.py")
+    module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+    config = SimpleNamespace(model="deepseek-flash", base_url="https://api.deepseek.com", is_configured=lambda: True)
+    monkeypatch.setattr(module, "load_llm_config", lambda: config)
+    monkeypatch.setattr(module, "dev_tasks", lambda: [SimpleNamespace(id="task")])
+    import shutil
+    monkeypatch.setattr(shutil, "disk_usage", lambda root: SimpleNamespace(free=9_999_999_999))
+    monkeypatch.setattr(module, "_seed", lambda *a, **k: pytest.fail("low storage reached seed execution"))
+    monkeypatch.setattr(module, "run_conversation", lambda *a, **k: pytest.fail("low storage reached provider execution"))
+    monkeypatch.setattr(sys, "argv", ["agent_eval_run.py", "--out", str(tmp_path / "round"),
+        "--round-budget-cny", "5", "--budget-ledger", str(tmp_path / "budget.json")])
+    assert module.main() == 86
+    state = json.loads((tmp_path / "budget.json").read_text())
+    assert state["stopped"] and "storage" in state["reason"]
 
 
 def test_budget_stop_keeps_session_and_actions_before_first_response(tmp_path, runner, monkeypatch):

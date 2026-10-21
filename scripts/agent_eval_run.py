@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import subprocess
 import sys
 import time
@@ -81,6 +82,8 @@ def main() -> int:
                         help="heldout is run once, at the final evaluation only")
     parser.add_argument("--round-budget-cny", type=str, help="shared CNY stop; maximum authorized for this batch is 5")
     parser.add_argument("--budget-ledger", type=Path, help="same ledger for both modes, never reset between tasks")
+    parser.add_argument("--allow-low-space-this-round", action="store_true",
+                        help="explicit user-authorized storage exception; never releases financial stops")
     args = parser.parse_args()
     if args.round_budget_cny is not None:
         from decimal import Decimal
@@ -95,9 +98,11 @@ def main() -> int:
     if args.round_budget_cny is not None:
         if config.model != "deepseek-flash" or args.suite != "dev":
             parser.error("the authorized small budget is pinned to deepseek-flash development tasks")
-        # The approved handoff pins this provider's 1M context. An absent
-        # request max_tokens reserves that whole window; no model config is changed.
+        # The approved handoff pins this provider's 1M context. The guard
+        # observes documented server output defaults; no model config is changed.
         budget = RoundBudget(args.budget_ledger, cap_cny=args.round_budget_cny, context_tokens=1_048_576)
+        if args.allow_low_space_this_round:
+            budget.resume_storage_stop()
         if budget.stopped:
             print("shared round budget already stopped; no provider call", flush=True)
             return 86
@@ -129,6 +134,7 @@ def main() -> int:
         "suite": args.suite,
         "tasks": [task.id for task in tasks],
         "round_budget": str(args.budget_ledger) if budget is not None else None,
+        "low_space_exception": args.allow_low_space_this_round,
     }
     (out / "run_meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -140,6 +146,13 @@ def main() -> int:
         if provider_down:
             break
         for rep in range(1, args.repeat + 1):
+            # Each new task is a new measurement, not just each mode/process.
+            free = shutil.disk_usage(ROOT).free
+            if free < 10_000_000_000 and not args.allow_low_space_this_round:
+                if budget is not None:
+                    budget.stop("storage threshold: less than 10 GB free before next task")
+                print(f"storage stop: {free / 1e9:.3f} GB free; no new task started", flush=True)
+                return 86
             name = f"{task.id}.r{rep}"
             directory = out / "tasks" / name
             if (directory / "record.json").exists():
@@ -200,7 +213,7 @@ def main() -> int:
             record["elapsed_s"] = round(time.monotonic() - started, 1)
             (directory / "record.json").write_text(json.dumps(record, ensure_ascii=False, indent=1), encoding="utf-8")
             if record["status"] == "round_budget_stopped":
-                print(f"{name}: shared budget stop; no further tasks or provider requests", flush=True)
+                print(f"{name}: round stopped; no further tasks or provider requests", flush=True)
                 return 86
             conversation = record.get("conversation") or {}
             # Stop the round when the provider stops serving (402 balance, 5xx):
