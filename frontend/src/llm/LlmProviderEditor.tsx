@@ -76,6 +76,7 @@ export function LlmProviderEditor({ provider, isCopy = false, onSaved, onBack }:
   const [notes, setNotes] = useState(provider?.notes ?? "");
   const [websiteUrl, setWebsiteUrl] = useState(provider?.website_url ?? "");
   const [baseUrl, setBaseUrl] = useState(provider?.base_url ?? "");
+  const [dataLocation, setDataLocation] = useState<"local" | "remote">(provider?.data_location ?? "remote");
   const [apiKey, setApiKey] = useState("");
   const [showApiKey, setShowApiKey] = useState(false);
   const [clearApiKey, setClearApiKey] = useState(false);
@@ -105,10 +106,11 @@ export function LlmProviderEditor({ provider, isCopy = false, onSaved, onBack }:
     notes: notes.trim(),
     website_url: websiteUrl.trim(),
     base_url: baseUrl.trim(),
+    data_location: dataLocation,
     model: model.trim(),
     timeout_s: Number(timeout) || 60,
     models: models.map(({ display_name, request_model, context_window_tokens, supports_1m }) => ({ display_name, request_model, context_window_tokens, supports_1m })),
-  }, null, 2), [baseUrl, icon, id, model, models, name, notes, timeout, websiteUrl]);
+  }, null, 2), [baseUrl, dataLocation, icon, id, model, models, name, notes, timeout, websiteUrl]);
 
   function validate(): FieldErrors {
     const errors: FieldErrors = {};
@@ -137,6 +139,7 @@ export function LlmProviderEditor({ provider, isCopy = false, onSaved, onBack }:
     invalidateDiscovery();
     setName(preset.name);
     setBaseUrl(preset.baseUrl);
+    setDataLocation("remote");
   }
 
   function updateModel(index: number, patch: Partial<LlmModel>) {
@@ -231,6 +234,7 @@ export function LlmProviderEditor({ provider, isCopy = false, onSaved, onBack }:
       notes: notes.trim(),
       website_url: websiteUrl.trim() || null,
       base_url: baseUrl.trim(),
+      data_location: dataLocation,
       model: model.trim(),
       timeout_s: Number(timeout) || 60,
       models,
@@ -308,6 +312,16 @@ export function LlmProviderEditor({ provider, isCopy = false, onSaved, onBack }:
             {fieldErrors.baseUrl && <span style={{ display: "block", marginTop: 5, color: "var(--status-fails-fg)" }}>{fieldErrors.baseUrl}</span>}
             {probeMessage && <span aria-live="polite" style={{ display: "block", marginTop: 5, color: probeMessage === "Connection successful" ? "var(--green)" : "var(--status-fails-fg)" }}>{probeMessage}</span>}
           </label>
+        </section>
+
+        <section style={{ padding: 18, border: "1px solid var(--separator)", borderRadius: 14, background: "var(--bg-card-2)" }}>
+          <label>Data processing location
+            <select aria-label="Data processing location" value={dataLocation} onChange={(event) => setDataLocation(event.target.value as "local" | "remote")} style={inputStyle}>
+              <option value="remote">Cloud / remote service (including local gateways)</option>
+              <option value="local">Local inference — data stays on this computer</option>
+            </select>
+          </label>
+          <p style={{ marginBottom: 0, color: "var(--label-secondary)", fontSize: 12 }}>Choose local only when the model processes data on this computer. A localhost gateway such as Magpie can forward requests to the cloud. Existing configurations default to remote protection.</p>
         </section>
 
         <details style={{ padding: 18, border: "1px solid var(--separator)", borderRadius: 14, background: "var(--bg-card-2)" }}>

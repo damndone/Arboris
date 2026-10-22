@@ -49,7 +49,7 @@ def reviewed(tmp_path, request):
     core.research_review_mode = lambda: 'ask'
     core.completion_check = lambda: evaluate(project, contract, evidence)
     core.research_review_context = lambda candidate: build_context(project, plan, mode='ask', candidate=candidate,
-        config=SimpleNamespace(provider_id='offline', base_url='http://127.0.0.1'))
+        config=SimpleNamespace(provider_id='offline', base_url='http://127.0.0.1', data_location='remote'))
     core.phase_restorer = lambda checkpoint: restore_phase(core, checkpoint)
     asyncio.run(core.prompt('/review', budget={'max_steps':1, 'timeout_s':30}))
     [result] = [entry.payload for entry in repo.get_branch('session-a') if entry.entry_type == 'research_review_result']

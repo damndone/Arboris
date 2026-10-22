@@ -368,6 +368,7 @@ def _chat_request_payload(
             base_url=config.base_url,
             provider_id=config.provider_id,
             model=config.model,
+            data_location=config.data_location,
         )
     except EgressPolicyError as exc:
         # A broken policy blocks the call; it never falls back to sending more.

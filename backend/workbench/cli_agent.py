@@ -188,7 +188,7 @@ async def _stream_headless_turn(
 
 _SAFE_CONFIG_FIELDS = (
     'base_url', 'model', 'timeout_s', 'provider_id', 'provider_name', 'source',
-    'context_window_tokens', 'supports_1m', 'supports_vision',
+    'context_window_tokens', 'supports_1m', 'supports_vision', 'data_location',
 )
 
 
@@ -245,6 +245,7 @@ def _safe_config(config) -> dict[str, Any]:
             'base_url', 'model', 'provider_id', 'provider_name', 'source'))
             or type(value['timeout_s']) not in {int, float} or value['timeout_s'] <= 0
             or type(value['supports_1m']) is not bool or type(value['supports_vision']) is not bool
+            or value['data_location'] not in ('local', 'remote')
             or value['context_window_tokens'] is not None and (
                 type(value['context_window_tokens']) is not int or value['context_window_tokens'] <= 0)):
         raise CommandError('journal runtime config has invalid safe fields')
@@ -272,8 +273,10 @@ def _read_runtime(journal) -> dict[str, Any]:
     if (type(value) is not dict or set(value) != fields
             or value['schema'] != 'workbench.headless-journal.v1' or value['complete'] is not True
             or type(value['input']) is not dict or type(value['config']) is not dict
-            or set(value['config']) != set(_SAFE_CONFIG_FIELDS)):
+            or set(value['config']) not in (set(_SAFE_CONFIG_FIELDS), set(_SAFE_CONFIG_FIELDS) - {'data_location'})):
         raise CommandError('journal runtime is incomplete or unsupported')
+    # Historical journals did not declare the ultimate processing location.
+    value['config'].setdefault('data_location', 'remote')
     for field in ('fixture_sha256', 'model_sha256', 'business_sha256'):
         digest = value[field]
         if type(digest) is not str or len(digest) != 64 or any(c not in '0123456789abcdef' for c in digest):

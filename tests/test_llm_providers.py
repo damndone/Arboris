@@ -68,6 +68,29 @@ def _create(api: TestClient, **overrides) -> dict:
     return response.json()
 
 
+def test_data_location_crud_preserves_key_and_default(api, store_path):
+    created = _create(api, base_url="http://127.0.0.1:3425/v1", data_location="remote")
+    assert created["data_location"] == "remote"
+    assert api.post("/llm/providers/deepseek/activate").status_code == 200
+    changed = api.put("/llm/providers/deepseek", json={"data_location": "local"})
+    assert changed.status_code == 200, changed.text
+    assert changed.json()["data_location"] == "local"
+    updated = api.put("/llm/providers/deepseek", json={"name": "Local inference"})
+    assert updated.json()["data_location"] == "local"
+    assert load_llm_config().data_location == "local"
+    assert load_provider_store(store_path).providers[0].api_key == API_KEY
+    assert api.get("/llm/config").json()["data_location"] == "local"
+    assert api.get("/llm/providers").json()["active_provider_id"] == "deepseek"
+    assert llm_routes._provider_config(load_provider_store(store_path).providers[0]).data_location == "local"
+
+
+@pytest.mark.parametrize("value", [None, "auto", "LOCAL", True, 0, []])
+def test_provider_api_rejects_invalid_data_location(api, store_path, value):
+    response = api.post("/llm/providers", json=_provider_payload(data_location=value))
+    assert response.status_code == 422, response.text
+    assert not store_path.exists()
+
+
 def test_create_and_list_return_only_public_provider_data(api, store_path):
     created = _create(api)
 

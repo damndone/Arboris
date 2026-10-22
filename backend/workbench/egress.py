@@ -12,7 +12,8 @@ and the server's instructions are sent as written.
 
 The policy decides, per provider, which classes may be sent. Remote providers
 by default receive dataset structure, labels, aggregates and model results --
-never row-level records. Local providers (localhost) receive everything.
+never row-level records. Explicitly configured local inference receives everything.
+Loopback addresses may proxy a cloud service and do not grant local privileges.
 A project may override both, and may declare column sensitivity: values of a
 ``sensitive`` column are withheld from remote providers, values of a
 ``restricted`` column from every provider. The column's name stays visible so
@@ -28,7 +29,6 @@ from __future__ import annotations
 import contextlib
 import contextvars
 import hashlib
-import ipaddress
 import json
 import os
 import re
@@ -160,16 +160,6 @@ def suggested_sensitivity(column: str) -> str:
     """The heuristic default level for a column name."""
 
     return "sensitive" if _PERSONAL_NAME_RE.match(column.strip()) else "internal"
-
-
-def provider_locality(base_url: str) -> str:
-    host = (urlparse(base_url).hostname or "").lower()
-    if host == "localhost" or host.endswith(".localhost"):
-        return "local"
-    try:
-        return "local" if ipaddress.ip_address(host).is_loopback else "remote"
-    except ValueError:
-        return "remote"
 
 
 @dataclass(frozen=True)
@@ -505,12 +495,13 @@ def guard_outgoing_messages(
     base_url: str,
     provider_id: str = "",
     model: str = "",
+    data_location: Literal["local", "remote"] = "remote",
 ) -> list[dict[str, Any]]:
     """Return the messages as they may be sent, and audit the send."""
 
     project = current_project()
     policy = load_policy(project)
-    locality = provider_locality(base_url)
+    locality = data_location
     allowed = policy.allowed_classes(provider_id=provider_id, locality=locality)
     tool_names = _tool_names_by_call_id(messages)
     parsed = [_parse_json(message.get("content")) for message in messages]

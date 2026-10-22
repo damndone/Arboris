@@ -8,7 +8,7 @@ import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from collections.abc import Mapping
 
 try:
@@ -23,6 +23,13 @@ _CONFIG_PATH_ENV = "WORKBENCH_LLM_CONFIG_PATH"
 _STORE_VERSION = 1
 _DEFAULT_CONFIG_DIR = Path(".config") / "econometrics-workbench"
 _DEFAULT_CONFIG_FILENAME = "llm-providers.json"
+DataLocation = Literal["local", "remote"]
+
+
+def parse_data_location(value: Any) -> DataLocation:
+    if value not in ("local", "remote"):
+        raise ValueError("data_location must be local or remote")
+    return value
 
 
 class ProviderStoreError(Exception):
@@ -69,6 +76,7 @@ class ProviderRecord:
     website_url: str = ""
     icon: str = ""
     notes: str = ""
+    data_location: DataLocation = "remote"
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "models", list(self.models))
@@ -81,6 +89,7 @@ class ProviderRecord:
             "notes": self.notes,
             "website_url": self.website_url,
             "base_url": self.base_url,
+            "data_location": self.data_location,
             "model": self.model,
             "api_key": self.api_key,
             "timeout_s": self.timeout_s,
@@ -240,6 +249,7 @@ def environment_provider_from_env() -> ProviderRecord | None:
         api_key=api_key,
         timeout_s=timeout_s,
         models=models,
+        data_location=parse_data_location(os.environ.get("WORKBENCH_LLM_DATA_LOCATION", "remote")),
     )
 
 
@@ -252,6 +262,7 @@ def provider_public_dict(provider: ProviderRecord) -> dict[str, Any]:
         "notes": provider.notes,
         "website_url": provider.website_url,
         "base_url": provider.base_url,
+        "data_location": provider.data_location,
         "model": provider.model,
         "timeout_s": provider.timeout_s,
         "models": [model.to_dict() for model in provider.models],
@@ -301,6 +312,7 @@ def _provider_from_dict(raw: Any) -> ProviderRecord:
         notes=_optional_string(raw, "notes"),
         website_url=_optional_string(raw, "website_url"),
         base_url=_required_string(raw, "base_url"),
+        data_location=parse_data_location(raw.get("data_location", "remote")),
         model=_required_string(raw, "model"),
         api_key=_optional_string(raw, "api_key"),
         timeout_s=_timeout_value(raw.get("timeout_s", DEFAULT_TIMEOUT_S)),

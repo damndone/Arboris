@@ -15,6 +15,7 @@ ProviderModel = view_of(ModelRecord, "ProviderModel")
 
 
 class LlmConfig(TypedDict):
+    data_location: NotRequired[Literal["local", "remote"]]
     configured: bool
     base_url: str | None
     model: str | None
@@ -41,6 +42,7 @@ class PublicProvider(TypedDict):
     timeout_s: float
     models: list[ProviderModel]
     key_present: bool
+    data_location: NotRequired[Literal["local", "remote"]]
 
 
 class ProviderList(TypedDict):

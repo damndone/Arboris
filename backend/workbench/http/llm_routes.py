@@ -19,7 +19,7 @@ import time
 from contextlib import contextmanager
 from threading import RLock
 from urllib.parse import urlparse
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Path, Request
 from fastapi.exceptions import RequestValidationError
@@ -322,6 +322,7 @@ def llm_config() -> LlmConfig:
         "context_window_tokens": config.context_window_tokens,
         "supports_1m": config.supports_1m,
         "supports_vision": config.supports_vision,
+        "data_location": config.data_location,
     }
 
 
@@ -356,6 +357,7 @@ class ProviderUpsertRequest(BaseModel):
     timeout_s: float | None = Field(default=None, gt=0, le=MAX_TIMEOUT_S)
     models: list[ProviderModelRequest] | None = None
     clear_api_key: bool = False
+    data_location: Literal["local", "remote"] = "remote"
 
     @field_validator("id", "name", "model")
     @classmethod
@@ -531,6 +533,7 @@ def _to_provider_record(
             model=request.model,
             api_key=_stored_api_key(request.api_key),
             timeout_s=request.timeout_s or DEFAULT_TIMEOUT_S,
+            data_location=request.data_location,
             models=[ModelRecord(**model.model_dump()) for model in request.models or []],
         )
 
@@ -562,6 +565,7 @@ def _to_provider_record(
         model=request.model if request.model is not None else existing.model,
         api_key=api_key,
         timeout_s=request.timeout_s if request.timeout_s is not None else existing.timeout_s,
+        data_location=(request.data_location if "data_location" in request.model_fields_set else existing.data_location),
         models=(
             [ModelRecord(**model.model_dump()) for model in request.models]
             if request.models is not None
@@ -746,6 +750,9 @@ def _provider_config(provider: ProviderRecord):
         api_key=provider.api_key,
         model=provider.model,
         timeout_s=provider.timeout_s,
+        data_location=provider.data_location,
+        provider_id=provider.id,
+        provider_name=provider.name,
     )
 
 
@@ -823,6 +830,7 @@ def refresh_llm_provider_models(provider_id: ProviderID) -> PublicProvider:
             model=current_provider.model,
             api_key=current_provider.api_key,
             timeout_s=current_provider.timeout_s,
+            data_location=current_provider.data_location,
             models=refreshed_models,
         )
         updated_store = (

@@ -1,6 +1,7 @@
 """The research reviewer gets a bounded evidence packet and no execution tools."""
 import asyncio
 import json
+import pytest
 
 from tests.test_agent_core_restart import setup
 from workbench.agent.model import ModelStreamEvent
@@ -231,17 +232,20 @@ def test_unknown_reviewer_citations_are_unverified_not_granted_authority(tmp_pat
     assert result['verdict'] == 'unverified'
 
 
-def test_production_review_packet_contains_verified_primary_and_sensitivity_without_rows(tmp_path):
+@pytest.mark.parametrize("data_location, permitted", [("local", True), ("remote", False)])
+def test_production_review_packet_contains_verified_primary_and_sensitivity_without_rows(tmp_path, data_location, permitted):
     from types import SimpleNamespace
     from workbench.agent.plans import Plan
     from workbench.agent.research_review import build_context
+    from workbench.egress import EgressPolicy, REMOTE_DEFAULT_ALLOW, save_policy
     from tests.test_agent_completion_time_series import products, series
     project, contract, evidence = products(tmp_path, series())
+    save_policy(project, EgressPolicy(providers={"local": REMOTE_DEFAULT_ALLOW, "remote": frozenset({"schema"})}))
     plan = Plan(plan_id='p', version=1, status='approved', question='Forecast the series', criteria=(), steps=(),
         allowed_classes=(), budget={'steps':6}, completion=contract, completion_evidence=evidence)
     context = build_context(project, plan, mode='auto', candidate='Analysis complete.',
-        config=SimpleNamespace(provider_id='offline', base_url='http://127.0.0.1'))
-    assert context['complete_packet'] is True and context['egress_allowed'] is True
+        config=SimpleNamespace(provider_id='offline', base_url='http://127.0.0.1', data_location=data_location))
+    assert context['complete_packet'] is True and context['egress_allowed'] is permitted
     assert [m['role'] for m in context['packet']['models']] == ['models', 'sensitivity']
     assert context['packet']['source'] == contract['source']
     encoded = json.dumps(context['packet'])

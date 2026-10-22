@@ -12,7 +12,7 @@ from uuid import uuid4
 from jsonschema import Draft202012Validator, ValidationError
 
 from ..canonical import sha256_canonical
-from ..egress import load_policy, provider_locality
+from ..egress import load_policy
 from .completion import _Products, source_receipt, claims_completion, _CLAIM
 from .phases import PhaseRequest, PhaseStep
 from .turn_messages import detect_language
@@ -69,7 +69,7 @@ def build_context(root, plan, *, mode, candidate, config):
     check = evaluate(root, plan.completion if plan else None, evidence)
     policy = load_policy(root)
     permitted = config is not None and 'model_result' in policy.allowed_classes(
-        provider_id=config.provider_id, locality=provider_locality(config.base_url))
+        provider_id=config.provider_id, locality=config.data_location)
     if plan is None or plan.completion is None:
         return {'mode': mode, 'packet': {}, 'manifest_sha256': check['verified_manifest_sha256'],
                 'evidence_keys': [], 'complete_packet': False, 'egress_allowed': permitted}

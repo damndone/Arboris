@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ast
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import httpx
@@ -31,7 +32,7 @@ from workbench.llm.config import LLMConfig
 
 BACKEND = Path(__file__).resolve().parents[1] / "backend" / "workbench"
 REMOTE = LLMConfig(base_url="https://api.deepseek.com", api_key="k", model="deepseek-chat", provider_id="deepseek")
-LOCAL = LLMConfig(base_url="http://127.0.0.1:11434/v1", api_key="k", model="qwen", provider_id="ollama")
+LOCAL = LLMConfig(base_url="http://127.0.0.1:11434/v1", api_key="k", model="qwen", provider_id="ollama", data_location="local")
 
 ROWS_RESULT = {
     "tool_call_id": "call-rows",
@@ -151,6 +152,45 @@ def test_a_local_provider_receives_rows(monkeypatch, tmp_path: Path) -> None:
         body = _send(monkeypatch, _conversation("show_dataset_rows", ROWS_RESULT), LOCAL)
     assert _tool_content(body)["output"]["rows"][0]["wage"] == 18.731
     assert read_audit(tmp_path)[0]["provider_locality"] == "local"
+
+
+@pytest.mark.parametrize("base_url", ["http://127.0.0.1:3425/v1", "http://localhost:3425/v1", "http://[::1]:3425/v1"])
+@pytest.mark.parametrize("tool_id,result", [
+    ("show_dataset_rows", ROWS_RESULT),
+    ("brand_new_tool", {"ok": True, "output": {"secret": "unclassified-value"}}),
+    ("inspect_project_model_coefficients", {"ok": True, "output": {"estimate": 1.234}}),
+])
+def test_unknown_loopback_gateway_has_remote_wire_policy(monkeypatch, tmp_path, base_url, tool_id, result):
+    gateway = replace(REMOTE, base_url=base_url, provider_id="magpie-workbuddy-ai",
+                      model="workbuddy-ai/deepseek-v4.1-flash")
+    with egress_project(tmp_path):
+        remote_body = _send(monkeypatch, _conversation(tool_id, result), REMOTE)
+        gateway_body = _send(monkeypatch, _conversation(tool_id, result), gateway)
+    assert gateway_body["messages"] == remote_body["messages"]
+    assert gateway_body["model"] == "workbuddy-ai/deepseek-v4.1-flash"
+    assert read_audit(tmp_path)[-1]["provider_locality"] == "remote"
+
+
+def test_gateway_column_protection_and_policy_view_match_wire(monkeypatch, tmp_path):
+    from fastapi.testclient import TestClient
+    from workbench.api import app
+    from workbench.http import egress_routes
+
+    gateway = replace(REMOTE, base_url="http://127.0.0.1:3425/v1", provider_id="magpie-workbuddy-ai")
+    save_policy(tmp_path, EgressPolicy(columns={"age": "restricted"},
+        providers={gateway.provider_id: frozenset(egress.CONTENT_CLASSES)}))
+    with egress_project(tmp_path):
+        body = _send(monkeypatch, _conversation("inspect_data_schema", SCHEMA_RESULT), gateway)
+    output = _tool_content(body)["output"]
+    assert output["value_labels"] == {"phone": egress.WITHHELD, "age": egress.WITHHELD}
+    assert output["frequencies"]["name"] == egress.WITHHELD
+    record = read_audit(tmp_path)[-1]
+    assert record["provider_host"] == "127.0.0.1"
+    assert record["provider_locality"] == "remote"
+    monkeypatch.setattr(egress_routes, "load_llm_config", lambda: gateway)
+    view = TestClient(app).get("/projects/egress", params={"project_root": str(tmp_path)})
+    assert view.status_code == 200, view.text
+    assert view.json()["active_provider"]["locality"] == record["provider_locality"]
 
 
 def test_aggregates_and_model_results_reach_a_remote_provider(monkeypatch, tmp_path: Path) -> None:

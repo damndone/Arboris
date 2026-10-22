@@ -18,7 +18,6 @@ from ..egress import (
     EgressPolicyError,
     load_policy,
     parse_policy,
-    provider_locality,
     read_audit,
     save_policy,
 )
@@ -50,7 +49,7 @@ def _policy(root: Path) -> EgressPolicy:
 
 def _view(root: Path, policy: EgressPolicy) -> dict[str, Any]:
     config = load_llm_config()
-    locality = provider_locality(config.base_url) if config.base_url else None
+    locality = config.data_location if config.base_url else None
     active = None
     if locality is not None:
         active = {

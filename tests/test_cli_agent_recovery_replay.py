@@ -11,6 +11,35 @@ import pytest
 from workbench.cli import app
 
 
+def test_journal_preserves_explicit_processing_location():
+    from dataclasses import replace
+    from workbench.cli_agent import _safe_config
+    from workbench.llm.config import LLMConfig
+    config = LLMConfig(base_url="http://localhost:11434/v1", api_key="private-key",
+                       model="local", data_location="local")
+    saved = _safe_config(config)
+    assert saved["data_location"] == "local"
+    assert "private-key" not in json.dumps(saved)
+    assert _safe_config(replace(config, data_location="remote"))["data_location"] == "remote"
+
+
+@pytest.mark.parametrize("location", [None, "local", "remote"])
+def test_journal_loads_location_and_treats_legacy_as_remote(location):
+    from types import SimpleNamespace
+    from workbench.cli_agent import _read_runtime, _safe_config
+    from workbench.llm.config import LLMConfig
+    config = _safe_config(LLMConfig(base_url="http://localhost/v1", api_key="", model="test"))
+    if location is None:
+        config.pop("data_location")
+    else:
+        config["data_location"] = location
+    manifest = {"schema": "workbench.headless-journal.v1", "input": {}, "config": config,
+                "fixture_sha256": "a" * 64, "model_sha256": "b" * 64,
+                "business_sha256": "c" * 64, "complete": True}
+    loaded = _read_runtime(SimpleNamespace(read_runtime=lambda: json.dumps(manifest)))
+    assert loaded["config"]["data_location"] == (location or "remote")
+
+
 def test_budget_blocked_headless_command_returns_failure_exit(tmp_path, monkeypatch):
     from workbench import cli_agent
     async def blocked(*args, **kwargs):

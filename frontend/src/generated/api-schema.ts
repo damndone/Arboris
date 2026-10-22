@@ -7423,6 +7423,11 @@ export interface components {
             configured: boolean;
             /** Context Window Tokens */
             context_window_tokens: number | null;
+            /**
+             * Data Location
+             * @enum {string}
+             */
+            data_location?: "local" | "remote";
             /** Key Present */
             key_present: boolean;
             /** Model */
@@ -7435,7 +7440,7 @@ export interface components {
              * Source
              * @enum {string}
              */
-            source: "local" | "environment" | "none" | "explicit_config_missing" | "explicit_config_invalid" | "explicit_config_unconfigured";
+            source: "local" | "environment" | "none" | "explicit_config_missing" | "explicit_config_invalid" | "explicit_config_unconfigured" | "config_invalid";
             /** Supports 1M */
             supports_1m: boolean;
             /** Supports Vision */
@@ -9626,6 +9631,12 @@ export interface components {
              * @default false
              */
             clear_api_key?: boolean;
+            /**
+             * Data Location
+             * @default remote
+             * @enum {string}
+             */
+            data_location?: "local" | "remote";
             /** Icon */
             icon?: string | null;
             /** Id */
@@ -9700,6 +9711,11 @@ export interface components {
         PublicProvider: {
             /** Base Url */
             base_url: string | null;
+            /**
+             * Data Location
+             * @enum {string}
+             */
+            data_location?: "local" | "remote";
             /** Icon */
             icon: string;
             /** Id */

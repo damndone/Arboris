@@ -10,11 +10,11 @@ from typing import Literal
 from urllib.parse import urlparse
 
 from .provider_store import (
+    DataLocation,
     ProviderRecord,
     ProviderStoreError,
     environment_provider_from_env,
     explicit_config_path,
-    load_provider_store,
     load_provider_store_strict,
 )
 
@@ -35,6 +35,7 @@ ConfigSource = Literal[
     "explicit_config_missing",
     "explicit_config_invalid",
     "explicit_config_unconfigured",
+    "config_invalid",
 ]
 
 
@@ -76,6 +77,7 @@ class LLMConfig:
     context_window_tokens: int | None = None
     supports_1m: bool = False
     supports_vision: bool = False
+    data_location: DataLocation = "remote"
 
     def is_configured(self) -> bool:
         return all(value.strip() for value in (self.base_url, self.api_key, self.model))
@@ -88,6 +90,11 @@ class LLMConfig:
         unreadable, and no fallback was consulted on purpose.
         """
 
+        if self.source == "config_invalid":
+            return (
+                "LLM provider store is invalid or unreadable. Refusing to fall "
+                "back to the environment; repair the provider configuration."
+            )
         if self.source == SOURCE_EXPLICIT_CONFIG_MISSING:
             return (
                 "WORKBENCH_LLM_CONFIG_PATH is set but the file does not exist. "
@@ -133,7 +140,10 @@ def load_llm_config() -> LLMConfig:
                 source=SOURCE_EXPLICIT_CONFIG_INVALID,
             )
     else:
-        store = load_provider_store()
+        try:
+            store = load_provider_store_strict()
+        except ProviderStoreError:
+            return LLMConfig(base_url="", api_key="", model="", source="config_invalid")
 
     provider = next(
         (
@@ -182,6 +192,7 @@ def _config_from_provider(provider: ProviderRecord, *, source: ConfigSource) -> 
         timeout_s=provider.timeout_s,
         provider_id=provider.id,
         provider_name=provider.name,
+        data_location=provider.data_location,
         source=source,
         context_window_tokens=(
             model_record.context_window_tokens if model_record is not None else None

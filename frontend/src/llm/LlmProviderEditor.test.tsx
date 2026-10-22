@@ -46,6 +46,17 @@ const provider: LlmProvider = {
 const savedProvider = { ...provider, name: "Saved provider" };
 
 describe("LlmProviderEditor", () => {
+  it("defaults loopback gateways to remote and saves explicit local inference", async () => {
+    render(<LlmProviderEditor provider={{ ...provider, base_url: "http://127.0.0.1:3425/v1" }} onSaved={vi.fn()} onBack={vi.fn()} />);
+    const location = screen.getByLabelText("Data processing location");
+    expect(location).toHaveValue("remote");
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+    await waitFor(() => expect(updateLlmProvider).toHaveBeenCalledWith("openai", expect.objectContaining({ data_location: "remote" })));
+    fireEvent.change(location, { target: { value: "local" } });
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+    await waitFor(() => expect(updateLlmProvider).toHaveBeenLastCalledWith("openai", expect.objectContaining({ data_location: "local" })));
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(createLlmProvider).mockResolvedValue(savedProvider);
