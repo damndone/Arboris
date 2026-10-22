@@ -10,7 +10,7 @@ import json
 from typing import Any
 
 from ..jsonl_store import _exclusive_jsonl_lock
-from .session import JsonlSessionRepository, SessionTreeEntry, _payload_digest
+from .session import JsonlSessionRepository, SessionTreeEntry, _log_index, _payload_digest
 
 SCHEMA = "agent.tool_receipt.v1"
 RECEIPT_STAGE = "original_tool_receipt"
@@ -96,13 +96,19 @@ def read(
     repository.get_metadata(session_id)
     path = repository._session_path(session_id)
     with repository._lock, _exclusive_jsonl_lock(path):
+        # The shared log index parses each appended line once; the strict
+        # receipt check below also runs once per line. Re-reading and parsing
+        # the whole log here (three times per tool call) cost 0.3-0.7 s per
+        # step on real 8 MB sessions.
         try:
-            rows = [json.loads(line, object_pairs_hook=_unique_object, parse_constant=_invalid_constant)
-                    for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
-            entries = [SessionTreeEntry.from_dict(row) for row in rows]
+            index = _log_index(path)
+            _check_strict(index)
         except (ValueError, TypeError, KeyError, UnicodeError) as exc:
             raise ToolReceiptError("invalid tool receipt session log") from exc
-        matches = [(row, entry) for row, entry in zip(rows, entries)
+        positions = sorted({*index.receipts.get(invocation_id, ()),
+                            *index.by_key.get((invocation_id, RECEIPT_STAGE), ())})
+        matches = [(row, SessionTreeEntry.from_dict(row)) for row in map(_strict_row, (index.lines[p] for p in positions))]
+        matches = [(row, entry) for row, entry in matches
                    if (entry.entry_type == "tool_receipt" and entry.payload.get("invocation_id") == invocation_id)
                    or (entry.idempotency is not None and entry.idempotency["key"] == invocation_id
                        and entry.idempotency["stage"] == RECEIPT_STAGE)]
@@ -121,12 +127,29 @@ def read(
         if entry.idempotency != {"key": invocation_id, "stage": RECEIPT_STAGE,
                                  "payload_sha256": _payload_digest("tool_receipt", envelope)}:
             raise ToolReceiptError("original tool receipt payload digest conflict")
-        if sum(candidate.entry_id == entry.entry_id for candidate in entries) != 1:
+        if len(index.by_id.get(entry.entry_id, ())) != 1:
             raise ToolReceiptError("duplicate original tool receipt entry")
-        if not any(candidate.session_id == session_id and candidate.entry_id == entry.entry_id
-                   for candidate in repository.get_branch(session_id)):
+        own = set(index.by_id[entry.entry_id])
+        if not any(branch_index.identity == index.identity and position in own
+                   for branch_index, position in repository._branch_positions(session_id, None)):
             raise ToolReceiptError("original tool receipt is on an off-branch historical entry or pending append")
         return entry
+
+
+_STRICT_CHECK = "tool_receipts.strict"
+
+
+def _strict_row(line: str) -> dict[str, Any]:
+    return json.loads(line, object_pairs_hook=_unique_object, parse_constant=_invalid_constant)
+
+
+def _check_strict(index) -> None:
+    """Every line must be strict JSON and a valid entry, as when the log was read whole."""
+    done = index.checked.get(_STRICT_CHECK, 0)
+    for line in index.lines[done:]:
+        SessionTreeEntry.from_dict(_strict_row(line))
+        done += 1
+        index.checked[_STRICT_CHECK] = done
 
 
 def persist(

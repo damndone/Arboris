@@ -40,11 +40,14 @@ def requested(text):
 
 
 def needed(core, payload):
-    revision_pending = any(e.entry_type == 'custom_message' and e.payload.get('message_type') == 'research_review_revision'
-        and e.payload.get('command_id') == core._active_command_id for e in core.repository.get_branch(core.session_id))
+    # Read the branch only when the cheap conditions leave it deciding: it was
+    # read on every step and cost about 60 ms each on an 8 MB session.
+    def revision_pending():
+        return any(e.entry_type == 'custom_message' and e.payload.get('message_type') == 'research_review_revision'
+            and e.payload.get('command_id') == core._active_command_id for e in core.repository.get_branch(core.session_id))
     return (core.research_review_context is not None and payload.get('stop_reason') == 'stop'
         and not payload.get('tool_calls') and (payload.get('review_requested') or
-        core.research_review_mode() == 'auto' and (claims_completion(payload['content']) or revision_pending)
+        core.research_review_mode() == 'auto' and (claims_completion(payload['content']) or revision_pending())
         and (payload.get('completion_check') or {}).get('status') == 'requirements_met')
         and not payload.get('numeric_check'))
 

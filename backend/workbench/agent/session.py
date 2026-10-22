@@ -155,6 +155,11 @@ class _LogIndex:
     #: Per line: entry type, parent reference and idempotency key, enough to
     #: walk and count a branch without parsing payloads.
     meta: list[tuple[str, dict[str, Any] | None, str | None]]
+    #: Positions of ``tool_receipt`` entries by their payload's invocation id.
+    receipts: dict[str, list[int]]
+    #: Per strict reader: how many leading lines it has already validated.
+    #: The lines of one index never change, so a check is done once per line.
+    checked: dict[str, int]
 
 
 #: Parsed-log indexes shared by every repository in the process (routes build a
@@ -176,6 +181,9 @@ def _index_line(index: _LogIndex, line: str) -> None:
         index.by_key.setdefault((str(identity["key"]), str(identity["stage"])), []).append(position)
     index.meta.append((str(value["entry_type"]), value.get("parent_ref"),
                        str(identity["key"]) if identity is not None else None))
+    payload = value.get("payload")
+    if value["entry_type"] == "tool_receipt" and isinstance(payload, dict):
+        index.receipts.setdefault(str(payload.get("invocation_id")), []).append(position)
 
 
 def _log_index(path: Path) -> _LogIndex:
@@ -200,10 +208,11 @@ def _log_index(path: Path) -> _LogIndex:
     if (cached is not None and (not cached.data or cached.data.endswith(b"\n"))
             and data.startswith(cached.data)):
         index = _LogIndex(identity, data, list(cached.lines), {k: list(v) for k, v in cached.by_id.items()},
-                          {k: list(v) for k, v in cached.by_key.items()}, list(cached.meta))
+                          {k: list(v) for k, v in cached.by_key.items()}, list(cached.meta),
+                          {k: list(v) for k, v in cached.receipts.items()}, dict(cached.checked))
         tail = data[len(cached.data):]
     else:
-        index = _LogIndex(identity, data, [], {}, {}, [])
+        index = _LogIndex(identity, data, [], {}, {}, [], {}, {})
         tail = data
     for line in tail.decode("utf-8").splitlines():
         if line.strip():
