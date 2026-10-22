@@ -7,27 +7,43 @@ export function AgentPlanPanel() {
   const agent = useAgentSurfaceOptional();
   const [draft, setDraft] = useState<AgentPlanPatch | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
   const plan = agent?.plan;
   useEffect(() => { setDraft(null); setFailure(null); }, [agent?.sessionId]);
   if (!agent) return null;
   if (!plan) return agent.planError ? <section className="wb-agent-plan" aria-label="Analysis plan"><p role="alert">{agent.planError}</p><button onClick={() => void agent.refreshPlan?.()}>Reload current plan</button></section> : null;
   const busy = agent.planBusy || agent.isSubmitting || agent.sessionStatus === "running";
   const changed = draft !== null && draft.version !== plan.version;
-  return <section className="wb-agent-plan" aria-label="Analysis plan">
-    <header><strong>Analysis plan · v{plan.version}</strong><span>{plan.status}</span></header>
+  const awaitingApproval = plan.approved_version !== plan.version && ["draft","needs_approval"].includes(plan.status);
+  const approve = () => {setFailure(null);void agent.approvePlan?.(plan.version).catch(error => setFailure(error instanceof Error ? error.message : "Could not approve plan."));};
+  const done = plan.steps.filter(step => ["done","completed"].includes(step.status)).length;
+  // v1.9.1: one line until opened, so the conversation keeps the panel.
+  return <details className="wb-agent-plan" aria-label="Analysis plan" open={open || draft !== null || undefined}
+    onToggle={event => setOpen((event.currentTarget as HTMLDetailsElement).open)}>
+    <summary>
+      <span className="wb-agent-plan__title">Plan v{plan.version}</span>
+      <span className="wb-agent-plan__meta">{plan.status} · {done ? `${done}/` : ""}{plan.steps.length} {plan.steps.length === 1 ? "step" : "steps"}</span>
+      {!draft && awaitingApproval && <button type="button" className="wb-agent-plan__approve" disabled={busy}
+        onClick={event => {event.preventDefault();approve();}}>Approve plan v{plan.version}</button>}
+    </summary>
     <p className="wb-agent-plan__note">Approval authorizes this plan version. It does not establish statistical preregistration.</p>
     {draft ? <>
       <label>Question<textarea aria-label="Plan question" maxLength={1000} value={draft.question ?? ""} onChange={e => setDraft({...draft,question:e.target.value})}/></label>
       <label>Criteria (one per line)<textarea aria-label="Plan criteria" value={(draft.criteria ?? []).join("\n")} onChange={e => setDraft({...draft,criteria:e.target.value.split("\n")})}/></label>
     </> : <><p>{plan.question}</p><ul>{plan.criteria.map((criterion, i) => <li key={i}>{criterion}</li>)}</ul></>}
-    <ol>{plan.steps.map(step => <li key={step.step_id}>
-      <div><code>{step.step_id}</code> · <span className="wb-agent-plan__status">{step.status}</span></div>
-      {draft ? <input aria-label={`Step ${step.step_id} title`} maxLength={200} value={draft.steps?.find(s => s.step_id === step.step_id)?.title ?? step.title}
-        onChange={e => setDraft({...draft,steps:draft.steps?.map(s => s.step_id === step.step_id ? {...s,title:e.target.value} : s)})}/> : <strong>{step.title}</strong>}
-      <div>Depends on: {step.depends_on.length ? step.depends_on.join(", ") : "none"}</div>
-      <div>{step.operation_ids.join(", ")}</div>
-      {step.expected_outputs.length > 0 && <div>Expected: {step.expected_outputs.join(", ")}</div>}
-      {step.added_after_results && <small>Later plan change</small>}
+    <ol>{plan.steps.map(step => <li key={step.step_id} data-status={step.status}>
+      <span className="wb-agent-plan__dot" aria-hidden="true" />
+      <div className="wb-agent-plan__step">
+        {draft ? <input aria-label={`Step ${step.step_id} title`} maxLength={200} value={draft.steps?.find(s => s.step_id === step.step_id)?.title ?? step.title}
+          onChange={e => setDraft({...draft,steps:draft.steps?.map(s => s.step_id === step.step_id ? {...s,title:e.target.value} : s)})}/> : <strong>{step.title}</strong>}
+        <div className="wb-agent-plan__detail">
+          <span className="wb-agent-plan__status">{step.status}</span>
+          {step.depends_on.length > 0 && <> · after {step.depends_on.join(", ")}</>}
+          {" · "}{step.operation_ids.join(", ")}
+          {step.added_after_results && <> · later plan change</>}
+        </div>
+        {step.expected_outputs.length > 0 && <div className="wb-agent-plan__detail">Expected: {step.expected_outputs.join(", ")}</div>}
+      </div>
     </li>)}</ol>
     {changed && <p role="status">A newer plan is available. Your draft is kept; discard it to edit the current version.</p>}
     {(failure || agent.planError) && <p role="alert">{failure ?? agent.planError}{draft ? " Your draft is kept." : ""} Reload the current plan to review changes.</p>}
@@ -43,7 +59,6 @@ export function AgentPlanPanel() {
         <button disabled={busy} onClick={() => {setDraft(null);setFailure(null);}}>Discard draft</button>
       </> : <>
         <button disabled={busy} onClick={() => setDraft({version:plan.version,question:plan.question,criteria:[...plan.criteria],steps:plan.steps.map(s => ({step_id:s.step_id,title:s.title,operation_ids:[...s.operation_ids],depends_on:[...s.depends_on],expected_outputs:[...s.expected_outputs]}))})}>Edit plan</button>
-        {plan.approved_version !== plan.version && ["draft","needs_approval"].includes(plan.status) && <button disabled={busy} onClick={() => {setFailure(null);void agent.approvePlan?.(plan.version).catch(error => setFailure(error instanceof Error ? error.message : "Could not approve plan."));}}>Approve plan v{plan.version}</button>}
         {agent.executionMode === "auto" && agent.approveAndRunPlan && plan.approved_version !== plan.version && ["draft","needs_approval"].includes(plan.status) && <>
           <button disabled={busy || Boolean(agent.durableTurns?.length)} onClick={() => {
             setFailure(null);
@@ -55,5 +70,5 @@ export function AgentPlanPanel() {
       <button disabled={agent.planBusy} onClick={() => void agent.refreshPlan?.()}>Reload current plan</button>
     </div>
     {agent.planVersions && agent.planVersions.length > 1 && <details><summary>Plan versions</summary><ul>{agent.planVersions.map(v => <li key={v.version}>v{v.version} · {v.status} · {v.updated_at}</li>)}</ul></details>}
-  </section>;
+  </details>;
 }

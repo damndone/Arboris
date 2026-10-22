@@ -396,17 +396,18 @@ export function AgentPanel({
       aria-label="Agent panel"
       className="wb-agent-panel"
     >
-      {(!compactHeader || auditSessionId) && <header
-        className={compactHeader ? "wb-agent-panel__header wb-agent-panel__header--compact" : "wb-agent-panel__header"}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          fontSize: 11,
-          fontFamily: "var(--font-mono, ui-monospace, monospace)",
-        }}
-      >
-        {!compactHeader && <strong style={{ color: "var(--label)" }}>agent</strong>}
+      {compactHeader && (agent.providerSteps?.length || auditSessionId) ? (
+        <div className="wb-agent-meta">
+          <AgentUsagePanel events={agent.providerSteps ?? []} compact />
+          {auditSessionId && (
+            <a href={agentAuditExportUrl(projectRoot, auditSessionId)} target="_blank" rel="noreferrer" aria-label="Export Agent audit" title="Export Agent audit">
+              Audit ↗
+            </a>
+          )}
+        </div>
+      ) : null}
+      {!compactHeader && <header className="wb-agent-panel__header">
+        <strong>agent</strong>
         {!compactHeader && <span style={{ color: "var(--label-secondary)" }}>{agent.scopeLabel}</span>}
         {!compactHeader && turnActive && (
           <span data-testid="agent-turn-progress" style={{ color: "var(--label-tertiary)" }} aria-live="polite">
@@ -431,14 +432,10 @@ export function AgentPanel({
           </a>
         )}
       </header>}
-      <AgentUsagePanel events={agent.providerSteps ?? []} />
+      {!compactHeader && <AgentUsagePanel events={agent.providerSteps ?? []} />}
       <AgentPlanPanel key={agent.sessionId ?? "new"} />
       {terminalFailure && (
-        <p
-          data-testid="agent-turn-error"
-          role="status"
-          style={{ margin: "6px 0", color: "var(--status-fails-fg)", fontSize: 12 }}
-        >
+        <p data-testid="agent-turn-error" role="status" className="wb-agent-callout">
           {terminalFailure}
         </p>
       )}

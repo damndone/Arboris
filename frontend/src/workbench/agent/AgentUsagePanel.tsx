@@ -33,15 +33,30 @@ function subtotal(values: (number | null)[], name: string): string {
   return `${known.reduce((sum,value)=>sum+value,0)} ${name}${known.length < values.length ? " (reported subtotal)" : ""}`;
 }
 
-export function AgentUsagePanel({events}: {events: AgentEvent[]}) {
+/** 1760242 → "1.76M", 15104 → "15.1K": a glance, not the record. */
+function compactCount(values: (number | null)[]): string {
+  const known = values.filter((value): value is number => value !== null);
+  if (!known.length) return "?";
+  const total = known.reduce((sum, value) => sum + value, 0);
+  if (total >= 1_000_000) return `${(total / 1_000_000).toFixed(2)}M`;
+  if (total >= 1_000) return `${(total / 1_000).toFixed(1)}K`;
+  return String(total);
+}
+
+export function AgentUsagePanel({events, compact = false}: {events: AgentEvent[]; compact?: boolean}) {
   if (!events.length) return null;
   const rows = events.map(reported);
   const cacheRows = rows.filter(row=>row.input !== null && row.hit !== null);
   const cachedInput = cacheRows.reduce((sum,row)=>sum+row.input!,0);
   const cachedHit = cacheRows.reduce((sum,row)=>sum+row.hit!,0);
   const cache = cachedInput ? `${(100*cachedHit/cachedInput).toFixed(1)}% cache${cacheRows.length < rows.length ? " (reported subset)" : ""}` : "Cache unavailable";
-  return <details className="wb-agent-usage" data-testid="agent-usage">
-    <summary>{rows.length} provider steps · {subtotal(rows.map(row=>row.input),"input")} · {subtotal(rows.map(row=>row.output),"output")} · {cache} · Cost unverified</summary>
+  const full = `${rows.length} provider steps · ${subtotal(rows.map(row=>row.input),"input")} · ${subtotal(rows.map(row=>row.output),"output")} · ${cache} · Cost unverified`;
+  const cacheShort = cachedInput ? ` · ${Math.round(100*cachedHit/cachedInput)}% cache` : "";
+  return <details className={compact ? "wb-agent-usage wb-agent-usage--compact" : "wb-agent-usage"} data-testid="agent-usage">
+    {compact
+      ? <summary title={full}>{rows.length} steps · {compactCount(rows.map(row=>row.input))} in · {compactCount(rows.map(row=>row.output))} out{cacheShort}</summary>
+      : <summary>{full}</summary>}
+    <div className="wb-agent-usage__body">
     <p>Provider-reported snapshots for this session. Missing usage stays unknown. Retries may consume additional unreported tokens; these counts are not an invoice. Reasoning tokens are included in output, not added to it. Earlier branches retain their own call records after undo.</p>
     <div className="wb-agent-usage__scroll"><table aria-label="Agent provider usage by step">
       <thead><tr><th>Command / step</th><th>Model</th><th>Elapsed</th><th>First content</th><th>Input</th><th>Output</th><th>Total</th><th>Cache hit</th><th>Cache miss</th><th>Reasoning</th><th>Retries</th><th>Outcome / source</th></tr></thead>
@@ -56,5 +71,6 @@ export function AgentUsagePanel({events}: {events: AgentEvent[]}) {
         </details></td>
       </tr>)}</tbody>
     </table></div>
+    </div>
   </details>;
 }

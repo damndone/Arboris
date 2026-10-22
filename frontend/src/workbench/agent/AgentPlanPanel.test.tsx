@@ -27,7 +27,7 @@ it("observes plan-event to DOM latency separately from browser paint", () => {
 it("shows server states and dependencies; approves exactly the displayed version without continuing", () => {
   render(<AgentPlanPanel />);
   expect(screen.getByText("Compare groups")).toBeInTheDocument();
-  expect(screen.getByText("Depends on: a")).toBeInTheDocument();
+  expect(screen.getByText(/after a/)).toBeInTheDocument();
   expect(screen.getByText("done")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button",{name:"Approve plan v3"}));
   expect(state.agent.approvePlan).toHaveBeenCalledWith(3);
