@@ -91,24 +91,7 @@
   color: var(--label-secondary);
 }
 
-.ws-composer__model select {
-  max-width: 9.5rem;
-  min-height: 0;
-  height: 28px;
-  padding: 0 22px 0 8px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background-color: transparent;
-  color: var(--label-secondary);
-  font-size: var(--text-small);
-  text-overflow: ellipsis;
-  cursor: pointer;
-}
 
-.ws-composer__model select:hover:not(:disabled) {
-  background-color: var(--bg-elev);
-  color: var(--label);
-}
 
 .ws-composer__send {
   display: inline-flex;
@@ -140,8 +123,7 @@
   color: var(--bg-card);
 }
 
-.ws-composer__send:focus-visible,
-.ws-composer__model select:focus-visible {
+.ws-composer__send:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
@@ -164,38 +146,9 @@
   min-height: 0;
 }
 
-/* Review first: a quiet toggle; pressed means every step waits for an OK. */
-.ws-composer__policy {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 26px;
-  min-height: 0;
-  padding: 0 8px;
-  border: var(--hairline) solid transparent;
-  border-radius: var(--radius-pill);
-  background: transparent;
-  color: var(--label-secondary);
-  font-size: var(--text-small);
-  font-weight: 500;
-  cursor: pointer;
-}
 
-.ws-composer__policy:hover:not(:disabled) {
-  background: var(--bg-elev);
-  color: var(--label);
-}
 
-.ws-composer__policy[aria-pressed="true"] {
-  border-color: color-mix(in oklch, var(--tint) 35%, transparent);
-  background: var(--tint-bg);
-  color: var(--tint-label);
-}
 
-.ws-composer__policy:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 1px;
-}
 
 /* One row at any Agent width: the toggles keep their words on one line and
    the model name gives way first. */
@@ -207,35 +160,15 @@
   white-space: nowrap;
 }
 
-.ws-composer__policy {
-  flex: 0 0 auto;
-  white-space: nowrap;
-}
-
-.ws-composer__model {
-  min-width: 0;
-  flex: 0 1 auto;
-}
-
-.ws-composer__model select {
-  width: 100%;
-}
 
 .ws-composer__send,
 .ws-composer__bar .wb-context-ring {
   flex: none;
 }
 
-/* In a narrow Agent, Review first keeps its icon and pressed tint; the note
-   under the input says which way it is set. */
+/* In a narrow Agent the model name gives way first, then the effort label. */
 @container composer (max-width: 400px) {
-  .ws-composer__policy {
-    width: 26px;
-    padding: 0;
-    justify-content: center;
-  }
-
-  .ws-composer__policy-label {
+  .ws-model-menu .ws-menu__label-sub {
     display: none;
   }
 }

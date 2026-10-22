@@ -51,6 +51,7 @@ import type {
   AgentHierarchyNode,
   AgentMessage,
   AgentModelOption,
+  AgentModelSettings,
   AgentNavigationRef,
   AgentOperationRecord,
   AgentProposal,
@@ -231,6 +232,8 @@ export interface AgentSurfaceContextValue {
   model: string;
   modelOptions: AgentModelOption[];
   setModel: (value: string) => Promise<void>;
+  /** Save the thinking effort or context window of one of the active provider's models. */
+  setModelSettings?: (requestModel: string, patch: AgentModelSettings) => Promise<void>;
   sessionStatus: string;
   proposals: AgentProposal[];
   confirmationBusyId: string | null;
@@ -657,6 +660,9 @@ export function AgentSurfaceProvider({
           context_window_tokens: llmConfig.context_window_tokens,
           supports_1m: llmConfig.supports_1m,
           supports_vision: llmConfig.supports_vision,
+          // No provider record to save a choice on: the menu shows no thinking control.
+          supports_reasoning_effort: false,
+          reasoning_effort: null,
         }]
       : [];
   }, [activeProvider, llmConfig?.model]);
@@ -710,6 +716,21 @@ export function AgentSurfaceProvider({
       setLlmConfig((current) => current ? { ...current, model: updated.model } : current);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Unable to update Agent model");
+    }
+  }, [activeProvider, llmConfig?.model]);
+
+  const setModelSettings = useCallback(async (requestModel: string, patch: AgentModelSettings) => {
+    if (!activeProvider) return;
+    setError(null);
+    try {
+      const models = (activeProvider.models ?? []).map((item) =>
+        item.request_model === requestModel ? { ...item, ...patch } : item);
+      const updated = await updateLlmProvider(activeProvider.id, { models });
+      setProviders((current) => current.map((provider) => provider.id === updated.id ? updated : provider));
+      const record = updated.models?.find((item) => item.request_model === llmConfig?.model);
+      if (record) setLlmConfig((current) => current ? { ...current, context_window_tokens: record.context_window_tokens } : current);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to update the model settings");
     }
   }, [activeProvider, llmConfig?.model]);
 
@@ -1229,6 +1250,7 @@ export function AgentSurfaceProvider({
     model,
     modelOptions,
     setModel,
+    setModelSettings,
     sessionStatus,
     proposals,
     confirmationBusyId,
@@ -1277,6 +1299,7 @@ export function AgentSurfaceProvider({
     sendPrompt,
     abortTurn,
     setModel,
+    setModelSettings,
     sessionStatus,
     proposals,
     confirmationBusyId,

@@ -9595,7 +9595,7 @@ export interface components {
             /** Display Name */
             display_name: string;
             /** Reasoning Effort */
-            reasoning_effort: string | null;
+            reasoning_effort: ("none" | "low" | "high" | "max") | null;
             /** Request Model */
             request_model: string;
             /** Supports 1M */

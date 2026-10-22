@@ -191,10 +191,12 @@ export function agentProposalFixture(
 }
 
 /** A provider model entry. */
+type OptionalModelFields = "supports_vision" | "supports_reasoning_effort" | "reasoning_effort";
+
 export function llmModelFixture(
-  model: Omit<Schema<"ProviderModel">, "supports_vision"> & Partial<Pick<Schema<"ProviderModel">, "supports_vision">>,
+  model: Omit<Schema<"ProviderModel">, OptionalModelFields> & Partial<Pick<Schema<"ProviderModel">, OptionalModelFields>>,
 ): Schema<"ProviderModel"> {
-  return { supports_vision: false, ...model };
+  return { supports_vision: false, supports_reasoning_effort: false, reasoning_effort: null, ...model };
 }
 
 /** One registered Agent operation as the capability catalog lists it. */

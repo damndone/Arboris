@@ -45,7 +45,8 @@ class ProviderStoreInvalidError(ProviderStoreError):
 
 
 #: Thinking efforts a model may take; ``none`` sends no thinking at all.
-REASONING_EFFORTS = ("none", "low", "high", "max")
+ReasoningEffort = Literal["none", "low", "high", "max"]
+REASONING_EFFORTS: tuple[ReasoningEffort, ...] = ("none", "low", "high", "max")
 
 
 def takes_reasoning_effort(request_model: str) -> bool:
@@ -68,7 +69,7 @@ class ModelRecord:
     supports_vision: bool = False
     # v1.9.1: thinking chosen in the Agent's model menu; None = the model's default.
     supports_reasoning_effort: bool = False
-    reasoning_effort: str | None = None
+    reasoning_effort: ReasoningEffort | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {

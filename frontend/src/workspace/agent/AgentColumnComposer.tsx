@@ -1,15 +1,21 @@
-import { AgentRunControls, agentTurnActive } from "../../workbench/agent/AgentRunControls";
+import { agentTurnActive } from "../../workbench/agent/AgentRunControls";
 // v1.9.0 — the Agent column's composer (design spec §8.3 #9). What the Agent
 // is about sits above the text; the text grows with what is typed; one row
-// below holds capabilities, context use, the model and send. Controls that do
-// nothing yet (attach context, voice) are left out rather than shown dead.
+// below holds capabilities, the mode, context use, the model and send.
+// v1.9.1: one mode control replaces the Mode select and the Review-first
+// toggle; while a turn runs a message is queued (or steers, when chosen);
+// an unfinished turn is one banner. Controls that do nothing yet (attach
+// context, voice) are left out rather than shown dead.
 
-import { useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useAgentSurfaceOptional } from "../../workbench/agent/AgentSurfaceContext";
 import { AgentCapabilityPopover } from "../../workbench/agent/AgentCapabilityPopover";
 import { ContextUsageRing } from "../../workbench/agent/ContextUsageRing";
-import { ReviewIcon, SendIcon, StopIcon } from "../icons";
+import { SendIcon, StopIcon } from "../icons";
+import { AgentModeMenu, cycleMode } from "./AgentModeMenu";
+import { AgentModelMenu } from "./AgentModelMenu";
 import "./agentColumnComposer.css";
+import "./composerMenu.css";
 
 const MAX_TEXT_HEIGHT = 200;
 
@@ -23,6 +29,9 @@ export function AgentColumnComposer() {
   const agent = useAgentSurfaceOptional();
   const textRef = useRef<HTMLTextAreaElement>(null);
   const prompt = agent?.prompt ?? "";
+  const [steer, setSteer] = useState(false);
+  const busyNow = agent ? agentTurnActive(agent) : false;
+  useEffect(() => { setSteer(false); }, [agent?.sessionId, busyNow]);
 
   useLayoutEffect(() => {
     const text = textRef.current;
@@ -48,18 +57,46 @@ export function AgentColumnComposer() {
     setPrompt,
   } = agent;
   const canSend = prompt.trim().length > 0;
-  const reviewFirst = agent.executionPolicy === "proposal_only";
-  const busy = agentTurnActive(agent);
+  const busy = busyNow;
+  // While a turn runs, a message waits for it (or steers it) instead of starting another.
+  const canQueue = busy && Boolean(agent.queueTurnMessage) && !agent.queueMessageBusy;
+  const submit = () => {
+    if (!canSend) return;
+    if (!busy) void sendPrompt(prompt);
+    else if (canQueue) void agent.queueTurnMessage?.(steer ? "steer" : "follow_up", prompt);
+  };
+  const unfinished = !agent.isSubmitting ? agent.durableTurns ?? [] : [];
 
   return (
     <div className="ws-composer-wrap">
-      <AgentRunControls />
+      {unfinished.map((turn) => (
+        <div key={turn.turn_id} className="ws-composer__banner" role="status">
+          <span>
+            Previous turn unfinished{turn.requires_reconcile ? " · needs reconciliation" : ""}
+          </span>
+          <button
+            type="button"
+            title="Resuming starts a model request. The server checks the original turn is no longer running first."
+            onClick={() => void agent.resumeTurn?.(turn.turn_id)}
+          >
+            Resume
+          </button>
+        </div>
+      ))}
+      {busy && agent.queueTurnMessage && (
+        <div className="ws-composer__queue">
+          <span>{steer ? "Your message steers the current turn" : "Your message waits for this turn to finish"}</span>
+          <button type="button" aria-pressed={steer} onClick={() => setSteer((value) => !value)}>
+            Steer
+          </button>
+        </div>
+      )}
       <form
         className="ws-composer"
         data-testid="agent-composer"
         onSubmit={(event) => {
           event.preventDefault();
-          if (canSend && !busy) void sendPrompt(prompt);
+          submit();
         }}
       >
         <div className="ws-composer__focus">
@@ -81,9 +118,14 @@ export function AgentColumnComposer() {
           placeholder="Ask about this result, or tell Arboris what to do…"
           onChange={(event) => setPrompt(event.target.value)}
           onKeyDown={(event) => {
+            if (event.key === "Tab" && event.shiftKey && !busy) {
+              event.preventDefault();
+              cycleMode(agent);
+              return;
+            }
             if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
               event.preventDefault();
-              if (canSend && !busy) void sendPrompt(prompt);
+              submit();
             }
           }}
         />
@@ -95,20 +137,7 @@ export function AgentColumnComposer() {
               textRef.current?.focus();
             }}
           />
-          {agent.setExecutionPolicy && (
-            <button
-              type="button"
-              className="ws-composer__policy"
-              aria-label="Review first"
-              aria-pressed={reviewFirst}
-              disabled={busy}
-              title={reviewFirst ? "Every step waits for your OK. Click to let read-only analyses run at once." : "Read-only analyses run at once. Click to review every step first."}
-              onClick={() => agent.setExecutionPolicy?.(reviewFirst ? "auto_read_only" : "proposal_only")}
-            >
-              <ReviewIcon />
-              <span className="ws-composer__policy-label">Review first</span>
-            </button>
-          )}
+          <AgentModeMenu agent={agent} disabled={busy} />
           <span className="ws-composer__spacer" />
           {busy && (
             <span className="ws-composer__status" role="status" aria-live="polite">
@@ -126,22 +155,18 @@ export function AgentColumnComposer() {
             onCompact={agent.compactConversation && agent.messages.some((message) => message.role === "user") ? () => void agent.compactConversation?.() : undefined}
             compacting={agent.compacting}
           />
-          <label className="ws-composer__model">
-            <span className="ws-visually-hidden">Model</span>
-            <select
-              aria-label="Agent model"
-              value={model}
-              disabled={busy || modelOptions.length === 0}
-              onChange={(event) => void setModel(event.target.value)}
-            >
-              {modelOptions.length === 0 && <option value={model}>{model}</option>}
-              {modelOptions.map((option) => (
-                <option key={option.request_model} value={option.request_model} title={option.request_model}>
-                  {option.display_name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <AgentModelMenu
+            model={model}
+            options={modelOptions}
+            disabled={busy}
+            onSelect={(value) => void setModel(value)}
+            onSettings={agent.setModelSettings ? (value, patch) => void agent.setModelSettings?.(value, patch) : undefined}
+          />
+          {busy && canQueue && canSend && (
+            <button type="submit" className="ws-composer__send" aria-label={steer ? "Steer the Agent" : "Queue for the Agent"} title={steer ? "Steer (Enter)" : "Queue (Enter)"}>
+              <SendIcon />
+            </button>
+          )}
           {busy ? (
             <button type="button" className="ws-composer__send ws-composer__send--stop" aria-label="Stop Agent" title="Stop" onClick={() => void abortTurn()}>
               <StopIcon />
@@ -158,9 +183,7 @@ export function AgentColumnComposer() {
           {error}
         </p>
       )}
-      <p className="ws-composer__note">
-        {reviewFirst ? "Every step waits for your OK" : "Read-only analyses run at once; changes wait for your OK"}
-      </p>
+      {agent.queueMessageNotice && <p className="ws-composer__note" role="status">{agent.queueMessageNotice}</p>}
     </div>
   );
 }
