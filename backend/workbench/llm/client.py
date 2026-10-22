@@ -8,6 +8,7 @@ anything raised from here.
 from __future__ import annotations
 
 import json
+import os
 import re
 from collections.abc import AsyncIterator, Mapping
 from typing import Any, Callable
@@ -397,8 +398,24 @@ def _chat_request_payload(
     if is_deepseek_v4(config) and "thinking" not in payload and "reasoning_effort" not in payload:
         # The documented V4 default, stated: a gateway serving the same model
         # (Magpie/WorkBuddy) otherwise answers without thinking.
-        payload["reasoning_effort"] = "high"
+        payload["reasoning_effort"] = agent_reasoning_effort()
     return payload
+
+
+REASONING_EFFORTS = ("none", "low", "high", "max")
+
+
+def agent_reasoning_effort() -> str:
+    """V4 effort for requests that do not bound it: WORKBENCH_REASONING_EFFORT, else the documented ``high``.
+
+    Evaluation runs set it to compare a strong configuration (``max``) and a
+    weak one (``none``, no thinking) on the same tasks.
+    """
+
+    value = os.environ.get("WORKBENCH_REASONING_EFFORT", "").strip().lower() or "high"
+    if value not in REASONING_EFFORTS:
+        raise LLMUpstreamError(f"WORKBENCH_REASONING_EFFORT must be one of {', '.join(REASONING_EFFORTS)}")
+    return value
 
 
 def _merge_stream_tool_call(

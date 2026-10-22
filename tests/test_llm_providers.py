@@ -2160,3 +2160,19 @@ def test_the_provider_connection_is_closed_when_the_answer_completes(monkeypatch
         return list(closed)
 
     assert asyncio.run(scenario()) == [True]
+
+
+def test_the_run_can_choose_the_v4_effort(monkeypatch) -> None:
+    import pytest
+    from workbench.llm.client import LLMUpstreamError, _chat_request_payload
+
+    gateway = LLMConfig(base_url="http://127.0.0.1:3425/v1", api_key=API_KEY, model="workbuddy-ai/deepseek-v4.1-flash")
+    messages = [{"role": "user", "content": "hi"}]
+    for effort in ("none", "max"):
+        monkeypatch.setenv("WORKBENCH_REASONING_EFFORT", effort)
+        assert _chat_request_payload(messages, gateway, None)["reasoning_effort"] == effort
+    # A bounded request keeps its own setting whatever the run chose.
+    assert _chat_request_payload(messages, gateway, None, model_config={"reasoning_effort": "none"})["reasoning_effort"] == "none"
+    monkeypatch.setenv("WORKBENCH_REASONING_EFFORT", "extreme")
+    with pytest.raises(LLMUpstreamError):
+        _chat_request_payload(messages, gateway, None)

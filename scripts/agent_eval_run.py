@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -150,6 +151,7 @@ def main() -> int:
         "round_budget": str(args.budget_ledger) if args.round_budget_cny is not None else None,
         "free_route_ledger": str(args.free_route_ledger) if args.free_route_ledger is not None else None,
         "provider": {key: getattr(config, key, None) for key in ("provider_id", "base_url", "model", "data_location")},
+        "reasoning_effort": os.environ.get("WORKBENCH_REASONING_EFFORT") or "default(high)",
         "low_space_exception": args.allow_low_space_this_round,
     }
     (out / "run_meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
