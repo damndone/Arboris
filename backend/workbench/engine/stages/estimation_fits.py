@@ -166,13 +166,18 @@ def panel_effect_columns(ctx) -> tuple[str | None, str | None]:
 
 def _fit_panel_ols(ctx, env):
     entity, time = panel_effect_columns(ctx)
+    # The panel's time order (declared, else detected) indexes the fit and its
+    # diagnostics even when it adds no fixed effects.
+    t_cands = ctx.artifacts.get("_time_candidates") or []
+    structure_time = time or (t_cands[0] if t_cands else None)
     covariance, cluster = _panel_covariance_request(ctx)
     primary, fitted = _orch().run_panel_ols(
         ctx.data.frame,
         y=ctx.artifacts["_normalized_y"],
         x=ctx.artifacts["_normalized_x"],
         entity=entity,
-        time=time,
+        time=structure_time,
+        time_effects=time is not None,
         model_id="panel_ols_1",
         covariance=covariance,
         cluster_col=cluster,
@@ -190,7 +195,8 @@ def _fit_panel_ols(ctx, env):
 
     diagnostics, positions, definition = panel_evidence(fitted, primary, ctx.data.frame,
         y=ctx.artifacts['_normalized_y'], x=ctx.artifacts['_normalized_x'],
-        entity=entity, time=time, cluster=cluster)
+        entity=entity, time=structure_time if fitted.model.dependent.index.names[1] == structure_time else None,
+        cluster=cluster)
     publish_completion_evidence(ctx, env, primary, point_definition=definition,
         retained_positions=positions, diagnostics={'panel': diagnostics})
     return "panel_ols_1", primary, None

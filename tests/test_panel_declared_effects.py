@@ -59,6 +59,24 @@ def test_an_entity_only_declaration_fits_entity_effects_only(tmp_path):
         _reference(entity_effects=True, time_effects=False), rel=1e-12)
 
 
+def test_an_entity_only_fit_keeps_the_real_time_order_for_its_diagnostics(tmp_path):
+    # Effects follow the declaration, structure does not: the panel diagnostics
+    # still see 6 years per firm (they saw 240 "times" when the fit used row order).
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    source = tmp_path / "panel.csv"
+    _frame().to_csv(source, index=False)
+    project = create_project(tmp_path, "demo")
+    result = run_workflow(project.root, [source], mode="auto", y="y", x=["x"], model_type="panel_ols", entity_col="firm_id")
+    run = project.root / "runs" / result["run_id"] / "model_results"
+    fit = read_json(run / "panel_ols_1.json")
+    panel = read_json(run / "panel_ols_1.completion.json")["diagnostics"]["panel"]
+    assert fit["time_col"] is None
+    assert panel["n_entities"] == 40 and panel["n_times"] == 6
+    assert panel["pairing"] == "adjacent_observed_times_within_entity" and panel["adjacent_pairs"] == 40 * 5
+    assert fit["coefficients"]["x"]["estimate"] == pytest.approx(
+        _reference(entity_effects=True, time_effects=False), rel=1e-12)
+
+
 def test_declaring_both_columns_fits_two_way_effects(tmp_path):
     one_way = _fit(tmp_path / "one", entity_col="firm_id")
     two_way = _fit(tmp_path / "two", entity_col="firm_id", time_col="year")

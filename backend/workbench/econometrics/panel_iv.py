@@ -123,8 +123,17 @@ def run_panel_ols(
     model_id: str,
     covariance: str = "clustered",
     cluster_col: str | None = None,
+    *,
+    time_effects: bool | None = None,
 ) -> tuple[dict[str, Any], Any]:
-    if entity is None and time is None:
+    """PanelOLS of y on x with entity and/or time fixed effects.
+
+    ``time`` indexes the panel; ``time_effects`` (default: whenever ``time`` is
+    given) decides whether it also gets fixed effects, so an entity-only fit
+    keeps the real time order for its panel diagnostics.
+    """
+    time_effects = time is not None if time_effects is None else bool(time_effects and time is not None)
+    if entity is None and not time_effects:
         raise ValueError(
             "PANEL_FIELDS_MISSING: PanelOLS requires at least an entity or time field."
         )
@@ -148,12 +157,15 @@ def run_panel_ols(
         data = _panel_estimation_rows(data, [y, *x], cluster_source)
 
     declared_entity = entity
-    declared_time = time
+    declared_time = time if time_effects else None
     index_cols: list[str] = []
     if entity is None:
         entity = "_panel_entity"
         data[entity] = "entity"
     index_cols.append(entity)
+    if time is not None and not time_effects and data.duplicated([entity, time]).any():
+        # Not a panel on this time column: keep the fit and drop the ordering.
+        time = None
     if time is None:
         time = "_panel_time"
         data[time] = range(len(data))
@@ -163,7 +175,7 @@ def run_panel_ols(
     terms = ["1", *[_linearmodels_term(column) for column in x]]
     if index_cols[0] != "_panel_entity":
         terms.append("EntityEffects")
-    if index_cols[1] != "_panel_time":
+    if time_effects:
         terms.append("TimeEffects")
     formula = f"{_linearmodels_term(y)} ~ {' + '.join(terms)}"
     if covariance == "clustered":
@@ -171,7 +183,7 @@ def run_panel_ols(
         fitted = _cluster_panel_fit(
             fitted, data, y=y, regressors=list(x),
             entity_effects=index_cols[0] != "_panel_entity",
-            time_effects=index_cols[1] != "_panel_time",
+            time_effects=time_effects,
             cluster_source=cluster_source,
         )
     else:

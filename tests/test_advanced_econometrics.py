@@ -361,11 +361,11 @@ def test_run_workflow_panel_ols_skips_statsmodels_diagnostics(monkeypatch, tmp_p
     import workbench.orchestrator as orchestrator
     from workbench.econometrics.runner import run_panel_ols as native_panel_ols
 
-    def fake_panel_ols(frame, y, x, entity, time, model_id, covariance="clustered", cluster_col=None):
+    def fake_panel_ols(frame, y, x, entity, time, model_id, covariance="clustered", cluster_col=None, time_effects=None):
         assert entity == "firm_id"
         assert time == "year"
         return native_panel_ols(frame, y, x, entity, time, model_id,
-                                covariance=covariance, cluster_col=cluster_col)
+                                covariance=covariance, cluster_col=cluster_col, time_effects=time_effects)
 
     def pooled_diagnostics(*args, **kwargs):
         pytest.fail("Panel fits must not use pooled statsmodels diagnostics")
