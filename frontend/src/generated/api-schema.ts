@@ -9594,10 +9594,14 @@ export interface components {
             context_window_tokens: number | null;
             /** Display Name */
             display_name: string;
+            /** Reasoning Effort */
+            reasoning_effort: string | null;
             /** Request Model */
             request_model: string;
             /** Supports 1M */
             supports_1m: boolean;
+            /** Supports Reasoning Effort */
+            supports_reasoning_effort: boolean;
             /** Supports Vision */
             supports_vision: boolean;
         };
@@ -9607,6 +9611,8 @@ export interface components {
             context_window_tokens?: number | null;
             /** Display Name */
             display_name: string;
+            /** Reasoning Effort */
+            reasoning_effort?: ("none" | "low" | "high" | "max") | null;
             /** Request Model */
             request_model: string;
             /**
@@ -9614,6 +9620,8 @@ export interface components {
              * @default false
              */
             supports_1m?: boolean;
+            /** Supports Reasoning Effort */
+            supports_reasoning_effort?: boolean | null;
             /**
              * Supports Vision
              * @default false

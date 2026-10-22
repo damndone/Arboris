@@ -44,6 +44,19 @@ class ProviderStoreInvalidError(ProviderStoreError):
     """The provider store exists but contains invalid JSON or schema."""
 
 
+#: Thinking efforts a model may take; ``none`` sends no thinking at all.
+REASONING_EFFORTS = ("none", "low", "high", "max")
+
+
+def takes_reasoning_effort(request_model: str) -> bool:
+    """DeepSeek V4 by its id, also behind a gateway that prefixes a vendor
+    (Magpie/WorkBuddy: ``workbuddy-ai/deepseek-v4.1-flash``); the default when a
+    stored model does not declare it."""
+
+    name = request_model.casefold().rsplit("/", 1)[-1]
+    return name.startswith(("deepseek-v4", "deepseek-flash"))
+
+
 @dataclass(frozen=True)
 class ModelRecord:
     display_name: str
@@ -53,6 +66,9 @@ class ModelRecord:
     # v1.7 G2: whether this model accepts image content. Gates the opt-in that
     # sends a rendered chart to the provider; default False = text-only.
     supports_vision: bool = False
+    # v1.9.1: thinking chosen in the Agent's model menu; None = the model's default.
+    supports_reasoning_effort: bool = False
+    reasoning_effort: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -61,6 +77,8 @@ class ModelRecord:
             "context_window_tokens": self.context_window_tokens,
             "supports_1m": self.supports_1m,
             "supports_vision": self.supports_vision,
+            "supports_reasoning_effort": self.supports_reasoning_effort,
+            "reasoning_effort": self.reasoning_effort,
         }
 
 
@@ -301,7 +319,7 @@ def _provider_from_dict(raw: Any) -> ProviderRecord:
     models_raw = raw.get("models", [])
     if not isinstance(models_raw, list):
         raise ValueError("models must be a list")
-    models = [_model_from_dict(item) for item in models_raw]
+    models = [model_from_dict(item) for item in models_raw]
     request_models = [model.request_model for model in models]
     if len(request_models) != len(set(request_models)):
         raise ValueError("model request_model values must be unique")
@@ -320,7 +338,9 @@ def _provider_from_dict(raw: Any) -> ProviderRecord:
     )
 
 
-def _model_from_dict(raw: Any) -> ModelRecord:
+def model_from_dict(raw: Any) -> ModelRecord:
+    """A validated model record; undeclared thinking support follows the model id."""
+
     if not isinstance(raw, Mapping):
         raise ValueError("model must be an object")
     context_window_tokens = raw.get("context_window_tokens")
@@ -336,12 +356,23 @@ def _model_from_dict(raw: Any) -> ModelRecord:
     supports_vision = raw.get("supports_vision", False)
     if not isinstance(supports_vision, bool):
         raise ValueError("supports_vision must be a boolean")
+    request_model = _required_nonblank_string(raw, "request_model")
+    supports_reasoning_effort = raw.get("supports_reasoning_effort")
+    if supports_reasoning_effort is None:
+        supports_reasoning_effort = takes_reasoning_effort(request_model)
+    if not isinstance(supports_reasoning_effort, bool):
+        raise ValueError("supports_reasoning_effort must be a boolean")
+    reasoning_effort = raw.get("reasoning_effort")
+    if reasoning_effort is not None and reasoning_effort not in REASONING_EFFORTS:
+        raise ValueError(f"reasoning_effort must be one of {', '.join(REASONING_EFFORTS)} or null")
     return ModelRecord(
         display_name=_required_nonblank_string(raw, "display_name"),
-        request_model=_required_nonblank_string(raw, "request_model"),
+        request_model=request_model,
         context_window_tokens=context_window_tokens,
         supports_1m=supports_1m,
         supports_vision=supports_vision,
+        supports_reasoning_effort=supports_reasoning_effort,
+        reasoning_effort=reasoning_effort,
     )
 
 

@@ -18,6 +18,7 @@ import httpx
 
 from ..egress import EgressPolicyError, guard_outgoing_messages
 from .config import LLMConfig
+from .provider_store import REASONING_EFFORTS, takes_reasoning_effort
 
 # Test seam: monkeypatch to inject httpx.MockTransport-backed clients.
 _client_factory: Callable[[LLMConfig], httpx.Client] = lambda config: httpx.Client(
@@ -76,8 +77,7 @@ def is_deepseek_v4(config: LLMConfig) -> bool:
     and run on other hosts, so neither the provider name nor the host identifies it.
     """
 
-    name = config.model.casefold().rsplit("/", 1)[-1]
-    return name.startswith(("deepseek-v4", "deepseek-flash"))
+    return takes_reasoning_effort(config.model)
 
 
 def deepseek_v4_request_config(config: LLMConfig) -> dict[str, Any]:
@@ -397,10 +397,11 @@ def _chat_request_payload(
         for key in ("tool_choice", "thinking", "reasoning_effort", "max_tokens"):
             if key in model_config:
                 payload[key] = model_config[key]
-    if is_deepseek_v4(config) and "thinking" not in payload and "reasoning_effort" not in payload:
-        # The documented V4 default, stated: a gateway serving the same model
+    supports = config.supports_reasoning_effort
+    if (is_deepseek_v4(config) if supports is None else supports) and "thinking" not in payload and "reasoning_effort" not in payload:
+        # The effort is always stated: a gateway serving the same model
         # (Magpie/WorkBuddy) otherwise answers without thinking.
-        effort = agent_reasoning_effort()
+        effort = agent_reasoning_effort(config)
         if effort == "none":
             payload["thinking"] = {"type": "disabled"}
         else:
@@ -408,17 +409,16 @@ def _chat_request_payload(
     return payload
 
 
-REASONING_EFFORTS = ("none", "low", "high", "max")
+def agent_reasoning_effort(config: LLMConfig | None = None) -> str:
+    """Effort for requests that do not bound it: WORKBENCH_REASONING_EFFORT, else the
+    model's choice in the Agent's model menu, else the documented V4 default ``high``.
 
-
-def agent_reasoning_effort() -> str:
-    """V4 effort for requests that do not bound it: WORKBENCH_REASONING_EFFORT, else the documented ``high``.
-
-    Evaluation runs set it to compare a strong configuration (``max``) and a
-    weak one (``none``, no thinking) on the same tasks.
+    Evaluation runs set the variable to compare a strong configuration (``max``)
+    and a weak one (``none``, no thinking) on the same tasks, whatever is stored.
     """
 
-    value = os.environ.get("WORKBENCH_REASONING_EFFORT", "").strip().lower() or "high"
+    stored = config.reasoning_effort if config is not None else None
+    value = os.environ.get("WORKBENCH_REASONING_EFFORT", "").strip().lower() or stored or "high"
     if value not in REASONING_EFFORTS:
         raise LLMUpstreamError(f"WORKBENCH_REASONING_EFFORT must be one of {', '.join(REASONING_EFFORTS)}")
     return value

@@ -40,6 +40,7 @@ from ..llm.provider_store import (
     DEFAULT_TIMEOUT_S,
     MAX_TIMEOUT_S,
     ModelRecord,
+    model_from_dict,
     ProviderRecord,
     ProviderStore,
     load_provider_store,
@@ -334,6 +335,8 @@ class ProviderModelRequest(BaseModel):
     context_window_tokens: int | None = Field(default=None, ge=1)
     supports_1m: bool = False
     supports_vision: bool = False
+    supports_reasoning_effort: bool | None = None
+    reasoning_effort: Literal["none", "low", "high", "max"] | None = None
 
     @field_validator("display_name", "request_model")
     @classmethod
@@ -534,7 +537,7 @@ def _to_provider_record(
             api_key=_stored_api_key(request.api_key),
             timeout_s=request.timeout_s or DEFAULT_TIMEOUT_S,
             data_location=request.data_location,
-            models=[ModelRecord(**model.model_dump()) for model in request.models or []],
+            models=[model_from_dict(model.model_dump()) for model in request.models or []],
         )
 
     if request.id is not None and request.id != provider_id:
@@ -567,7 +570,7 @@ def _to_provider_record(
         timeout_s=request.timeout_s if request.timeout_s is not None else existing.timeout_s,
         data_location=(request.data_location if "data_location" in request.model_fields_set else existing.data_location),
         models=(
-            [ModelRecord(**model.model_dump()) for model in request.models]
+            [model_from_dict(model.model_dump()) for model in request.models]
             if request.models is not None
             else existing.models
         ),

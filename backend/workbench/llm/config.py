@@ -78,6 +78,9 @@ class LLMConfig:
     supports_1m: bool = False
     supports_vision: bool = False
     data_location: DataLocation = "remote"
+    #: None: decided by the model id (DeepSeek V4); see ``takes_reasoning_effort``.
+    supports_reasoning_effort: bool | None = None
+    reasoning_effort: str | None = None
 
     def is_configured(self) -> bool:
         return all(value.strip() for value in (self.base_url, self.api_key, self.model))
@@ -201,4 +204,8 @@ def _config_from_provider(provider: ProviderRecord, *, source: ConfigSource) -> 
         supports_vision=(
             model_record.supports_vision if model_record is not None else False
         ),
+        supports_reasoning_effort=(
+            model_record.supports_reasoning_effort if model_record is not None else None
+        ),
+        reasoning_effort=model_record.reasoning_effort if model_record is not None else None,
     )
