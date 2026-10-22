@@ -135,12 +135,13 @@ export function writeAgentMode(mode: AgentMode): void {
   }
 }
 
-export const DEFAULT_AGENT_WIDTH = 380;
+export const DEFAULT_AGENT_WIDTH = 440;
+export const MIN_AGENT_WIDTH = 320;
 
 export function readAgentWidth(): number {
   try {
     const stored = Number(localStorage.getItem(AGENT_WIDTH_KEY));
-    return Number.isFinite(stored) && stored >= 240 && stored <= 960 ? stored : DEFAULT_AGENT_WIDTH;
+    return Number.isFinite(stored) && stored >= MIN_AGENT_WIDTH && stored <= 960 ? stored : DEFAULT_AGENT_WIDTH;
   } catch {
     return DEFAULT_AGENT_WIDTH;
   }

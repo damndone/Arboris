@@ -135,13 +135,14 @@
   outline-offset: -2px;
 }
 
-/* Width handle on the leading edge; inside the card so the clip keeps it. */
+/* Width handle on the leading edge; inside the card so the clip keeps it.
+   Drag to resize, double-click to restore the default width. */
 .ws-agent__resize {
   position: absolute;
   left: 0;
   top: 44px;
   bottom: var(--space-3);
-  width: 6px;
+  width: 8px;
   z-index: 1;
   cursor: col-resize;
   touch-action: none;
@@ -150,7 +151,7 @@
 .ws-agent__resize::after {
   content: "";
   position: absolute;
-  left: 1px;
+  left: 0;
   top: 0;
   bottom: 0;
   width: 2px;

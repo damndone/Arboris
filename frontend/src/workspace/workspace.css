@@ -125,6 +125,8 @@
 }
 
 .ws-agent {
+  /* The width handle is positioned against the panel, not the page. */
+  position: relative;
   grid-column: 3;
   grid-row: 2 / 4;
   min-width: 0;
