@@ -37,6 +37,7 @@ from .estimation_fits import (
     _kernel_source_packet,
     _result_for_downstream,
     _fit_panel_ols,
+    panel_effect_columns,
     _fit_iv_2sls,
     _fit_did,
     _fit_cs_did,
@@ -184,7 +185,7 @@ class EstimationStage:
         # to the outer _run_workflow handler — original behavior).
         id_cands = ctx.artifacts.get("_id_candidates") or []
         t_cands = ctx.artifacts.get("_time_candidates") or []
-        if model_type == "panel_ols" and not id_cands and not t_cands:
+        if model_type == "panel_ols" and not any(panel_effect_columns(ctx)):
             raise WorkflowValidationError(
                 "PANEL_FIELDS_MISSING",
                 "panel_ols requires entity or time.",

@@ -154,16 +154,25 @@ def _panel_covariance_request(ctx) -> tuple[str, str | None]:
     return covariance, normalize_column_name(cluster) if cluster else None
 
 
-def _fit_panel_ols(ctx, env):
+def panel_effect_columns(ctx) -> tuple[str | None, str | None]:
+    """The (entity, time) columns whose fixed effects a panel fit uses (stages/routing.py)."""
+    columns = ctx.artifacts.get("_panel_effect_columns")
+    if columns is not None:
+        return columns
     id_cands = ctx.artifacts.get("_id_candidates") or []
     t_cands = ctx.artifacts.get("_time_candidates") or []
+    return (id_cands[0] if id_cands else None, t_cands[0] if t_cands else None)
+
+
+def _fit_panel_ols(ctx, env):
+    entity, time = panel_effect_columns(ctx)
     covariance, cluster = _panel_covariance_request(ctx)
     primary, fitted = _orch().run_panel_ols(
         ctx.data.frame,
         y=ctx.artifacts["_normalized_y"],
         x=ctx.artifacts["_normalized_x"],
-        entity=id_cands[0] if id_cands else None,
-        time=t_cands[0] if t_cands else None,
+        entity=entity,
+        time=time,
         model_id="panel_ols_1",
         covariance=covariance,
         cluster_col=cluster,
@@ -181,7 +190,7 @@ def _fit_panel_ols(ctx, env):
 
     diagnostics, positions, definition = panel_evidence(fitted, primary, ctx.data.frame,
         y=ctx.artifacts['_normalized_y'], x=ctx.artifacts['_normalized_x'],
-        entity=id_cands[0] if id_cands else None, time=t_cands[0] if t_cands else None, cluster=cluster)
+        entity=entity, time=time, cluster=cluster)
     publish_completion_evidence(ctx, env, primary, point_definition=definition,
         retained_positions=positions, diagnostics={'panel': diagnostics})
     return "panel_ols_1", primary, None

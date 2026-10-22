@@ -34,10 +34,12 @@ class RoutingStage:
         # the empty short-circuit below still holds.
         entity_col = normalize_column_name(ctx.artifacts.get("_entity_col") or "")
         time_col = normalize_column_name(ctx.artifacts.get("_time_col") or "")
-        if entity_col and entity_col in cleaned.columns:
-            id_candidates = [entity_col]
-        if time_col and time_col in cleaned.columns:
-            time_candidates = [time_col]
+        declared_entity = entity_col if entity_col and entity_col in cleaned.columns else None
+        declared_time = time_col if time_col and time_col in cleaned.columns else None
+        if declared_entity:
+            id_candidates = [declared_entity]
+        if declared_time:
+            time_candidates = [declared_time]
         routing = classify_dataset(cleaned, id_candidates, time_candidates)
         env.step("routing", "complete", f"Classified as {routing['kind']}")
         routing_path = run_root / "staged" / "analysis_router.json"
@@ -54,4 +56,14 @@ class RoutingStage:
         ctx.artifacts["_routing"] = routing
         ctx.artifacts["_time_candidates"] = time_candidates
         ctx.artifacts["_id_candidates"] = id_candidates
+        # Panel fixed effects follow the declaration: once either panel column
+        # is declared, an undeclared one adds no effects (an entity-only request
+        # used to get the detected time column's effects too, so one-way and
+        # two-way fits came out identical). With neither declared, detection
+        # still supplies both, as before.
+        if declared_entity or declared_time:
+            ctx.artifacts["_panel_effect_columns"] = (declared_entity, declared_time)
+        else:
+            ctx.artifacts["_panel_effect_columns"] = (
+                id_candidates[0] if id_candidates else None, time_candidates[0] if time_candidates else None)
         return ctx
