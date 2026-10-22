@@ -43,3 +43,17 @@ def test_one_outside_reference_still_makes_the_review_unverified():
     result = _parse(_review('plan.criteria[2]', 'run:20261022_111353_820833_86804463'), KEYS)
     assert result == {'verdict': 'unverified', 'findings': [],
                       'reason': 'inconsistent_verdict_or_unknown_evidence_reference'}
+
+
+def test_a_citation_by_the_evidence_own_identity_is_supplied():
+    from workbench.agent.research_review import _packet_values
+
+    packet = {'plan': {'plan_id': 'plan_eda232411058'}, 'source': {'sha256': 'a' * 64, 'run_id': '20261022_152633_388180_9d1cbd1c'},
+              'completion': {'verified_artifacts': [{'artifact_id': 'survival_cox_1.completion', 'run_id': '20261022_152904_897303_6d53c957'}]}}
+    values = _packet_values(packet)
+    for ref in ('survival_cox_1.completion', 'plan_eda232411058', 'a' * 64, 'observations.candidate',
+                'cleaned_dataset@20261022_152633_388180_9d1cbd1c'.replace('cleaned_dataset', 'survival_cox_1.completion'),
+                'plan:plan_eda232411058'):
+        assert _supplied(ref, KEYS, values), ref
+    for ref in ('cleaned_dataset@20261022_000000_000000_deadbeef', 'run:20261022_111353_820833_86804463', 'models[0]'):
+        assert not _supplied(ref, KEYS, values), ref
