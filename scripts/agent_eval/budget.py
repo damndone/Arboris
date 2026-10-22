@@ -237,6 +237,19 @@ class FreeRouteGuard:
             state["prompt_tokens"] += int(usage.get("prompt_tokens") or 0)
             state["completion_tokens"] += int(usage.get("completion_tokens") or 0)
 
+    #: Interrupted calls a free round tolerates before it stops (each is still taped).
+    MAX_TRANSPORT_INTERRUPTIONS = 3
+
+    def tolerate_transport_interruption(self, error: str) -> bool:
+        """Nothing is billed on this route; let the product retry, up to a bound per round."""
+        with self._change() as state:
+            state.setdefault("transport_interruptions", []).append(error)
+            count = len(state["transport_interruptions"])
+        if count > self.MAX_TRANSPORT_INTERRUPTIONS:
+            self.stop(f"{count} transport interruptions on the free route")
+            return False
+        return True
+
     def resume_storage_stop(self):
         with self._change() as state:
             if state["stopped"] and str(state["reason"]).startswith("storage threshold"):

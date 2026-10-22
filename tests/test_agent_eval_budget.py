@@ -244,3 +244,14 @@ def test_the_free_route_guard_stops_on_any_non_zero_or_missing_credit(tmp_path):
         fresh.settle(fresh.reserve(b"{}"), {"prompt_tokens": 10, "completion_tokens": 2})
     with pytest.raises(ValueError):
         FreeRouteGuard(tmp_path / "free.json", provider_id="magpie-workbuddy-ai", base_url="http://127.0.0.1:9999/v1")
+
+
+
+def test_the_free_route_tolerates_a_few_transport_interruptions(tmp_path):
+    from agent_eval.budget import FreeRouteGuard
+
+    guard = FreeRouteGuard(tmp_path / "free.json", provider_id="magpie-workbuddy-ai", base_url="http://127.0.0.1:3425/v1")
+    assert all(guard.tolerate_transport_interruption("RemoteProtocolError") for _ in range(3))
+    assert not guard.stopped
+    assert guard.tolerate_transport_interruption("ReadTimeout") is False
+    assert guard.stopped and guard.state["transport_interruptions"][-1] == "ReadTimeout"

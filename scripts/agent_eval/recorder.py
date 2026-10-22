@@ -17,6 +17,7 @@ requiring identical hashes.
 from __future__ import annotations
 
 import hashlib
+import asyncio
 import json
 import threading
 import time
@@ -116,6 +117,11 @@ class _RecordingTransport(httpx.AsyncBaseTransport):
                 # billed. Release it and let the product's own retry run (the paid
                 # fix1 round froze on one such ConnectError).
                 self.budget.release(reservation)
+                raise
+            tolerate = getattr(self.budget, "tolerate_transport_interruption", None)
+            if tolerate is not None and not isinstance(exc, (asyncio.CancelledError, KeyboardInterrupt)) and tolerate(type(exc).__name__):
+                # Free route: nothing is billed, so an interrupted call is the product's
+                # to retry; the guard stops the round only after repeated interruptions.
                 raise
             if self.budget is not None:
                 self.budget.stop("transport interrupted; preserve reservation until billing is reconciled")
