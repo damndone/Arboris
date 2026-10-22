@@ -640,4 +640,6 @@ def _attach_ols_result_contract(
     return result
 
 
+#: Inference engine v2 (v1.8.10): robust and clustered OLS use Stata's
+#: finite-sample reference distributions instead of the normal.
 INFERENCE_ENGINE_VERSION = "workbench.inference.v2"

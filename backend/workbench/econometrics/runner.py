@@ -62,10 +62,6 @@ HONEST_SD_SCALE_FLOOR = 1e-8
 HONEST_DID_WORKERS = max(1, min(4, os.cpu_count() or 1))
 
 
-#: Inference engine v2 (v1.8.10): robust and clustered OLS use Stata's
-#: finite-sample reference distributions instead of the normal.
-
-
 def run_ols(
     frame: pd.DataFrame, y: str, x: list[str], robust: bool, model_id: str,
     categorical_x: set[str] | None = None,

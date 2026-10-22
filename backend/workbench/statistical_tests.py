@@ -429,9 +429,4 @@ def summarize_statistical_tests(
     }
 
 
-# --- Helpers ---
-
-
-# --- v1.8.6 independent statistical evidence slice ---
-
 

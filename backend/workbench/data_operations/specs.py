@@ -150,6 +150,8 @@ DataTransformOperation = Literal[
 ]
 
 
+# Operations implemented before the declaration registry. Everything newer is
+# declared in data_operation_registry and admitted from there.
 def allowed_data_transform_operations() -> frozenset[str]:
     from ..data_operation_registry import data_operation_declarations
 
@@ -373,6 +375,13 @@ class DataColumnCastEffect:
         }
 
 
+# Batch cast (data.columns.cast): N columns -> one immutable child. Same typed
+# lifecycle as the singular data.column.cast, but the operation grain
+# matches user intent: "cast these N columns" is one Operation Record, one child
+# node, one artifact, one recipe, one diff — instead of N sibling nodes that each
+# apply only one cast and never yield a fully-cast dataset. Leaf helpers
+# (_convert_strict / _schema_fingerprint / _resolve_source / _read_frame) are
+# shared with the singular path, which is left untouched.
 @dataclass(frozen=True)
 class DataCastItem:
     column: str
