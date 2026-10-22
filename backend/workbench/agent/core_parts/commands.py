@@ -37,13 +37,22 @@ class CommandMixin:
     ) -> str:
         return await self._command(None, budget=budget, tool_context=tool_context, continuation=True)
 
+    def _last_person_text(self):
+        for entry in reversed(self.repository.get_branch(self.session_id)):
+            if entry.entry_type == "message" and entry.payload.get("role") == "user":
+                return entry.payload.get("content")
+        return None
+
     async def _command(self, text, *, budget, tool_context, continuation):
         journal = self.turn_journal
         with journal.ownership() if journal else nullcontext():
             if self.command_check is not None:
                 self.command_check()
             self._begin(AgentRunBudget.from_value(budget), command_id=(tool_context or {}).get("command_id"))
-            self._user_text = text
+            # A continuation has no new text; the person's last request still sets the
+            # answer language and what a completion claim answers (off3: English notices
+            # in a Chinese task after every confirmation).
+            self._user_text = text if not continuation else self._last_person_text()
             started = False
             try:
                 if continuation:
