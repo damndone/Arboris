@@ -86,15 +86,17 @@ def deepseek_v4_request_config(config: LLMConfig) -> dict[str, Any]:
     DeepSeek V4 enables high-effort private reasoning by default. Workbench's
     typed Notebook planner and evidence-bound Report writer both need bounded
     public responses, so they share this adapter policy instead of each caller
-    guessing provider controls independently. ``reasoning_effort: none`` says
-    the same as ``thinking: disabled`` for gateways that ignore the latter.
+    guessing provider controls independently. No thinking is stated only as
+    ``thinking: disabled``: the Magpie/WorkBuddy gateway thinks whenever
+    ``reasoning_effort`` is present, whatever its value, even beside
+    ``thinking: disabled`` (probe 2026-10-22).
     """
 
     # "deepseek-flash" is the V4.1 Flash alias this Workbench is configured with;
     # matching only "deepseek-v4*" left planner, report writer and conversation
     # summaries in default high-effort thinking with a bounded output.
     if is_deepseek_v4(config):
-        return {"thinking": {"type": "disabled"}, "reasoning_effort": "none", "max_tokens": 8192}
+        return {"thinking": {"type": "disabled"}, "max_tokens": 8192}
     return {}
 
 
@@ -398,7 +400,11 @@ def _chat_request_payload(
     if is_deepseek_v4(config) and "thinking" not in payload and "reasoning_effort" not in payload:
         # The documented V4 default, stated: a gateway serving the same model
         # (Magpie/WorkBuddy) otherwise answers without thinking.
-        payload["reasoning_effort"] = agent_reasoning_effort()
+        effort = agent_reasoning_effort()
+        if effort == "none":
+            payload["thinking"] = {"type": "disabled"}
+        else:
+            payload["reasoning_effort"] = effort
     return payload
 
 

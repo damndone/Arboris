@@ -1835,7 +1835,6 @@ def test_deepseek_v4_adapter_does_not_advertise_named_tool_choice() -> None:
     assert adapter.supports_named_tool_choice() is False
     assert adapter.planning_request_config() == {
         "thinking": {"type": "disabled"},
-        "reasoning_effort": "none",
         "max_tokens": 8192,
     }
 
@@ -1854,7 +1853,8 @@ def test_deepseek_v4_behind_a_gateway_is_recognised_and_thinks_by_default() -> N
     assert _chat_request_payload(messages, official, None)["reasoning_effort"] == "high"
     assert "reasoning_effort" not in _chat_request_payload(messages, other, None)
     bounded = _chat_request_payload(messages, gateway, None, model_config=OpenAICompatibleModelAdapter(gateway).planning_request_config())
-    assert bounded["reasoning_effort"] == "none" and bounded["thinking"] == {"type": "disabled"}
+    # No thinking is stated only as thinking=disabled: the gateway thinks whenever reasoning_effort is present.
+    assert bounded["thinking"] == {"type": "disabled"} and "reasoning_effort" not in bounded
 
 
 def test_probe_uses_models_endpoint_and_never_chat_completion(
@@ -2168,11 +2168,13 @@ def test_the_run_can_choose_the_v4_effort(monkeypatch) -> None:
 
     gateway = LLMConfig(base_url="http://127.0.0.1:3425/v1", api_key=API_KEY, model="workbuddy-ai/deepseek-v4.1-flash")
     messages = [{"role": "user", "content": "hi"}]
-    for effort in ("none", "max"):
-        monkeypatch.setenv("WORKBENCH_REASONING_EFFORT", effort)
-        assert _chat_request_payload(messages, gateway, None)["reasoning_effort"] == effort
+    monkeypatch.setenv("WORKBENCH_REASONING_EFFORT", "max")
+    assert _chat_request_payload(messages, gateway, None)["reasoning_effort"] == "max"
+    monkeypatch.setenv("WORKBENCH_REASONING_EFFORT", "none")
+    weak = _chat_request_payload(messages, gateway, None)
+    assert weak["thinking"] == {"type": "disabled"} and "reasoning_effort" not in weak
     # A bounded request keeps its own setting whatever the run chose.
-    assert _chat_request_payload(messages, gateway, None, model_config={"reasoning_effort": "none"})["reasoning_effort"] == "none"
+    assert _chat_request_payload(messages, gateway, None, model_config={"thinking": {"type": "disabled"}})["thinking"] == {"type": "disabled"}
     monkeypatch.setenv("WORKBENCH_REASONING_EFFORT", "extreme")
     with pytest.raises(LLMUpstreamError):
         _chat_request_payload(messages, gateway, None)
