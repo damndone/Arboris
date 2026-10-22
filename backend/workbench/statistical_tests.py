@@ -441,12 +441,13 @@ def _build_advanced_evidence_results(
                 continue
             labels, arrays = grouped
             group_map = dict(zip(labels, arrays, strict=True))
+            summaries = [_GroupSummary(values) for values in arrays]
             for left_index, right_index in combinations(range(len(arrays)), 2):
                 try:
                     evidence.append(
                         _cohens_d_evidence(
-                            arrays[left_index],
-                            arrays[right_index],
+                            summaries[left_index],
+                            summaries[right_index],
                             test_id=(
                                 f"cohens_d:{outcome}:{group}:"
                                 f"{labels[left_index]}:{labels[right_index]}"
@@ -540,10 +541,10 @@ def _finite_groups(
     for label in labels:
         values = pd.to_numeric(
             pair.loc[group_series == label, outcome], errors="coerce"
-        ).dropna().tolist()
-        if len(values) >= 2 and all(math.isfinite(float(value)) for value in values):
+        ).dropna().to_numpy(dtype=float)
+        if len(values) >= 2 and bool(np.isfinite(values).all()):
             valid_labels.append(str(label))
-            arrays.append([float(value) for value in values])
+            arrays.append(values.tolist())
     if len(arrays) < 2:
         return None
     return valid_labels, arrays
@@ -560,12 +561,17 @@ def _welch_t_statistics(
     result contract while preserving the finite Welch calculation when only
     one group is constant.
     """
-    left_values = [float(value) for value in left]
-    right_values = [float(value) for value in right]
-    left_variance = sample_variance(left_values)
-    right_variance = sample_variance(right_values)
+    return _welch_from(_GroupSummary([float(value) for value in left]),
+                       _GroupSummary([float(value) for value in right]))
+
+
+def _welch_from(
+    left: _GroupSummary, right: _GroupSummary
+) -> tuple[float | None, float | None, list[str]]:
+    left_variance = left.variance
+    right_variance = right.variance
     standard_error_squared = (
-        left_variance / len(left_values) + right_variance / len(right_values)
+        left_variance / left.n + right_variance / right.n
     )
     warning_codes = (
         ["T_TEST_ZERO_VARIANCE"]
@@ -575,11 +581,11 @@ def _welch_t_statistics(
     if standard_error_squared <= 0:
         return None, None, warning_codes or ["T_TEST_ZERO_VARIANCE"]
     statistic = (
-        sum(left_values) / len(left_values) - sum(right_values) / len(right_values)
+        left.total / left.n - right.total / right.n
     ) / math.sqrt(standard_error_squared)
     denominator = (
-        (left_variance / len(left_values)) ** 2 / (len(left_values) - 1)
-        + (right_variance / len(right_values)) ** 2 / (len(right_values) - 1)
+        (left_variance / left.n) ** 2 / (left.n - 1)
+        + (right_variance / right.n) ** 2 / (right.n - 1)
     )
     if denominator <= 0:
         return None, None, warning_codes or ["T_TEST_ZERO_VARIANCE"]
@@ -595,12 +601,19 @@ def _cohens_d_evidence(
     test_id: str,
     labels: Sequence[str],
 ) -> dict[str, Any]:
-    effect = cohens_d(left, right)
-    statistic, p_value, warning_codes = _welch_t_statistics(left, right)
+    if isinstance(left, _GroupSummary):
+        # Groups from _finite_groups: finite floats, at least two each.
+        effect = _cohens_d_from(left, right)
+        statistic, p_value, warning_codes = _welch_from(left, right)
+        nobs = left.n + right.n
+    else:
+        effect = cohens_d(left, right)
+        statistic, p_value, warning_codes = _welch_t_statistics(left, right)
+        nobs = len(left) + len(right)
     return _evidence_result(
         test_id=test_id,
         test_type="cohens_d",
-        nobs=len(left) + len(right),
+        nobs=nobs,
         statistic=statistic,
         p_value=p_value,
         effect_size=effect,
@@ -1127,18 +1140,46 @@ def cohens_d(left: Sequence[float], right: Sequence[float]) -> dict[str, Any]:
     # groups that this function is required to reject. The standard-library
     # implementation preserves sample-variance semantics without turning a
     # predictable typed rejection into numerical warning noise.
+    return _cohens_d_from(_GroupSummary(left_values), _GroupSummary(right_values))
+
+
+class _GroupSummary:
+    """A group's count, sum and sample variance, each computed once.
+
+    The pairwise effect sizes of a grouping reuse each group many times; on a
+    1,000,000-row import every comparison re-copied and re-converted both
+    groups (268 Cohen's d and 272 Welch tests). The same Python sum and the
+    same numpy variance of the same values are used, so results are
+    bit-identical to computing them per comparison.
+    """
+
+    __slots__ = ("values", "n", "total", "_variance")
+
+    def __init__(self, values: list[float]) -> None:
+        self.values = values
+        self.n = len(values)
+        self.total = sum(values)
+        self._variance: float | None = None
+
+    @property
+    def variance(self) -> float:
+        if self._variance is None:
+            self._variance = sample_variance(self.values)
+        return self._variance
+
+
+def _cohens_d_from(left: _GroupSummary, right: _GroupSummary) -> dict[str, Any]:
     pooled_variance = (
-        (len(left_values) - 1) * sample_variance(left_values)
-        + (len(right_values) - 1) * sample_variance(right_values)
-    ) / (len(left_values) + len(right_values) - 2)
+        (left.n - 1) * left.variance + (right.n - 1) * right.variance
+    ) / (left.n + right.n - 2)
     pooled_sd = math.sqrt(pooled_variance)
     if pooled_sd == 0:
         raise ValueError("cohens_d requires non-constant groups")
     return {
         "effect_size_name": "cohens_d",
-        "value": (sum(left_values) / len(left_values) - sum(right_values) / len(right_values)) / pooled_sd,
+        "value": (left.total / left.n - right.total / right.n) / pooled_sd,
         "pooled_sd": pooled_sd,
-        "nobs": len(left_values) + len(right_values),
+        "nobs": left.n + right.n,
     }
 
 

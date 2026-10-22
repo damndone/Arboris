@@ -38,6 +38,8 @@ def _normalize(value: Any) -> Any:
             normalized[normalized_key] = _normalize(item)
         return normalized
     if isinstance(value, (list, tuple)):
+        if _plain_string_list(value):
+            return list(value)  # ASCII text is already NFC and has no surrogates
         if _numeric_list(value):
             # Same text as normalizing each item: zero is encoded "0" either way.
             if not all(map(math.isfinite, value)):
@@ -72,6 +74,8 @@ def _encode_json(value: Any) -> str:
     if isinstance(value, str):
         return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
     if isinstance(value, list):
+        if value and _plain_string_list(value):
+            return '["' + '","'.join(value) + '"]'
         if _numeric_list(value):
             return "[" + ",".join(_encode_numbers(value)) + "]"
         return "[" + ",".join(_encode_json(item) for item in value) + "]"
@@ -86,6 +90,18 @@ def _encode_json(value: Any) -> str:
     raise CanonicalJSONError(
         f"unsupported canonical JSON value: {type(value).__name__}"
     )
+
+
+def _plain_string_list(value: list | tuple) -> bool:
+    """Strings JSON writes as themselves in quotes: printable ASCII, no quote or backslash.
+
+    A 1,000,000-row OLS fingerprint names every analysis row by a decimal id;
+    each went through NFC normalization and json.dumps one by one.
+    """
+    if not value or not all(type(item) is str for item in value):
+        return False
+    joined = "".join(value)
+    return joined.isascii() and joined.isprintable() and '"' not in joined and "\\" not in joined
 
 
 def _numeric_list(value: list | tuple) -> bool:
