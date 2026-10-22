@@ -1857,3 +1857,12 @@ def test_panel_genesis_step_runs_one_way_fixed_effects(tmp_path, columns) -> Non
     state = WorkflowExecutor(project).execute(draft, build_workflow_step_executor(project, draft))
 
     assert state.status == "completed", state.steps["estimate_panel"].error
+
+
+def test_a_failed_branch_names_the_runs_recorded_reason(tmp_path) -> None:
+    from workbench.agent.workflow_runtime_parts.models import _recorded_run_error
+
+    (tmp_path / "errors.json").write_text(json.dumps({"issues": [
+        {"severity": "BLOCKER", "code": "WORKFLOW_FAILED", "message": "cannot include dtype 'M' in a buffer"}]}))
+    assert _recorded_run_error(tmp_path) == ": cannot include dtype 'M' in a buffer"
+    assert _recorded_run_error(tmp_path / "missing") == ""

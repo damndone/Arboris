@@ -272,7 +272,11 @@ def _execute_model_genesis_branches(
         run_root = root / "runs" / run_id
         manifest = read_json(run_root / "run_manifest.json")
         if manifest.get("status") != "completed":
-            raise WorkflowExecutionError(f"{model_family} branch {branch_id} did not complete")
+            # Name the run's own recorded reason: "did not complete" alone left
+            # the Agent (and this guard's tests) nothing to correct.
+            raise WorkflowExecutionError(
+                f"{model_family} branch {branch_id} did not complete" + _recorded_run_error(run_root)
+            )
         run_artifacts = _read_artifacts_index(run_root).get("artifacts", [])
         ids = [str(item["artifact_id"]) for item in run_artifacts if item.get("artifact_id")]
         by_group = branch_spec.get("by_group")
@@ -678,3 +682,17 @@ def _wait_for_run(root: Path, run_id: str, *, timeout_seconds: float = 1800.0) -
                 return
         time.sleep(0.1)
     raise WorkflowExecutionError(f"run did not reach a terminal state: {run_id}")
+
+
+def _recorded_run_error(run_root: Path) -> str:
+    """The first error a failed run recorded, bounded, or nothing."""
+    try:
+        errors = read_json(run_root / "errors.json")
+    except (OSError, ValueError):
+        return ""
+    entries = (errors.get("issues") or errors.get("errors")) if isinstance(errors, dict) else errors
+    for entry in entries if isinstance(entries, list) else ():
+        message = entry.get("message") if isinstance(entry, dict) else entry
+        if isinstance(message, str) and message.strip():
+            return ": " + message.strip()[:300]
+    return ""

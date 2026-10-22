@@ -979,6 +979,26 @@ def _meta_plan(*, secondary_run_id: str, secondary_artifact_id: str) -> list[dic
         ),
         _sourced(
             {
+                "step_id": "iv_models",
+                "operation_id": "model.genesis",
+                "spec": {
+                    "model_family": "iv_2sls",
+                    "iv_endog": ["size"],
+                    "iv_instruments": ["rate_a"],
+                    "branches": [{"branch_id": "iv", "outcome": "outcome", "predictors": ["rate_b"]}],
+                },
+            }
+        ),
+        _sourced(
+            {
+                "step_id": "ar",
+                "operation_id": "iv.ar_confidence",
+                "depends_on": ["iv_models"],
+                "spec": {"model_ref": "step:iv_models:iv"},
+            }
+        ),
+        _sourced(
+            {
                 "step_id": "named_correlations",
                 "operation_id": "test.correlations",
                 "spec": _generic_spec({"columns": ["size", "rate_a"]}),
@@ -1275,6 +1295,7 @@ _LINEAGE_META_STEPS: dict[str, tuple[str, ...]] = {
     "model.joint_f_test": ("joint",),
     "model.white_test": ("white",),
     "model.quadratic_stationary_point": ("stationary",),
+    "iv.ar_confidence": ("ar",),
     "data.merge": ("data_merge",),
     "data.append": ("data_append",),
     "data.reshape": ("data_reshape",),
@@ -1530,6 +1551,7 @@ _LINEAGE_META_READERS = {
     "model.joint_f_test": _post_estimation_claims,
     "model.white_test": _post_estimation_claims,
     "model.quadratic_stationary_point": _post_estimation_claims,
+    "iv.ar_confidence": _post_estimation_claims,
     "data.merge": _data_management_claims,
     "data.append": _data_management_claims,
     "data.reshape": _data_management_claims,

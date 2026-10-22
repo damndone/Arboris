@@ -15,6 +15,11 @@ def array_fingerprint(values):
         raise TypeError('object arrays have no stable byte representation')
     header = {'version': 'numpy-bytes.v1', 'dtype': array.dtype.str, 'shape': list(array.shape)}
     digest = hashlib.sha256(json.dumps(header, sort_keys=True, separators=(',', ':')).encode() + b'\0')
+    if array.dtype.kind in 'mM':
+        # Dates and durations expose no buffer ("cannot include dtype 'M' in a
+        # buffer" failed every panel, DID, IV, Cox or LMM fit on a frame with a
+        # date column). Their int64 ticks are the value; the header keeps the unit.
+        array = array.view(np.dtype('<i8') if array.dtype.byteorder in '<=|' else np.dtype('>i8'))
     if array.flags.c_contiguous:
         digest.update(memoryview(array).cast('B'))
     else:
