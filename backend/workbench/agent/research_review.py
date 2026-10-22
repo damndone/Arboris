@@ -119,6 +119,16 @@ def _unverified(reason):
     return {'verdict': 'unverified', 'findings': [], 'reason': reason}
 
 
+def _supplied(ref, keys):
+    """A reference names supplied evidence: a packet key, or a path inside one (``key.field``, ``key[2]``).
+
+    Reviewers cite precisely (``plan.criteria[2]``, ``diagnostic:0.summary.n_entities``);
+    exact-key matching discarded 6 of 10 recorded reviews for it. A reference to
+    anything the packet does not hold is still refused.
+    """
+    return ref in keys or any(ref.startswith(key + '.') or ref.startswith(key + '[') for key in keys)
+
+
 def _parse(text, keys):
     try:
         value = json.loads(text)
@@ -129,7 +139,7 @@ def _parse(text, keys):
         return _unverified('invalid_reviewer_response')
     if (value['verdict'] == 'no_issues_found' and value['findings']
             or value['verdict'] == 'issues_found' and not value['findings']
-            or any(ref not in keys for f in value['findings'] for ref in f['evidence_refs'])):
+            or any(not _supplied(ref, keys) for f in value['findings'] for ref in f['evidence_refs'])):
         return _unverified('inconsistent_verdict_or_unknown_evidence_reference')
     return value
 
