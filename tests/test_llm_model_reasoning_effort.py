@@ -124,3 +124,16 @@ def test_detection_updates_the_configured_models_only_and_keeps_the_choices(api,
     assert flash.context_window_tokens == 1_000_000 and flash.context_limit_tokens == 256_000
     assert hy3.reasoning_efforts == ("low", "high") and hy3.context_window_tokens == 192_000 and not hy3.supports_1m
     assert step.reasoning_efforts == ("low", "medium", "high") and step.supports_1m
+
+
+def test_an_evaluation_run_can_pick_another_model_of_the_provider(api, monkeypatch):
+    _create(api, [{"display_name": "Flash", "request_model": "workbuddy-ai/deepseek-v4.1-flash"},
+                  {"display_name": "Hy3", "request_model": "workbuddy-ai/hy3", "context_window_tokens": 192_000,
+                   "reasoning_efforts": ["low", "high"]}])
+    monkeypatch.setenv("WORKBENCH_AGENT_MODEL", "workbuddy-ai/hy3")
+    config = load_llm_config()
+    assert config.model == "workbuddy-ai/hy3" and config.context_window_tokens == 192_000
+    assert config.reasoning_efforts == ("low", "high")
+    assert load_provider_store().providers[0].model == "workbuddy-ai/deepseek-v4.1-flash"  # the selection is unchanged
+    monkeypatch.setenv("WORKBENCH_AGENT_MODEL", "not-listed")
+    assert not load_llm_config().is_configured()

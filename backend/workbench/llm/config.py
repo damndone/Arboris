@@ -5,6 +5,7 @@ lets a running server pick up key changes without restart.
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Literal
 from urllib.parse import urlparse
@@ -184,14 +185,23 @@ def _config_from_provider(provider: ProviderRecord, *, source: ConfigSource) -> 
     else:
         base_url = provider.base_url
 
+    model = provider.model
+    # Evaluation runs compare models of one provider without changing the
+    # person's selection: WORKBENCH_AGENT_MODEL names another of its models.
+    # A name the provider does not list leaves the config unconfigured.
+    override = os.environ.get("WORKBENCH_AGENT_MODEL", "").strip()
+    if override:
+        if not any(item.request_model == override for item in provider.models):
+            return LLMConfig(base_url="", api_key="", model="", source=source)
+        model = override
     model_record = next(
-        (model for model in provider.models if model.request_model == provider.model),
+        (item for item in provider.models if item.request_model == model),
         None,
     )
     return LLMConfig(
         base_url=base_url,
         api_key=provider.api_key,
-        model=provider.model,
+        model=model,
         timeout_s=provider.timeout_s,
         provider_id=provider.id,
         provider_name=provider.name,
