@@ -200,6 +200,8 @@ class ResearchReviewPhase:
     def request(self, transcript):
         if self.state.get('cached_result') is not None:
             return self._terminal(self.state['cached_result'], cached=True)
+        if self.state.get('reused_result') is not None:
+            return self._terminal(self.state['reused_result'], reused=True)
         if self.state.get('immediate_reason'):
             return self._terminal(_unverified(self.state['immediate_reason']))
         if self.state.get('dispatched'):
@@ -233,8 +235,8 @@ class ResearchReviewPhase:
                     result = _unverified('reviewer_numeric_claim_unverified')
         return self._terminal({**result, 'raw_response':text[:MAX_REPLY_CHARS]})
 
-    def _terminal(self, result, *, cached=False):
-        if not cached:
+    def _terminal(self, result, *, cached=False, reused=False):
+        if not cached and not reused:
             current = self.completion_check() if self.completion_check else None
             if current is not None and current['verified_manifest_sha256'] != self.state['manifest_sha256']:
                 result = {**result, **_unverified('evidence_changed_during_review'),
@@ -253,6 +255,29 @@ class ResearchReviewPhase:
                 'key':self.state['review_id'],'stage':'research_review_result'}]})
 
 
+def _reusable_blocking_review(branch, *, manifest_sha256, model, command_id):
+    """The latest blocking review, from an earlier command, of this exact verified evidence by the same model.
+
+    The evidence the reviewer judged has not changed, so its blocking findings
+    still stand; asking again only rewords them at the price of a full review
+    (a recorded Auto task spent twelve reviews, about 95k reasoning tokens, on
+    one unchanged manifest while every nudge re-asked). Within one command the
+    revision and its recheck stay: a finding about the candidate's wording is
+    fixed by rewording, without new evidence.
+    """
+    same_model = {e.payload.get('review_id') for e in branch
+                  if e.entry_type == 'research_review_intent' and e.payload.get('model') == model}
+    for e in reversed(branch):
+        result = e.payload
+        if (e.entry_type == 'research_review_result' and result.get('command_id') != command_id
+                and result.get('manifest_sha256') == manifest_sha256
+                and (result.get('reused_from_review_id') or result.get('review_id')) in same_model
+                and result.get('verdict') == 'issues_found'
+                and any(f.get('severity') == 'blocking' for f in result.get('findings') or [])):
+            return result
+    return None
+
+
 async def start_review(core, payload, entry, *, request_id, context_fingerprint, tool_context):
     ctx = core.research_review_context(payload['content'])
     user_text = getattr(core, '_user_text', None)
@@ -268,8 +293,13 @@ async def start_review(core, payload, entry, *, request_id, context_fingerprint,
     intents = [e for e in branch if e.entry_type == 'research_review_intent'
                and e.payload['command_id'] == core._active_command_id]
     received = {e.payload['review_id'] for e in branch if e.entry_type == 'research_review_result'}
+    prior = None
+    if cached is None and not payload.get('review_requested'):
+        # An explicit /review always asks the reviewer again.
+        prior = _reusable_blocking_review(branch, manifest_sha256=ctx['manifest_sha256'], model=core.model_name,
+                                          command_id=core._active_command_id)
     reason = None
-    if cached is None:
+    if cached is None and prior is None:
         if any(e.payload['review_id'] not in received for e in intents):
             reason = 'review_interrupted_without_durable_result; explicit /review required'
         elif not ctx.get('egress_allowed'):
@@ -285,13 +315,19 @@ async def start_review(core, payload, entry, *, request_id, context_fingerprint,
                 'verification_inputs':ctx.get('verification_inputs'),
                 'model':core.model_name,'candidate_entry_id':entry.entry_id,
             },key=digest,stage='research_review_intent')
-    count = len(intents) + int(cached is None and reason is None)
+    # A reused verdict was already handed back in an earlier command: no further revision turn.
+    count = MAX_REVIEWS if prior is not None else len(intents) + int(cached is None and reason is None)
+    reused = None
+    if prior is not None:
+        reused = {**prior, 'review_id':digest, 'command_id':core._active_command_id, 'candidate_entry_id':entry.entry_id,
+                  'packet_sha256':sha256_canonical(packet), 'reused_from_review_id':prior.get('reused_from_review_id') or prior['review_id'],
+                  'reuse_reason':'verified_evidence_unchanged', 'completion_check':core.completion_check() if core.completion_check else None}
     state = {'review_id':digest,'command_id':core._active_command_id,'packet':packet,'encoded_packet':encoded,
         'candidate':payload,'candidate_entry_id':entry.entry_id,'manifest_sha256':ctx['manifest_sha256'],
         'evidence_keys':ctx['evidence_keys'],'mode':ctx['mode'],'language':language,'review_count':count,
-        'remaining_after':None if core._budget.max_steps is None else core._budget.max_steps-core._steps_used-int(reason is None and cached is None),
+        'remaining_after':None if core._budget.max_steps is None else core._budget.max_steps-core._steps_used-int(reason is None and cached is None and prior is None),
         'original_request_id':request_id,'context_fingerprint':context_fingerprint,
-        'cached_result':cached,'immediate_reason':reason,'dispatched':False}
+        'cached_result':cached,'reused_result':reused,'immediate_reason':reason,'dispatched':False}
     core.enter_phase(ResearchReviewPhase(state,completion_check=core.completion_check))
     core._active_message_started = False
     return await core._run_turn(None,append_user=False,tool_context=tool_context)
