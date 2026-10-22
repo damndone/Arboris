@@ -112,6 +112,9 @@ class _RecordingTransport(httpx.AsyncBaseTransport):
                 "request": json.loads(body), "request_bytes": len(body), "response_raw": "", "usage": None,
                 "transport_error": type(exc).__name__, "budget_reservation": reservation,
                 "sent": not isinstance(exc, _NOT_SENT)})
+            if isinstance(exc, _NOT_SENT) and hasattr(self.budget, "unreachable"):
+                self.budget.release(reservation)
+                self.budget.unreachable(type(exc).__name__)
             if self.budget is not None and isinstance(exc, _NOT_SENT):
                 # No connection, so no request reached the provider: nothing can be
                 # billed. Release it and let the product's own retry run (the paid
@@ -151,6 +154,8 @@ class _RecordingTransport(httpx.AsyncBaseTransport):
             "usage": usage,
             "budget_reservation": reservation,
         })
+        if usage is None and response.status_code >= 400 and hasattr(self.budget, "refused"):
+            self.budget.refused(response.status_code, raw)
         if self.budget is not None:
             self.budget.settle(reservation, usage)
         # ``aread`` already decoded the body: pass it on without the

@@ -237,6 +237,27 @@ class FreeRouteGuard:
             state["prompt_tokens"] += int(usage.get("prompt_tokens") or 0)
             state["completion_tokens"] += int(usage.get("completion_tokens") or 0)
 
+    def refused(self, status, body):
+        """A response without usage: say why, from the provider's own message.
+
+        off4b (2026-10-22): a 429 frequency limit was reported as "credit None",
+        hiding that the route was exhausted until its reset time.
+        """
+        try:
+            message = str(json.loads(body)["error"]["message"])
+        except (ValueError, KeyError, TypeError):
+            message = body.decode("utf-8", "replace") if isinstance(body, bytes) else str(body)
+        message = " ".join(message.split())[:300]
+        what = "rate-limited (HTTP 429)" if status == 429 else f"refused the call (HTTP {status})"
+        self.stop(f"free route {what}: {message}")
+        raise BudgetStop(self.state["reason"])
+
+    def unreachable(self, error):
+        """No connection to the gateway: stop the round now (off4: the first task spent all
+        its nudges in seconds on ConnectError while the gateway was down)."""
+        self.stop(f"free route gateway {self._identity[1]} unreachable ({error}); no request was sent")
+        raise BudgetStop(self.state["reason"])
+
     #: Interrupted calls a free round tolerates before it stops (each is still taped).
     MAX_TRANSPORT_INTERRUPTIONS = 3
 

@@ -255,3 +255,63 @@ def test_the_free_route_tolerates_a_few_transport_interruptions(tmp_path):
     assert not guard.stopped
     assert guard.tolerate_transport_interruption("ReadTimeout") is False
     assert guard.stopped and guard.state["transport_interruptions"][-1] == "ReadTimeout"
+
+
+FREE_BASE = "http://127.0.0.1:3425/v1"
+#: The response that ended off4b's Auto mode (2026-10-22), verbatim.
+RATE_LIMITED = {"error": {"code": None, "message": "WorkBuddy AI: usage exceeds frequency limit, but don't worry, your "
+                "usage will reset at 2026-10-23 20:56:28 UTC+8, alternatively, you can switch to the other models to "
+                "continue using it.", "param": None, "type": "rate_limit_error"}}
+
+
+def _free_call(tmp_path, handle):
+    from agent_eval.budget import BudgetStop, FreeRouteGuard
+    from agent_eval.recorder import _Tape, _RecordingTransport
+
+    guard = FreeRouteGuard(tmp_path / "free.json", provider_id="magpie-workbuddy-ai", base_url=FREE_BASE)
+    tape = _Tape(tmp_path / "tape.jsonl", "record")
+
+    async def scenario():
+        transport = _RecordingTransport(tape, httpx.MockTransport(handle), budget=guard)
+        async with httpx.AsyncClient(transport=transport) as client:
+            with pytest.raises(BudgetStop) as stopped:
+                await client.post(f"{FREE_BASE}/chat/completions", json={"max_tokens": 10})
+            with pytest.raises(BudgetStop):  # and nothing further goes out
+                await client.post(f"{FREE_BASE}/chat/completions", json={"max_tokens": 10})
+            return str(stopped.value)
+    return asyncio.run(scenario()), guard, tape
+
+
+def test_a_rate_limited_free_route_stops_with_the_providers_reason(tmp_path):
+    calls = []
+    reason, guard, tape = _free_call(tmp_path, lambda request: calls.append(request) or httpx.Response(429, json=RATE_LIMITED))
+    assert len(calls) == 1 and guard.stopped
+    assert "rate-limited (HTTP 429)" in reason and "2026-10-23 20:56:28" in reason and "credit" not in reason
+    assert json.loads(tape.path.read_text().splitlines()[0])["status"] == 429
+
+
+def test_an_unreachable_free_gateway_stops_the_round_at_once(tmp_path):
+    def refuse(request):
+        raise httpx.ConnectError("All connection attempts failed", request=request)
+    reason, guard, tape = _free_call(tmp_path, refuse)
+    assert guard.stopped and "unreachable (ConnectError)" in reason and FREE_BASE in reason
+    [record] = [json.loads(line) for line in tape.path.read_text().splitlines()]
+    assert record["sent"] is False
+
+
+def test_a_paid_round_still_retries_a_connection_that_was_never_made(tmp_path):
+    api = budget_api()
+    from agent_eval.recorder import _Tape, _RecordingTransport
+
+    budget = api.RoundBudget(tmp_path / "budget.json", cap_cny="5", context_tokens=100)
+
+    def refuse(request):
+        raise httpx.ConnectError("All connection attempts failed", request=request)
+
+    async def scenario():
+        transport = _RecordingTransport(_Tape(tmp_path / "tape.jsonl", "record"), httpx.MockTransport(refuse), budget=budget)
+        async with httpx.AsyncClient(transport=transport) as client:
+            with pytest.raises(httpx.ConnectError):
+                await client.post("https://provider.invalid/chat", json={"max_tokens": 10})
+    asyncio.run(scenario())
+    assert not budget.stopped and budget.state["reservations"] == {}
