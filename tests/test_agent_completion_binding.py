@@ -93,3 +93,28 @@ def test_without_a_covering_report_the_exact_compose_step_is_given(products, tmp
     assert notes['compose_report']['operation_id'] == 'report.compose'
     assert {'role': 'primary', **evidence['models'][0]} in refs
     assert {r['role'] for r in refs} == {'primary', 'diagnostic', 'sensitivity'}
+
+
+def test_a_named_report_that_misses_selected_results_is_returned_with_what_it_lacks(products, tmp_path):
+    # Free-route no-thinking round (iv_weak): a usable but non-covering named report was kept,
+    # 'report:result_sources' stayed missing and the model never learned which results it lacked.
+    import shutil
+    from tests.test_agent_completion import artifact
+    from workbench.reporting import render_html_report
+
+    project, contract, evidence = products
+    copy = tmp_path / 'copy'
+    shutil.copytree(project, copy)
+    main = evidence['models'][0]['run_id']
+    artifact(copy, main, 'partial_collection', 'report_collection', {
+        'schema_version': 'workflow-report-collection.v1', 'status': 'completed', 'steps': {
+            'primary': {'status': 'completed', 'artifact_ids': [f'{main}:survival_cox_1']}}})
+    render_html_report({'title': 'Partial', 'facts': [], 'claims': [], 'warnings': [], 'descriptive_stats': []},
+                       copy / 'runs' / main, filename='partial.html', artifact_id='partial_report', inputs=['partial_collection'])
+    named = {**evidence, 'report': {'run_id': main, 'artifact_id': 'partial_report'}}
+    checked, derived, notes = _check(copy, contract, named)
+    [dropped] = [d for d in notes['dropped'] if 'report' in d]
+    assert dropped['report']['artifact_id'] == 'partial_report'
+    assert evidence['sensitivity'][0] in dropped['does_not_cover']
+    # The covering report is bound instead, so the plan completes.
+    assert derived['report'] == evidence['report'] and checked['status'] == 'requirements_met', checked['missing']

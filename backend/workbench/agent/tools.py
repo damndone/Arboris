@@ -452,6 +452,35 @@ def tool_note(text: str) -> None:
         notes.append(text)
 
 
+def _wrap_single_strings(definition: "ToolDefinition", arguments: dict[str, Any]) -> dict[str, Any]:
+    """A string given where the schema wants a list of strings means that one-item list.
+
+    A weaker model sent playbooks 'iv' for ['iv'] and lost a turn to the refusal (free-route
+    no-thinking round, iv_weak). Only top-level and nested object fields are wrapped, never
+    inside a oneOf/anyOf branch, and only when the list's items are strings.
+    """
+    from copy import deepcopy
+
+    wrapped, paths = None, []
+    for error in Draft202012Validator(definition.input_schema).iter_errors(arguments):
+        items = error.schema.get("items") if isinstance(error.schema, dict) else None
+        if (error.validator == "type" and error.validator_value == "array" and isinstance(error.instance, str)
+                and isinstance(items, dict) and items.get("type") == "string"
+                and not any(part in {"oneOf", "anyOf"} for part in error.schema_path)):
+            wrapped = wrapped if wrapped is not None else deepcopy(arguments)
+            target = wrapped
+            path = list(error.absolute_path)
+            for key in path[:-1]:
+                target = target[key]
+            if path:
+                target[path[-1]] = [error.instance]
+                paths.append(".".join(map(str, path)))
+    if wrapped is None:
+        return arguments
+    tool_note(f"{', '.join(paths)} takes a list; the single value was used as a one-item list.")
+    return wrapped
+
+
 def _drop_unused_read_identity(definition: "ToolDefinition", arguments: dict[str, Any]) -> dict[str, Any]:
     schema = definition.input_schema
     if definition.side_effect != "none" or schema.get("additionalProperties") is not False:
@@ -571,6 +600,8 @@ class ToolRegistry:
         arguments = _drop_unused_read_identity(definition, tool_call.get("arguments") or {})
         if definition.normalize is not None and isinstance(arguments, dict):
             arguments = definition.normalize(arguments)
+        if isinstance(arguments, dict):
+            arguments = _wrap_single_strings(definition, arguments)
         details = validation_details(definition.input_schema, arguments)
         if details:
             example = _operation_change_example(definition.input_schema, arguments)

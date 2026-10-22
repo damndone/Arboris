@@ -6,7 +6,7 @@ from collections.abc import Callable, Iterable
 from typing import Any
 
 from .tools import ToolDefinition, ToolHandler, ToolRegistry
-from .completion import CONTRACT_SCHEMA, EVIDENCE_SCHEMA, INSPECT_SCHEMA
+from .completion import AGENT_CONTRACT_SCHEMA, EVIDENCE_SCHEMA, INSPECT_SCHEMA
 
 
 _UPDATE_PLAN_SCHEMA: dict[str, Any] = {
@@ -16,7 +16,7 @@ _UPDATE_PLAN_SCHEMA: dict[str, Any] = {
     "required": ["steps"],
     "properties": {
         "question": {"type": "string"},
-        "completion": CONTRACT_SCHEMA,
+        "completion": AGENT_CONTRACT_SCHEMA,
         "completion_evidence": EVIDENCE_SCHEMA,
         "criteria": {"type": "array", "items": {"type": "string"}, "maxItems": 12},
         "steps": {

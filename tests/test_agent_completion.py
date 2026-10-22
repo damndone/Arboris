@@ -402,8 +402,13 @@ def test_invalid_source_contract_does_not_freeze_an_unrepairable_plan(tmp_path):
         'question': 'q', 'completion': contract,
         'steps': [{'step_id': 'fit', 'title': 'Fit', 'operation_ids': ['model.genesis']}]}}
     result = asyncio.run(f.orchestrator.tool_registry('chain-a').execute(call, session_id='chain-session'))
-    assert result.ok and not result.output['saved']
-    assert f.orchestrator.plan_store.current('chain-session') is None
+    # The registered dataset's sha256 is bound (since v1.9.1), so a wrong value cannot freeze an
+    # unrepairable plan: what is saved is the real source. An unregistered source is still refused
+    # (test_an_unregistered_source_is_still_refused_with_a_way_forward).
+    assert result.ok and result.output['saved']
+    saved = f.orchestrator.plan_store.current('chain-session')
+    assert saved.completion['source']['sha256'] != 'f' * 64
+    assert saved.completion['source']['sha256'] == fixture(tmp_path / 'project2')[0]['source']['sha256']
 
 
 def test_human_can_explicitly_correct_completion_contract_with_new_approval(tmp_path):
@@ -484,3 +489,41 @@ def test_recovering_the_same_partial_answer_does_not_duplicate_the_notice(tmp_pa
         assert answer.count('Partially complete') == 1
         assert not adapter.requests
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize('given', ['missing', 'one_digit_off'])
+def test_the_source_sha256_is_bound_from_the_registered_dataset(tmp_path, given):
+    # Free-route no-thinking round (panel_fe): one miscopied hex digit refused every plan to the end.
+    from tests.test_read_only_analysis import _Fixture
+    contract, evidence = fixture(tmp_path / 'project')
+    truth = contract['source']['sha256']
+    source = {k: v for k, v in contract['source'].items() if k != 'sha256'}
+    if given == 'one_digit_off':
+        source['sha256'] = truth[:10] + ('0' if truth[10] != '0' else '1') + truth[11:]
+    f = _Fixture(tmp_path / 'runtime')
+    f.orchestrator.context_provider.project_root = tmp_path / 'project'
+    registry = f.orchestrator.tool_registry('chain-a')
+    call = {'tool_call_id': 'plan', 'tool_id': 'update_plan', 'arguments': {
+        'question': 'Complete the source-bound linear analysis',
+        'steps': [{'step_id': 'fit', 'title': 'Fit', 'operation_ids': ['model.genesis']}],
+        'completion': {**contract, 'source': source}, 'completion_evidence': evidence}}
+    result = asyncio.run(registry.execute(call, session_id='chain-session'))
+    assert result.ok and result.output['saved'], result
+    assert result.output['plan']['completion']['source']['sha256'] == truth
+    if given == 'one_digit_off':
+        assert 'differed in 1 of 64' in result.output['workbench_notes'][0]
+    check = {'tool_call_id': 'check', 'tool_id': 'inspect_analysis_completion', 'arguments': {}}
+    assert asyncio.run(registry.execute(check, session_id='chain-session')).output['status'] == 'requirements_met'
+
+
+def test_an_unregistered_source_is_still_refused_with_a_way_forward(tmp_path):
+    from tests.test_read_only_analysis import _Fixture
+    contract, evidence = fixture(tmp_path / 'project')
+    f = _Fixture(tmp_path / 'runtime')
+    f.orchestrator.context_provider.project_root = tmp_path / 'project'
+    registry = f.orchestrator.tool_registry('chain-a')
+    call = {'tool_call_id': 'plan', 'tool_id': 'update_plan', 'arguments': {
+        'question': 'q', 'steps': [{'step_id': 'fit', 'title': 'Fit', 'operation_ids': ['model.genesis']}],
+        'completion': {**contract, 'source': {'run_id': 'r', 'artifact_id': 'no_such_dataset'}}}}
+    result = asyncio.run(registry.execute(call, session_id='chain-session'))
+    assert 'not a registered dataset' in json.dumps(result.output if result.ok else result.error_details)

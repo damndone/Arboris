@@ -128,3 +128,4 @@ def test_the_turn_stores_reasoning_on_the_assistant_message_and_never_streams_it
     assert assistant["reasoning_source"] == SOURCE
     streamed = events.replay("s")
     assert all("private chain" not in str(e) for e in streamed)
+

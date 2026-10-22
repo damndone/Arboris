@@ -129,3 +129,20 @@ def test_a_read_naming_a_branch_of_the_head_as_the_head_reads_it_under_the_head(
                 raise AssertionError(f"{requested} was accepted")
     finally:
         tools._TOOL_NOTES.reset(token)
+
+
+def test_a_single_string_for_a_list_of_strings_is_a_one_item_list():
+    seen = {}
+    definition = ToolDefinition(tool_id="plan_x", version="v1", side_effect="proposal",
+        input_schema={"type": "object", "properties": {"completion": {"type": "object", "properties": {
+            "playbooks": {"type": "array", "items": {"type": "string"}}}}, "count": {"type": "integer"}},
+            "additionalProperties": False},
+        handler=lambda arguments, context: seen.setdefault("arguments", arguments) and {"saved": True})
+    result = asyncio.run(_registry(definition).execute({"tool_call_id": "c", "tool_id": "plan_x",
+        "arguments": {"completion": {"playbooks": "iv"}}}, session_id="s"))
+    assert result.ok and seen["arguments"] == {"completion": {"playbooks": ["iv"]}}
+    assert "one-item list" in result.output["workbench_notes"][0]
+    # Other type errors are not guessed at.
+    refused = asyncio.run(_registry(definition).execute({"tool_call_id": "c", "tool_id": "plan_x",
+        "arguments": {"count": "three"}}, session_id="s"))
+    assert not refused.ok

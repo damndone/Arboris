@@ -425,8 +425,18 @@ class OrchestrationTools:
                 completion = arguments.get("completion")
                 if completion is not None:
                     root = getattr(self.context_provider, "project_root", self.repository.root.parent)
-                    if source_receipt(root, completion["source"]) != completion["source"]:
-                        raise plan_module.PlanError("completion source is unavailable or changed; inspect_analysis_completion with source first")
+                    given = completion["source"]
+                    receipt = source_receipt(root, {"run_id": given["run_id"], "artifact_id": given["artifact_id"]})
+                    if receipt is None:
+                        raise plan_module.PlanError(
+                            f"completion source {given['run_id']}/{given['artifact_id']} is not a registered dataset; "
+                            "name the cleaned dataset (for example artifact_id cleaned_dataset) of a run in this chain")
+                    if given.get("sha256") not in (None, receipt["sha256"]):
+                        from .tools import tool_note
+                        wrong = sum(a != b for a, b in zip(str(given["sha256"]), receipt["sha256"]))
+                        tool_note(f"completion.source.sha256 is bound from the registered dataset; the value given "
+                                  f"differed in {wrong} of 64 characters and was not used.")
+                    arguments = {**arguments, "completion": {**completion, "source": receipt}}
                 steps = plan_module.parse_steps(arguments.get("steps"), self.known_plan_operations())
                 def revise(previous):
                     # A status update that leaves out the question or criteria keeps them:

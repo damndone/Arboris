@@ -36,6 +36,12 @@ CONTRACT_SCHEMA = {'type': 'object', 'required': ['playbooks', 'source'], 'prope
                  'items': {'type': 'string', 'enum': list(PLAYBOOKS)}},
     'source': {**_REF, 'required': ['run_id', 'artifact_id', 'sha256'], 'properties': {
         **_REF['properties'], 'sha256': {'type': 'string', 'pattern': '^[a-f0-9]{64}$'}}}}, 'additionalProperties': False}
+#: The Agent names the source; the Workbench binds its sha256 from the registered artifact
+#: (a weaker model miscopied one hex digit and retried a refused plan to the end of its
+#: nudges, free-route no-thinking round, panel_fe, 2026-10-22).
+AGENT_CONTRACT_SCHEMA = {**CONTRACT_SCHEMA, 'properties': {**CONTRACT_SCHEMA['properties'], 'source': {
+    **CONTRACT_SCHEMA['properties']['source'], 'required': ['run_id', 'artifact_id'],
+    'description': 'run_id and artifact_id of the registered dataset; the Workbench binds its sha256.'}}}
 INSPECT_SCHEMA = {"type": "object", "properties": {"source": _REF}, "additionalProperties": False}
 EVIDENCE_SCHEMA = {'type': 'object', 'properties': {
     **{key: {'type': 'array', 'maxItems': 24, 'items': _REF} for key in ('models', 'diagnostics', 'sensitivity')},
@@ -652,16 +658,26 @@ def derive_evidence(project_root, contract, evidence):
     if own:
         notes['bound_by_workbench'].append('diagnostics')
     report = given.get('report')
-    if isinstance(report, dict) and usable_report(report):
+    selected_refs = [ref for key in ('models', 'diagnostics', 'sensitivity') for ref in result[key]]
+    selected = [products.load(ref) for ref in selected_refs]
+
+    def uncovered(ref):
+        ancestors = products.ancestors(ref)
+        return [plain(selected_ref) for selected_ref, value in zip(selected_refs, selected)
+                if value is None or not any(a.sha256 == value.sha256 for a in ancestors)]
+
+    # A named report counts only if it covers the selected results; otherwise it is returned
+    # with what it lacks and the ready-made compose_report below. Accepting any usable report
+    # left a weaker model with 'report:result_sources' and no way to learn which results were
+    # missing (free-route no-thinking round, iv_weak, 2026-10-22: 8 nudges).
+    lacking = uncovered(report) if isinstance(report, dict) and usable_report(report) else None
+    if lacking == []:
         result['report'] = plain(report)
     else:
         if report is not None:
-            notes['dropped'].append({'report': report})
-        selected = [products.load(ref) for key in ('models', 'diagnostics', 'sensitivity') for ref in result[key]]
+            notes['dropped'].append({'report': report, **({'does_not_cover': lacking[:12]} if lacking else {})})
         for ref, artifact in reports:
-            ancestors = products.ancestors(ref)
-            if usable_report(ref) and bound(ref) and all(
-                    value is not None and any(a.sha256 == value.sha256 for a in ancestors) for value in selected):
+            if usable_report(ref) and bound(ref) and not uncovered(ref):
                 result['report'] = plain(ref)
                 notes['bound_by_workbench'].append('report')
                 break
