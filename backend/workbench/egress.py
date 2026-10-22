@@ -544,6 +544,14 @@ def guard_outgoing_messages(
             # is still filtered below.
             content_class = "conversation" if role in {"user", "assistant"} else "workbench_state"
         outgoing["content"], columns, protocols = _filter(content, payload, protected, allowed)
+        reasoning = message.get("reasoning_content")
+        if role == "assistant" and isinstance(reasoning, str):
+            # The model's private reasoning goes back to the provider that wrote
+            # it, and is filtered exactly like its reply.
+            outgoing["reasoning_content"], reasoning_columns, reasoning_protocols = _filter(
+                reasoning, _parse_json(reasoning), protected, allowed)
+            columns = tuple(sorted({*columns, *reasoning_columns}))
+            protocols = tuple(sorted({*protocols, *reasoning_protocols}))
         decision = "withheld_in_part" if protocols else "redacted" if columns else "sent"
         decisions.append(_Decision(index, role, content_class, decision, tool_id, columns, protocols))
         guarded.append(outgoing)

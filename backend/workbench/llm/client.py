@@ -302,8 +302,12 @@ async def async_stream_chat_completion(
                     if delta.get("reasoning_content") is not None:
                         # Keep private reasoning out of the public stream while
                         # preserving a provider-activity signal for retry
-                        # control in the generic adapter.
-                        yield {"type": "provider_activity"}
+                        # control in the generic adapter. The text travels with
+                        # it: DeepSeek requires it back on later requests that
+                        # carry tools (the adapter keeps it private).
+                        reasoning = delta.get("reasoning_content")
+                        yield {"type": "provider_activity",
+                               **({"reasoning": reasoning} if isinstance(reasoning, str) and reasoning else {})}
                     raw_tool_calls = delta.get("tool_calls") or []
                     if not isinstance(raw_tool_calls, list):
                         raise LLMUpstreamError(

@@ -79,6 +79,8 @@ def estimate_message_tokens(message: Mapping[str, Any]) -> int:
     total = estimate_text_tokens(text) + 4
     if message.get("tool_calls"):
         total += estimate_text_tokens(json.dumps(message["tool_calls"], ensure_ascii=False))
+    if isinstance(message.get("reasoning_content"), str):
+        total += estimate_text_tokens(message["reasoning_content"])
     return total
 
 

@@ -7,7 +7,7 @@ from typing import Any
 from uuid import uuid4
 
 from .. import numeric_grounding
-from ..model import ModelRequest
+from ..model import ModelRequest, ModelStreamEvent
 from ..phases import PhaseStep
 from ..turn_messages import detect_language, interrupted_reply_note, provider_failure_message
 
@@ -120,6 +120,7 @@ class TurnLoopMixin:
         )
         self._active_message_started = True
         chunks: list[str] = []
+        reasoning: ModelStreamEvent | None = None
         tool_calls: dict[str, dict[str, Any]] = {}
         finish_reason = "stop"
         error: str | None = None
@@ -151,6 +152,8 @@ class TurnLoopMixin:
                             call_id = str(call.get("tool_call_id", uuid4().hex))
                             current = tool_calls.setdefault(call_id, {})
                             current.update(call)
+                    elif event.type == "reasoning":
+                        reasoning = event  # private: kept for the provider, never emitted
                     elif event.type == "done":
                         finish_reason = event.finish_reason or "stop"
                         if active_phase is None:
@@ -259,6 +262,9 @@ class TurnLoopMixin:
             payload["numeric_check"] = {"error": "the numeric check could not run"}
         if tool_calls:
             payload["tool_calls"] = list(tool_calls.values())
+        if reasoning is not None and reasoning.delta and finish_reason != "aborted":
+            payload["reasoning_content"] = reasoning.delta
+            payload["reasoning_source"] = dict(reasoning.reasoning_source or {})
         if error is not None:
             payload["error"] = error
         from ..research_review import needed as review_needed

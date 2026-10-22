@@ -24,6 +24,8 @@ _TRANSIENT_UPSTREAM_STATUSES = frozenset({408, 425, 429, 500, 502, 503, 504})
 
 def _to_openai_wire_messages(
     messages: list[dict[str, Any]],
+    *,
+    reasoning_source: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Convert internal session messages to the OpenAI chat wire format.
 
@@ -37,6 +39,10 @@ def _to_openai_wire_messages(
     and never crossed this boundary). Proposal/confirmation audit messages can
     be appended while a tool is executing; they are deferred until the
     assistant's contiguous tool-result block is complete.
+
+    An assistant message's private reasoning is sent back only to the provider
+    and model that produced it (``reasoning_source``); DeepSeek's thinking mode
+    requires it on every later request that carries tools.
     """
 
     converted: list[dict[str, Any]] = []
@@ -65,6 +71,10 @@ def _to_openai_wire_messages(
                     }
                     for call in internal_calls
                 ]
+            reasoning = message.get("reasoning_content")
+            if (reasoning_source is not None and isinstance(reasoning, str) and reasoning
+                    and message.get("reasoning_source") == dict(reasoning_source)):
+                wire["reasoning_content"] = reasoning
             return wire
         if role == "tool":
             return {
@@ -145,6 +155,8 @@ class ModelStreamEvent:
     provider_request_id: str | None = None
     usage: dict[str, Any] | None = None
     error: str | None = None
+    #: For a ``reasoning`` event: the provider and model that produced it.
+    reasoning_source: dict[str, Any] | None = None
 
     @classmethod
     def text_delta(cls, request_id: str, delta: str) -> "ModelStreamEvent":
@@ -155,6 +167,12 @@ class ModelStreamEvent:
         cls, request_id: str, tool_call: dict[str, Any]
     ) -> "ModelStreamEvent":
         return cls(type="tool_call_delta", request_id=request_id, tool_call=tool_call)
+
+    @classmethod
+    def reasoning(cls, request_id: str, text: str, source: dict[str, Any]) -> "ModelStreamEvent":
+        """The provider's private reasoning for this response; never user-visible."""
+
+        return cls(type="reasoning", request_id=request_id, delta=text, reasoning_source=source)
 
     @classmethod
     def done(cls, request_id: str, finish_reason: str = "stop") -> "ModelStreamEvent":
@@ -240,6 +258,11 @@ class OpenAICompatibleModelAdapter:
             raise ValueError("idle_timeout_s must be positive")
         self.idle_timeout_s = float(idle_timeout_s)
 
+    def reasoning_source(self) -> dict[str, Any]:
+        """Which provider and model private reasoning belongs to; it is sent to no other."""
+
+        return {"provider_id": self.config.provider_id, "base_url": self.config.base_url, "model": self.config.model}
+
     def supports_named_tool_choice(self) -> bool:
         """Return whether this provider accepts a named ``tool_choice``.
 
@@ -273,7 +296,8 @@ class OpenAICompatibleModelAdapter:
         if abort_event is not None and abort_event.is_set():
             yield ModelStreamEvent.from_error(request.request_id, "aborted")
             return
-        wire_messages = _to_openai_wire_messages(request.messages)
+        source = self.reasoning_source()
+        wire_messages = _to_openai_wire_messages(request.messages, reasoning_source=source)
         wire_tools = _to_openai_tool_descriptors(request.tools)
         # A provider cannot act: a tool runs only after Workbench receives the
         # call. So a request that failed before any public output -- no text,
@@ -289,6 +313,7 @@ class OpenAICompatibleModelAdapter:
                     return
             received_event = False
             public_progress = False
+            reasoning_parts: list[str] = []  # this attempt's only; a retry starts over
             try:
                 request_config = (
                     {"model_config": request.model_config}
@@ -340,6 +365,8 @@ class OpenAICompatibleModelAdapter:
                         received_event = True
                         if item.get("public") is True:
                             public_progress = True
+                        if isinstance(item.get("reasoning"), str):
+                            reasoning_parts.append(item["reasoning"])
                     elif event_type == "done":
                         # Close the provider stream here, in this task: left
                         # suspended inside ``client.stream(...)`` it holds the
@@ -347,6 +374,8 @@ class OpenAICompatibleModelAdapter:
                         # another task.
                         await stream.aclose()
                         finish_reason = item.get("finish_reason")
+                        if reasoning_parts:
+                            yield ModelStreamEvent.reasoning(request.request_id, "".join(reasoning_parts), source)
                         yield ModelStreamEvent(
                             type="done",
                             request_id=request.request_id,

@@ -78,7 +78,15 @@ def test_offline_transport_decodes_the_fixed_development_finish_frame(monkeypatc
     assert events[-1].type == 'done' and events[-1].usage == record['usage']
     assert events[-1].provider_request_id
     # This decodes an original response; it is not full-request analysis replay.
-    assert all(event.type in {'text_delta', 'tool_call_delta', 'done'} for event in events)
+    assert all(event.type in {'text_delta', 'tool_call_delta', 'reasoning', 'done'} for event in events)
+    # The private reasoning arrives once, whole, just before done (it is sent back to the provider).
+    streamed = ''.join((json.loads(line[6:])['choices'][0].get('delta') or {}).get('reasoning_content') or ''
+                       for line in record['response_raw'].splitlines()
+                       if line.startswith('data: {') and json.loads(line[6:]).get('choices'))
+    reasoning = [event for event in events if event.type == 'reasoning']
+    assert [event.delta for event in reasoning] == ([streamed] if streamed else [])
+    if reasoning:
+        assert events[-2] is reasoning[0]
 
 
 @pytest.mark.parametrize(('usage', 'state'), [(None, 'unavailable'), ({}, 'reported'),
