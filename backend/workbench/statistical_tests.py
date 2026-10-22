@@ -1100,6 +1100,15 @@ def sample_variance(values: Sequence[float]) -> float:
     return float((np.dot(deviations, deviations) - deviations.sum() ** 2 / array.size) / (array.size - 1))
 
 
+def _finite_array(values: Sequence[float], *, label: str, minimum: int = 2) -> np.ndarray:
+    array = np.asarray(values, dtype=float)
+    if array.size < minimum:
+        raise ValueError(f"{label} requires at least two observations")
+    if not np.isfinite(array).all():
+        raise ValueError(f"{label} requires finite observations")
+    return array
+
+
 def _finite_values(values: Sequence[float], *, label: str, minimum: int = 2) -> list[float]:
     array = np.asarray(values, dtype=float)
     if array.size < minimum:
@@ -1343,10 +1352,12 @@ def wilcoxon_signed_rank(left: Sequence[float], right: Sequence[float]) -> dict[
 
 
 def variance_and_normality_tests(groups: Mapping[str, Sequence[float]]) -> list[dict[str, Any]]:
-    arrays = [_finite_values(values, label=f"group {name}") for name, values in groups.items()]
+    # The same finite float values as _finite_values gives, kept as arrays:
+    # scipy and sample_variance convert lists to exactly these arrays anyway.
+    arrays = [_finite_array(values, label=f"group {name}") for name, values in groups.items()]
     if len(arrays) < 2:
         raise ValueError("variance tests require at least two groups")
-    combined = [value for values in arrays for value in values]
+    combined = np.concatenate(arrays)
     zero_variance_group = any(sample_variance(values) == 0 for values in arrays)
     if zero_variance_group:
         levene_stat, levene_p = None, None
