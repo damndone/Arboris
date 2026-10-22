@@ -52,11 +52,11 @@ def test_a_later_command_reuses_the_blocking_review_of_unchanged_evidence(tmp_pa
         await core.prompt('完成分析', budget={'max_steps': 10, 'timeout_s': 30})
         assert adapter.reviews == 2  # review, revision, recheck: unchanged
         first = _results(repo)[-1]
-        for _ in range(3):
+        for _ in range(2):
             answer = await _nudge(core)
             assert '部分完成' in answer and 'Plan criterion 2 has no supporting fit.' in answer
-        assert adapter.reviews == 2  # three nudges, no further reviewer call
-        reused = _results(repo)[-3:]
+        assert adapter.reviews == 2  # two nudges, no further reviewer call (a third reviews afresh)
+        reused = _results(repo)[-2:]
         assert all(r['reused_from_review_id'] == first['review_id'] for r in reused)
         assert all(r['reuse_reason'] == 'verified_evidence_unchanged' for r in reused)
         assert all(r['findings'] == first['findings'] for r in reused)
@@ -156,3 +156,33 @@ def test_a_verified_blocking_finding_still_blocks():
               'findings': [{'severity': 'blocking', 'message': 'Criterion 2 unmet.', 'evidence_refs': ['plan']}]}
     published = _publication(payload, result, language='zh', mode='auto', review_count=2, remaining=None)
     assert '部分完成' in published['content'] and '分析完成' not in published['content']
+
+
+WORDING = {'verdict': 'issues_found', 'findings': [{'severity': 'blocking',
+           'message': 'The candidate says the test is absent; it is present.', 'evidence_refs': ['candidate', 'plan']}]}
+
+
+def test_a_blocking_finding_about_the_answer_is_reviewed_again_for_a_new_answer(tmp_path):
+    async def scenario():
+        adapter = Adapter(verdict=WORDING)
+        core, _, _ = setup(tmp_path, adapter)
+        wire(core)
+        await core.prompt('完成分析', budget={'max_steps': 10, 'timeout_s': 30})
+        before = adapter.reviews
+        await _nudge(core)
+        assert adapter.reviews > before  # the new answer is reviewed, not handed the old verdict
+    asyncio.run(scenario())
+
+
+def test_after_two_reuses_in_a_row_the_next_answer_is_reviewed_afresh(tmp_path):
+    async def scenario():
+        adapter = Adapter()
+        core, _, repo = setup(tmp_path, adapter)
+        wire(core)
+        await core.prompt('完成分析', budget={'max_steps': 10, 'timeout_s': 30})
+        first = adapter.reviews
+        await _nudge(core); await _nudge(core)
+        assert adapter.reviews == first  # two reuses
+        await _nudge(core)
+        assert adapter.reviews > first  # then a fresh review
+    asyncio.run(scenario())

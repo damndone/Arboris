@@ -188,9 +188,20 @@ def validate_model_genesis_spec(spec: Mapping[str, Any]) -> ModelFamilyContract:
     if not isinstance(branches, list) or not branches:
         raise OperationValidationError("model.genesis step requires a non-empty branches list")
     seen: set[str] = set()
+    specifications: dict[str, str] = {}
     for branch in branches:
         if not isinstance(branch, Mapping):
             raise OperationValidationError("each model branch must be an object")
+        # Family and panel effects are step-level: a branch naming another family or panel
+        # columns was silently fitted as the step's model (free-route no-thinking round,
+        # panel_fe: 'pooled_ols', 'firm_fe' and 'random_effects' all ran as one two-way fit).
+        stray = [key for key in ("model_family", "entity_col", "time_col") if key in branch
+                 and branch[key] != spec.get(key)]
+        if stray:
+            raise OperationValidationError(
+                f"model branch {branch.get('branch_id')} sets {', '.join(stray)}, which apply to the whole "
+                "model.genesis step; fit a different family or different panel effects as its own "
+                "model.genesis step")
         branch_id = branch.get("branch_id")
         if not isinstance(branch_id, str) or not branch_id.strip():
             raise OperationValidationError("each model branch requires a branch_id")
@@ -208,6 +219,14 @@ def validate_model_genesis_spec(spec: Mapping[str, Any]) -> ModelFamilyContract:
             raise OperationValidationError(
                 f"model branch {branch_id} outcome must not also be a predictor"
             )
+        signature = repr(sorted((key, repr(value)) for key, value in branch.items() if key != "branch_id"))
+        twin = next((other for other, other_signature in specifications.items() if other_signature == signature), None)
+        if twin is not None:
+            raise OperationValidationError(
+                f"model branches {twin} and {branch_id} have the same specification and would give the same "
+                "fit; branches differ in outcome, predictors or terms. Fit another family or other panel "
+                "effects as its own model.genesis step")
+        specifications[branch_id] = signature
         covariance = branch.get("covariance", spec.get("covariance"))
         if not contract.allows_covariance and covariance is not None:
             raise OperationValidationError(

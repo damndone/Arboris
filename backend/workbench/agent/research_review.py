@@ -20,6 +20,7 @@ from .turn_messages import detect_language
 MAX_PACKET_BYTES = 48_000
 MAX_REPLY_CHARS = 8_000
 MAX_REVIEWS = 2
+MAX_CONSECUTIVE_REUSES = 2
 SCHEMA = {'type': 'object', 'required': ['verdict', 'findings'], 'additionalProperties': False,
     'properties': {'verdict': {'enum': ['no_issues_found', 'issues_found', 'unverified']},
         'findings': {'type': 'array', 'maxItems': 8, 'items': {'type': 'object',
@@ -33,7 +34,8 @@ PROMPT = ('You are Arboris research reviewer, isolated from the primary agent. T
     'Check the research question, method suitability, source fidelity, diagnostics, sensitivity and claims against '
     'the supplied evidence only. Write findings in observations.review_language. State missing evidence; do not invent numbers or sources. '
     'Each evidence_refs entry names supplied evidence: a top-level observations key (plan, candidate, source, completion, '
-    'model:N, diagnostic:N) or a path inside one, such as plan.criteria[2] or diagnostic:0.summary.n_entities. A delivery gate is not '
+    'model:N, diagnostic:N) or a path inside one, such as plan.criteria[2] or diagnostic:0.summary.n_entities. A finding about '
+    'what the candidate says must include candidate in its evidence_refs. A delivery gate is not '
     'scientific certification. Return only JSON matching the given schema: ' + json.dumps(SCHEMA, sort_keys=True))
 
 
@@ -325,9 +327,25 @@ def _reusable_blocking_review(branch, *, manifest_sha256, model, command_id):
     """
     same_model = {e.payload.get('review_id') for e in branch
                   if e.entry_type == 'research_review_intent' and e.payload.get('model') == model}
+    # After two reuses in a row the next answer is reviewed afresh: a wording fix the reviewer
+    # did not cite as such is then seen (bounded cost: one review in three).
+    streak = 0
+    for e in reversed(branch):
+        if e.entry_type == 'research_review_result' and e.payload.get('manifest_sha256') == manifest_sha256:
+            if not e.payload.get('reused_from_review_id'):
+                break
+            streak += 1
+    if streak >= MAX_CONSECUTIVE_REUSES:
+        return None
     for e in reversed(branch):
         result = e.payload
+        blocking = [f for f in result.get('findings') or [] if f.get('severity') == 'blocking']
+        # A blocking finding that cites the candidate is about its wording, which a new answer may
+        # have fixed: review that answer (free-route no-thinking round, iv_weak Auto: the corrected
+        # answer was never reviewed and the task ran out of nudges).
+        about_wording = any(_supplied(ref, ['candidate']) for f in blocking for ref in f.get('evidence_refs') or [])
         if (e.entry_type == 'research_review_result' and result.get('command_id') != command_id
+                and not about_wording
                 and result.get('manifest_sha256') == manifest_sha256
                 and (result.get('reused_from_review_id') or result.get('review_id')) in same_model
                 and result.get('verdict') == 'issues_found'

@@ -146,3 +146,43 @@ def test_a_single_string_for_a_list_of_strings_is_a_one_item_list():
     refused = asyncio.run(_registry(definition).execute({"tool_call_id": "c", "tool_id": "plan_x",
         "arguments": {"count": "three"}}, session_id="s"))
     assert not refused.ok
+
+
+def _genesis_spec(**overrides):
+    spec = {"model_family": "panel_ols", "entity_col": "firm", "time_col": "year",
+            "branches": [{"branch_id": "firm_fe", "outcome": "y", "predictors": ["x"]}]}
+    return {**spec, **overrides}
+
+
+def test_a_branch_cannot_switch_family_or_panel_effects():
+    import pytest
+    from workbench.contracts.common.errors import OperationValidationError
+    from workbench.agent.workflow_contract_parts import validation
+
+    validate = validation.validate_model_genesis_spec
+    spec = _genesis_spec(branches=[{"branch_id": "re", "outcome": "y", "predictors": ["x"], "model_family": "random_effects"}])
+    with pytest.raises(OperationValidationError, match="own model.genesis step"):
+        validate(spec)
+
+
+def test_identical_branches_are_refused_as_one_fit():
+    import pytest
+    from workbench.contracts.common.errors import OperationValidationError
+    from workbench.agent.workflow_contract_parts import validation
+
+    validate = validation.validate_model_genesis_spec
+    spec = _genesis_spec(branches=[{"branch_id": "pooled_ols", "outcome": "y", "predictors": ["x"]},
+                                   {"branch_id": "firm_fe", "outcome": "y", "predictors": ["x"]}])
+    with pytest.raises(OperationValidationError, match="same specification"):
+        validate(spec)
+    validate(_genesis_spec(branches=[{"branch_id": "a", "outcome": "y", "predictors": ["x"]},
+                                     {"branch_id": "b", "outcome": "y", "predictors": ["x", "z"]}]))
+
+
+def test_an_ols_cluster_refusal_names_the_rerun_route():
+    from workbench.agent.contract_help import help_for
+
+    assert "model.rerun" in help_for("model.genesis ols does not accept panel entity_col or time_col")
+    text = help_for("model.genesis ols model_options does not accept field(s): cluster")
+    assert "model.rerun" in text and "accepts" in text
+    assert "model.rerun" not in help_for("model.genesis survival_cox model_options does not accept field(s): event_col")

@@ -24,10 +24,25 @@ def _family_fields(family: str) -> tuple[tuple[str, ...], tuple[str, ...]] | Non
     return tuple(contract.model_options_fields), tuple(contract.model_options_required_fields)
 
 
+_OLS_CLUSTER = (
+    " To cluster an OLS fit's standard errors by a column, fit OLS without it, then propose model.rerun "
+    "on that model with changes {\"covariance\": \"clustered\", \"entity_col\": \"<column>\"}. For "
+    "within-entity (fixed-effects) estimates use model_family panel_ols with entity_col."
+)
+
+
 def help_for(message: str) -> str:
     """A sentence to append to ``message``, or ''."""
 
     first_line = message.splitlines()[0] if message else ""
+    if first_line.startswith("model.genesis ols does not accept panel entity_col or time_col") or (
+            first_line.startswith("model.genesis ols model_options does not accept") and "cluster" in first_line):
+        # Asked twice in one task by a weaker model (free-route no-thinking round, panel_fe).
+        return (_help_for_options(first_line) + _OLS_CLUSTER) if "model_options" in first_line else _OLS_CLUSTER
+    return _help_for_options(first_line)
+
+
+def _help_for_options(first_line: str) -> str:
     unknown = _UNKNOWN_OPTIONS.search(first_line)
     family = unknown.group(1) if unknown else (m.group(1) if (m := _MISSING_OPTIONS.search(first_line)) else None)
     fields = _family_fields(family) if family else None
