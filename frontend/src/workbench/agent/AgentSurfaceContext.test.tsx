@@ -1007,8 +1007,8 @@ describe("AgentSurfaceProvider", () => {
       "proposal-1",
       { revision: 1, fingerprint: "fingerprint-1", active_head_run_id: "run-a" },
     ));
-    // A settled proposal folds into one line instead of staying above the input.
-    expect(await screen.findByTestId("agent-settled-proposals")).toHaveTextContent("1 earlier proposal · confirmed");
+    // A decided proposal leaves the approval bar; the conversation keeps a receipt.
+    expect(await screen.findByTestId("agent-proposal-proposal-1")).toHaveTextContent("Approved");
     expect(screen.queryByRole("button", { name: "Confirm proposal proposal-1" })).toBeNull();
   });
 
@@ -1104,8 +1104,8 @@ describe("AgentSurfaceProvider", () => {
       "proposal-1",
       undefined,
     ));
-    // A settled proposal folds into one line instead of staying above the input.
-    expect(await screen.findByTestId("agent-settled-proposals")).toHaveTextContent("1 earlier proposal · declined");
+    // A decided proposal leaves the approval bar; the conversation keeps a receipt.
+    expect(await screen.findByTestId("agent-proposal-proposal-1")).toHaveTextContent("Declined");
     expect(screen.queryByRole("button", { name: "Confirm proposal proposal-1" })).toBeNull();
   });
 

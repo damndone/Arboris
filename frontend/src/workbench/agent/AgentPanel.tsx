@@ -12,7 +12,8 @@ import { AgentTargetRecovery } from "./AgentTargetRecovery";
 import { renderMarkdown } from "../../report/markdown";
 import "./agent.css";
 import { formatPValue } from "../../format/numbers";
-import { ProposalFields } from "./ProposalFields";
+import { AgentApprovalBar } from "./AgentApprovalBar";
+import { AgentProposalReceipt, receiptsByTurn } from "./AgentProposalReceipt";
 
 function roleMarker(role: string): string {
   if (role === "user") return "❯";
@@ -208,39 +209,6 @@ function withdrawnNumbers(message: AgentMessage): string {
   return numbers.length > 0 ? numbers.join(", ") : "some numbers";
 }
 
-/** One cast entry as the user typed it, e.g. `wage → string`. */
-function castLine(entry: unknown): string | null {
-  if (!entry || typeof entry !== "object") return null;
-  const cast = entry as { column?: unknown; target_dtype?: unknown };
-  if (typeof cast.column !== "string" || typeof cast.target_dtype !== "string") return null;
-  return `${cast.column} → ${cast.target_dtype}`;
-}
-
-function changeSummary(changes: Record<string, unknown>): string {
-  return Object.entries(changes).map(([key, value]) => {
-    if (
-      key !== "model_options"
-      && value
-      && typeof value === "object"
-      && "old" in value
-      && "new" in value
-    ) {
-      const pair = value as { old?: unknown; new?: unknown };
-      return `${key}: ${String(pair.old)} → ${String(pair.new)}`;
-    }
-    // A data cast's `casts` array reads as human intent, not raw JSON: the batch
-    // NL path (data.columns.cast) surfaces here, and a dumped array is unreadable.
-    if (key === "casts" && Array.isArray(value)) {
-      const lines = value.map(castLine).filter((line): line is string => line !== null);
-      if (lines.length === value.length && lines.length > 0) {
-        return `Cast ${lines.join(", ")}`;
-      }
-    }
-    if (typeof value === "string") return `${key}: ${value}`;
-    return `${key}: ${JSON.stringify(value)}`;
-  }).join(" · ");
-}
-
 function navigationButtonLabel(ref: {
   kind: string;
   relation: string;
@@ -273,10 +241,6 @@ export function AgentPanel({
   compactHeader?: boolean;
 }) {
   const agent = useAgentSurface();
-  const [revisionIssues, setRevisionIssues] = useState<string[]>([]);
-  const [editingProposalId, setEditingProposalId] = useState<string | null>(null);
-  const [revisionDraft, setRevisionDraft] = useState<Record<string, unknown>>({});
-  const [revisionError, setRevisionError] = useState<string | null>(null);
   const transcriptRef = useRef<HTMLDivElement | null>(null);
   const shouldFollowTranscriptRef = useRef(true);
   const hasMeasuredTranscriptRef = useRef(false);
@@ -299,6 +263,7 @@ export function AgentPanel({
   const turns = buildTurns(agent.messages);
   const pendingProposals = agent.proposals.filter((proposal) => proposal.status === "pending");
   const settledProposals = agent.proposals.filter((proposal) => proposal.status !== "pending");
+  const receipts = receiptsByTurn(turns, settledProposals);
   const pinned = new Set((agent.chapters ?? []).map((chapter) => chapter.entry_id));
   useLayoutEffect(() => {
     const transcript = transcriptRef.current;
@@ -498,9 +463,11 @@ export function AgentPanel({
                   onSelect={(prompt) => { void agent.sendPrompt(prompt); }} />
               ))}
               {turn.responses.map(renderTranscriptMessage)}
+              {receipts.get(turn.id)?.map((proposal) => <AgentProposalReceipt key={proposal.proposal_id} proposal={proposal} />)}
             </div>
           );
         })}
+        {receipts.get("")?.map((proposal) => <AgentProposalReceipt key={proposal.proposal_id} proposal={proposal} />)}
         {turnActive && (
           /* The turn in progress lives in the conversation, where its reply
            * will land, instead of in boxes above that push it away. */
@@ -635,157 +602,9 @@ export function AgentPanel({
           </span>
         </div>
       )}
-      {agent.proposals.length > 0 && (
-        <aside
-          data-testid="agent-action-rail"
-          aria-label="Agent actions"
-          className="wb-agent-action-rail"
-        >
-          {/* Only what still waits for the person stays above the input;
-              confirmed or declined proposals fold into one line (review 6). */}
-          {settledProposals.length > 0 && (
-            <details className="wb-agent-settled" data-testid="agent-settled-proposals">
-              <summary>
-                {settledProposals.length === 1 ? "1 earlier proposal" : `${settledProposals.length} earlier proposals`}
-                {" · "}{settledProposals.map((proposal) => proposal.status).join(", ")}
-              </summary>
-              <ul>
-                {settledProposals.map((proposal) => (
-                  <li key={proposal.proposal_id} data-testid={`agent-proposal-${proposal.proposal_id}`}>
-                    <strong>{proposal.operation_id}</strong> · {proposal.status}
-                    {(proposal.readable ?? []).length > 0 && <span> · {(proposal.readable ?? []).join("; ")}</span>}
-                  </li>
-                ))}
-              </ul>
-            </details>
-          )}
-          {pendingProposals.map((proposal) => {
-        const pending = proposal.status === "pending";
-        return (
-          <article
-            key={proposal.proposal_id}
-            data-testid={`agent-proposal-${proposal.proposal_id}`}
-            className="wb-agent-proposal"
-            aria-label={`Agent proposal ${proposal.proposal_id}`}
-          >
-            <div className="wb-agent-proposal-header">
-              <strong>{proposal.operation_id}</strong>
-              <span>revision {proposal.revision}</span>
-              <span className="wb-agent-proposal-status">{proposal.status}</span>
-            </div>
-            {proposal.readable && proposal.readable.length > 0 ? (
-              <>
-                <ol data-testid="agent-proposal-readable" className="wb-agent-proposal-change" style={{ margin: "4px 0", paddingLeft: 18 }}>
-                  {proposal.readable.map((line, index) => (
-                    <li key={index}>{line}</li>
-                  ))}
-                </ol>
-                <details className="wb-agent-proposal-detail">
-                  <summary>Technical parameters</summary>
-                  <pre style={{ whiteSpace: "pre-wrap", fontSize: 11, margin: 0 }}>
-                    {JSON.stringify(proposal.changes, null, 2)}
-                  </pre>
-                </details>
-              </>
-            ) : (
-              <div className="wb-agent-proposal-change">{changeSummary(proposal.changes)}</div>
-            )}
-            {proposal.revision > 1 && <p role="note">Parameters were revised. The Agent rationale below describes the original proposal; review the current parameter summary before confirming.</p>}
-            {proposal.expected_effect.length > 0 && (
-              <div className="wb-agent-proposal-detail">Expected: {proposal.expected_effect.join("; ")}</div>
-            )}
-            {proposal.risks.length > 0 && (
-              <div className="wb-agent-proposal-detail">Risk: {proposal.risks.join("; ")}</div>
-            )}
-            {pending && (
-              <>
-                <div className="wb-agent-proposal-actions">
-                  <button
-                    type="button"
-                    className="wb-agent-proposal-confirm"
-                    aria-label={`Confirm proposal ${proposal.proposal_id}`}
-                    disabled={agent.confirmationBusyId !== null || editingProposalId === proposal.proposal_id}
-                    onClick={() => void agent.confirmProposal(proposal.proposal_id)}
-                  >
-                    {agent.confirmationBusyId === proposal.proposal_id
-                      ? "Confirming…"
-                      : "Confirm proposal"}
-                  </button>
-                  <button
-                    type="button"
-                    className="wb-agent-proposal-decline"
-                    aria-label={`Decline proposal ${proposal.proposal_id}`}
-                    disabled={agent.confirmationBusyId !== null}
-                    onClick={() => void agent.declineProposal(proposal.proposal_id)}
-                  >
-                    {agent.confirmationBusyId === proposal.proposal_id ? "Working…" : "Decline"}
-                  </button>
-                  <button
-                    type="button"
-                    className="wb-agent-proposal-revise"
-                    aria-label={`Revise proposal ${proposal.proposal_id}`}
-                    disabled={agent.confirmationBusyId !== null}
-                    onClick={() => {
-                      setEditingProposalId(proposal.proposal_id);
-                      setRevisionDraft(proposal.changes);
-                      setRevisionError(null);
-                    }}
-                  >
-                    Revise
-                  </button>
-                </div>
-                {editingProposalId === proposal.proposal_id && (
-                  <div className="wb-agent-proposal-editor">
-                    <ProposalFields projectRoot={projectRoot} label={`Proposal changes ${proposal.proposal_id}`} value={revisionDraft} onChange={setRevisionDraft} onIssues={setRevisionIssues} />
-                    {revisionIssues.length > 0 && <p role="status">{revisionIssues.join(" ")}</p>}
-                    {revisionError && <div role="alert">{revisionError}</div>}
-                    <div className="wb-agent-proposal-actions">
-                      <button
-                        type="button"
-                        className="wb-agent-proposal-confirm"
-                        aria-label={`Save revision ${proposal.proposal_id}`}
-                        disabled={agent.confirmationBusyId !== null || revisionIssues.length > 0}
-                        onClick={async () => {
-                          try {
-                            const parsed: unknown = revisionDraft;
-                            if (
-                              typeof parsed !== "object" ||
-                              parsed === null ||
-                              Array.isArray(parsed)
-                            ) {
-                              throw new Error("Changes must be a JSON object");
-                            }
-                            const saved = await agent.reviseProposal(
-                              proposal.proposal_id,
-                              proposal.revision,
-                              parsed as Record<string, unknown>,
-                            );
-                            if (saved) setEditingProposalId(null);
-                          } catch (error) {
-                            setRevisionError(
-                              error instanceof Error ? error.message : "Invalid proposal changes",
-                            );
-                          }
-                        }}
-                      >
-                        Save revision
-                      </button>
-                      <button
-                        type="button"
-                        className="wb-agent-proposal-revise"
-                        aria-label={`Cancel revision ${proposal.proposal_id}`}
-                        onClick={() => setEditingProposalId(null)}
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-          </article>
-        );
-          })}
+      {pendingProposals.length > 0 && (
+        <aside data-testid="agent-action-rail" aria-label="Agent actions" className="wb-agent-action-rail">
+          <AgentApprovalBar proposals={pendingProposals} projectRoot={projectRoot} />
         </aside>
       )}
       {composer ?? <AgentComposer showScope={false} variant="terminal" />}
