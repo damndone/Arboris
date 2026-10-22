@@ -52,6 +52,7 @@ class ContextBuilder:
     ) -> ContextSnapshot:
         messages: list[dict[str, Any]] = []
         source_entry_ids: list[str] = []
+        shown_proposals: dict[str, dict[str, Any]] = {}
         branch = self.repository.get_branch(session_id, leaf_entry_id=leaf_entry_id)
         for entry in _project(branch):
             payload = dict(entry.payload)
@@ -66,6 +67,8 @@ class ContextBuilder:
                     and not include_failed_assistant_messages
                 ):
                     continue
+                if role == "tool" and '"proposal_id"' in content:
+                    _note_tool_proposal(content, shown_proposals)
                 messages.append({
                     key: value
                     for key, value in payload.items()
@@ -82,6 +85,7 @@ class ContextBuilder:
                     # message: providers with private reasoning refuse a second
                     # answer inside a turn that already used tools.
                     role = "user" if payload.get("model_role") == "user" else "system"
+                    content = _proposal_record_content(payload, content, shown_proposals)
                     messages.append({"role": role, "content": content, "name": payload.get("name", "workbench")})
                     source_entry_ids.append(entry.entry_id)
             elif entry.entry_type == "compaction":
@@ -114,6 +118,43 @@ class ContextBuilder:
         serialized = json.dumps(messages, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         fingerprint = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
         return ContextSnapshot(messages=messages, fingerprint=fingerprint, source_entry_ids=source_entry_ids)
+
+
+# Proposal audit messages repeat the proposal the model already received in its
+# run_operation tool result (the changes up to four times per confirmation). The
+# projection keeps every field whose value is new for that proposal and names
+# the rest; the stored audit record stays complete.
+_PROPOSAL_RECORD_FIELDS = {"operation_proposal": "proposal", "operation_proposal_revision": "proposal",
+                           "operation_confirmation": "confirmation"}
+_PROPOSAL_IDENTITY = ("record_type", "proposal_id", "revision", "fingerprint", "status")
+
+
+def _note_tool_proposal(content: str, shown: dict[str, dict[str, Any]]) -> None:
+    try:
+        output = json.loads(content).get("output")
+    except (ValueError, AttributeError):
+        return
+    proposal = output.get("proposal") if isinstance(output, dict) else None
+    if isinstance(proposal, dict) and isinstance(proposal.get("proposal_id"), str):
+        shown[proposal["proposal_id"]] = {**shown.get(proposal["proposal_id"], {}), **proposal}
+
+
+def _proposal_record_content(payload: dict[str, Any], content: str, shown: dict[str, dict[str, Any]]) -> str:
+    record = payload.get(_PROPOSAL_RECORD_FIELDS.get(payload.get("message_type"), ""))
+    if not isinstance(record, dict) or not isinstance(record.get("proposal_id"), str):
+        return content
+    if content != json.dumps(record, ensure_ascii=False, sort_keys=True):
+        return content  # already bounded to a summary
+    prior = shown.get(record["proposal_id"])
+    shown[record["proposal_id"]] = {**(prior or {}), **record}
+    if prior is None or prior.get("fingerprint") != record.get("fingerprint"):
+        return content
+    compact = {key: value for key, value in record.items() if key in _PROPOSAL_IDENTITY or prior.get(key) != value}
+    if len(compact) == len(record):
+        return content
+    compact["repeated_fields"] = sorted(set(record) - set(compact))
+    compact["repeated_fields_note"] = "Same values as already shown above for this proposal and fingerprint."
+    return json.dumps(compact, ensure_ascii=False, sort_keys=True)
 
 
 _STANDING_ORDER = {name: index for index,name in enumerate([
