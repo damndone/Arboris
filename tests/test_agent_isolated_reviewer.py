@@ -77,7 +77,8 @@ def test_reviewer_cannot_invoke_a_tool_or_grant_execution_permission(tmp_path):
         wire(core)
         answer = await core.prompt('完成分析', budget={'max_steps': 3, 'timeout_s': 30})
         assert len(adapter.requests) == 2
-        assert '部分完成' in answer
+        # The reviewer's own failure: the met completion stands, marked review unavailable (2026-10-22).
+        assert '隔离复核不可用' in answer and '分析完成' in answer
         assert not any(e.entry_type == 'tool_intent' for e in repo.get_branch('session-a'))
     asyncio.run(scenario())
 
@@ -103,7 +104,7 @@ def test_review_respects_remaining_command_budget(tmp_path):
         wire(core)
         answer = await core.prompt('完成分析', budget={'max_steps': 1, 'timeout_s': 30})
         assert len(adapter.requests) == 1
-        assert '部分完成' in answer
+        assert '隔离复核不可用' in answer and '分析完成' in answer
     asyncio.run(scenario())
 
 
@@ -154,7 +155,7 @@ def test_unfinished_review_is_not_automatically_reissued_after_restart(tmp_path)
         fresh_adapter = Adapter()
         resumed, _, _ = setup(tmp_path, fresh_adapter, create=False)
         wire(resumed)
-        assert '部分完成' in await resumed.resume(turn.turn_id)
+        assert '隔离复核不可用' in await resumed.resume(turn.turn_id)
         assert fresh_adapter.requests == []
     asyncio.run(scenario())
 

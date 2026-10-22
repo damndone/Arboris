@@ -127,3 +127,32 @@ def test_another_reviewer_model_reviews_again(tmp_path):
         await _nudge(core)
         assert adapter.reviews == 4
     asyncio.run(scenario())
+
+
+def test_a_reviewer_side_failure_keeps_a_met_completion_but_a_partial_one_stays_partial():
+    from workbench.agent.research_review import _publication
+
+    payload = {'content': '分析完成：结论如下。', 'completion_check': {'status': 'requirements_met'}}
+    base = {'candidate_entry_id': 'e', 'findings': [], 'verdict': 'unverified'}
+    kept = _publication(payload, {**base, 'reason': 'inconsistent_verdict_or_unknown_evidence_reference',
+                                  'completion_check': {'status': 'requirements_met'}},
+                        language='zh', mode='auto', review_count=1, remaining=None)
+    assert '分析完成' in kept['content'] and '隔离复核不可用' in kept['content']
+    assert kept['research_review']['review_unavailable'] is True
+    for reason, check in (('evidence_changed_during_review', 'requirements_met'),
+                          ('delivery_requirements_still_partial', 'requirements_met'),
+                          ('invalid_reviewer_response', 'partial')):
+        demoted = _publication({**payload, 'completion_check': {'status': check}},
+                               {**base, 'reason': reason, 'completion_check': {'status': check}},
+                               language='zh', mode='auto', review_count=1, remaining=None)
+        assert '部分完成' in demoted['content'] and '分析完成' not in demoted['content'], reason
+
+
+def test_a_verified_blocking_finding_still_blocks():
+    from workbench.agent.research_review import _publication
+
+    payload = {'content': '分析完成：结论如下。', 'completion_check': {'status': 'requirements_met'}}
+    result = {'candidate_entry_id': 'e', 'verdict': 'issues_found', 'completion_check': {'status': 'requirements_met'},
+              'findings': [{'severity': 'blocking', 'message': 'Criterion 2 unmet.', 'evidence_refs': ['plan']}]}
+    published = _publication(payload, result, language='zh', mode='auto', review_count=2, remaining=None)
+    assert '部分完成' in published['content'] and '分析完成' not in published['content']

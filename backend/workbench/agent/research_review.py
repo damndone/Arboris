@@ -171,12 +171,31 @@ def _parse(text, keys, packet=None):
     return value
 
 
+#: Reasons a review could not be used that lie with the review itself (its output,
+#: its provider, its budget or its egress), not with the analysis. Decided by the user
+#: (2026-10-22): such a review does not demote a completion the deterministic delivery
+#: check has met; it is reported as unavailable. A verified blocking finding, partial
+#: delivery evidence and evidence that changed during the review still block.
+REVIEWER_SIDE_REASONS = frozenset({
+    'review_interrupted_without_durable_result; explicit /review required', 'model_result_sharing_not_available',
+    'evidence_packet_incomplete_or_oversized', 'review_or_command_budget_exhausted', 'invalid_reviewer_response',
+    'reviewer_attempted_tool_call', 'reviewer_numeric_claim_unverified', 'review_aborted_or_provider_error',
+    'reviewer_response_oversized', 'review_response_incomplete', 'inconsistent_verdict_or_unknown_evidence_reference',
+})
+
+
 def _publication(payload, result, *, language, mode, review_count, remaining):
     current_check = result.get("completion_check")
     blocking = any(f['severity'] == 'blocking' for f in result['findings'])
     verified = result['verdict'] != 'unverified' and not blocking
-    prefix = ('隔离复核：在已提供的证据中未发现阻断项。' if verified else '部分完成：隔离复核存在未解决项。') if language == 'zh' else (
-        'Isolated review: no blocking issue found in supplied evidence.' if verified else 'Partial completion: isolated review has unresolved issues.')
+    met = (current_check or payload.get('completion_check') or {}).get('status') == 'requirements_met'
+    unavailable = result['verdict'] == 'unverified' and result.get('reason') in REVIEWER_SIDE_REASONS and met
+    prefix = ('隔离复核：在已提供的证据中未发现阻断项。' if verified else
+              '隔离复核不可用：确定性交付检查已通过，完成结论保留。' if unavailable else
+              '部分完成：隔离复核存在未解决项。') if language == 'zh' else (
+        'Isolated review: no blocking issue found in supplied evidence.' if verified else
+        'Isolated review unavailable: the deterministic delivery check passed; the completion stands.' if unavailable else
+        'Partial completion: isolated review has unresolved issues.')
     notes = '\n'.join(f['severity'] + ': ' + f['message'] for f in result['findings'])
     if result.get('reason'):
         reasons = {
@@ -201,13 +220,15 @@ def _publication(payload, result, *, language, mode, review_count, remaining):
         and result['verdict'] == 'issues_found' and review_count < MAX_REVIEWS
         and (remaining is None or remaining >= 2))
     original = '' if payload.get('review_requested') or revise else payload['content']
-    if not verified:
+    if not verified and not unavailable:
         original = _CLAIM.sub('交付证据已核验' if language == 'zh' else 'delivery evidence checked', original)
     content = (original[:12_000] + '\n\n' + prefix + '\n' + notes).strip()
     reviewed = {k:v for k,v in payload.items() if k != 'review_pending'}
     if current_check is not None:
         reviewed['completion_check'] = current_check
-    reviewed.update(content=content, review_candidate_entry_id=result['candidate_entry_id'], research_review={k:v for k,v in result.items() if k not in {'raw_response','completion_check'}})
+    reviewed.update(content=content, review_candidate_entry_id=result['candidate_entry_id'], research_review={
+        **{k:v for k,v in result.items() if k not in {'raw_response','completion_check'}},
+        **({'review_unavailable': True} if unavailable else {})})
     if revise:
         reviewed.update(stop_reason='revised', review_revision=True)
     return reviewed
