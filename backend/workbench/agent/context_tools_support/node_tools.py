@@ -51,7 +51,7 @@ class NodeToolsMixin:
     def __init__(self, project_root: Path | str) -> None:
         self.project_root = Path(project_root).resolve()
 
-    def _tool_active_head(self, chain_id: str, requested: str) -> str:
+    def _tool_active_head(self, chain_id: str, requested: str, owner_run_id: Any = None) -> str:
         """Use the durable head when this tool belongs to a managed Chain.
 
         Legacy read-only sessions have no ChainStore record yet and retain the
@@ -72,13 +72,36 @@ class NodeToolsMixin:
             # Told to the Agent: surfaced only as its class name, it kept passing a
             # model's own branch run as the head (paid fix4 round, panel, Ask: 8
             # refused reads and three nudges). The head is this conversation's own.
-            from ..tools import ToolVisibleError
+            from ..tools import ToolVisibleError, tool_note
             head = ChainStore(self.project_root / "workbench", create=False).resolve_active_head(chain_id)
+            if owner_run_id == requested and self._derives_from(requested, head):
+                # A read of that run, with the run also passed as the head: what the
+                # refusal below asks for. Read tools change nothing, so do it.
+                tool_note(f"active_head_run_id is this conversation's head {head}; read run {requested} "
+                          "as owner_run_id under it.")
+                return head
             raise ToolVisibleError(
                 f"ACTIVE_HEAD_MISMATCH: active_head_run_id must be this conversation's current head {head}, "
                 f"not {requested}. To read a result in another run (for example a model's branch run), pass "
                 f"that run as owner_run_id and keep active_head_run_id {head}."
             ) from exc
+
+    def _derives_from(self, run_id: str, head: str, *, limit: int = 20) -> bool:
+        """Whether ``run_id`` is ``head`` or was derived from it (dataset_source chain)."""
+        import json
+
+        current = run_id
+        for _ in range(limit):
+            if current == head:
+                return True
+            try:
+                manifest = json.loads((self.project_root / "runs" / current / "run_manifest.json").read_text())
+            except (OSError, ValueError):
+                return False
+            current = ((manifest.get("dataset_source") or {}).get("source_run_id")) if isinstance(manifest, dict) else None
+            if not isinstance(current, str) or not current:
+                return False
+        return False
 
     def inspect_node_context(
         self,

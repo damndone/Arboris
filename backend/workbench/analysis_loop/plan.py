@@ -179,7 +179,15 @@ def _resolve_target(
 
     resolved = resolve_comparison_target(source, requested_result_id)
     if isinstance(resolved, IntentValidationResult):
-        raise _error(resolved.code, resolved.message or resolved.code, **dict(resolved.evidence))
+        message = resolved.message or resolved.code
+        if resolved.code in {"COMPARISON_TARGET_REQUIRED", "COMPARISON_TARGET_UNKNOWN"} and source.result_ids:
+            # The bare code left the Agent guessing twice (free-route round, panel).
+            labels = source.result_labels or {}
+            listed = ", ".join(f"{result_id} ({labels[result_id]})" if labels.get(result_id) else str(result_id)
+                               for result_id in list(source.result_ids)[:20])
+            message = (f"{resolved.code}: the source names no primary estimate; pass the coefficient to "
+                       f"compare as target.result_id, one of: {listed}")
+        raise _error(resolved.code, message, **dict(resolved.evidence))
     return resolved
 
 

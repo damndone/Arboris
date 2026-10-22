@@ -53,6 +53,7 @@ def build_chain_tool_registry(
     run_operation: ToolHandler,
     plan_analysis: ToolHandler,
     inspect_analysis_completion: ToolHandler,
+    normalize_target: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
 ) -> ToolRegistry:
     """Keep context reads first, followed by scoped planning and operation tools.
 
@@ -83,7 +84,7 @@ def build_chain_tool_registry(
 
     registry.register(ToolDefinition(
         tool_id="run_operation", version="v1", input_schema=proposal_tool_schema(), max_output_budget=24_000,
-        side_effect="proposal", scope_requirements=("chain",), handler=run_operation,
+        side_effect="proposal", scope_requirements=("chain",), handler=run_operation, normalize=normalize_target,
         description="Run one typed operation under the current permissions, or return its reviewable proposal."
     ))
     registry.register(ToolDefinition(

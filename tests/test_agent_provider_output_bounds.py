@@ -12,7 +12,8 @@ def _config(model):
 
 def test_the_configured_flash_alias_gets_the_v4_controls():
     for model in ("deepseek-flash", "deepseek-v4-flash", "deepseek-v4.1-flash"):
-        assert deepseek_v4_request_config(_config(model)) == {"thinking": {"type": "disabled"}, "max_tokens": 8192}
+        assert deepseek_v4_request_config(_config(model)) == {
+            "thinking": {"type": "disabled"}, "reasoning_effort": "none", "max_tokens": 8192}
     assert deepseek_v4_request_config(_config("deepseek-chat")) == {}
 
 

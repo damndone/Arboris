@@ -10,6 +10,7 @@ from .operations import RERUN_OPERATIONS, is_rerun_operation
 from .proposals import ProposalInvocation, ProposalRevision
 from .tools import ToolRegistry, ToolVisibleError
 from .toolsets import build_chain_tool_registry
+from .operations import normalize_operation_target
 from .operation_handlers.proposal_arguments import _canonicalize_data_columns_cast_arguments, _canonicalize_workflow_arguments, _precheck_model_options, _clustered_analysis_loop_intent
 
 class OrchestrationTools:
@@ -510,5 +511,6 @@ class OrchestrationTools:
             run_operation=run_operation,
             plan_analysis=plan_analysis,
             inspect_analysis_completion=inspect_analysis_completion,
+            normalize_target=lambda arguments: normalize_operation_target(self.operation_registry, arguments),
         )
 

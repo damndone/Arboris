@@ -77,9 +77,7 @@ class RegistrationMixin:
                     request_id=str(arguments.get("request_id") or "inspect-node-context"),
                     owner_run_id=str(arguments["owner_run_id"]),
                     op_node_id=str(arguments["op_node_id"]),
-                    active_head_run_id=self._tool_active_head(
-                        chain_id, str(arguments["active_head_run_id"])
-                    ),
+                    active_head_run_id=self._tool_active_head(chain_id, str(arguments["active_head_run_id"]), arguments.get("owner_run_id")),
                 )
             )
 
@@ -96,9 +94,7 @@ class RegistrationMixin:
                     ),
                     owner_run_id=str(arguments["owner_run_id"]),
                     op_node_id=str(arguments["op_node_id"]),
-                    active_head_run_id=self._tool_active_head(
-                        chain_id, str(arguments["active_head_run_id"])
-                    ),
+                    active_head_run_id=self._tool_active_head(chain_id, str(arguments["active_head_run_id"]), arguments.get("owner_run_id")),
                     operation_id=str(arguments["operation_id"]),
                     operation_version=str(arguments.get("operation_version") or "v1"),
                     step_operation_ids=tuple(str(item) for item in arguments.get("step_operation_ids") or ()),
@@ -130,9 +126,7 @@ class RegistrationMixin:
                     request_id=str(arguments.get("request_id") or "inspect-diagnostics"),
                     owner_run_id=str(arguments["owner_run_id"]),
                     op_node_id=str(arguments["op_node_id"]),
-                    active_head_run_id=self._tool_active_head(
-                        chain_id, str(arguments["active_head_run_id"])
-                    ),
+                    active_head_run_id=self._tool_active_head(chain_id, str(arguments["active_head_run_id"]), arguments.get("owner_run_id")),
                 )
             )
 
@@ -149,9 +143,7 @@ class RegistrationMixin:
                     ),
                     owner_run_id=str(arguments["owner_run_id"]),
                     op_node_id=str(arguments["op_node_id"]),
-                    active_head_run_id=self._tool_active_head(
-                        chain_id, str(arguments["active_head_run_id"])
-                    ),
+                    active_head_run_id=self._tool_active_head(chain_id, str(arguments["active_head_run_id"]), arguments.get("owner_run_id")),
                 )
             )
 
@@ -168,9 +160,7 @@ class RegistrationMixin:
                     ),
                     owner_run_id=str(arguments["owner_run_id"]),
                     op_node_id=str(arguments["op_node_id"]),
-                    active_head_run_id=self._tool_active_head(
-                        chain_id, str(arguments["active_head_run_id"])
-                    ),
+                    active_head_run_id=self._tool_active_head(chain_id, str(arguments["active_head_run_id"]), arguments.get("owner_run_id")),
                 )
             )
 
@@ -185,9 +175,7 @@ class RegistrationMixin:
                     request_id=str(arguments.get("request_id") or "inspect-result-summary"),
                     owner_run_id=str(arguments["owner_run_id"]),
                     op_node_id=str(arguments["op_node_id"]),
-                    active_head_run_id=self._tool_active_head(
-                        chain_id, str(arguments["active_head_run_id"])
-                    ),
+                    active_head_run_id=self._tool_active_head(chain_id, str(arguments["active_head_run_id"]), arguments.get("owner_run_id")),
                 )
             )
 
@@ -204,9 +192,7 @@ class RegistrationMixin:
                     ),
                     owner_run_id=str(arguments["owner_run_id"]),
                     op_node_id=str(arguments["op_node_id"]),
-                    active_head_run_id=self._tool_active_head(
-                        chain_id, str(arguments["active_head_run_id"])
-                    ),
+                    active_head_run_id=self._tool_active_head(chain_id, str(arguments["active_head_run_id"]), arguments.get("owner_run_id")),
                 )
             )
 
@@ -221,9 +207,7 @@ class RegistrationMixin:
                     request_id=str(arguments.get("request_id") or "inspect-repeated-measures-recipe"),
                     owner_run_id=str(arguments["owner_run_id"]),
                     op_node_id=str(arguments["op_node_id"]),
-                    active_head_run_id=self._tool_active_head(
-                        chain_id, str(arguments["active_head_run_id"])
-                    ),
+                    active_head_run_id=self._tool_active_head(chain_id, str(arguments["active_head_run_id"]), arguments.get("owner_run_id")),
                 )
             )
 
@@ -238,9 +222,7 @@ class RegistrationMixin:
                     request_id=str(arguments.get("request_id") or "inspect-artifact-preview"),
                     owner_run_id=str(arguments["owner_run_id"]),
                     op_node_id=str(arguments["op_node_id"]),
-                    active_head_run_id=self._tool_active_head(
-                        chain_id, str(arguments["active_head_run_id"])
-                    ),
+                    active_head_run_id=self._tool_active_head(chain_id, str(arguments["active_head_run_id"]), arguments.get("owner_run_id")),
                 )
             )
 
@@ -255,9 +237,7 @@ class RegistrationMixin:
                     request_id=str(arguments.get("request_id") or "inspect-data-schema"),
                     owner_run_id=str(arguments["owner_run_id"]),
                     op_node_id=str(arguments["op_node_id"]),
-                    active_head_run_id=self._tool_active_head(
-                        chain_id, str(arguments["active_head_run_id"])
-                    ),
+                    active_head_run_id=self._tool_active_head(chain_id, str(arguments["active_head_run_id"]), arguments.get("owner_run_id")),
                 )
             )
 
@@ -274,9 +254,7 @@ class RegistrationMixin:
                     ),
                     owner_run_id=str(arguments["owner_run_id"]),
                     op_node_id=str(arguments["op_node_id"]),
-                    active_head_run_id=self._tool_active_head(
-                        chain_id, str(arguments["active_head_run_id"])
-                    ),
+                    active_head_run_id=self._tool_active_head(chain_id, str(arguments["active_head_run_id"]), arguments.get("owner_run_id")),
                 ),
                 chain_id=chain_id,
                 session_id=session_id,
@@ -295,9 +273,7 @@ class RegistrationMixin:
                     ),
                     owner_run_id=str(arguments["owner_run_id"]),
                     op_node_id=str(arguments["op_node_id"]),
-                    active_head_run_id=self._tool_active_head(
-                        chain_id, str(arguments["active_head_run_id"])
-                    ),
+                    active_head_run_id=self._tool_active_head(chain_id, str(arguments["active_head_run_id"]), arguments.get("owner_run_id")),
                     operation_record_id=str(arguments["operation_record_id"]),
                     artifact_id=str(arguments["artifact_id"]),
                 ),
@@ -319,9 +295,7 @@ class RegistrationMixin:
                     ),
                     owner_run_id=str(arguments["owner_run_id"]),
                     op_node_id=str(arguments["op_node_id"]),
-                    active_head_run_id=self._tool_active_head(
-                        chain_id, str(arguments["active_head_run_id"])
-                    ),
+                    active_head_run_id=self._tool_active_head(chain_id, str(arguments["active_head_run_id"]), arguments.get("owner_run_id")),
                 )
             )
 

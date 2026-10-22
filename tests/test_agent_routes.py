@@ -1375,12 +1375,9 @@ def test_chain_turn_wires_scoped_read_only_tools_without_mutation(
             for item in proposal_schema["oneOf"]
             if item["properties"]["operation_id"]["const"] == "model.rerun"
         )
-        assert rerun_branch["properties"]["target"]["required"] == [
-            "run_id",
-            "node_ref",
-            "node_hash",
-            "forest_node_key",
-        ]
+        # Node identity is backend-bound (design §5.3): references only.
+        assert rerun_branch["properties"]["target"]["required"] == ["run_id", "node_ref"]
+        assert {"node_hash", "forest_node_key"} <= set(rerun_branch["properties"]["target"]["properties"])
         assert rerun_branch["properties"]["preconditions"]["required"] == [
             "context_version",
             "context_fingerprint",

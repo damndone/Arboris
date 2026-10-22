@@ -161,9 +161,13 @@ def _canonicalize_workflow_arguments(
     hash copied from the graph projection as ``artifact_id``.
     """
 
+    target = dict(arguments.get("target") or {})
+    # Node identity the backend binds; a copied value is dropped, never trusted.
+    for field in ("node_hash", "forest_node_key"):
+        target.pop(field, None)
+    arguments = {**arguments, "target": target}
     if project_root is None:
         return arguments
-    target = dict(arguments.get("target") or {})
     run_id = str(target.get("run_id") or "")
     node_ref = str(target.get("node_ref") or "")
     if not run_id or not node_ref:

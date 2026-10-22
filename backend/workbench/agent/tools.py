@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import asyncio
+import contextvars
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -367,14 +368,19 @@ def _is_agent_input_fault(exc: BaseException) -> bool:
 
     from .context_tools import OperationContractUnavailableError
     from ..contracts.common.errors import OperationValidationError
+    from ..analysis_loop.plan import PlanValidationError
     from ..analysis_loop.resolver import AnalysisLoopSourceResolutionError
 
+    # PlanValidationError rejects the Agent's own Analysis Loop intent with a code
+    # and a message; shown as its class name only, the Agent retried blind twice
+    # (free-route round, panel_fe.specific).
     return isinstance(
         exc,
         (
             OperationValidationError,
             OperationContractUnavailableError,
             AnalysisLoopSourceResolutionError,
+            PlanValidationError,
         ),
     )
 
@@ -432,6 +438,31 @@ class ToolRuntime(Protocol):
         """Execute one already-normalized tool call."""
 
 
+#: Corrections the Workbench made to one tool call (e.g. an ignored identity
+#: field), handed back with the result so the model learns the right call.
+_TOOL_NOTES: contextvars.ContextVar[list[str] | None] = contextvars.ContextVar("workbench_tool_notes", default=None)
+#: Node identity arguments a read tool that does not take them can ignore.
+_READ_IDENTITY_FIELDS = frozenset({"active_head_run_id", "op_node_id", "owner_run_id"})
+
+
+def tool_note(text: str) -> None:
+    """Record a correction the Workbench made to the current tool call."""
+    notes = _TOOL_NOTES.get()
+    if notes is not None and text not in notes:
+        notes.append(text)
+
+
+def _drop_unused_read_identity(definition: "ToolDefinition", arguments: dict[str, Any]) -> dict[str, Any]:
+    schema = definition.input_schema
+    if definition.side_effect != "none" or schema.get("additionalProperties") is not False:
+        return arguments
+    unused = sorted(set(arguments) & _READ_IDENTITY_FIELDS - set(schema.get("properties") or {}))
+    if not unused:
+        return arguments
+    tool_note(f"{definition.tool_id} takes no {', '.join(unused)}; ignored.")
+    return {key: value for key, value in arguments.items() if key not in unused}
+
+
 @dataclass(frozen=True)
 class ToolDefinition:
     tool_id: str
@@ -442,6 +473,9 @@ class ToolDefinition:
     scope_requirements: tuple[str, ...] = ()
     max_output_budget: int | None = None
     description: str = ""
+    #: Optional deterministic correction of the arguments before validation;
+    #: it reports what it changed through tool_note.
+    normalize: Callable[[dict[str, Any]], dict[str, Any]] | None = None
 
     def descriptor(self) -> dict[str, Any]:
         descriptor: dict[str, Any] = {
@@ -516,7 +550,27 @@ class ToolRegistry:
                     }
                 ],
             )
-        arguments = tool_call.get("arguments") or {}
+        notes: list[str] = []
+        notes_token = _TOOL_NOTES.set(notes)
+        try:
+            return self._with_notes(await self._execute_defined(definition, tool_call, session_id=session_id,
+                                                                  metadata=metadata), notes)
+        finally:
+            _TOOL_NOTES.reset(notes_token)
+
+    @staticmethod
+    def _with_notes(result: "ToolResult", notes: list[str]) -> "ToolResult":
+        if not notes or not result.ok or not isinstance(result.output, dict):
+            return result
+        return ToolResult(tool_call_id=result.tool_call_id, tool_id=result.tool_id, ok=True,
+                          output={**result.output, "workbench_notes": list(notes)})
+
+    async def _execute_defined(self, definition, tool_call, *, session_id, metadata):
+        tool_id = str(tool_call.get("tool_id", ""))
+        call_id = str(tool_call.get("tool_call_id", ""))
+        arguments = _drop_unused_read_identity(definition, tool_call.get("arguments") or {})
+        if definition.normalize is not None and isinstance(arguments, dict):
+            arguments = definition.normalize(arguments)
         details = validation_details(definition.input_schema, arguments)
         if details:
             example = _operation_change_example(definition.input_schema, arguments)

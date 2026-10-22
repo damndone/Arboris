@@ -43,6 +43,68 @@ from .operation_records import (  # noqa: F401  (moved; re-exported)
 )
 
 
+#: Node identity the backend binds from run_id + node_ref (design §5.3). Proposals
+#: may carry them (copied from a node read) but never need to: model.rerun used to
+#: require node_hash/forest_node_key while operation.multi_step refused them and
+#: required artifact_id, so a model that had done one rejected the other
+#: (free-route round, 2026-10-22: 11 of 35 refused calls).
+_BOUND_IDENTITY = ("node_hash", "forest_node_key")
+#: Operations whose canonicalization also binds the node's artifact_id.
+_ARTIFACT_BOUND = frozenset({"operation.multi_step", "data.columns.cast"})
+
+
+_IDENTITY_FIELDS = ("artifact_id", "node_hash", "forest_node_key")
+
+
+def normalize_operation_target(registry: "OperationRegistry", arguments: dict[str, Any]) -> dict[str, Any]:
+    """Identity in a proposal target that this operation does not use is dropped, not refused.
+
+    ``node_id`` names the node the way node reads do; it means ``node_ref``.
+    """
+    from .tools import tool_note
+
+    target = arguments.get("target")
+    if not isinstance(target, dict):
+        return arguments
+    target = dict(target)
+    if "node_id" in target:
+        node_id = target.pop("node_id")
+        if "node_ref" not in target:
+            target["node_ref"] = node_id
+            tool_note("target.node_id is spelled node_ref; used as node_ref.")
+        elif node_id != target["node_ref"]:
+            target["node_id"] = node_id  # contradictory: leave it for validation to refuse
+        else:
+            tool_note("target.node_id duplicates node_ref; ignored.")
+    try:
+        definition = registry.require(str(arguments.get("operation_id")))
+    except Exception:
+        return {**arguments, "target": target}
+    own = set(((definition.proposal_schema or {}).get("properties", {}).get("target") or {}).get("properties") or {})
+    if definition.operation_id in _ARTIFACT_BOUND:
+        own.add("artifact_id")
+    unused = [field for field in _IDENTITY_FIELDS if field in target and field not in own]
+    for field in unused:
+        target.pop(field)
+    if unused:
+        tool_note(f"{definition.operation_id} does not use target.{', target.'.join(unused)}; ignored "
+                  "(the backend binds node identity from run_id and node_ref).")
+    return {**arguments, "target": target}
+
+
+def _accept_backend_bound_identity(schema: dict[str, Any], operation_id: str) -> None:
+    """Agent-facing target: references required, backend-bound identity optional and unused."""
+    target = schema.get("properties", {}).get("target")
+    if not isinstance(target, dict) or "properties" not in target:
+        return
+    bound = [*_BOUND_IDENTITY, *(["artifact_id"] if operation_id in _ARTIFACT_BOUND else [])]
+    target["required"] = [field for field in target.get("required", []) if field not in bound]
+    for field in bound:
+        target["properties"].setdefault(field, {"type": "string", "maxLength": 500})
+    note = ("The backend binds " + ", ".join(bound) + " from run_id and node_ref; values given here are not used.")
+    target["description"] = (target.get("description", "") + " " + note).strip()
+
+
 class OperationRegistry:
     """Explicit registry for agent-facing operation identities."""
 
@@ -539,6 +601,7 @@ class OperationRegistry:
                     "Supply active_head_run_id. The backend binds context_version, "
                     "context_fingerprint and owner_resolution from the data node."
                 )
+            _accept_backend_bound_identity(schema, definition.operation_id)
             schemas.append(schema)
         base["oneOf"] = schemas
         base["description"] = "A typed, confirmation-gated Workbench operation proposal."
