@@ -18,6 +18,11 @@ ROOT = Path(__file__).resolve().parents[1] / "backend" / "workbench"
 # Modules that belong to a family, or declare the families, may name them.
 FAMILY_OWNED = (
     "engine/stages/estimation.py",
+    # The estimation stage's fit adapters, survey variance and run records,
+    # split out of estimation.py in v1.9.1.
+    "engine/stages/estimation_fits.py",
+    "engine/stages/estimation_survey.py",
+    "engine/stages/estimation_records.py",
     "engine/packs/",
     "econometrics/",
     "contracts/model/",
