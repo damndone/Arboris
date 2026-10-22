@@ -91,7 +91,9 @@ def _declared_tool_ids() -> set[str]:
     for path in BACKEND.rglob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
-            if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "ToolDefinition":
+            # Context tools keep their static fields in tool_specs.py as dict(tool_id=...).
+            constructor = getattr(node.func, "id", None) if isinstance(node, ast.Call) else None
+            if constructor == "ToolDefinition" or (constructor == "dict" and path.name == "tool_specs.py"):
                 for keyword in node.keywords:
                     if keyword.arg == "tool_id" and isinstance(keyword.value, ast.Constant):
                         ids.add(keyword.value.value)

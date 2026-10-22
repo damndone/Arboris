@@ -239,8 +239,9 @@ def test_the_agent_has_a_tool_that_reads_these_findings():
 
     source = (
         Path(__file__).parent.parent
-        / "backend/workbench/agent/context_tools_support/registration.py"
+        / "backend/workbench/agent/context_tools_support/tool_specs.py"
     ).read_text()
+    # The tool's static descriptor (id, schema, description) lives in tool_specs.py.
     assert 'tool_id="inspect_design_advisories"' in source, (
         "the method exists but no ToolDefinition exposes it to a model"
     )
