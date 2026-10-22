@@ -14,7 +14,7 @@ import { useLineage } from "../../lineage/LineageContext";
 import { buildAskAIContextPacket } from "../../lineage/detail/sections/askAiContextPacket";
 import { resolveNodeOperationContext } from "../../lineage/api/nodeOperationContext";
 import { focusFromWorkbench, resolveFocus } from "./focus";
-import { fetchLlmConfig, fetchLlmProviders, updateLlmProvider } from "../../llm/llmApi";
+import { detectLlmProviderModels, fetchLlmConfig, fetchLlmProviders, updateLlmProvider } from "../../llm/llmApi";
 import type { LlmConfigInfo, LlmProvider } from "../../llm/llmTypes";
 import { useForest } from "../ForestContext";
 import { useWorkbench } from "../WorkbenchStateProvider";
@@ -647,6 +647,27 @@ export function AgentSurfaceProvider({
     return () => { cancelled = true; };
   }, [projectRoot]);
 
+  // v1.9.1: what the active provider's model list reports (window, thinking efforts,
+  // image input) updates its configured models, once per provider per page; a
+  // provider that reports nothing, or a failure, leaves them as they are.
+  const detectedProviders = useRef(new Set<string>());
+  useEffect(() => {
+    const providerId = llmConfig?.provider_id;
+    if (!providerId || detectedProviders.current.has(providerId)) return;
+    detectedProviders.current.add(providerId);
+    let cancelled = false;
+    Promise.resolve()
+      .then(() => detectLlmProviderModels(providerId))
+      .then(async (updated) => {
+        const refreshed = await fetchLlmConfig();
+        if (cancelled || !updated?.id) return;
+        setProviders((current) => current.map((provider) => provider.id === updated.id ? updated : provider));
+        if (refreshed && typeof refreshed === "object") setLlmConfig(refreshed);
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [llmConfig?.provider_id]);
+
   const activeProvider = providers.find((provider) => provider.id === llmConfig?.provider_id);
   const modelOptions = useMemo(() => {
     const options = Array.isArray(activeProvider?.models)
@@ -660,9 +681,10 @@ export function AgentSurfaceProvider({
           context_window_tokens: llmConfig.context_window_tokens,
           supports_1m: llmConfig.supports_1m,
           supports_vision: llmConfig.supports_vision,
-          // No provider record to save a choice on: the menu shows no thinking control.
-          supports_reasoning_effort: false,
+          // No provider record to save a choice on: the menu shows no thinking or limit control.
+          reasoning_efforts: [],
           reasoning_effort: null,
+          context_limit_tokens: null,
         }]
       : [];
   }, [activeProvider, llmConfig?.model]);
@@ -686,9 +708,10 @@ export function AgentSurfaceProvider({
   // the window the server assumes for compaction, shown as an assumption.
   const activeModelRecord = modelOptions.find((option) => option.request_model === model);
   const ONE_MILLION = 1_000_000;
+  const modelWindow = activeModelRecord?.context_window_tokens ?? (activeModelRecord?.supports_1m ? ONE_MILLION : null);
+  const limit = activeModelRecord?.context_limit_tokens ?? null;
   const declaredWindow =
-    activeModelRecord?.context_window_tokens
-    ?? (activeModelRecord?.supports_1m ? ONE_MILLION : null)
+    (modelWindow !== null && limit !== null ? Math.min(modelWindow, limit) : modelWindow ?? limit)
     ?? llmConfig?.context_window_tokens
     ?? (llmConfig?.supports_1m ? ONE_MILLION : null)
     ?? (serverContext?.window_declared ? serverContext.window_tokens : null);
@@ -727,8 +750,8 @@ export function AgentSurfaceProvider({
         item.request_model === requestModel ? { ...item, ...patch } : item);
       const updated = await updateLlmProvider(activeProvider.id, { models });
       setProviders((current) => current.map((provider) => provider.id === updated.id ? updated : provider));
-      const record = updated.models?.find((item) => item.request_model === llmConfig?.model);
-      if (record) setLlmConfig((current) => current ? { ...current, context_window_tokens: record.context_window_tokens } : current);
+      // The config's window is the working one: the model's, capped by the limit just saved.
+      setLlmConfig(await fetchLlmConfig());
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Unable to update the model settings");
     }

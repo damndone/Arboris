@@ -31,6 +31,7 @@ const mocks = vi.hoisted(() => ({
   sendAgentTurn: vi.fn(),
   fetchLlmProviders: vi.fn(),
   fetchLlmConfig: vi.fn(),
+  detectLlmProviderModels: vi.fn(() => Promise.reject(new Error("no listing"))),
   updateLlmProvider: vi.fn(),
   lineageModel: { current: { nodes: [] } as Record<string, unknown> },
   workbenchState: { selectedKey: null as string | null, agentFocus: null as null | { kind: "report" | "plan"; id: string; runId?: string } },
@@ -66,6 +67,7 @@ vi.mock("./agentApi", () => ({
 vi.mock("../../llm/llmApi", () => ({
   fetchLlmProviders: mocks.fetchLlmProviders,
   fetchLlmConfig: mocks.fetchLlmConfig,
+  detectLlmProviderModels: mocks.detectLlmProviderModels,
   updateLlmProvider: mocks.updateLlmProvider,
 }));
 vi.mock("../../lineage/LineageContext", () => ({

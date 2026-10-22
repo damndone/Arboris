@@ -78,8 +78,8 @@ class LLMConfig:
     supports_1m: bool = False
     supports_vision: bool = False
     data_location: DataLocation = "remote"
-    #: None: decided by the model id (DeepSeek V4); see ``takes_reasoning_effort``.
-    supports_reasoning_effort: bool | None = None
+    #: The efforts the model accepts; None: decided by the model id (DeepSeek V4).
+    reasoning_efforts: tuple[str, ...] | None = None
     reasoning_effort: str | None = None
 
     def is_configured(self) -> bool:
@@ -197,15 +197,14 @@ def _config_from_provider(provider: ProviderRecord, *, source: ConfigSource) -> 
         provider_name=provider.name,
         data_location=provider.data_location,
         source=source,
+        # The window the Agent works within: the model's, capped by the person's limit.
         context_window_tokens=(
-            model_record.context_window_tokens if model_record is not None else None
+            model_record.effective_window_tokens if model_record is not None else None
         ),
         supports_1m=model_record.supports_1m if model_record is not None else False,
         supports_vision=(
             model_record.supports_vision if model_record is not None else False
         ),
-        supports_reasoning_effort=(
-            model_record.supports_reasoning_effort if model_record is not None else None
-        ),
+        reasoning_efforts=model_record.reasoning_efforts if model_record is not None else None,
         reasoning_effort=model_record.reasoning_effort if model_record is not None else None,
     )

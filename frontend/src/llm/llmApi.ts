@@ -58,6 +58,11 @@ export function updateLlmProvider(
   });
 }
 
+/** Read the provider's model list and update what it reports about the configured models. */
+export function detectLlmProviderModels(providerId: string): Promise<LlmProvider> {
+  return readLlmResponse<LlmProvider>(providerPath(providerId, "/models/detect"), { method: "POST" });
+}
+
 export function activateLlmProvider(providerId: string): Promise<LlmProvider> {
   return readLlmResponse<LlmProvider>(providerPath(providerId, "/activate"), {
     method: "POST",

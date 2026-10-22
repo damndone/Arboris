@@ -1192,9 +1192,10 @@ def test_refresh_models_preserves_provider_updates_during_fetch(
             # v1.7 G2: vision capability is preserved across a model refresh
             # exactly like supports_1m (it is operator metadata, not upstream's).
             "supports_vision": False,
-            # v1.9.1: thinking chosen in the model menu, kept the same way.
-            "supports_reasoning_effort": False,
+            # v1.9.1: thinking and the context limit, kept the same way.
+            "reasoning_efforts": [],
             "reasoning_effort": None,
+            "context_limit_tokens": None,
         }
     ]
     assert "updated-secret" not in response.text

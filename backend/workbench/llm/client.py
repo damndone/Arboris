@@ -18,7 +18,7 @@ import httpx
 
 from ..egress import EgressPolicyError, guard_outgoing_messages
 from .config import LLMConfig
-from .provider_store import REASONING_EFFORTS, takes_reasoning_effort
+from .provider_store import REASONING_EFFORTS, default_efforts, takes_reasoning_effort
 
 # Test seam: monkeypatch to inject httpx.MockTransport-backed clients.
 _client_factory: Callable[[LLMConfig], httpx.Client] = lambda config: httpx.Client(
@@ -113,7 +113,35 @@ def _stream_timeout(config: LLMConfig) -> httpx.Timeout:
     return httpx.Timeout(config.timeout_s, read=min(config.timeout_s, STREAM_SILENCE_S))
 
 
-def fetch_models(config: LLMConfig) -> list[dict[str, str]]:
+def _positive_int(value: Any) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
+
+
+def reported_capabilities(raw_model: Mapping[str, Any]) -> dict[str, Any]:
+    """What a model list says about a model, when it says it (Magpie/WorkBuddy, OpenRouter-style
+    fields): its context window, the thinking efforts it accepts, and image input. A field the
+    provider does not report is left out, so nothing is guessed."""
+
+    found: dict[str, Any] = {}
+    window = next((_positive_int(raw_model.get(key)) for key in ("context_length", "context_window", "max_input_tokens")
+                   if _positive_int(raw_model.get(key))), None)
+    if window:
+        found["context_window_tokens"] = window
+    levels = raw_model.get("reasoning_levels")
+    if not isinstance(levels, list):
+        supported = raw_model.get("supported_reasoning_levels")
+        levels = [item.get("effort") for item in supported if isinstance(item, Mapping)] if isinstance(supported, list) else None
+    if isinstance(levels, list):
+        found["reasoning_efforts"] = [level for level in REASONING_EFFORTS if level in levels]
+    elif raw_model.get("reasoning") is False:
+        found["reasoning_efforts"] = []
+    modalities = raw_model.get("modalities")
+    if isinstance(modalities, Mapping) and isinstance(modalities.get("input"), list):
+        found["supports_vision"] = "image" in modalities["input"]
+    return found
+
+
+def fetch_models(config: LLMConfig) -> list[dict[str, Any]]:
     """GET {base_url}/models and return the provider's model summaries."""
     if not config.base_url.strip() or not config.api_key.strip():
         raise LLMNotConfiguredError("Provider base URL and API key are required to fetch models.")
@@ -146,7 +174,7 @@ def fetch_models(config: LLMConfig) -> list[dict[str, str]]:
         raw_models = payload["data"]
         if not isinstance(raw_models, list):
             raise TypeError
-        models: list[dict[str, str]] = []
+        models: list[dict[str, Any]] = []
         model_ids: set[str] = set()
         for raw_model in raw_models:
             if not isinstance(raw_model, dict):
@@ -160,7 +188,7 @@ def fetch_models(config: LLMConfig) -> list[dict[str, str]]:
             if not isinstance(owned_by, str):
                 raise TypeError
             model_ids.add(model_id)
-            models.append({"id": model_id, "owned_by": owned_by})
+            models.append({"id": model_id, "owned_by": owned_by, **reported_capabilities(raw_model)})
     except (ValueError, KeyError, TypeError) as exc:
         raise LLMUpstreamError(
             "LLM provider returned an unexpected models response shape"
@@ -397,8 +425,8 @@ def _chat_request_payload(
         for key in ("tool_choice", "thinking", "reasoning_effort", "max_tokens"):
             if key in model_config:
                 payload[key] = model_config[key]
-    supports = config.supports_reasoning_effort
-    if (is_deepseek_v4(config) if supports is None else supports) and "thinking" not in payload and "reasoning_effort" not in payload:
+    efforts = config.reasoning_efforts if config.reasoning_efforts is not None else default_efforts(config.model)
+    if efforts and "thinking" not in payload and "reasoning_effort" not in payload:
         # The effort is always stated: a gateway serving the same model
         # (Magpie/WorkBuddy) otherwise answers without thinking.
         effort = agent_reasoning_effort(config)
@@ -418,7 +446,11 @@ def agent_reasoning_effort(config: LLMConfig | None = None) -> str:
     """
 
     stored = config.reasoning_effort if config is not None else None
-    value = os.environ.get("WORKBENCH_REASONING_EFFORT", "").strip().lower() or stored or "high"
+    efforts = (config.reasoning_efforts if config is not None and config.reasoning_efforts is not None
+               else default_efforts(config.model) if config is not None else ())
+    # The documented V4 default, else the strongest effort the model lists.
+    default = "high" if not efforts or "high" in efforts else efforts[-1]
+    value = os.environ.get("WORKBENCH_REASONING_EFFORT", "").strip().lower() or stored or default
     if value not in REASONING_EFFORTS:
         raise LLMUpstreamError(f"WORKBENCH_REASONING_EFFORT must be one of {', '.join(REASONING_EFFORTS)}")
     return value

@@ -157,8 +157,9 @@ export function LlmProviderEditor({ provider, isCopy = false, onSaved, onBack }:
           context_window_tokens: null,
           supports_1m: false,
           supports_vision: false,
-          supports_reasoning_effort: false,
+          reasoning_efforts: [],
           reasoning_effort: null,
+          context_limit_tokens: null,
         },
       ];
     });

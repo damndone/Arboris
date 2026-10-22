@@ -1450,6 +1450,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/llm/providers/{provider_id}/models/detect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Detect Llm Provider Models
+         * @description Read the provider's model list and update what it reports about the models already
+         *     configured (context window, thinking efforts, image input). No model is added or removed;
+         *     a provider whose list reports nothing leaves its models as they are.
+         */
+        post: operations["detect_llm_provider_models_llm_providers__provider_id__models_detect_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/llm/providers/{provider_id}/models/refresh": {
         parameters: {
             query?: never;
@@ -9590,29 +9612,35 @@ export interface components {
         };
         /** ProviderModel */
         ProviderModel: {
+            /** Context Limit Tokens */
+            context_limit_tokens: number | null;
             /** Context Window Tokens */
             context_window_tokens: number | null;
             /** Display Name */
             display_name: string;
             /** Reasoning Effort */
-            reasoning_effort: ("none" | "low" | "high" | "max") | null;
+            reasoning_effort: ("none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max") | null;
+            /** Reasoning Efforts */
+            reasoning_efforts: ("none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max")[];
             /** Request Model */
             request_model: string;
             /** Supports 1M */
             supports_1m: boolean;
-            /** Supports Reasoning Effort */
-            supports_reasoning_effort: boolean;
             /** Supports Vision */
             supports_vision: boolean;
         };
         /** ProviderModelRequest */
         ProviderModelRequest: {
+            /** Context Limit Tokens */
+            context_limit_tokens?: number | null;
             /** Context Window Tokens */
             context_window_tokens?: number | null;
             /** Display Name */
             display_name: string;
             /** Reasoning Effort */
-            reasoning_effort?: ("none" | "low" | "high" | "max") | null;
+            reasoning_effort?: ("none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max") | null;
+            /** Reasoning Efforts */
+            reasoning_efforts?: ("none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max")[] | null;
             /** Request Model */
             request_model: string;
             /**
@@ -9620,8 +9648,6 @@ export interface components {
              * @default false
              */
             supports_1m?: boolean;
-            /** Supports Reasoning Effort */
-            supports_reasoning_effort?: boolean | null;
             /**
              * Supports Vision
              * @default false
@@ -13707,6 +13733,37 @@ export interface operations {
         };
     };
     activate_llm_provider_llm_providers__provider_id__activate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicProvider"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    detect_llm_provider_models_llm_providers__provider_id__models_detect_post: {
         parameters: {
             query?: never;
             header?: never;

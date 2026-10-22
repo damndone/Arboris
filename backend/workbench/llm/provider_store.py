@@ -44,18 +44,25 @@ class ProviderStoreInvalidError(ProviderStoreError):
     """The provider store exists but contains invalid JSON or schema."""
 
 
-#: Thinking efforts a model may take; ``none`` sends no thinking at all.
-ReasoningEffort = Literal["none", "low", "high", "max"]
-REASONING_EFFORTS: tuple[ReasoningEffort, ...] = ("none", "low", "high", "max")
+#: Thinking efforts a provider may name (DeepSeek maps minimal/medium/xhigh onto
+#: low/high/max); ``none`` sends no thinking at all.
+ReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+REASONING_EFFORTS: tuple[ReasoningEffort, ...] = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
+#: DeepSeek V4's documented efforts, with thinking off: the default for its ids.
+DEEPSEEK_V4_EFFORTS: tuple[ReasoningEffort, ...] = ("none", "low", "high", "max")
 
 
 def takes_reasoning_effort(request_model: str) -> bool:
     """DeepSeek V4 by its id, also behind a gateway that prefixes a vendor
     (Magpie/WorkBuddy: ``workbuddy-ai/deepseek-v4.1-flash``); the default when a
-    stored model does not declare it."""
+    stored model does not declare its efforts."""
 
     name = request_model.casefold().rsplit("/", 1)[-1]
     return name.startswith(("deepseek-v4", "deepseek-flash"))
+
+
+def default_efforts(request_model: str) -> tuple[ReasoningEffort, ...]:
+    return DEEPSEEK_V4_EFFORTS if takes_reasoning_effort(request_model) else ()
 
 
 @dataclass(frozen=True)
@@ -67,9 +74,24 @@ class ModelRecord:
     # v1.7 G2: whether this model accepts image content. Gates the opt-in that
     # sends a rendered chart to the provider; default False = text-only.
     supports_vision: bool = False
-    # v1.9.1: thinking chosen in the Agent's model menu; None = the model's default.
-    supports_reasoning_effort: bool = False
+    # v1.9.1: the efforts the model accepts (detected from the provider's model
+    # list, else by id), and the one chosen in the Agent's model menu
+    # (None = the model's default). An empty tuple: no thinking control.
+    reasoning_efforts: tuple[ReasoningEffort, ...] = ()
     reasoning_effort: ReasoningEffort | None = None
+    # The person's cap below the model's window: when the conversation is compacted.
+    context_limit_tokens: int | None = None
+
+    @property
+    def supports_reasoning_effort(self) -> bool:
+        return bool(self.reasoning_efforts)
+
+    @property
+    def effective_window_tokens(self) -> int | None:
+        window = self.context_window_tokens or (1_000_000 if self.supports_1m else None)
+        if self.context_limit_tokens is None:
+            return window
+        return min(window, self.context_limit_tokens) if window else self.context_limit_tokens
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -78,8 +100,9 @@ class ModelRecord:
             "context_window_tokens": self.context_window_tokens,
             "supports_1m": self.supports_1m,
             "supports_vision": self.supports_vision,
-            "supports_reasoning_effort": self.supports_reasoning_effort,
+            "reasoning_efforts": list(self.reasoning_efforts),
             "reasoning_effort": self.reasoning_effort,
+            "context_limit_tokens": self.context_limit_tokens,
         }
 
 
@@ -358,22 +381,30 @@ def model_from_dict(raw: Any) -> ModelRecord:
     if not isinstance(supports_vision, bool):
         raise ValueError("supports_vision must be a boolean")
     request_model = _required_nonblank_string(raw, "request_model")
-    supports_reasoning_effort = raw.get("supports_reasoning_effort")
-    if supports_reasoning_effort is None:
-        supports_reasoning_effort = takes_reasoning_effort(request_model)
-    if not isinstance(supports_reasoning_effort, bool):
-        raise ValueError("supports_reasoning_effort must be a boolean")
+    efforts = raw.get("reasoning_efforts")
+    if efforts is None:
+        # Before v1.9.1 records carried no efforts; a short-lived boolean said whether any.
+        efforts = default_efforts(request_model) if raw.get("supports_reasoning_effort", True) else ()
+    if not isinstance(efforts, (list, tuple)) or any(item not in REASONING_EFFORTS for item in efforts):
+        raise ValueError(f"reasoning_efforts must list values from {', '.join(REASONING_EFFORTS)}")
+    efforts = tuple(dict.fromkeys(efforts))
     reasoning_effort = raw.get("reasoning_effort")
-    if reasoning_effort is not None and reasoning_effort not in REASONING_EFFORTS:
-        raise ValueError(f"reasoning_effort must be one of {', '.join(REASONING_EFFORTS)} or null")
+    if reasoning_effort is not None and reasoning_effort not in efforts:
+        reasoning_effort = None  # a choice the model no longer offers falls back to its default
+    context_limit_tokens = raw.get("context_limit_tokens")
+    if context_limit_tokens is not None and (
+        isinstance(context_limit_tokens, bool) or not isinstance(context_limit_tokens, int) or context_limit_tokens <= 0
+    ):
+        raise ValueError("context_limit_tokens must be a positive integer or null")
     return ModelRecord(
         display_name=_required_nonblank_string(raw, "display_name"),
         request_model=request_model,
         context_window_tokens=context_window_tokens,
         supports_1m=supports_1m,
         supports_vision=supports_vision,
-        supports_reasoning_effort=supports_reasoning_effort,
+        reasoning_efforts=efforts,
         reasoning_effort=reasoning_effort,
+        context_limit_tokens=context_limit_tokens,
     )
 
 

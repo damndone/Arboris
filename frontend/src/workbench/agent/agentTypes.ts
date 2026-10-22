@@ -17,8 +17,8 @@ export type AgentOperationRecord = Schema<"OperationRecordView">;
 export type AgentSession = Schema<"AgentSession">;
 export type AgentChapter = Schema<"AgentChapter">;
 export type AgentModelOption = Schema<"ProviderModel">;
-/** What the model menu changes on a model: its thinking effort and context window. */
-export type AgentModelSettings = Partial<Pick<AgentModelOption, "reasoning_effort" | "context_window_tokens">>;
+/** What the model menu changes on a model: its thinking effort and the context limit. */
+export type AgentModelSettings = Partial<Pick<AgentModelOption, "reasoning_effort" | "context_limit_tokens">>;
 export type AgentCapability = Schema<"OperationCapability">;
 export type AgentCapabilityBoundaryItem = Schema<"BoundaryItem">;
 export type AgentCapabilityCatalog = Schema<"AgentCapabilities">;
