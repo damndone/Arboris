@@ -68,24 +68,32 @@ class LLMToolCallArgumentsError(LLMUpstreamError):
     """Provider completed a tool call whose arguments are not a JSON object."""
 
 
+def is_deepseek_v4(config: LLMConfig) -> bool:
+    """Whether the configured model is DeepSeek V4, by its id, also behind a gateway.
+
+    Gateways prefix a vendor (Magpie/WorkBuddy: ``workbuddy-ai/deepseek-v4.1-flash``)
+    and run on other hosts, so neither the provider name nor the host identifies it.
+    """
+
+    name = config.model.casefold().rsplit("/", 1)[-1]
+    return name.startswith(("deepseek-v4", "deepseek-flash"))
+
+
 def deepseek_v4_request_config(config: LLMConfig) -> dict[str, Any]:
     """Return bounded, provider-owned controls for DeepSeek V4 requests.
 
     DeepSeek V4 enables high-effort private reasoning by default. Workbench's
     typed Notebook planner and evidence-bound Report writer both need bounded
     public responses, so they share this adapter policy instead of each caller
-    guessing provider controls independently.
+    guessing provider controls independently. ``reasoning_effort: none`` says
+    the same as ``thinking: disabled`` for gateways that ignore the latter.
     """
 
-    provider = (config.provider_name or "").casefold()
-    host = (urlparse(config.base_url).hostname or "").casefold()
-    model = config.model.casefold()
-    is_deepseek = "deepseek" in provider or host == "api.deepseek.com"
     # "deepseek-flash" is the V4.1 Flash alias this Workbench is configured with;
     # matching only "deepseek-v4*" left planner, report writer and conversation
     # summaries in default high-effort thinking with a bounded output.
-    if is_deepseek and model.startswith(("deepseek-v4", "deepseek-flash")):
-        return {"thinking": {"type": "disabled"}, "max_tokens": 8192}
+    if is_deepseek_v4(config):
+        return {"thinking": {"type": "disabled"}, "reasoning_effort": "none", "max_tokens": 8192}
     return {}
 
 
@@ -383,9 +391,13 @@ def _chat_request_payload(
     if model_config:
         # Only server-owned, provider-neutral request controls cross this
         # boundary. The planner never forwards arbitrary model parameters.
-        for key in ("tool_choice", "thinking", "max_tokens"):
+        for key in ("tool_choice", "thinking", "reasoning_effort", "max_tokens"):
             if key in model_config:
                 payload[key] = model_config[key]
+    if is_deepseek_v4(config) and "thinking" not in payload and "reasoning_effort" not in payload:
+        # The documented V4 default, stated: a gateway serving the same model
+        # (Magpie/WorkBuddy) otherwise answers without thinking.
+        payload["reasoning_effort"] = "high"
     return payload
 
 

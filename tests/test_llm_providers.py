@@ -1835,8 +1835,26 @@ def test_deepseek_v4_adapter_does_not_advertise_named_tool_choice() -> None:
     assert adapter.supports_named_tool_choice() is False
     assert adapter.planning_request_config() == {
         "thinking": {"type": "disabled"},
+        "reasoning_effort": "none",
         "max_tokens": 8192,
     }
+
+
+def test_deepseek_v4_behind_a_gateway_is_recognised_and_thinks_by_default() -> None:
+    """Magpie/WorkBuddy serves V4 under a vendor-prefixed id and answers without thinking unless asked."""
+    from workbench.llm.client import _chat_request_payload, is_deepseek_v4
+
+    gateway = LLMConfig(base_url="http://127.0.0.1:3425/v1", api_key=API_KEY,
+                        model="workbuddy-ai/deepseek-v4.1-flash", provider_name="Magpie · WorkBuddy AI")
+    official = LLMConfig(base_url="https://api.deepseek.com", api_key=API_KEY, model="deepseek-flash", provider_name="DeepSeek")
+    other = LLMConfig(base_url="https://api.example.test", api_key=API_KEY, model="gpt-4.1")
+    assert is_deepseek_v4(gateway) and is_deepseek_v4(official) and not is_deepseek_v4(other)
+    messages = [{"role": "user", "content": "hi"}]
+    assert _chat_request_payload(messages, gateway, None)["reasoning_effort"] == "high"
+    assert _chat_request_payload(messages, official, None)["reasoning_effort"] == "high"
+    assert "reasoning_effort" not in _chat_request_payload(messages, other, None)
+    bounded = _chat_request_payload(messages, gateway, None, model_config=OpenAICompatibleModelAdapter(gateway).planning_request_config())
+    assert bounded["reasoning_effort"] == "none" and bounded["thinking"] == {"type": "disabled"}
 
 
 def test_probe_uses_models_endpoint_and_never_chat_completion(
