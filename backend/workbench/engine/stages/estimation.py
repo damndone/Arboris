@@ -510,7 +510,10 @@ def _fit_ols(ctx, env):
         from ...cleaning import normalize_column_name
 
         hac_time_order = normalize_column_name(str(options["time_order"]))
-    primary, fitted = _orch().run_ols(
+    # The fit and its result contract are one long pure call: stop waiting on cancel.
+    from ..interruptible import run_interruptible
+
+    primary, fitted = run_interruptible(env, lambda: _orch().run_ols(
         ctx.data.frame,
         y=ctx.artifacts["_normalized_y"],
         x=ctx.artifacts["_normalized_x"],
@@ -533,7 +536,7 @@ def _fit_ols(ctx, env):
         ),
         hac_time_order=hac_time_order,
         hac_lags=options.get("hac_lags") if requested_covariance == "hac" else None,
-    )
+    ))
     _apply_survey_design_variance(ctx, "ols", primary)
     if primary.get("nobs_subpopulation") is not None:
         # The fitted object describes every row, not the subpopulation; residual

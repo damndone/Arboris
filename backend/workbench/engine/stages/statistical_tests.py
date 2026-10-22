@@ -54,14 +54,17 @@ class StatisticalTestsStage:
         ):
             if extra not in stat_analysis_columns:
                 stat_analysis_columns.append(extra)
-        statistical_tests = run_statistical_tests(
+        # A long pure computation; its artifacts are written below, after it returns.
+        from ..interruptible import run_interruptible
+
+        statistical_tests = run_interruptible(env, lambda: run_statistical_tests(
             cleaned,
             analysis_columns=stat_analysis_columns,
             dataset_sha256=dataset_sha256,
             lineage_parent=str(ctx.data.artifact_id or "cleaned_dataset"),
             paired_columns=paired_columns,
             reference_means=reference_means,
-        )
+        ))
         write_statistical_test_artifacts(run_root, statistical_tests)
         statistical_test_summaries = summarize_statistical_tests(
             statistical_tests, y=normalized_y
