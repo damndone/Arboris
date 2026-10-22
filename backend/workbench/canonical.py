@@ -92,13 +92,16 @@ def _encode_json(value: Any) -> str:
     )
 
 
+_NUMBER_TYPES = frozenset({int, float})
+
+
 def _plain_string_list(value: list | tuple) -> bool:
     """Strings JSON writes as themselves in quotes: printable ASCII, no quote or backslash.
 
     A 1,000,000-row OLS fingerprint names every analysis row by a decimal id;
     each went through NFC normalization and json.dumps one by one.
     """
-    if not value or not all(type(item) is str for item in value):
+    if not value or set(map(type, value)) != {str}:
         return False
     joined = "".join(value)
     return joined.isascii() and joined.isprintable() and '"' not in joined and "\\" not in joined
@@ -106,7 +109,7 @@ def _plain_string_list(value: list | tuple) -> bool:
 
 def _numeric_list(value: list | tuple) -> bool:
     """Only ints and floats (bool is an int subclass and is excluded)."""
-    return all(type(item) is float or type(item) is int for item in value)
+    return set(map(type, value)) <= _NUMBER_TYPES
 
 
 def _encode_numbers(values: list | tuple) -> list[str]:
