@@ -119,9 +119,10 @@ class _RecordingTransport(httpx.AsyncBaseTransport):
                 self.budget.release(reservation)
                 raise
             tolerate = getattr(self.budget, "tolerate_transport_interruption", None)
-            if tolerate is not None and not isinstance(exc, (asyncio.CancelledError, KeyboardInterrupt)) and tolerate(type(exc).__name__):
-                # Free route: nothing is billed, so an interrupted call is the product's
-                # to retry; the guard stops the round only after repeated interruptions.
+            if tolerate is not None and not isinstance(exc, KeyboardInterrupt) and tolerate(type(exc).__name__):
+                # Free route: nothing is billed, so an interrupted call is the product's to
+                # handle (including its own no-progress cancel, a CancelledError after the
+                # idle bound); the guard stops the round only after repeated interruptions.
                 raise
             if self.budget is not None:
                 self.budget.stop("transport interrupted; preserve reservation until billing is reconciled")
