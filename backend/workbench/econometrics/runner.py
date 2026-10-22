@@ -202,11 +202,39 @@ def _python_scalar(value: Any) -> Any:
     return str(value)
 
 
+_PLAIN_KINDS = frozenset("biuf")  # bool, signed/unsigned int, float numpy dtypes
+
+
+def _python_values(values: Any) -> list[Any]:
+    """``[_python_scalar(v) for v in values]`` for a column, in one pass where possible.
+
+    For a plain numpy bool/int/float column, ``tolist()`` gives the same
+    Python scalars as ``.item()`` on each value, and a missing float is NaN,
+    which ``_python_scalar`` maps to None. Other columns (dates, objects,
+    nullable extension types) keep the per-value path. Converting six
+    million values one by one was about 2 s of a 1,000,000-row OLS.
+    """
+    dtype = getattr(values, "dtype", None)
+    if isinstance(dtype, np.dtype) and dtype.kind in _PLAIN_KINDS:
+        array = np.asarray(values)
+        out = array.tolist()
+        if dtype.kind == "f":
+            missing = np.flatnonzero(np.isnan(array))
+            for position in missing.tolist():
+                out[position] = None
+        return out
+    return [_python_scalar(value) for value in values]
+
+
 def _row_id_values(
     frame: pd.DataFrame,
     row_ids: list[str] | tuple[str, ...] | None,
 ) -> list[str]:
     def collision_safe(values: list[Any]) -> list[str]:
+        if set(map(type, values)) <= {str} and len(set(values)) == len(values):
+            # Distinct strings convert and render to themselves; the typed
+            # rendering below is needed only when renderings collide.
+            return list(values)
         original_types = [
             f"{type(value).__module__}.{type(value).__qualname__}"
             for value in values
@@ -223,6 +251,11 @@ def _row_id_values(
 
     if row_ids is None:
         if frame.index.is_unique:
+            index = frame.index
+            if isinstance(index.dtype, np.dtype) and index.dtype.kind in "iu":
+                # Distinct integers render to distinct decimal strings, so the
+                # collision check always takes the plain branch.
+                return [str(value) for value in index.tolist()]
             return collision_safe(list(frame.index))
         return [f"position:{position}" for position in range(len(frame))]
     if len(row_ids) != len(frame):
@@ -300,17 +333,24 @@ def _validate_cluster_group_values(groups: pd.Series) -> None:
         )
 
 
-def _analysis_row_context(
-    frame: pd.DataFrame,
-    row_labels: Any,
-    *,
-    model_index: Any = None,
-    row_ids: list[str] | tuple[str, ...] | None,
-    cluster_row_ids: list[str] | tuple[str, ...] | None,
-) -> tuple[list[int], list[str]]:
-    reference_index = list(model_index if model_index is not None else frame.index)
-    labels = list(row_labels) if row_labels is not None else reference_index
-    source_ids = _row_id_values(frame, row_ids)
+def _aligned_positions(reference_index: list[Any], labels: list[Any]) -> list[int]:
+    """Each label's position in the reference, taking a repeated label's occurrences in order.
+
+    Equal sequences map to 0..n-1 (that is what taking each label's next
+    occurrence gives); unique labels on a unique reference use one vectorized
+    lookup. Anything else keeps the per-label path, which also raises for a
+    missing label or one used more often than it occurs.
+    """
+    if labels is reference_index or labels == reference_index:
+        return list(range(len(reference_index)))
+    reference = pd.Index(reference_index)
+    if reference.is_unique and not reference.hasnans and pd.Index(labels).is_unique:
+        found = reference.get_indexer(labels)
+        if (found < 0).any():
+            raise ValueError(
+                "OLS_CLUSTER_ROW_ALIGNMENT: model rows are not aligned to the input frame."
+            )
+        return found.tolist()
     positions_by_label: dict[Any, list[int]] = {}
     for position, label in enumerate(reference_index):
         positions_by_label.setdefault(label, []).append(position)
@@ -322,6 +362,21 @@ def _analysis_row_context(
                 "OLS_CLUSTER_ROW_ALIGNMENT: model rows are not aligned to the input frame."
             )
         selected_positions.append(positions.pop(0))
+    return selected_positions
+
+
+def _analysis_row_context(
+    frame: pd.DataFrame,
+    row_labels: Any,
+    *,
+    model_index: Any = None,
+    row_ids: list[str] | tuple[str, ...] | None,
+    cluster_row_ids: list[str] | tuple[str, ...] | None,
+) -> tuple[list[int], list[str]]:
+    reference_index = list(model_index if model_index is not None else frame.index)
+    labels = list(row_labels) if row_labels is not None else reference_index
+    source_ids = _row_id_values(frame, row_ids)
+    selected_positions = _aligned_positions(reference_index, labels)
     analysis_ids = [source_ids[position] for position in selected_positions]
     if cluster_row_ids is not None:
         observed_cluster_ids = [str(value) for value in cluster_row_ids]
@@ -436,9 +491,9 @@ def _attach_ols_result_contract(
     )
     selected = frame.iloc[row_positions][[y, *x]]
     point_fp = point_estimation_fingerprint(
-        y=[_python_scalar(value) for value in selected[y]],
+        y=_python_values(selected[y]),
         X={
-            column: [_python_scalar(value) for value in selected[column]]
+            column: _python_values(selected[column])
             for column in x
         },
         weights=weights,
