@@ -231,6 +231,17 @@ def _leverage(rng: np.random.Generator) -> pd.DataFrame:
     return pd.DataFrame({"city": [f"city_{i}" for i in range(n)], "density": np.round(x, 3), "rent": np.round(y, 3)})
 
 
+def _leverage_clean_slope(frame: pd.DataFrame) -> float:
+    """The slope the generator's own rows support: OLS without the three contaminated cities.
+
+    The population slope is 1.0, but this task's fixed draw gives 1.276 on its 77
+    clean rows (both conventional and HC1 intervals exclude 1.0), so no correct
+    analysis could recover 1.0 within the tolerance (grader v2, GAP 2026-10-22).
+    """
+    clean = frame.iloc[3:]
+    return float(np.polyfit(clean["density"].astype(float), clean["rent"].astype(float), 1)[0])
+
+
 def _survival(rng: np.random.Generator) -> pd.DataFrame:
     n = 600
     drug = rng.binomial(1, 0.5, n)
@@ -341,7 +352,8 @@ SCENARIOS: dict[str, Scenario] = {s.id: s for s in [
              0.7, 0.08, _missing_mar),
     Scenario("leverage", "Rent and density with high-leverage cities", "rent", "density",
              ("ols",), ("diagnostics.influence",), ("reporting the full-sample slope without influence checks",),
-             1.0, 0.25, _leverage, notes="Three high-leverage points flatten the slope."),
+             1.0, 0.25, _leverage, notes="Three high-leverage points flatten the slope.",
+             extra={"sample_truth": _leverage_clean_slope}),
     Scenario("survival", "Drug and time to relapse", "months", "drug",
              ("survival_cox",), ("survival.kaplan_meier", "survival.log_rank"), ("OLS on duration",),
              float(np.log(0.6)), 0.15, _survival, notes="Truth is the log hazard ratio (HR 0.6)."),

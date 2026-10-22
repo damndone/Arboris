@@ -220,8 +220,30 @@ def _candidate_rows(model: dict[str, Any], scenario) -> list[tuple[float, Any, A
     return [(float(row["estimate"]), row.get("ci_lower"), row.get("ci_upper"))] if row and row.get("estimate") is not None else []
 
 
-def estimate_check(models: list[dict[str, Any]], scenario, project: Path | None = None) -> dict[str, Any]:
+#: v1 = the grader frozen at eval-v1.9.1-frozen (17c382e4); v2 adds sample truths for
+#: scenarios whose fixed draw departs from the population value (GAP 2026-10-22).
+GRADER_VERSIONS = ("v1", "v2")
+GRADER_VERSION = "v2"
+
+
+def scenario_truth(scenario, directory: Path | None, grader: str = GRADER_VERSION) -> tuple[float | None, str]:
+    """The value an estimate is scored against, and where it comes from."""
+    sample = scenario.extra.get("sample_truth")
+    if grader == "v1" or sample is None or directory is None:
+        return scenario.truth, "population"
+    frames = sorted(p for p in directory.glob("*.csv"))
+    if not frames:
+        return scenario.truth, "population"
+    import pandas as pd
+    return float(sample(pd.read_csv(frames[0]))), "sample_oracle"
+
+
+def estimate_check(models: list[dict[str, Any]], scenario, project: Path | None = None, *,
+                   truth: float | None = None) -> dict[str, Any]:
     extra = scenario.extra
+    if truth is not None:
+        from dataclasses import replace
+        scenario = replace(scenario, truth=truth)
     scored_by_rule = any(k in extra for k in ("terms_by_family", "term_contains", "linear_combination", "garch_persistence"))
     if scenario.truth is None or extra.get("score_estimate") is False or not (scenario.main_term or scored_by_rule):
         return {"applicable": False}
@@ -316,7 +338,9 @@ def usage_from_tape(path: Path) -> dict[str, Any]:
             "median_request_bytes": statistics.median(request_bytes) if request_bytes else None}
 
 
-def grade_task(directory: Path) -> dict[str, Any] | None:
+def grade_task(directory: Path, *, grader: str = GRADER_VERSION) -> dict[str, Any] | None:
+    if grader not in GRADER_VERSIONS:
+        raise ValueError(f"grader must be one of {GRADER_VERSIONS}")
     record = _read_json(directory / "record.json")
     if not record:
         return None
@@ -351,6 +375,7 @@ def grade_task(directory: Path) -> dict[str, Any] | None:
             except ValueError:
                 pass
     agent_models = [m for m in models if not m["seed"]]
+    truth, truth_source = scenario_truth(scenario, directory, grader)
     out.update({
         "completed_marker": conversation["completed_marker"],
         "stop_reason": conversation["stop_reason"],
@@ -368,7 +393,8 @@ def grade_task(directory: Path) -> dict[str, Any] | None:
                                     or bool(_artifact_families(project) & set(scenario.appropriate_families)))
                                    if scenario.appropriate_families else None,
         "artifact_operations": artifact_operations(project),
-        "estimate": estimate_check(models, scenario, project),
+        "estimate": {**estimate_check(models, scenario, project, truth=truth), "truth_source": truth_source},
+        "grader": grader,
         "checks_expected": list(expected),
         "checks_covered": covered,
         "check_coverage": round(len(covered) / len(expected), 3) if expected else None,
@@ -497,10 +523,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("round_dir", type=Path)
     parser.add_argument("--judge", action="store_true", help="also run the model judge (paid calls)")
+    parser.add_argument("--grader", choices=GRADER_VERSIONS, default=GRADER_VERSION,
+                        help="v1 = frozen at eval-v1.9.1-frozen (writes grades.json); v2 writes grades-v2.json")
     args = parser.parse_args()
     rows = []
     for directory in sorted((args.round_dir / "tasks").iterdir()):
-        graded = grade_task(directory)
+        graded = grade_task(directory, grader=args.grader)
         if graded is None:
             continue
         if args.judge and graded.get("status") == "ran":
@@ -514,8 +542,9 @@ def main() -> int:
             graded["judge"] = cached if "error" not in cached else None
         rows.append(graded)
     summary = summarize(rows)
-    (args.round_dir / "grades.json").write_text(json.dumps({"summary": summary, "tasks": rows}, ensure_ascii=False, indent=1),
-                                                encoding="utf-8")
+    name = "grades.json" if args.grader == "v1" else f"grades-{args.grader}.json"
+    (args.round_dir / name).write_text(json.dumps({"summary": {**summary, "grader": args.grader}, "tasks": rows},
+                                                  ensure_ascii=False, indent=1), encoding="utf-8")
     print(json.dumps(summary, ensure_ascii=False, indent=1))
     return 0
 
