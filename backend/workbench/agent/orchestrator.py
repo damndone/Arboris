@@ -675,7 +675,7 @@ class WorkbenchOrchestrator(OrchestrationWorkflows, OrchestrationProposals, Orch
         project_root = getattr(self.context_provider, "project_root", self.repository.root.parent)
         evidence, bound = derive_evidence(project_root, plan.completion if plan else None,
                                           plan.completion_evidence if plan else None)
-        result = evaluate(project_root, plan.completion if plan else None, evidence, suggest=suggest)
+        result = evaluate(project_root, plan.completion if plan else None, evidence, suggest=suggest, options=True)
         result['bound_by_workbench'] = bound['bound_by_workbench']
         if bound['dropped']:
             # Named back to the Agent: a reference that does not resolve to the right kind
@@ -693,6 +693,10 @@ class WorkbenchOrchestrator(OrchestrationWorkflows, OrchestrationProposals, Orch
                                    'specification and question, never by significance, and call update_plan with '
                                    'completion_evidence {"models": [its run_id and artifact_id]}; the Workbench binds '
                                    'its diagnostics, the other fits and the report.')
+        elif result.get('sensitivity_options') and result['status'] == 'partial':
+            # off3 leverage.goal composed its report three times before the sensitivity fit it lacked.
+            from .completion_sensitivity import SENSITIVITY_NEXT_STEP
+            result['next_step'] = SENSITIVITY_NEXT_STEP
         elif 'compose_report' in bound and result['status'] == 'partial':
             result['compose_report'] = bound['compose_report']
             result['next_step'] = ('No report covers the bound results yet. Propose compose_report exactly as given '

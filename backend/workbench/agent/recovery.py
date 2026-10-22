@@ -77,6 +77,8 @@ def _next_step(result):
         lines.append('Next step: ' + str(result['next_step']))
     if result.get('compose_report'):
         lines.append('compose_report: ' + json.dumps(result['compose_report'], ensure_ascii=False))
+    if result.get('sensitivity_options'):
+        lines.append('sensitivity_options: ' + json.dumps(result['sensitivity_options'], ensure_ascii=False))
     if result.get('primary_candidates'):
         lines.append('primary_candidates: ' + json.dumps(result['primary_candidates'], ensure_ascii=False))
     return ('\n' + '\n'.join(lines)) if lines else ''

@@ -12,6 +12,7 @@ from typing import Any
 
 from ..canonical import sha256_canonical
 from .context_compiler import read_completion_artifact, read_completion_dataset_source, read_arima_completion_product, read_garch_completion_product, completion_candidate_refs
+from .completion_sensitivity import MAX_OPTIONS, SENSITIVITY_NEXT_STEP, influence_option, specification_options
 from .completion_profiles import NATIVE_COMPANIONS, companion_model, native_diagnostics, native_findings, verified_iv_ar, with_iv_ar
 
 VERSION = 'analysis-completion/v1'
@@ -218,7 +219,7 @@ def source_receipt(project_root, ref):
     return {'run_id': ref['run_id'], 'artifact_id': ref['artifact_id'], 'sha256': value.sha256}
 
 
-def evaluate(project_root, contract, evidence, *, suggest=False):
+def evaluate(project_root, contract, evidence, *, suggest=False, options=False):
     """Recheck actual products on every final answer, including after restart.
 
     Missing or unsupported evidence stays partial. There is no model-call path,
@@ -239,6 +240,7 @@ def evaluate(project_root, contract, evidence, *, suggest=False):
     groups = {key: [(ref, products.load(ref)) for ref in evidence.get(key, [])]
               for key in ('models', 'diagnostics', 'sensitivity')}
     repairs = []
+    sensitivity_options = []
 
     def bound(ref):
         return source is not None and any(a.sha256 == source.sha256 for a in products.ancestors(ref))
@@ -278,10 +280,20 @@ def evaluate(project_root, contract, evidence, *, suggest=False):
         comparisons = [alternate for alternate in alternates if main and _different_estimation(main, alternate)]
         if not comparisons:
             missing.append(f'{family}:sensitivity:distinct_point_estimation')
-        if family == 'ols' and any((v.get('cooks_distance') or {}).get('n_high', 0) > 0 for v in diagnostic_values):
+        influential = [v['cooks_distance'] for v in diagnostic_values if (v.get('cooks_distance') or {}).get('n_high', 0) > 0]
+        influence_missing = False
+        if family == 'ols' and influential:
             sample = main.get('analysis_sample_fingerprint')
             if not sample or not any(a.get('analysis_sample_fingerprint') and a['analysis_sample_fingerprint'] != sample for a in comparisons):
                 missing.append('ols:sensitivity:influence_sample_comparison')
+                influence_missing = True
+        if (suggest or options) and main_ref and (influence_missing or not comparisons):
+            offered = [influence_option(project_root, main_ref, main, influential[0].get('threshold'))] if influence_missing else []
+            if not comparisons:
+                offered += specification_options(project_root, main_ref, main)
+            sensitivity_options.extend(option for option in offered if option)
+            if suggest:
+                repairs.append({'family': family, 'reason': 'no_distinct_sensitivity_fit', 'action': SENSITIVITY_NEXT_STEP})
     report_ref = evidence.get('report')
     report = products.load(report_ref)
     json_report = report is not None and report.payload and report.payload.get('sections')
@@ -304,6 +316,8 @@ def evaluate(project_root, contract, evidence, *, suggest=False):
     if suggest:
         result['evidence_catalog'] = catalog
         result['repair_steps'] = repairs
+    if sensitivity_options:
+        result['sensitivity_options'] = sensitivity_options[:MAX_OPTIONS]
     return result
 
 
@@ -505,8 +519,14 @@ def publication(content: str, result: dict, language: str, *, final=True, reques
             or (not claim and (not final or result['missing'] == ['completion_contract:select_playbooks_and_source']))):
         return content
     notice = partial_notice(result, language)
-    # Preserve useful interim findings, but never republish a rejected claim.
-    return notice if claim else notice + '\n\n' + content
+    # Preserve useful interim findings, but never republish a rejected claim; an
+    # earlier notice the answer repeats is replaced, not stacked (off3 round).
+    content = _PARTIAL_NOTICE.sub('', content).strip()
+    return notice if claim or not content else notice + '\n\n' + content
+
+
+_PARTIAL_NOTICE = re.compile(r'(?:部分完成：以下必需证据尚未核验。|Partially complete: required evidence remains unverified\.)'
+                             r'[ \t]*(?:\n[ \t]*- [^\n]*)*\n*')
 
 
 def partial_notice(result, language):
@@ -556,6 +576,12 @@ def derive_evidence(project_root, contract, evidence):
     def plain(ref):
         return {'run_id': ref['run_id'], 'artifact_id': ref['artifact_id']}
 
+    def fitted_on_source(ref):
+        artifact = products.load(ref)
+        return artifact is not None and any(
+            (data := products.load({'run_id': ref['run_id'], 'artifact_id': item})) is not None
+            and data.artifact_type in _DATA_TYPES and data.sha256 == source.sha256 for item in artifact.inputs)
+
     runs = sorted((path.name for path in products.runs.iterdir()
                    if path.is_dir() and not path.name.startswith(('_', '.'))), reverse=True)[:DERIVE_RUN_LIMIT]
     models, diagnostics, reports, post_estimation = [], [], [], []
@@ -595,8 +621,11 @@ def derive_evidence(project_root, contract, evidence):
         distinct = {}
         for ref, model in family_models:
             distinct.setdefault(model.get('point_estimation_fingerprint') or (ref['run_id'], ref['artifact_id']), (ref, model))
-        if len(distinct) == 1:
-            primaries.append(plain(next(iter(distinct.values()))[0]))
+        # A fit on data derived from the source (a refit without influential rows) is a
+        # variant of the fit on the source itself, not a rival primary (offline replay of off3 leverage).
+        on_source = [entry for entry in distinct.values() if fitted_on_source(entry[0])]
+        if len(distinct) == 1 or len(on_source) == 1:
+            primaries.append(plain((on_source if len(distinct) > 1 else list(distinct.values()))[0][0]))
             notes['bound_by_workbench'].append(f'{family}:primary')
         elif distinct:
             notes['primary_candidates'][family] = [

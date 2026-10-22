@@ -206,20 +206,14 @@ def _workflow_dataset_node(project_root: Path, run_id: str, node_ref: str) -> st
     """
 
     from ...graph_model import NodeKind
-    from ...graph_store import GraphStore
+    from ...lineage.model_inputs import input_datasets
     from ..tools import tool_note
 
-    try:
-        graph = GraphStore(Path(project_root) / "runs").read(run_id)
-    except (FileNotFoundError, KeyError, OSError, TypeError, ValueError):
+    lineage = input_datasets(project_root, run_id, node_ref)
+    if lineage is None or lineage[0] == NodeKind.DATASET_STAGE:
         return node_ref
-    node = graph.nodes.get(node_ref)
-    if node is None or node.kind == NodeKind.DATASET_STAGE:
-        return node_ref
-    datasets = sorted(key for key, item in graph.nodes.items() if item.kind == NodeKind.DATASET_STAGE)
-    inputs = sorted({edge.source_id for edge in graph.edges.values() if edge.target_id == node_ref
-                     and getattr(graph.nodes.get(edge.source_id), "kind", None) == NodeKind.DATASET_STAGE})
-    if node.kind == NodeKind.MODEL and len(inputs) == 1:
+    kind, inputs, datasets = lineage
+    if kind == NodeKind.MODEL and len(inputs) == 1:
         tool_note(f"operation.multi_step runs on a dataset node: target.node_ref {node_ref} was bound to "
                   f"{inputs[0]}, the dataset {node_ref} was fitted on.")
         return inputs[0]
