@@ -1,0 +1,201 @@
+"""Context size, compaction, terminal errors, timeouts and the abort event."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+from typing import Any
+from uuid import uuid4
+
+from ..compaction import (
+    compact as compact_session,
+    estimate_messages_tokens,
+    estimate_text_tokens,
+)
+from ..turn_messages import budget_exhausted_message, detect_language, provider_failure_message
+
+
+class LifecycleMixin:
+    """Part of AgentCore; see agent/core.py."""
+
+    def context_tokens(self, messages: list[dict[str, Any]]) -> int:
+        """Estimated size of a request: its messages and the tool descriptions."""
+
+        tools = estimate_text_tokens(json.dumps(self.tools, ensure_ascii=False)) if self.tools else 0
+        return estimate_messages_tokens(messages) + tools
+
+    async def compact(
+        self,
+        trigger: str,
+        *,
+        tokens_before: int,
+        command_id: str | None = None,
+        focus: str | None = None,
+    ) -> Any:
+        """Summarize the older conversation; on failure the turn goes on uncompacted."""
+
+        if self.compaction_policy is None:
+            return None
+        self.events.emit(
+            self.session_id,
+            "compaction_start",
+            {"trigger": trigger, "tokens_before": tokens_before, **self.compaction_policy.to_dict()},
+            command_id=command_id,
+        )
+        try:
+            entry = await compact_session(
+                self.repository,
+                self.session_id,
+                self.adapter,
+                self.compaction_policy,
+                trigger=trigger,
+                tokens_before=tokens_before,
+                focus=focus,
+                model=self.model_name,
+            )
+        except Exception as exc:  # A failed summary must not lose the turn.
+            self.events.emit(
+                self.session_id,
+                "compaction_end",
+                {"trigger": trigger, "compacted": False, "error": str(exc) or type(exc).__name__},
+                command_id=command_id,
+            )
+            return None
+        tokens_after = self.context_tokens(self.context_builder.build(self.session_id).messages) if entry else tokens_before
+        self.events.emit(
+            self.session_id,
+            "compaction_end",
+            {
+                "trigger": trigger,
+                "compacted": entry is not None,
+                "entry_id": entry.entry_id if entry else None,
+                "tokens_before": tokens_before,
+                "tokens_after": tokens_after,
+                "verified": entry.payload.get("verified") if entry else None,
+            },
+            command_id=command_id,
+        )
+        return entry
+
+    def _persist_terminal_error(self, error: str) -> str:
+        """Persist a budget stop as a complete, replayable assistant turn."""
+
+        if error in {"max_steps_exceeded", "repeated_tool_call_limit", "analysis_recovery_limit"}:
+            self._final_status = "blocked"
+        elif error == "agent_aborted":
+            self._final_status = "cancelled"
+        else:
+            self._final_status = "failed"
+        command_id = self._active_command_id or uuid4().hex
+        if not self._active_turn_started:
+            self.events.emit(
+                self.session_id,
+                "agent_start",
+                {"phase": "turn", "command_id": command_id},
+                command_id=command_id,
+            )
+            self.events.emit(
+                self.session_id,
+                "turn_start",
+                {"append_user": False},
+                command_id=command_id,
+            )
+            self._active_turn_started = True
+
+        request_id = self._active_request_id or uuid4().hex
+        if not self._active_message_started:
+            self.events.emit(
+                self.session_id,
+                "message_start",
+                {"role": "assistant", "request_id": request_id},
+                command_id=command_id,
+            )
+            self._active_message_started = True
+
+        # Budget stops and timeouts owe the user a visible explanation.
+        content = (
+            budget_exhausted_message(
+                detect_language(getattr(self, "_user_text", None)),
+                error,
+                getattr(self, "_tools_used", []),
+                getattr(self, "_last_tool_failure", None),
+            )
+            if error in {"max_steps_exceeded", "repeated_tool_call_limit", "analysis_recovery_limit"}
+            else provider_failure_message(detect_language(getattr(self, "_user_text", None)), error)
+            if error == "agent_timeout"
+            else ""
+        )
+        writer = self.repository.append_once if self.turn_journal else self.repository.append
+        entry = writer(
+            self.session_id,
+            "message",
+            {
+                "role": "assistant",
+                "content": content,
+                "stop_reason": "error",
+                "error": error,
+                **({"command_id": command_id} if self.turn_journal else {}),
+            },
+            **({"key": command_id, "stage": "terminal_error"} if self.turn_journal else {}),
+        )
+        if error in {"agent_timeout", "agent_aborted"}:
+            self.events.emit(
+                self.session_id,
+                "aborted",
+                {"request_id": request_id, "error": error},
+                command_id=command_id,
+            )
+        self.events.emit(
+            self.session_id,
+            "error",
+            {"request_id": request_id, "error": error},
+            command_id=command_id,
+        )
+        self.events.emit(
+            self.session_id,
+            "message_end",
+            {
+                "entry_id": entry.entry_id,
+                "content": content,
+                "stop_reason": "error",
+                "error": error,
+            },
+            command_id=command_id,
+        )
+        self.events.emit(
+            self.session_id,
+            "turn_end",
+            {"stop_reason": "error", "error": error},
+            command_id=command_id,
+        )
+        self.events.emit(
+            self.session_id,
+            "save_point",
+            {
+                "entry_id": entry.entry_id,
+                "context_fingerprint": self._active_context_fingerprint,
+            },
+            command_id=command_id,
+        )
+        self.events.emit(
+            self.session_id,
+            "agent_end",
+            {"stop_reason": "error", "error": error},
+            command_id=command_id,
+        )
+        self._active_request_id = None
+        self._active_message_started = False
+        self._active_turn_started = False
+        return content
+
+    def _mark_timeout(self) -> None:
+        self._timeout_requested = True
+        self._abort_requested = True
+        if self._abort_event is not None:
+            self._abort_event.set()
+        if self._active_tool_task is not None and not self._active_tool_task.done():
+            self._active_tool_task.cancel()
+
+    def _new_abort_event(self) -> asyncio.Event:
+        self._abort_event = asyncio.Event()
+        return self._abort_event

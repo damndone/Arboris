@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import statsmodels
+
 from ..canonical import sha256_canonical
 from ..analysis_loop.fingerprints import (
     analysis_sample_fingerprint,
