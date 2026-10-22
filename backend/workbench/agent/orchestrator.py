@@ -458,7 +458,19 @@ class WorkbenchOrchestrator(OrchestrationWorkflows, OrchestrationProposals, Orch
             failpoint=self.failpoint,
             risk_authorization_store=self.risk_authorization_store,
         )
-        terminal = await lifecycle.execute(record_id)
+        from ..data_operations import DataColumnCastValidationError
+
+        try:
+            terminal = await lifecycle.execute(record_id)
+        except DataColumnCastValidationError as exc:
+            # The confirmed source does not resolve: the operation failed, and
+            # the Agent is told so, instead of a server error and a pending record.
+            current = self.operation_store.get(record_id)
+            if current.status != "pending":
+                raise
+            terminal = self._fail_operation(current, error={
+                "type": "DataColumnCastValidationError", "phase": "validate",
+                "code": "WORKFLOW_SOURCE_INVALID", "message": str(exc)})
         if terminal.status in {"completed", "failed"}:
             _record_operation_in_ledger(project_root, terminal)
         return terminal

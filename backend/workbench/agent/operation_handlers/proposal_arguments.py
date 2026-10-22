@@ -163,9 +163,10 @@ def _canonicalize_workflow_arguments(
 
     target = dict(arguments.get("target") or {})
     # Node identity the backend binds; a copied value is dropped, never trusted.
-    for field in ("node_hash", "forest_node_key"):
-        target.pop(field, None)
-    arguments = {**arguments, "target": target}
+    if {"node_hash", "forest_node_key"} & set(target):
+        for field in ("node_hash", "forest_node_key"):
+            target.pop(field, None)
+        arguments = {**arguments, "target": target}
     if project_root is None:
         return arguments
     run_id = str(target.get("run_id") or "")
@@ -177,6 +178,9 @@ def _canonicalize_workflow_arguments(
         resolve_data_column_cast_context,
     )
 
+    if (bound := _workflow_dataset_node(project_root, run_id, node_ref)) != node_ref:
+        node_ref = target["node_ref"] = bound
+        arguments = {**arguments, "target": target}
     try:
         context = resolve_data_column_cast_context(
             project_root,
@@ -189,6 +193,40 @@ def _canonicalize_workflow_arguments(
         return arguments
     target["artifact_id"] = str(context["source_artifact_id"])
     return {**arguments, "target": target}
+
+
+def _workflow_dataset_node(project_root: Path, run_id: str, node_ref: str) -> str:
+    """The dataset node a workflow runs on, when the Agent named the model it inspected.
+
+    A workflow reads a dataset stage. Agents target the node they were looking
+    at, often ``model:ols_1``; that proposal used to be admitted and then fail
+    at confirmation (free-route round, 2026-10-22: six confirmations, none
+    ran). The model's one input dataset is a lineage fact, so it is bound with
+    a note; any other non-dataset node is refused here, naming the choices.
+    """
+
+    from ...graph_model import NodeKind
+    from ...graph_store import GraphStore
+    from ..tools import tool_note
+
+    try:
+        graph = GraphStore(Path(project_root) / "runs").read(run_id)
+    except (FileNotFoundError, KeyError, OSError, TypeError, ValueError):
+        return node_ref
+    node = graph.nodes.get(node_ref)
+    if node is None or node.kind == NodeKind.DATASET_STAGE:
+        return node_ref
+    datasets = sorted(key for key, item in graph.nodes.items() if item.kind == NodeKind.DATASET_STAGE)
+    inputs = sorted({edge.source_id for edge in graph.edges.values() if edge.target_id == node_ref
+                     and getattr(graph.nodes.get(edge.source_id), "kind", None) == NodeKind.DATASET_STAGE})
+    if node.kind == NodeKind.MODEL and len(inputs) == 1:
+        tool_note(f"operation.multi_step runs on a dataset node: target.node_ref {node_ref} was bound to "
+                  f"{inputs[0]}, the dataset {node_ref} was fitted on.")
+        return inputs[0]
+    raise ToolVisibleError(
+        f"WORKFLOW_SOURCE_NOT_DATASET: operation.multi_step target.node_ref must be a dataset node of run "
+        f"{run_id}, not {node_ref}. Dataset nodes in this run: {', '.join(datasets) or 'none'}."
+    )
 
 
 def _clustered_analysis_loop_intent(arguments: dict[str, Any]) -> str | None:
