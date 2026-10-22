@@ -36,7 +36,7 @@ from agent_eval.runner import Policy, run_conversation  # noqa: E402
 from agent_eval.external import ExternalTask, blade_tasks, qrdata_subset, replication_tasks, seed_model_for  # noqa: E402
 from agent_eval.heldout import heldout_tasks  # noqa: E402
 from agent_eval.tasks import dev_tasks  # noqa: E402
-from agent_eval.budget import BudgetStop, RoundBudget  # noqa: E402
+from agent_eval.budget import BudgetStop, FreeRouteGuard, RoundBudget  # noqa: E402
 from workbench.app import app  # noqa: E402
 from workbench.dev_fixtures.agent_navigation import _wait_for_terminal_run  # noqa: E402
 from workbench.events import get_event_manager  # noqa: E402
@@ -82,9 +82,13 @@ def main() -> int:
                         help="heldout is run once, at the final evaluation only")
     parser.add_argument("--round-budget-cny", type=str, help="shared CNY stop; maximum authorized for this batch is 5")
     parser.add_argument("--budget-ledger", type=Path, help="same ledger for both modes, never reset between tasks")
+    parser.add_argument("--free-route-ledger", type=Path,
+                        help="run on the free Magpie/WorkBuddy provider; every response must report usage.credit == 0")
     parser.add_argument("--allow-low-space-this-round", action="store_true",
                         help="explicit user-authorized storage exception; never releases financial stops")
     args = parser.parse_args()
+    if args.round_budget_cny is not None and args.free_route_ledger is not None:
+        parser.error("choose either a CNY round budget or the free route, not both")
     if args.round_budget_cny is not None:
         from decimal import Decimal
         if not args.budget_ledger or not Decimal(0) < Decimal(args.round_budget_cny) <= Decimal(5):
@@ -105,6 +109,16 @@ def main() -> int:
             budget.resume_storage_stop()
         if budget.stopped:
             print("shared round budget already stopped; no provider call", flush=True)
+            return 86
+    if args.free_route_ledger is not None:
+        try:
+            budget = FreeRouteGuard(args.free_route_ledger, provider_id=config.provider_id, base_url=config.base_url)
+        except ValueError as exc:
+            parser.error(str(exc))
+        if args.allow_low_space_this_round:
+            budget.resume_storage_stop()
+        if budget.stopped:
+            print(f"free-route guard already stopped ({budget.state['reason']}); no provider call", flush=True)
             return 86
     selected = {item for item in args.tasks.split(",") if item}
     suite = {"dev": dev_tasks, "heldout": heldout_tasks,
@@ -133,7 +147,9 @@ def main() -> int:
                    "execution_mode_request": args.mode if args.mode in {"ask", "auto"} else "server_default"},
         "suite": args.suite,
         "tasks": [task.id for task in tasks],
-        "round_budget": str(args.budget_ledger) if budget is not None else None,
+        "round_budget": str(args.budget_ledger) if args.round_budget_cny is not None else None,
+        "free_route_ledger": str(args.free_route_ledger) if args.free_route_ledger is not None else None,
+        "provider": {key: getattr(config, key, None) for key in ("provider_id", "base_url", "model", "data_location")},
         "low_space_exception": args.allow_low_space_this_round,
     }
     (out / "run_meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")

@@ -169,3 +169,75 @@ class RoundBudget:
                 state.update(stopped=True, reason="cost bound reached")
         if self.stopped:
             raise BudgetStop(self.state["reason"])
+
+
+FREE_PROVIDER_ID = "magpie-workbuddy-ai"
+
+
+class FreeRouteGuard:
+    """The budget hook for the free Magpie -> WorkBuddy route: every response must report zero credit.
+
+    Runs on this route carry no CNY cap, so the guard instead proves each call was
+    free: the saved free provider is required before the round, and a response with
+    a missing or non-zero ``usage.credit`` (a paid fallback, a changed tariff, an
+    unreadable usage) stops the whole round, like a budget stop.
+    """
+
+    def __init__(self, path, *, provider_id, base_url):
+        if provider_id != FREE_PROVIDER_ID:
+            raise ValueError(f"the free route requires provider {FREE_PROVIDER_ID!r}, got {provider_id!r}")
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.lock = FileLock(str(self.path) + ".lock")
+        self._identity = (provider_id, base_url)
+        with self._change() as state:
+            if state["provider_id"] != provider_id or state["base_url"] != base_url:
+                raise ValueError("free-route ledger belongs to another provider")
+
+    @contextmanager
+    def _change(self):
+        with self.lock:
+            state = self.state
+            yield state
+            temp = self.path.with_suffix(".tmp")
+            temp.write_text(json.dumps(state, indent=2))
+            temp.replace(self.path)
+
+    @property
+    def state(self):
+        if self.path.exists():
+            return json.loads(self.path.read_text())
+        provider_id, base_url = self._identity
+        return {"schema": "free-route/v1", "provider_id": provider_id, "base_url": base_url, "calls": 0,
+                "prompt_tokens": 0, "completion_tokens": 0, "stopped": False, "reason": None}
+
+    @property
+    def stopped(self):
+        return self.state["stopped"]
+
+    def stop(self, reason):
+        with self._change() as state:
+            state.update(stopped=True, reason=reason)
+
+    def reserve(self, body):
+        if self.stopped:
+            raise BudgetStop(self.state["reason"])
+        return uuid4().hex
+
+    def release(self, key):
+        return None
+
+    def settle(self, key, usage):
+        credit = usage.get("credit") if isinstance(usage, dict) else None
+        if type(credit) not in (int, float) or credit != 0:
+            self.stop(f"free route reported credit {credit!r}; stopping before any further call")
+            raise BudgetStop(self.state["reason"])
+        with self._change() as state:
+            state["calls"] += 1
+            state["prompt_tokens"] += int(usage.get("prompt_tokens") or 0)
+            state["completion_tokens"] += int(usage.get("completion_tokens") or 0)
+
+    def resume_storage_stop(self):
+        with self._change() as state:
+            if state["stopped"] and str(state["reason"]).startswith("storage threshold"):
+                state.update(stopped=False, reason=None)

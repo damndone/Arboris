@@ -222,3 +222,25 @@ def test_only_a_request_that_never_left_releases_its_reservation(tmp_path, failu
         assert state["reservations"] == {} and budget.spent_usd == api.cost_usd(usage)
     else:
         assert len(state["reservations"]) == 1
+
+
+def test_the_free_route_guard_stops_on_any_non_zero_or_missing_credit(tmp_path):
+    import pytest
+    from agent_eval.budget import BudgetStop, FreeRouteGuard
+
+    with pytest.raises(ValueError):
+        FreeRouteGuard(tmp_path / "x.json", provider_id="deepseek", base_url="https://api.deepseek.com")
+    guard = FreeRouteGuard(tmp_path / "free.json", provider_id="magpie-workbuddy-ai", base_url="http://127.0.0.1:3425/v1")
+    key = guard.reserve(b"{}")
+    guard.settle(key, {"prompt_tokens": 10, "completion_tokens": 2, "credit": 0})
+    assert guard.state["calls"] == 1 and not guard.stopped
+    with pytest.raises(BudgetStop):
+        guard.settle(guard.reserve(b"{}"), {"prompt_tokens": 10, "completion_tokens": 2, "credit": 0.01})
+    assert guard.stopped
+    with pytest.raises(BudgetStop):
+        guard.reserve(b"{}")
+    fresh = FreeRouteGuard(tmp_path / "free2.json", provider_id="magpie-workbuddy-ai", base_url="http://127.0.0.1:3425/v1")
+    with pytest.raises(BudgetStop):
+        fresh.settle(fresh.reserve(b"{}"), {"prompt_tokens": 10, "completion_tokens": 2})
+    with pytest.raises(ValueError):
+        FreeRouteGuard(tmp_path / "free.json", provider_id="magpie-workbuddy-ai", base_url="http://127.0.0.1:9999/v1")
