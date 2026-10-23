@@ -90,6 +90,44 @@ def outcome(project_root: Path, record: Mapping[str, Any]) -> dict[str, Any]:
     return facts
 
 
+def outcome_extras(project_root: Path, session_id: str, record: Any) -> dict[str, Any]:
+    """What an Ask-mode confirmation tells the Agent beyond the receipt, as Auto mode's
+    tool result already does: the results, the plan step it completed, and the delivery
+    check. In the free-route DeepSeek rounds the Agent otherwise spent about three
+    artifact reads, two plan updates and two completion checks per task asking.
+    """
+
+    from . import plans as plan_module
+    from .context_tools import NodeOperationContextProvider
+    from .delivery import delivery_check, delivery_digest
+
+    extras: dict[str, Any] = {}
+    if record.status == "completed":
+        try:
+            results = NodeOperationContextProvider(project_root).executed_workflow_results(record)
+        except Exception:  # the receipt still goes out; the results stay readable by id
+            results = []
+        if results:
+            extras["results"] = results
+    operation_ids = ([str(step.get("operation_id", "")) for step in (record.changes or {}).get("steps") or ()
+                      if isinstance(step, dict)] if record.operation_id == "operation.multi_step"
+                     else [str(record.operation_id)])
+    store = plan_module.PlanStore(Path(project_root) / "workbench")
+    try:
+        before = store.current(session_id)
+        if before is not None:
+            after = store.update(session_id, lambda current: plan_module.mark_covered(current, operation_ids, record.status))
+            changed = [step.step_id for old, step in zip(before.steps, after.steps) if old.status != step.status]
+            if changed:
+                extras["plan_steps_marked"] = {"steps": changed, "status": "done" if record.status == "completed" else "failed"}
+        digest = delivery_digest(delivery_check(project_root, store.current(session_id)))
+        if digest:
+            extras["delivery"] = digest
+    except (plan_module.PlanError, OSError, ValueError, KeyError):
+        pass
+    return extras
+
+
 def outcome_text(facts: Mapping[str, Any]) -> str:
     """The message the Agent reads on its next turn."""
 
@@ -119,10 +157,19 @@ def outcome_text(facts: Mapping[str, Any]) -> str:
                 f"- The same {node} already existed in run(s) {', '.join(runs)} (identical inputs, so identical results); "
                 "the lineage shows them as one node. Say so: the result is not new."
             )
-        lines.append(
-            f"Read the new results with inspect_project_model_coefficients using run_ids [{run_id}] "
-            "(add the original run to compare), and report them. Do not say you could not execute it: confirming executed it."
-        )
+        if not facts.get("results"):
+            lines.append(
+                f"Read the new results with inspect_project_model_coefficients using run_ids [{run_id}] "
+                "(add the original run to compare), and report them. Do not say you could not execute it: confirming executed it."
+            )
+    if facts.get("results"):
+        lines.append("Results (the same public view inspect_operation_artifact serves; answer from these, no need to "
+                     "read them again): " + json.dumps(facts["results"], ensure_ascii=False)[:6000])
+    if facts.get("plan_steps_marked"):
+        marked = facts["plan_steps_marked"]
+        lines.append(f"Plan step(s) {', '.join(marked['steps'])} marked {marked['status']} by the Workbench.")
+    from .delivery import delivery_lines
+    lines.extend(delivery_lines(facts.get("delivery")))
     return "\n".join(lines)
 
 

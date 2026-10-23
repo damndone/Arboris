@@ -7,6 +7,7 @@ import socket
 import sys
 
 import pytest
+from workbench.agent.session import JsonlSessionRepository
 from fastapi.testclient import TestClient
 
 from tests.test_agent_eval_headless_transport import runner
@@ -197,6 +198,11 @@ def test_recorded_family_failures_recover_via_real_common_tools_without_nudges(n
             assert confirmations == ((2 if case['playbook'] == 'iv' else 1) if mode == 'ask'
                                      else (1 if case['playbook'] == 'iv' else 0))
             assert approvals == (1 if mode == 'auto' else 0)
+            if mode == 'ask':
+                # v1.9.1: the confirmation's result message carries the delivery check.
+                told = [entry.payload['content'] for entry in JsonlSessionRepository(root/'workbench').get_branch(session)
+                        if entry.entry_type == 'custom_message' and entry.payload.get('name') == 'workbench_operation_result']
+                assert told and all('Delivery check after this operation' in content for content in told)
             from workbench.agent.operations import OperationRecordStore
             # Child receipts retain their parent's workflow authority; count
             # the user/plan authorization once, on the enclosing proposal.

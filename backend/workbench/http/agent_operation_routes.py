@@ -341,7 +341,7 @@ async def confirm_agent_proposal(
             message="Another confirmed operation is already executing against this Chain head.",
             details={"proposal_id": proposal_id},
         ) from exc
-    _tell_agent_the_outcome(root, session_id, record.to_dict())
+    _tell_agent_the_outcome(root, session_id, record)
     return {
         "proposal": _public_proposal(store, proposal_id),
         "operation": record.to_dict(),
@@ -363,17 +363,25 @@ def _tell_agent_finished_outcomes(root: Path, session_id: str) -> None:
     store = OperationRecordStore(root / "workbench", create=False)
     for record_id in pending:
         try:
-            record = store.get(record_id).to_dict()
+            record = store.get(record_id)
         except (KeyError, OSError, ValueError):
             continue
-        if record.get("status") in OUTCOME_TERMINAL:
+        if record.to_dict().get("status") in OUTCOME_TERMINAL:
             _tell_agent_the_outcome(root, session_id, record)
 
 
-def _tell_agent_the_outcome(root: Path, session_id: str, record: dict[str, Any]) -> None:
-    """The Agent's next turn knows what its confirmed proposal produced."""
+def _tell_agent_the_outcome(root: Path, session_id: str, record: Any) -> None:
+    """The Agent's next turn knows what its confirmed proposal produced, its results,
+    the plan step it completed and where delivery now stands."""
 
-    facts = operation_outcome(root, record)
+    from ..agent.operation_outcome import outcome_extras
+
+    if isinstance(record, dict):  # a stored receipt only: tell what it says
+        facts = operation_outcome(root, record)
+    else:
+        facts = operation_outcome(root, record.to_dict())
+        if hasattr(record, "changes") and facts.get("status") in OUTCOME_TERMINAL:
+            facts.update(outcome_extras(root, session_id, record))
     try:
         repository, _events, _metadata = _get_session(root, session_id)
         repository.append(session_id, "custom_message", {

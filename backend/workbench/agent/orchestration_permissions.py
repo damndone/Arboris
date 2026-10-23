@@ -135,7 +135,11 @@ class OrchestrationPermissions:
                 # user's newer plan; do not replay or replace either of them.
                 plan_update_conflict = True
         tests_run = prior + (budget.inferential_steps if record.status == "completed" else 0)
+        from .delivery import delivery_check, delivery_digest
+
+        digest = delivery_digest(delivery_check(project_root, self._current_plan(session_id)))
         return {
+            **({"delivery_check": digest} if digest else {}),
             "executed": True,
             "authorized_by": actor,
             "authorization_reason": decision.reason,

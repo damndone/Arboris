@@ -669,48 +669,10 @@ class WorkbenchOrchestrator(OrchestrationWorkflows, OrchestrationProposals, Orch
 
 
     def _completion_check(self, session_id, *, suggest=False):
-        from .completion import derive_evidence, evaluate
+        from .delivery import delivery_check
 
-        plan = self.plan_store.current(session_id)
         project_root = getattr(self.context_provider, "project_root", self.repository.root.parent)
-        evidence, bound = derive_evidence(project_root, plan.completion if plan else None,
-                                          plan.completion_evidence if plan else None)
-        result = evaluate(project_root, plan.completion if plan else None, evidence, suggest=suggest, options=True)
-        result['bound_by_workbench'] = bound['bound_by_workbench']
-        if bound['dropped']:
-            # Named back to the Agent: a reference that does not resolve to the right kind
-            # of verified product is not evidence, whatever it was meant to be.
-            result['dropped_references'] = bound['dropped'][:12]
-        if result['status'] == 'requirements_met':
-            # In the paid fix2 round (iv_weak, Auto) the Agent met every requirement and still
-            # would not call the analysis complete, reading not_certified as unfinished.
-            result['next_step'] = ('Delivery requirements are met: report this analysis as complete and state its '
-                                   'scientific limitations. A finding that the data cannot support the requested '
-                                   'claim is a complete answer, not a missing step.')
-        elif bound['primary_candidates']:
-            result['primary_candidates'] = bound['primary_candidates']
-            result['next_step'] = ('Several fits are eligible as the primary model. Choose one by the fixed '
-                                   'specification and question, never by significance, and call update_plan with '
-                                   'completion_evidence {"models": [its run_id and artifact_id]}; the Workbench binds '
-                                   'its diagnostics, the other fits and the report.')
-        elif result.get('sensitivity_options') and result['status'] == 'partial':
-            # off3 leverage.goal composed its report three times before the sensitivity fit it lacked.
-            from .completion_sensitivity import SENSITIVITY_NEXT_STEP
-            result['next_step'] = SENSITIVITY_NEXT_STEP
-        elif 'compose_report' in bound and result['status'] == 'partial':
-            result['compose_report'] = bound['compose_report']
-            result['next_step'] = ('No report covers the bound results yet. Propose compose_report exactly as given '
-                                   '(run_operation, operation.multi_step with one report.compose step).')
-        if result['status'] == 'partial' and plan and (evidence or {}).get('models'):
-            def repairable(code):
-                return (code.startswith('report:') or ':model:' in code or ':sensitivity:' in code
-                    or code.endswith(':diagnostics:computed_and_model_bound')
-                    or code == 'iv:diagnostics:ar_unavailable')
-            if all(repairable(code) for code in result['missing']):
-                result['recovery_action'] = 'inspect_and_repair'
-                from ..canonical import sha256_canonical
-                result['recovery_question_sha256'] = sha256_canonical(plan.question)
-        return result
+        return delivery_check(project_root, self.plan_store.current(session_id), suggest=suggest)
 
 
     def _chain(self, chain_id: str) -> tuple[str, AgentCore]:

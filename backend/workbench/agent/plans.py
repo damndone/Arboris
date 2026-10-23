@@ -254,6 +254,28 @@ def mark_executed(plan: Plan, operation_ids: list[str], status: str) -> Plan:
                                                      "status": status}, create=_now))
 
 
+def mark_covered(plan: Plan, operation_ids: list[str], status: str) -> Plan:
+    """After a confirmed operation: mark the ready steps it fully covers, nothing more.
+
+    A step is marked only when every operation it lists ran in this one, so a
+    step that still has work keeps its status and the plan's authority over that
+    work (unlike mark_executed, which serves the plan running its own step).
+    """
+
+    ran = set(operation_ids)
+    done = {step.step_id for step in plan.steps if step.status == "done"}
+    steps = [replace(step, status="done" if status == "completed" else "failed")
+             if (step.status in {"pending", "running", "awaiting"} and step.operation_ids
+                 and set(step.operation_ids) <= ran and all(item in done for item in step.depends_on))
+             else step for step in plan.steps]
+    if steps == list(plan.steps):
+        return plan
+    return replace(plan, steps=tuple(steps),
+                   updated_at=identity_value(owner="agent.plan.mark_covered", slot="updated_at",
+                                             inputs={"previous": plan.to_dict(), "operation_ids": operation_ids,
+                                                     "status": status}, create=_now))
+
+
 class PlanStore:
     """One append-only JSONL history per session: every version is kept."""
 
