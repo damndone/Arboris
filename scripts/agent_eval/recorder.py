@@ -122,10 +122,11 @@ class _RecordingTransport(httpx.AsyncBaseTransport):
                 self.budget.release(reservation)
                 raise
             tolerate = getattr(self.budget, "tolerate_transport_interruption", None)
-            if tolerate is not None and not isinstance(exc, KeyboardInterrupt) and tolerate(type(exc).__name__):
+            if tolerate is not None and not isinstance(exc, KeyboardInterrupt) and tolerate(
+                    type(exc).__name__, task=self.tape.context.get("task")):
                 # Free route: nothing is billed, so an interrupted call is the product's to
                 # handle (including its own no-progress cancel, a CancelledError after the
-                # idle bound); the guard stops the round only after repeated interruptions.
+                # idle bound); after repeated interruptions in one task the guard ends that task.
                 raise
             if self.budget is not None:
                 self.budget.stop("transport interrupted; preserve reservation until billing is reconciled")

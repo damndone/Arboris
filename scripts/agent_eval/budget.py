@@ -25,6 +25,15 @@ class BudgetStop(BaseException):
     """Bypass product retry handlers and stop the entire paid evaluation round."""
 
 
+class TaskStop(BaseException):
+    """Bypass product retry handlers and end this task only; the round goes on.
+
+    Free route (2026-10-22): models that stalled repeatedly on one task (WorkBuddy
+    Hy3 and Step-5, no first byte for 90 s on large contexts) ended the whole round
+    under a per-round count, so one slow task voided the rest.
+    """
+
+
 def cost_usd(usage):
     if not isinstance(usage, dict):
         raise ValueError("missing usage")
@@ -258,17 +267,18 @@ class FreeRouteGuard:
         self.stop(f"free route gateway {self._identity[1]} unreachable ({error}); no request was sent")
         raise BudgetStop(self.state["reason"])
 
-    #: Interrupted calls a free round tolerates before it stops (each is still taped).
+    #: Interrupted calls one task tolerates before it ends (each is still taped).
     MAX_TRANSPORT_INTERRUPTIONS = 3
 
-    def tolerate_transport_interruption(self, error: str) -> bool:
-        """Nothing is billed on this route; let the product retry, up to a bound per round."""
+    def tolerate_transport_interruption(self, error: str, task: str | None = None) -> bool:
+        """Nothing is billed on this route; let the product retry, up to a bound per task.
+        Beyond it the task ends (TaskStop) and the round goes on."""
         with self._change() as state:
-            state.setdefault("transport_interruptions", []).append(error)
-            count = len(state["transport_interruptions"])
+            state.setdefault("transport_interruptions", []).append({"task": task, "error": error})
+            count = sum(1 for item in state["transport_interruptions"]
+                        if isinstance(item, dict) and item.get("task") == task)
         if count > self.MAX_TRANSPORT_INTERRUPTIONS:
-            self.stop(f"{count} transport interruptions on the free route")
-            return False
+            raise TaskStop(f"{count} transport interruptions on the free route in task {task}")
         return True
 
     def resume_storage_stop(self):

@@ -247,14 +247,41 @@ def test_the_free_route_guard_stops_on_any_non_zero_or_missing_credit(tmp_path):
 
 
 
-def test_the_free_route_tolerates_a_few_transport_interruptions(tmp_path):
-    from agent_eval.budget import FreeRouteGuard
+def test_the_free_route_tolerates_a_few_transport_interruptions_per_task(tmp_path):
+    from agent_eval.budget import FreeRouteGuard, TaskStop
 
     guard = FreeRouteGuard(tmp_path / "free.json", provider_id="magpie-workbuddy-ai", base_url="http://127.0.0.1:3425/v1")
-    assert all(guard.tolerate_transport_interruption("RemoteProtocolError") for _ in range(3))
+    assert all(guard.tolerate_transport_interruption("CancelledError", task="a") for _ in range(3))
+    with pytest.raises(TaskStop, match="4 transport interruptions .* task a"):
+        guard.tolerate_transport_interruption("ReadTimeout", task="a")
+    # The round goes on: the next task has its own allowance.
     assert not guard.stopped
-    assert guard.tolerate_transport_interruption("ReadTimeout") is False
-    assert guard.stopped and guard.state["transport_interruptions"][-1] == "ReadTimeout"
+    assert all(guard.tolerate_transport_interruption("CancelledError", task="b") for _ in range(3))
+    assert guard.state["transport_interruptions"][3] == {"task": "a", "error": "ReadTimeout"}
+
+
+def test_repeated_stalls_end_the_task_through_the_recorder_and_not_the_round(tmp_path):
+    from agent_eval.budget import FreeRouteGuard, TaskStop
+    from agent_eval.recorder import _Tape, _RecordingTransport
+
+    guard = FreeRouteGuard(tmp_path / "free.json", provider_id="magpie-workbuddy-ai", base_url=FREE_BASE)
+    tape = _Tape(tmp_path / "tape.jsonl", "record")
+    tape.context = {"task": "panel_fe.specific.r1"}
+
+    def stall(request):
+        raise httpx.ReadTimeout("no first byte", request=request)
+
+    async def scenario():
+        transport = _RecordingTransport(tape, httpx.MockTransport(stall), budget=guard)
+        async with httpx.AsyncClient(transport=transport) as client:
+            for _ in range(3):
+                with pytest.raises(httpx.ReadTimeout):
+                    await client.post(f"{FREE_BASE}/chat/completions", json={"max_tokens": 10})
+            with pytest.raises(TaskStop):
+                await client.post(f"{FREE_BASE}/chat/completions", json={"max_tokens": 10})
+    asyncio.run(scenario())
+    assert not guard.stopped
+    assert len(tape.path.read_text().splitlines()) == 4  # every interrupted call is still taped
 
 
 FREE_BASE = "http://127.0.0.1:3425/v1"

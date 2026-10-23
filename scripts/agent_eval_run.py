@@ -37,7 +37,7 @@ from agent_eval.runner import Policy, run_conversation  # noqa: E402
 from agent_eval.external import ExternalTask, blade_tasks, qrdata_subset, replication_tasks, seed_model_for  # noqa: E402
 from agent_eval.heldout import heldout_tasks  # noqa: E402
 from agent_eval.tasks import dev_tasks  # noqa: E402
-from agent_eval.budget import BudgetStop, FreeRouteGuard, RoundBudget  # noqa: E402
+from agent_eval.budget import BudgetStop, FreeRouteGuard, RoundBudget, TaskStop  # noqa: E402
 from workbench.app import app  # noqa: E402
 from workbench.dev_fixtures.agent_navigation import _wait_for_terminal_run  # noqa: E402
 from workbench.events import get_event_manager  # noqa: E402
@@ -206,6 +206,14 @@ def main() -> int:
                     record["conversation"] = run_conversation(client, project.root, run_id, task.prompt, policy,
                         progress_path=directory / "conversation-progress.json")
                 record["status"] = "ran"
+            except TaskStop as exc:
+                # This task ended on repeated provider interruptions; the next task runs.
+                record["status"] = "task_stopped"
+                record["error"] = str(exc)
+                progress = directory / "conversation-progress.json"
+                if progress.exists():
+                    record["conversation"] = json.loads(progress.read_text())
+                    record["conversation"]["stop_reason"] = "provider_interruptions"
             except BudgetStop as exc:
                 record["status"] = "round_budget_stopped"
                 record["error"] = str(exc)
