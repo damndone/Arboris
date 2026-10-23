@@ -511,7 +511,12 @@ class OrchestrationTools:
             if "source" in arguments:
                 from .completion import source_receipt
                 root = getattr(self.context_provider, "project_root", self.repository.root.parent)
-                result["source"] = source_receipt(root, arguments["source"])
+                source = {key: arguments["source"][key] for key in ("run_id", "artifact_id")}
+                result["source"] = source_receipt(root, source)
+                given = arguments["source"].get("sha256")
+                if given and isinstance(result["source"], dict) and result["source"].get("sha256") not in (None, given):
+                    from .tools import tool_note
+                    tool_note("source.sha256 differs from the verified dataset; use the sha256 returned here.")
             return result
 
         return build_chain_tool_registry(

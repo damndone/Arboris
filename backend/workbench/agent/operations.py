@@ -76,6 +76,8 @@ def normalize_operation_target(registry: "OperationRegistry", arguments: dict[st
             target["node_id"] = node_id  # contradictory: leave it for validation to refuse
         else:
             tool_note("target.node_id duplicates node_ref; ignored.")
+    arguments = _with_known_version(registry, arguments)
+    arguments = _normalize_steps(arguments)
     try:
         definition = registry.require(str(arguments.get("operation_id")))
     except Exception:
@@ -90,6 +92,81 @@ def normalize_operation_target(registry: "OperationRegistry", arguments: dict[st
         tool_note(f"{definition.operation_id} does not use target.{', target.'.join(unused)}; ignored "
                   "(the backend binds node identity from run_id and node_ref).")
     return {**arguments, "target": target}
+
+
+def _with_known_version(registry: "OperationRegistry", arguments: dict[str, Any]) -> dict[str, Any]:
+    """An omitted operation_version is the operation's only version, when it has one."""
+    from .tools import tool_note
+
+    if arguments.get("operation_version") or not isinstance(arguments.get("operation_id"), str):
+        return arguments
+    versions = registry.versions(arguments["operation_id"])
+    if len(versions) != 1:
+        return arguments
+    (version,) = versions
+    tool_note(f"operation_version was omitted; {arguments['operation_id']} has one version, {version}.")
+    return {**arguments, "operation_version": version}
+
+
+def _normalize_steps(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Workflow steps written in an unambiguous variant of their contract, corrected with a note.
+
+    Free-route round with Hy3 and Step-5 (2026-10-23): step-level model fields
+    written inside every branch, `columns` for statistical.explore's
+    `selected_columns`, a filter's `op` (data.subset's spelling) for explore's
+    `operator`, and a model option misspelled closely enough to match exactly
+    one accepted name (event_col: event_column). A variant that could mean two
+    things is left for validation to refuse.
+    """
+    import difflib
+
+    from ..contracts.model.family import MODEL_FAMILY_CONTRACTS, MODEL_FAMILY_SPEC_FIELDS
+    from .tools import tool_note
+
+    changes = arguments.get("changes")
+    steps = changes.get("steps") if isinstance(changes, dict) else None
+    if not isinstance(steps, list):
+        return arguments
+    normalized = []
+    for step in steps:
+        if not isinstance(step, dict) or not isinstance(step.get("spec"), dict):
+            normalized.append(step)
+            continue
+        spec, label = dict(step["spec"]), step.get("step_id") or step.get("operation_id")
+        branches = spec.get("branches")
+        if isinstance(branches, list) and branches and all(isinstance(item, dict) for item in branches):
+            for field in sorted({"model_family", *MODEL_FAMILY_SPEC_FIELDS}):
+                values = [branch.get(field) for branch in branches]
+                if spec.get(field) is None and all(value is not None and value == values[0] for value in values):
+                    spec[field] = values[0]
+                    branches = [{key: value for key, value in branch.items() if key != field} for branch in branches]
+                    tool_note(f"step {label}: {field} applies to the whole model.genesis step; moved out of its branches.")
+            spec["branches"] = branches
+        options = spec.get("model_options")
+        family = MODEL_FAMILY_CONTRACTS.get(spec.get("model_family"))
+        if isinstance(options, dict) and family is not None:
+            accepted = list(family.model_options_fields)
+            renamed = {}
+            for key in [key for key in options if key not in accepted]:
+                close = difflib.get_close_matches(key, accepted, n=2, cutoff=0.8)
+                if len(close) == 1 and close[0] not in options and close[0] not in renamed.values():
+                    renamed[key] = close[0]
+            if renamed:
+                spec["model_options"] = {renamed.get(key, key): value for key, value in options.items()}
+                tool_note(f"step {label}: model_options " + ", ".join(f"{old} is spelled {new}" for old, new in renamed.items())
+                          + "; used as that.")
+        if step.get("operation_id") == "statistical.explore":
+            if "columns" in spec and "selected_columns" not in spec:
+                spec["selected_columns"] = spec.pop("columns")
+                tool_note(f"step {label}: statistical.explore names its columns selected_columns; used columns as that.")
+            filters = spec.get("filters")
+            if isinstance(filters, list) and any(isinstance(item, dict) and "op" in item and "operator" not in item for item in filters):
+                spec["filters"] = [{**{key: value for key, value in item.items() if key != "op"}, "operator": item["op"]}
+                                   if isinstance(item, dict) and "op" in item and "operator" not in item else item
+                                   for item in filters]
+                tool_note(f"step {label}: statistical.explore filters name the comparison operator; used op as that.")
+        normalized.append({**step, "spec": spec})
+    return {**arguments, "changes": {**changes, "steps": normalized}}
 
 
 def _accept_backend_bound_identity(schema: dict[str, Any], operation_id: str) -> None:
@@ -432,6 +509,10 @@ class OperationRegistry:
         if key in self._definitions:
             raise ValueError(f"operation already registered: {definition.operation_id}")
         self._definitions[key] = definition
+
+    def versions(self, operation_id: str) -> set[str]:
+        """The registered versions of one operation."""
+        return {version for registered, version in self._definitions if registered == operation_id}
 
     def operation_ids(self) -> list[str]:
         """Registered operation identities, for tool schemas and UI enums."""

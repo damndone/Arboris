@@ -39,7 +39,7 @@ def test_identity_an_operation_does_not_use_is_dropped_with_a_note():
     arguments = {"operation_id": "model.rerun", "target": {"run_id": "r", "node_ref": "model:ols_1", "artifact_id": "ols_1"}}
     normalized, notes = _normalize(arguments)
     assert normalized["target"] == {"run_id": "r", "node_ref": "model:ols_1"}
-    assert notes and "artifact_id" in notes[0]
+    assert any("artifact_id" in note for note in notes)
     workflow = {"operation_id": "operation.multi_step",
                 "target": {"run_id": "r", "node_ref": "stage:cleaned", "node_hash": "h", "forest_node_key": "k"}}
     normalized, notes = _normalize(workflow)
@@ -186,3 +186,82 @@ def test_an_ols_cluster_refusal_names_the_rerun_route():
     text = help_for("model.genesis ols model_options does not accept field(s): cluster")
     assert "model.rerun" in text and "accepts" in text
     assert "model.rerun" not in help_for("model.genesis survival_cox model_options does not accept field(s): event_col")
+
+
+# Hy3 / Step-5 free-route rounds (2026-10-23): variants that mean one thing are corrected with a note.
+
+def _genesis_step(spec):
+    return {"operation_id": "operation.multi_step", "operation_version": "v1",
+            "target": {"run_id": "r", "node_ref": "stage:cleaned"},
+            "changes": {"steps": [{"step_id": "fit", "operation_id": "model.genesis", "spec": spec}]}}
+
+
+def test_a_step_field_written_in_every_branch_is_moved_to_the_step():
+    spec = {"model_family": "iv_2sls", "covariance": "robust", "branches": [
+        {"branch_id": "a", "outcome": "y", "predictors": ["x"], "iv_endog": ["edu"], "iv_instruments": ["z"]},
+        {"branch_id": "b", "outcome": "y", "predictors": [], "iv_endog": ["edu"], "iv_instruments": ["z"]}]}
+    normalized, notes = _normalize(_genesis_step(spec))
+    step = normalized["changes"]["steps"][0]["spec"]
+    assert step["iv_endog"] == ["edu"] and step["iv_instruments"] == ["z"]
+    assert all("iv_endog" not in branch and "iv_instruments" not in branch for branch in step["branches"])
+    assert any("iv_endog" in note for note in notes)
+    # Branches that disagree are not merged: validation refuses them.
+    spec["branches"][1]["iv_endog"] = ["other"]
+    kept, _ = _normalize(_genesis_step(spec))
+    assert kept["changes"]["steps"][0]["spec"]["branches"][1]["iv_endog"] == ["other"]
+
+
+def test_explore_columns_and_a_filter_op_mean_selected_columns_and_operator():
+    arguments = {"operation_id": "operation.multi_step", "operation_version": "v1", "target": {"run_id": "r", "node_ref": "n"},
+                 "changes": {"steps": [{"step_id": "e", "operation_id": "statistical.explore", "spec": {
+                     "operation": "summarize_detail", "columns": ["months"],
+                     "filters": [{"column": "drug", "op": "eq", "value": 0}]}}]}}
+    normalized, notes = _normalize(arguments)
+    spec = normalized["changes"]["steps"][0]["spec"]
+    assert spec["selected_columns"] == ["months"] and "columns" not in spec
+    assert spec["filters"] == [{"column": "drug", "operator": "eq", "value": 0}]
+    assert len(notes) == 2
+    from workbench.agent.workflow_contract_parts.validation import _validate_step_spec
+    _validate_step_spec("statistical.explore", spec)  # the corrected spec is what validation accepts
+
+
+def test_an_omitted_version_is_the_operations_only_one():
+    normalized, notes = _normalize({"operation_id": "operation.multi_step", "target": {"run_id": "r", "node_ref": "n"},
+                                    "changes": {"steps": []}})
+    assert normalized["operation_version"] == "v1" and notes
+
+
+def test_the_completion_check_accepts_the_sha256_it_was_given():
+    from workbench.agent.completion import INSPECT_SCHEMA
+    assert validation_details(INSPECT_SCHEMA, {"source": {"run_id": "r", "artifact_id": "a", "sha256": "f" * 64}}) == []
+
+
+def test_a_rerun_contract_read_on_a_data_node_names_the_model_nodes(tmp_path):
+    import pytest
+    from workbench.agent.chains import ChainStore
+    from workbench.agent.context_tools import NodeOperationContextProvider
+    from workbench.agent.context_tools_support.requests import InspectOperationContractRequest
+    from workbench.orchestrator import run_workflow
+    from workbench.projects import create_project
+
+    project = create_project(tmp_path, "rerun-contract")
+    source = tmp_path / "data.csv"
+    from tests.test_agent_completion_sensitivity import _leverage_frame
+    _leverage_frame().to_csv(source, index=False)
+    run_id = run_workflow(project.root, [source], mode="auto", model_type="ols", y="rent", x=["density"])["run_id"]
+    ChainStore(project.root / "workbench").create_root(chain_id="chain-a", run_family_id="f", active_head_run_id=run_id,
+                                                       agent_session_id="s")
+    provider = NodeOperationContextProvider(project.root)
+    with pytest.raises(Exception, match=r"no contract for model\.rerun@v1 on stage:cleaned .*pass op_node_id model:"):
+        provider.inspect_operation_contract(InspectOperationContractRequest(
+            request_id="r", owner_run_id=run_id, op_node_id="stage:cleaned", active_head_run_id=run_id,
+            operation_id="model.rerun"), operation_registry=OperationRegistry())
+
+
+def test_a_model_option_one_spelling_from_an_accepted_name_is_that_name():
+    spec = {"model_family": "survival_cox", "branches": [{"branch_id": "a", "outcome": "months", "predictors": ["drug"]}],
+            "model_options": {"event_col": "event", "tie_method": "efron"}}
+    normalized, notes = _normalize(_genesis_step(spec))
+    options = normalized["changes"]["steps"][0]["spec"]["model_options"]
+    assert options == {"event_column": "event", "tie_method": "efron"}  # not close enough to 'ties': left to refuse
+    assert any("event_col is spelled event_column" in note for note in notes)

@@ -213,8 +213,18 @@ class NodeToolsMixin:
                     "contract_owner": "operation_registry",
                 }
             else:
+                # Step-5 asked for model.rerun's contract on stage:cleaned and read only
+                # "no contract", twice (free-route round, 2026-10-23); say where it applies.
+                from ...services.rerun_service import editable_rerun_nodes
+                try:
+                    editable = editable_rerun_nodes(self.project_root, request.owner_run_id)
+                except Exception:
+                    editable = []
+                where = (f" It edits a model node; in run {request.owner_run_id} pass op_node_id "
+                         + " or ".join(editable) + ".") if editable else ""
                 raise OperationContractUnavailableError(
-                    f"no contract for {request.operation_id}@{request.operation_version}"
+                    f"no contract for {request.operation_id}@{request.operation_version} on "
+                    f"{request.op_node_id} ({node.get('stage')}).{where}"
                 )
 
         return {

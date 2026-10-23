@@ -43,7 +43,9 @@ CONTRACT_SCHEMA = {'type': 'object', 'required': ['playbooks', 'source'], 'prope
 AGENT_CONTRACT_SCHEMA = {**CONTRACT_SCHEMA, 'properties': {**CONTRACT_SCHEMA['properties'], 'source': {
     **CONTRACT_SCHEMA['properties']['source'], 'required': ['run_id', 'artifact_id'],
     'description': 'run_id and artifact_id of the registered dataset; the Workbench binds its sha256.'}}}
-INSPECT_SCHEMA = {"type": "object", "properties": {"source": _REF}, "additionalProperties": False}
+# A source may carry the sha256 the Agent read before; the Workbench returns the verified one.
+INSPECT_SCHEMA = {"type": "object", "properties": {"source": {**_REF, "properties": {
+    **_REF["properties"], "sha256": {"type": "string", "maxLength": 128}}}}, "additionalProperties": False}
 EVIDENCE_SCHEMA = {'type': 'object', 'properties': {
     **{key: {'type': 'array', 'maxItems': 24, 'items': _REF} for key in ('models', 'diagnostics', 'sensitivity')},
     'report': _REF}, 'additionalProperties': False}
