@@ -283,6 +283,19 @@ def test_repeated_stalls_end_the_task_through_the_recorder_and_not_the_round(tmp
     assert not guard.stopped
     assert len(tape.path.read_text().splitlines()) == 4  # every interrupted call is still taped
 
+    # The same task in the other mode (its own directory, same name and ledger) starts afresh.
+    (tmp_path / "auto").mkdir()
+    other = _Tape(tmp_path / "auto" / "tape.jsonl", "record")
+    other.context = {"task": "panel_fe.specific.r1"}
+
+    async def again():
+        transport = _RecordingTransport(other, httpx.MockTransport(stall), budget=guard)
+        async with httpx.AsyncClient(transport=transport) as client:
+            for _ in range(3):
+                with pytest.raises(httpx.ReadTimeout):
+                    await client.post(f"{FREE_BASE}/chat/completions", json={"max_tokens": 10})
+    asyncio.run(again())
+
 
 FREE_BASE = "http://127.0.0.1:3425/v1"
 #: The response that ended off4b's Auto mode (2026-10-22), verbatim.

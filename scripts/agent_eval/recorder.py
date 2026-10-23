@@ -122,8 +122,9 @@ class _RecordingTransport(httpx.AsyncBaseTransport):
                 self.budget.release(reservation)
                 raise
             tolerate = getattr(self.budget, "tolerate_transport_interruption", None)
+            # The task's own directory: Ask and Auto runs of one task share its name and ledger.
             if tolerate is not None and not isinstance(exc, KeyboardInterrupt) and tolerate(
-                    type(exc).__name__, task=self.tape.context.get("task")):
+                    type(exc).__name__, task=str(self.tape.path.parent)):
                 # Free route: nothing is billed, so an interrupted call is the product's to
                 # handle (including its own no-progress cancel, a CancelledError after the
                 # idle bound); after repeated interruptions in one task the guard ends that task.
