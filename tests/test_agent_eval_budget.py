@@ -355,3 +355,58 @@ def test_a_paid_round_still_retries_a_connection_that_was_never_made(tmp_path):
                 await client.post("https://provider.invalid/chat", json={"max_tokens": 10})
     asyncio.run(scenario())
     assert not budget.stopped and budget.state["reservations"] == {}
+
+
+def _sse_transport(gate):
+    async def body():
+        yield b'data: {"choices":[{"delta":{"reasoning_content":"thinking"}}]}\n\n'
+        await gate.wait()
+        yield (b'data: {"choices":[{"delta":{"content":"ok"}}],"usage":{"prompt_tokens":10,'
+               b'"completion_tokens":2,"credit":0}}\n\ndata: [DONE]\n\n')
+
+    return httpx.MockTransport(lambda request: httpx.Response(200, headers={"content-type": "text/event-stream"},
+                                                              content=body()))
+
+
+def test_a_streamed_reply_reaches_the_product_as_it_arrives_and_is_taped_at_the_end(tmp_path):
+    """The recorder read whole replies before handing them on, so the product saw nothing until
+    the model finished and its 90 s no-progress bound cut every longer answer (2026-10-23)."""
+    from agent_eval.budget import FreeRouteGuard
+    from agent_eval.recorder import _Tape, _RecordingTransport
+
+    guard = FreeRouteGuard(tmp_path / "free.json", provider_id="magpie-workbuddy-ai", base_url=FREE_BASE)
+    tape = _Tape(tmp_path / "tape.jsonl", "record")
+
+    async def scenario():
+        gate = asyncio.Event()
+        transport = _RecordingTransport(tape, _sse_transport(gate), budget=guard)
+        async with httpx.AsyncClient(transport=transport) as client:
+            async with client.stream("POST", f"{FREE_BASE}/chat/completions", json={"max_tokens": 10}) as response:
+                chunks = response.aiter_bytes()
+                first = await chunks.__anext__()
+                assert b"thinking" in first and not tape.path.exists()  # before the provider finished
+                gate.set()
+                rest = b"".join([chunk async for chunk in chunks])
+        assert b'"content":"ok"' in rest
+    asyncio.run(scenario())
+    [record] = [json.loads(line) for line in tape.path.read_text().splitlines()]
+    assert record["status"] == 200 and record["usage"]["credit"] == 0 and "thinking" in record["response_raw"]
+    assert guard.state["calls"] == 1
+
+
+def test_a_stream_the_product_abandons_is_taped_as_interrupted(tmp_path):
+    from agent_eval.budget import FreeRouteGuard
+    from agent_eval.recorder import _Tape, _RecordingTransport
+
+    guard = FreeRouteGuard(tmp_path / "free.json", provider_id="magpie-workbuddy-ai", base_url=FREE_BASE)
+    tape = _Tape(tmp_path / "tape.jsonl", "record")
+
+    async def scenario():
+        transport = _RecordingTransport(tape, _sse_transport(asyncio.Event()), budget=guard)
+        async with httpx.AsyncClient(transport=transport) as client:
+            async with client.stream("POST", f"{FREE_BASE}/chat/completions", json={"max_tokens": 10}) as response:
+                await response.aiter_bytes().__anext__()  # then leaves, as a no-progress cancel does
+    asyncio.run(scenario())
+    [record] = [json.loads(line) for line in tape.path.read_text().splitlines()]
+    assert record["transport_error"] == "CancelledError" and record["sent"] is True and "thinking" in record["response_raw"]
+    assert not guard.stopped and len(guard.state["transport_interruptions"]) == 1

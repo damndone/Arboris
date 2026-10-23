@@ -104,48 +104,48 @@ class _RecordingTransport(httpx.AsyncBaseTransport):
         assert self.inner is not None
         reservation = self.budget.reserve(body) if self.budget is not None else None
         try:
-            response = await self.inner.handle_async_request(request)
-            raw = await response.aread()
-        except BaseException as exc:
-            self.tape.write({**self.tape.context, "at": started, "elapsed_s": time.time() - started,
-                "url_path": request.url.path, "status": 0, "content_type": "", "request_sha256": digest,
-                "request": json.loads(body), "request_bytes": len(body), "response_raw": "", "usage": None,
-                "transport_error": type(exc).__name__, "budget_reservation": reservation,
-                "sent": not isinstance(exc, _NOT_SENT)})
-            if isinstance(exc, _NOT_SENT) and hasattr(self.budget, "unreachable"):
-                self.budget.release(reservation)
-                self.budget.unreachable(type(exc).__name__)
-            if self.budget is not None and isinstance(exc, _NOT_SENT):
-                # No connection, so no request reached the provider: nothing can be
-                # billed. Release it and let the product's own retry run (the paid
-                # fix1 round froze on one such ConnectError).
-                self.budget.release(reservation)
-                raise
-            tolerate = getattr(self.budget, "tolerate_transport_interruption", None)
-            # The task's own directory: Ask and Auto runs of one task share its name and ledger.
-            if tolerate is not None and not isinstance(exc, KeyboardInterrupt) and tolerate(
-                    type(exc).__name__, task=str(self.tape.path.parent)):
-                # Free route: nothing is billed, so an interrupted call is the product's to
-                # handle (including its own no-progress cancel, a CancelledError after the
-                # idle bound); after repeated interruptions in one task the guard ends that task.
-                raise
-            if self.budget is not None:
-                self.budget.stop("transport interrupted; preserve reservation until billing is reconciled")
-                from .budget import BudgetStop
-                raise BudgetStop("unknown usage after transport failure") from exc
-            raise
-        elapsed = time.time() - started
-        content_type = response.headers.get("content-type", "")
-        try:
             request_json = json.loads(body)
         except ValueError:
             request_json = None
-        stream = "event-stream" in content_type
-        usage = _usage_from_stream(raw) if stream else _usage_from_json(raw)
+        try:
+            response = await self.inner.handle_async_request(request)
+            content_type = response.headers.get("content-type", "")
+            if response.status_code == 200 and "event-stream" in content_type:
+                # Pass the stream through as it arrives. Reading it whole first hid
+                # every chunk from the product until the model had finished, so its
+                # 90 s no-progress bound cut any answer longer than 90 s (Hy3 and
+                # Step-5 "stalls", 2026-10-23: no successful call ever exceeded 90 s).
+                headers = [(k, v) for k, v in response.headers.items()
+                           if k.lower() not in {"content-encoding", "content-length", "transfer-encoding"}]
+                tee = _TeeStream(response, lambda raw, exc: self._finish(
+                    request, digest, body, request_json, started, reservation, response, raw, exc))
+                return httpx.Response(response.status_code, headers=headers, stream=tee)
+            raw = await response.aread()
+        except BaseException as exc:
+            self._interrupted(request, digest, body, started, reservation, exc, b"", sent=not isinstance(exc, _NOT_SENT))
+            raise
+        self._record(request, digest, body, request_json, started, reservation, response, raw)
+        # ``aread`` already decoded the body: pass it on without the
+        # encoding and length headers, or the client decodes it a second time,
+        # fails, and the adapter retries a request that had succeeded.
+        headers = [(k, v) for k, v in response.headers.items()
+                   if k.lower() not in {"content-encoding", "content-length", "transfer-encoding"}]
+        return httpx.Response(response.status_code, headers=headers, content=raw)
+
+    def _finish(self, request, digest, body, request_json, started, reservation, response, raw, exc):
+        """The streamed reply ended: completely, or abandoned or cut off part-way."""
+        if exc is None:
+            self._record(request, digest, body, request_json, started, reservation, response, raw)
+        else:
+            self._interrupted(request, digest, body, started, reservation, exc, raw, sent=True)
+
+    def _record(self, request, digest, body, request_json, started, reservation, response, raw):
+        content_type = response.headers.get("content-type", "")
+        usage = _usage_from_stream(raw) if "event-stream" in content_type else _usage_from_json(raw)
         self.tape.write({
             **self.tape.context,
             "at": started,
-            "elapsed_s": round(elapsed, 3),
+            "elapsed_s": round(time.time() - started, 3),
             "url_path": request.url.path,
             "status": response.status_code,
             "content_type": content_type,
@@ -160,12 +160,68 @@ class _RecordingTransport(httpx.AsyncBaseTransport):
             self.budget.refused(response.status_code, raw)
         if self.budget is not None:
             self.budget.settle(reservation, usage)
-        # ``aread`` already decoded the body: pass it on without the
-        # encoding and length headers, or the client decodes it a second time,
-        # fails, and the adapter retries a request that had succeeded.
-        headers = [(k, v) for k, v in response.headers.items()
-                   if k.lower() not in {"content-encoding", "content-length", "transfer-encoding"}]
-        return httpx.Response(response.status_code, headers=headers, content=raw)
+
+    def _interrupted(self, request, digest, body, started, reservation, exc, raw, *, sent):
+        """Tape an exchange that did not complete, then apply the round's rules.
+        Raises when the round (or, on the free route, the task) must stop."""
+        self.tape.write({**self.tape.context, "at": started, "elapsed_s": time.time() - started,
+            "url_path": request.url.path, "status": 0, "content_type": "", "request_sha256": digest,
+            "request": json.loads(body), "request_bytes": len(body), "response_raw": raw.decode("utf-8", "replace"),
+            "usage": None, "transport_error": type(exc).__name__, "budget_reservation": reservation, "sent": sent})
+        if not sent and hasattr(self.budget, "unreachable"):
+            self.budget.release(reservation)
+            self.budget.unreachable(type(exc).__name__)
+        if self.budget is not None and not sent:
+            # No connection, so no request reached the provider: nothing can be
+            # billed. Release it and let the product's own retry run (the paid
+            # fix1 round froze on one such ConnectError).
+            self.budget.release(reservation)
+            return
+        tolerate = getattr(self.budget, "tolerate_transport_interruption", None)
+        # The task's own directory: Ask and Auto runs of one task share its name and ledger.
+        if tolerate is not None and not isinstance(exc, KeyboardInterrupt) and tolerate(
+                type(exc).__name__, task=str(self.tape.path.parent)):
+            # Free route: nothing is billed, so an interrupted call is the product's to
+            # handle (including its own no-progress cancel); after repeated
+            # interruptions in one task the guard ends that task.
+            return
+        if self.budget is not None:
+            self.budget.stop("transport interrupted; preserve reservation until billing is reconciled")
+            from .budget import BudgetStop
+            raise BudgetStop("unknown usage after transport failure") from exc
+
+
+class _TeeStream(httpx.AsyncByteStream):
+    """Hand each chunk on as it arrives and keep a copy; report once, when the stream ends."""
+
+    def __init__(self, response: httpx.Response, finish) -> None:
+        self._response = response
+        self._finish = finish
+        self._parts: list[bytes] = []
+        self._done = False
+
+    async def __aiter__(self):
+        try:
+            async for chunk in self._response.aiter_bytes():
+                self._parts.append(chunk)
+                yield chunk
+        except BaseException as exc:
+            self._end(exc)
+            raise
+        self._end(None)
+
+    async def aclose(self) -> None:
+        # Closed before the end: the reader abandoned the stream (the product's
+        # own no-progress cancel, or its Stop).
+        if not self._done:
+            self._end(asyncio.CancelledError())
+        await self._response.aclose()
+
+    def _end(self, exc) -> None:
+        if self._done:
+            return
+        self._done = True
+        self._finish(b"".join(self._parts), exc)
 
 
 @contextmanager
