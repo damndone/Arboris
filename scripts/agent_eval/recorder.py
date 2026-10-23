@@ -133,8 +133,14 @@ class _RecordingTransport(httpx.AsyncBaseTransport):
         return httpx.Response(response.status_code, headers=headers, content=raw)
 
     def _finish(self, request, digest, body, request_json, started, reservation, response, raw, exc):
-        """The streamed reply ended: completely, or abandoned or cut off part-way."""
-        if exc is None:
+        """The streamed reply ended: completely, or abandoned or cut off part-way.
+
+        The product closes a stream once it has the completion and its usage, a
+        moment before the connection's end; usage comes only at the end, so a
+        stream closed after it is complete, not abandoned (first streaming run,
+        2026-10-23: four complete replies were taped as interruptions).
+        """
+        if exc is None or (isinstance(exc, asyncio.CancelledError) and _usage_from_stream(raw) is not None):
             self._record(request, digest, body, request_json, started, reservation, response, raw)
         else:
             self._interrupted(request, digest, body, started, reservation, exc, raw, sent=True)

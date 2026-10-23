@@ -410,3 +410,29 @@ def test_a_stream_the_product_abandons_is_taped_as_interrupted(tmp_path):
     [record] = [json.loads(line) for line in tape.path.read_text().splitlines()]
     assert record["transport_error"] == "CancelledError" and record["sent"] is True and "thinking" in record["response_raw"]
     assert not guard.stopped and len(guard.state["transport_interruptions"]) == 1
+
+
+def test_a_stream_closed_after_its_usage_arrived_is_complete(tmp_path):
+    """The product closes the stream once it has the completion and usage, before the end marker."""
+    from agent_eval.budget import FreeRouteGuard
+    from agent_eval.recorder import _Tape, _RecordingTransport
+
+    guard = FreeRouteGuard(tmp_path / "free.json", provider_id="magpie-workbuddy-ai", base_url=FREE_BASE)
+    tape = _Tape(tmp_path / "tape.jsonl", "record")
+
+    async def body():
+        yield (b'data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}],'
+               b'"usage":{"prompt_tokens":10,"completion_tokens":2,"credit":0}}\n\n')
+        await asyncio.Event().wait()  # the end marker never comes before the reader leaves
+        yield b"data: [DONE]\n\n"
+
+    async def scenario():
+        transport = _RecordingTransport(tape, httpx.MockTransport(
+            lambda request: httpx.Response(200, headers={"content-type": "text/event-stream"}, content=body())), budget=guard)
+        async with httpx.AsyncClient(transport=transport) as client:
+            async with client.stream("POST", f"{FREE_BASE}/chat/completions", json={"max_tokens": 10}) as response:
+                await response.aiter_bytes().__anext__()
+    asyncio.run(scenario())
+    [record] = [json.loads(line) for line in tape.path.read_text().splitlines()]
+    assert record["status"] == 200 and record["usage"]["credit"] == 0 and "transport_error" not in record
+    assert guard.state["calls"] == 1 and not guard.state.get("transport_interruptions")
