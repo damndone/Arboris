@@ -1751,7 +1751,9 @@ def test_openai_adapter_preserves_complete_non_object_tool_json_failure(monkeypa
     assert events[0].error == "provider_tool_arguments_invalid"
 
 
-def test_openai_adapter_stops_one_no_progress_stream_without_retry(monkeypatch) -> None:
+def test_openai_adapter_abandons_a_no_progress_stream_and_sends_at_most_two_fresh_requests(monkeypatch) -> None:
+    """v1.9.1 (approved 2026-10-23): a stalled stream is still abandoned at the idle
+    bound, never waited on; a fresh request follows, at most twice per turn."""
     attempts = 0
 
     async def fake_stream(*_args, **_kwargs):
@@ -1771,6 +1773,7 @@ def test_openai_adapter_stops_one_no_progress_stream_without_retry(monkeypatch) 
             ),
             idle_timeout_s=0.01,
         )
+        adapter.stall_retry_delays_s = (0.0, 0.0)
         return [
             event
             async for event in adapter.stream(
@@ -1779,8 +1782,8 @@ def test_openai_adapter_stops_one_no_progress_stream_without_retry(monkeypatch) 
         ]
 
     events = asyncio.run(scenario())
-    assert attempts == 1
-    assert events[-1].type == "error"
+    assert attempts == 3
+    assert [event.type for event in events] == ["retry", "retry", "error"]
     assert events[-1].error == "provider_no_progress"
 
 

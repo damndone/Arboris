@@ -43,7 +43,8 @@ class ReplayIncomplete(ReplayError):
 
 
 _HEADER = {"kind": "header", "schema": "workbench.model-replay", "version": 1}
-_REQUEST_FIELDS = {field.name for field in fields(ModelRequest)} - {"request_id", "abort_event"}
+# What the provider receives; the turn key only bounds the adapter's own stall retries.
+_REQUEST_FIELDS = {field.name for field in fields(ModelRequest)} - {"request_id", "abort_event", "turn_key"}
 _EVENT_FIELDS = {field.name for field in fields(ModelStreamEvent)}
 
 

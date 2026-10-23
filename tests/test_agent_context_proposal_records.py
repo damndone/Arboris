@@ -72,3 +72,19 @@ def test_bounded_summaries_are_left_as_written(tmp_path):
     repository.append("s", "custom_message", {"message_type": "operation_proposal", "audience": "model",
                                               "content": summary, "proposal": _proposal()})
     assert ContextBuilder(repository).build("s").messages[-1]["content"] == summary
+
+
+def test_a_record_stored_before_its_tool_result_is_still_shortened(tmp_path):
+    """The real order (2026-10-23 tapes): the audit record is written while the tool runs,
+    before the run_operation result that carries the same proposal."""
+    repository = JsonlSessionRepository(tmp_path)
+    repository.create_session("s", chain_id="s", role="chain")
+    repository.append("s", "message", {"role": "user", "content": "Check the correlation."})
+    repository.append("s", "message", {"role": "assistant", "content": "", "tool_calls": [
+        {"id": "c1", "type": "function", "function": {"name": "run_operation", "arguments": "{}"}}]})
+    _record(repository, "operation_proposal", "proposal", _proposal())
+    repository.append("s", "message", {"role": "tool", "tool_call_id": "c1", "content": json.dumps(
+        {"error": None, "ok": True, "output": {"proposal": _proposal(), "requires_confirmation": True}})})
+    messages = ContextBuilder(repository).build("s").messages
+    record = next(json.loads(m["content"]) for m in messages if m["role"] == "system" and '"proposal_id"' in m["content"])
+    assert "changes" not in record and "changes" in record["repeated_fields"]

@@ -54,7 +54,16 @@ class ContextBuilder:
         source_entry_ids: list[str] = []
         shown_proposals: dict[str, dict[str, Any]] = {}
         branch = self.repository.get_branch(session_id, leaf_entry_id=leaf_entry_id)
-        for entry in _project(branch):
+        projected = _project(branch)
+        # A proposal's audit record is stored before the run_operation result that
+        # carries the same proposal, and sent after it; note those results first, or
+        # every record goes out in full (about 1.7 KB per proposal, 2026-10-23).
+        for entry in projected:
+            content = entry.payload.get("content")
+            if (entry.entry_type == "message" and entry.payload.get("role") == "tool"
+                    and isinstance(content, str) and '"proposal_id"' in content):
+                _note_tool_proposal(content, shown_proposals)
+        for entry in projected:
             payload = dict(entry.payload)
             if entry.entry_type == "message":
                 role = payload.get("role")
@@ -67,8 +76,6 @@ class ContextBuilder:
                     and not include_failed_assistant_messages
                 ):
                     continue
-                if role == "tool" and '"proposal_id"' in content:
-                    _note_tool_proposal(content, shown_proposals)
                 messages.append({
                     key: value
                     for key, value in payload.items()

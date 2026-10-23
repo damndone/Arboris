@@ -108,6 +108,7 @@ class TurnLoopMixin:
             response_schema=phase_request.response_schema if phase_request is not None else None,
             model_config=phase_request.model_config if phase_request is not None else {},
             abort_event=self._new_abort_event(),
+            turn_key=command_id,
         )
         self._active_request_id = request.request_id
         if self.turn_journal:

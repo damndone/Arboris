@@ -143,6 +143,8 @@ class ModelRequest:
     response_schema: dict[str, Any] | None = None
     model_config: Mapping[str, Any] = field(default_factory=dict)
     abort_event: Any | None = None
+    #: The person's turn this request belongs to; bounds stall retries per turn.
+    turn_key: str | None = None
 
 
 @dataclass(frozen=True)
@@ -229,6 +231,19 @@ async def _next_stream_item_or_signal(
             await asyncio.gather(abort_waiter, return_exceptions=True)
 
 
+async def _wait_or_abort(seconds: float, abort_event: Any | None) -> bool:
+    """Wait, unless the person stops the turn first; True when stopped."""
+
+    if abort_event is None:
+        await asyncio.sleep(seconds)
+        return False
+    try:
+        await asyncio.wait_for(abort_event.wait(), timeout=seconds)
+    except asyncio.TimeoutError:
+        return False
+    return True
+
+
 def _error_label(exc: LLMUpstreamError) -> str:
     label = type(exc).__name__
     if exc.upstream_status is not None:
@@ -251,12 +266,31 @@ class OpenAICompatibleModelAdapter:
     # Seconds to wait before each retry of a request that failed before any
     # output (a dropped connection, a stream cut short, 429/5xx).
     retry_delays_s: tuple[float, ...] = (1.0, 3.0)
+    # A request that sent nothing within the idle bound is abandoned, as before
+    # (no waiting on the same stalled stream); then a fresh request is sent after
+    # each of these waits, at most this many times per turn. Free-route rounds
+    # (2026-10-23): 26 of 92 Hy3 turns and 22 of 54 Step-5 turns ended on a stall
+    # and needed the person to say "continue".
+    stall_retry_delays_s: tuple[float, ...] = (5.0, 15.0)
 
     def __init__(self, config: LLMConfig, *, idle_timeout_s: float = 90.0) -> None:
         self.config = config
         if idle_timeout_s <= 0:
             raise ValueError("idle_timeout_s must be positive")
         self.idle_timeout_s = float(idle_timeout_s)
+        self._stall_retries: dict[str, int] = {}
+
+    def _take_stall_retry(self, request: ModelRequest) -> float | None:
+        """The wait before the next fresh request after a stall, while this turn has one left."""
+
+        key = request.turn_key or request.request_id
+        used = self._stall_retries.get(key, 0)
+        if used >= len(self.stall_retry_delays_s):
+            return None
+        if len(self._stall_retries) > 64:
+            self._stall_retries.pop(next(iter(self._stall_retries)))
+        self._stall_retries[key] = used + 1
+        return self.stall_retry_delays_s[used]
 
     def reasoning_source(self) -> dict[str, Any]:
         """Which provider and model private reasoning belongs to; it is sent to no other."""
@@ -305,12 +339,22 @@ class OpenAICompatibleModelAdapter:
         # not. Each retry is yielded as an event so the failure stays on the
         # record. After public output began, nothing is replayed.
         attempt_budget = 1 + len(self.retry_delays_s)
-        for attempt in range(attempt_budget):
-            if attempt:
-                await asyncio.sleep(self.retry_delays_s[attempt - 1])
-                if abort_event is not None and abort_event.is_set():
+        attempt = -1
+        stall_wait: float | None = None
+        while attempt + 1 < attempt_budget or stall_wait is not None:
+            if stall_wait is not None:
+                # A fresh request after a stall does not use the failure retries.
+                if await _wait_or_abort(stall_wait, abort_event):
                     yield ModelStreamEvent.from_error(request.request_id, "aborted")
                     return
+                stall_wait = None
+            else:
+                attempt += 1
+                if attempt:
+                    await asyncio.sleep(self.retry_delays_s[attempt - 1])
+                    if abort_event is not None and abort_event.is_set():
+                        yield ModelStreamEvent.from_error(request.request_id, "aborted")
+                        return
             received_event = False
             public_progress = False
             reasoning_parts: list[str] = []  # this attempt's only; a retry starts over
@@ -331,6 +375,10 @@ class OpenAICompatibleModelAdapter:
                         stream, abort_event, self.idle_timeout_s
                     )
                     if signal == "timeout":
+                        if not public_progress and (wait := self._take_stall_retry(request)) is not None:
+                            yield ModelStreamEvent.retrying(request.request_id, "provider_no_progress")
+                            stall_wait = wait
+                            break
                         yield ModelStreamEvent.from_error(
                             request.request_id, "provider_no_progress"
                         )
@@ -384,6 +432,8 @@ class OpenAICompatibleModelAdapter:
                             usage=item.get("usage"),
                         )
                         return
+                if stall_wait is not None:
+                    continue
                 raise LLMUpstreamError("LLM provider ended the stream without a completion")
             except LLMToolCallArgumentsError:
                 # The provider completed a typed call, but the arguments are
