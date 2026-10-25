@@ -108,6 +108,10 @@ def _with_known_version(registry: "OperationRegistry", arguments: dict[str, Any]
     return {**arguments, "operation_version": version}
 
 
+#: Covariance names with exactly one meaning in the Workbench's vocabulary (Hy3 wrote statsmodels' nonrobust).
+COVARIANCE_ALIASES = {"nonrobust": "unadjusted"}
+
+
 def _normalize_steps(arguments: dict[str, Any]) -> dict[str, Any]:
     """Workflow steps written in an unambiguous variant of their contract, corrected with a note.
 
@@ -142,6 +146,14 @@ def _normalize_steps(arguments: dict[str, Any]) -> dict[str, Any]:
                     branches = [{key: value for key, value in branch.items() if key != field} for branch in branches]
                     tool_note(f"step {label}: {field} applies to the whole model.genesis step; moved out of its branches.")
             spec["branches"] = branches
+        if isinstance(spec.get("branches"), list):
+            spec["branches"] = [dict(branch) if isinstance(branch, dict) else branch for branch in spec["branches"]]
+        for holder, where in [(spec, ""), *((branch, f" branch {index}") for index, branch in enumerate(spec.get("branches") or [])
+                                                if isinstance(branch, dict))]:
+            alias = COVARIANCE_ALIASES.get(str(holder.get("covariance", "")).strip().lower().replace("-", "").replace("_", ""))
+            if alias:
+                tool_note(f"step {label}{where}: covariance {holder['covariance']} is called {alias} here; used as that.")
+                holder["covariance"] = alias
         options = spec.get("model_options")
         family = MODEL_FAMILY_CONTRACTS.get(spec.get("model_family"))
         if isinstance(options, dict) and family is not None:

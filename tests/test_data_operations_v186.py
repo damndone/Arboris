@@ -738,3 +738,27 @@ def test_subset_rejects_invalid_row_indices_with_stable_error(
     )
     with pytest.raises(DataColumnCastValidationError, match="DATA_SUBSET_ROW_INDEX_INVALID"):
         preview_data_transform(project, spec)
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [{"exclude_row_indices": [5]}, {"exclude_row_indices": [0, 0]}, {"exclude_row_indices": [0, 1]},
+     {"exclude_row_indices": [0], "row_indices": [1]}],
+)
+def test_subset_rejects_invalid_excluded_rows_with_stable_error(tmp_path: Path, extra: dict) -> None:
+    project, run_id, artifact_id = _source_project(tmp_path, pd.DataFrame({"id": [1, 2], "value": [10, 20]}))
+    spec = DataTransformSpecV1(
+        source_run_id=run_id, source_node_id="stage:source", source_artifact_id=artifact_id,
+        operation="subset", parameters={"columns": ["id", "value"], **extra},
+    )
+    with pytest.raises(DataColumnCastValidationError, match="DATA_SUBSET_ROW_INDEX_INVALID"):
+        preview_data_transform(project, spec)
+
+
+def test_subset_leaves_out_named_positions_counted_after_the_filters(tmp_path: Path) -> None:
+    from workbench.data_operations.transforms import _execute_subset
+
+    frame = pd.DataFrame({"id": [1, 2, 3, 4, 5], "value": [1, 5, 6, 7, 8]})
+    result = _execute_subset(frame, {"columns": ["id"], "filters": [{"column": "value", "op": "gt", "value": 1}],
+                                     "exclude_row_indices": [0, 2]})
+    assert result["id"].tolist() == [3, 5]

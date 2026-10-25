@@ -6,6 +6,7 @@ import inspect
 import asyncio
 import contextvars
 import json
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Protocol
@@ -481,6 +482,47 @@ def _wrap_single_strings(definition: "ToolDefinition", arguments: dict[str, Any]
     return wrapped
 
 
+_MARKER = re.compile(r"</?(?:tool_sep|arg_key|arg_value)(?::[^>]*)?>")
+_LEAKED_VALUE = re.compile(r"<arg_value(?::[^>]*)?>(.*?)</arg_value(?::[^>]*)?>", re.S)
+
+
+def _split_leaked_markers(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Arguments a model wrote in its own tool-call markup, split back into fields.
+
+    Hy3 (free-route Auto iv_weak, 2026-10-23) sent update_plan one key
+    ``completion<tool_sep:ID><arg_value:ID>{...}</arg_value:ID><arg_key:ID>completion_evidence``
+    holding the completion_evidence value, and lost the step to the refusal. A key
+    is split only when it parses completely into as many names as values and no
+    name is already present; anything else is left for validation to refuse.
+    """
+
+    def decoded(text: Any) -> Any:
+        if not isinstance(text, str):
+            return text
+        try:
+            value = json.loads(text)
+        except ValueError:
+            return text.strip()
+        return value if isinstance(value, (dict, list)) else text.strip()
+
+    repaired, split = dict(arguments), []
+    for key, last in arguments.items():
+        if not isinstance(key, str) or not _MARKER.search(key):
+            continue
+        values = _LEAKED_VALUE.findall(key)
+        names = [part.strip() for part in _MARKER.split(_LEAKED_VALUE.sub("", key)) if part.strip()]
+        if (len(names) != len(values) + 1 or not all(name.isidentifier() for name in names)
+                or len(set(names)) != len(names) or any(name in repaired for name in names)):
+            continue
+        del repaired[key]
+        repaired.update({name: decoded(value) for name, value in zip(names, [*values, last])})
+        split.extend(names)
+    if split:
+        tool_note("arguments " + ", ".join(split) + " arrived inside tool-call markup in one field name; split into "
+                  "separate fields. Send each argument as its own JSON field.")
+    return repaired
+
+
 def _drop_unused_read_identity(definition: "ToolDefinition", arguments: dict[str, Any]) -> dict[str, Any]:
     schema = definition.input_schema
     if definition.side_effect != "none" or schema.get("additionalProperties") is not False:
@@ -597,7 +639,10 @@ class ToolRegistry:
     async def _execute_defined(self, definition, tool_call, *, session_id, metadata):
         tool_id = str(tool_call.get("tool_id", ""))
         call_id = str(tool_call.get("tool_call_id", ""))
-        arguments = _drop_unused_read_identity(definition, tool_call.get("arguments") or {})
+        arguments = tool_call.get("arguments") or {}
+        if isinstance(arguments, dict):
+            arguments = _split_leaked_markers(arguments)
+        arguments = _drop_unused_read_identity(definition, arguments)
         if definition.normalize is not None and isinstance(arguments, dict):
             arguments = definition.normalize(arguments)
         if isinstance(arguments, dict):

@@ -265,3 +265,43 @@ def test_a_model_option_one_spelling_from_an_accepted_name_is_that_name():
     options = normalized["changes"]["steps"][0]["spec"]["model_options"]
     assert options == {"event_column": "event", "tie_method": "efron"}  # not close enough to 'ties': left to refuse
     assert any("event_col is spelled event_column" in note for note in notes)
+
+
+def _plan_tool(seen):
+    return ToolDefinition(tool_id="plan_y", version="v1", side_effect="proposal",
+        input_schema={"type": "object", "properties": {"question": {"type": "string"}, "completion": {"type": "object"},
+                                                       "completion_evidence": {"type": "object"}},
+                      "additionalProperties": False},
+        handler=lambda arguments, context: seen.setdefault("arguments", arguments) and {"saved": True})
+
+
+def test_arguments_written_in_the_models_own_markup_are_split_back_into_fields():
+    # Hy3, free-route Auto iv_weak (2026-10-23): two update_plan fields fused into one key.
+    seen = {}
+    key = ('completion<tool_sep:6124c78e>\n<arg_value:6124c78e>{"playbooks": ["ols"]}</arg_value:6124c78e>\n'
+           '<arg_key:6124c78e>completion_evidence')
+    result = asyncio.run(_registry(_plan_tool(seen)).execute({"tool_call_id": "c", "tool_id": "plan_y",
+        "arguments": {key: '{"models": [{"run_id": "r", "artifact_id": "ols_1"}]}', "question": "q"}}, session_id="s"))
+    assert result.ok, result
+    assert seen["arguments"] == {"question": "q", "completion": {"playbooks": ["ols"]},
+                                 "completion_evidence": {"models": [{"run_id": "r", "artifact_id": "ols_1"}]}}
+    assert "tool-call markup" in result.output["workbench_notes"][0]
+
+
+def test_markup_that_does_not_parse_into_names_and_values_is_left_for_validation():
+    seen = {}
+    for key in ('completion<tool_sep:1><arg_value:1>{}</arg_value:1>',  # a value without its name
+                'question<tool_sep:1><arg_value:1>x</arg_value:1><arg_key:1>completion'):  # a name already given
+        result = asyncio.run(_registry(_plan_tool(seen)).execute({"tool_call_id": "c", "tool_id": "plan_y",
+            "arguments": {key: "{}", "question": "q"}}, session_id="s"))
+        assert not result.ok and result.error == "invalid_tool_arguments", key
+
+
+def test_nonrobust_covariance_is_the_workbenchs_unadjusted():
+    arguments = _genesis_step({"model_family": "ols", "covariance": "non-robust",
+                               "branches": [{"branch_id": "b", "covariance": "nonrobust", "outcome": "y", "predictors": ["x"]}]})
+    normalized, notes = _normalize(arguments)
+    spec = normalized["changes"]["steps"][0]["spec"]
+    assert spec["covariance"] == "unadjusted" and spec["branches"][0]["covariance"] == "unadjusted"
+    assert arguments["changes"]["steps"][0]["spec"]["branches"][0]["covariance"] == "nonrobust"  # input untouched
+    assert len(notes) == 2 and all("unadjusted" in note for note in notes)

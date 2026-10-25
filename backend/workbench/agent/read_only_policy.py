@@ -36,7 +36,7 @@ class AutoRunDecision:
         return {"allowed": self.allowed, "reason": self.reason, "inferential_steps": self.inferential_steps}
 
 
-_ROW_SELECTIONS = ("filters", "equals", "row_indices", "row_index_range", "row_range")
+_ROW_SELECTIONS = ("filters", "equals", "row_indices", "row_index_range", "row_range", "exclude_row_indices")
 
 
 def _category(step: Mapping[str, Any]) -> str:

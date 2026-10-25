@@ -12,7 +12,7 @@ from typing import Any
 
 #: What an operation result carries of the check: enough to act on, not the evidence catalog.
 DIGEST_FIELDS = ("status", "missing", "next_step", "compose_report", "sensitivity_options", "primary_candidates",
-                 "dropped_references")
+                 "dropped_references", "disclosures")
 
 
 def delivery_check(project_root, plan, *, suggest=False):
@@ -75,7 +75,7 @@ def delivery_lines(digest: dict[str, Any] | None) -> list[str]:
              + (f"; missing: {', '.join(digest['missing'][:8])}" if digest.get("missing") else "") + "."]
     if digest.get("next_step"):
         lines.append("Next step: " + str(digest["next_step"]))
-    for key in ("compose_report", "sensitivity_options", "primary_candidates"):
+    for key in ("compose_report", "sensitivity_options", "primary_candidates", "disclosures"):
         if digest.get(key):
             lines.append(f"{key}: " + json.dumps(digest[key], ensure_ascii=False)[:3000])
     lines.append("This is the same check inspect_analysis_completion returns; call it only for its evidence catalog "

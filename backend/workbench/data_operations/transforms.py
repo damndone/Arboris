@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, Mapping
+import numpy as np
 import pandas as pd
 from ..artifacts import (
     register_artifact,
@@ -196,7 +197,7 @@ def _execute_subset(
     parameters = dict(parameters)
     _reject_unknown_parameters(
         parameters,
-        {"columns", "equals", "filters", "row_indices", "row_index_range", "row_range"},
+        {"columns", "equals", "filters", "row_indices", "row_index_range", "row_range", "exclude_row_indices"},
         "subset",
     )
     columns = _require_string_list(parameters.get("columns"), "subset.columns")
@@ -287,6 +288,28 @@ def _execute_subset(
                 "DATA_SUBSET_ROW_INDEX_INVALID: row_index_range must be a bounded [start, stop) range"
             )
         result = result.iloc[start:stop]
+    excluded = parameters.get("exclude_row_indices")
+    if excluded is not None:
+        # A named leave-out (e.g. high-influence rows): positions are counted
+        # after the filters, like row_indices, and every other row is kept.
+        if row_indices is not None or row_index_range is not None:
+            raise DataColumnCastValidationError(
+                "DATA_SUBSET_ROW_INDEX_INVALID: exclude_row_indices cannot be combined with row_indices or row_index_range"
+            )
+        if (
+            not isinstance(excluded, list)
+            or not excluded
+            or any(type(index) is not int for index in excluded)
+            or len(set(excluded)) != len(excluded)
+            or any(index < 0 or index >= len(result) for index in excluded)
+            or len(excluded) >= len(result)
+        ):
+            raise DataColumnCastValidationError(
+                "DATA_SUBSET_ROW_INDEX_INVALID: exclude_row_indices must be unique, non-negative, in range, and keep at least one row"
+            )
+        keep = np.ones(len(result), dtype=bool)
+        keep[excluded] = False
+        result = result.iloc[keep]
     return result.reset_index(drop=True)
 
 

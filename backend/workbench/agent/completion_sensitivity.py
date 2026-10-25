@@ -32,6 +32,10 @@ SENSITIVITY_NEXT_STEP = (
     'The Workbench binds the new fit as sensitivity; compose the report after it.')
 #: Above this many rows the influence refit is not computed inside the completion check.
 MAX_INFLUENCE_ROWS = 200_000
+INFLUENCE_DISCLOSURE = (
+    'The high-influence refit cannot be computed for this data (see reason). State in the report that the '
+    "influence diagnostic flagged observations, why no leave-out comparison was fitted, and what that means for "
+    'the robustness of the primary estimate.')
 
 
 def _unset(value: Any) -> bool:
@@ -138,8 +142,12 @@ def specification_options(project_root, main_ref, main) -> list[dict[str, Any]]:
 def influence_option(project_root, main_ref, main, threshold) -> dict[str, Any] | None:
     """The primary refitted without the rows whose Cook's distance exceeds the diagnostic's own threshold.
 
-    Rows are named by a column whose values identify them (unique, no missing),
-    so the subset is reviewable; without one, nothing is offered.
+    Rows are named by a column whose values identify them (unique, no missing)
+    so the subset is reviewable; without one, by their zero-based positions in
+    the model's input dataset (Hy3 Auto iv_weak, 2026-10-23: no ID column, no
+    option, and the gate looped). ``None`` when the primary or its dataset
+    cannot be resolved; ``{'unavailable': reason}`` when the data itself rules
+    the refit out, which the gate reports as a disclosure instead of looping.
     """
 
     from ..data_operations import _read_frame, resolve_data_column_cast_context
@@ -156,41 +164,48 @@ def influence_option(project_root, main_ref, main, threshold) -> dict[str, Any] 
     except Exception:
         return None
     used = [branch['outcome'], *branch['predictors']]
-    if len(frame) > MAX_INFLUENCE_ROWS or any(column not in frame for column in used):
+    if any(column not in frame for column in used):
         return None
+    if len(frame) > MAX_INFLUENCE_ROWS:
+        return {'unavailable': 'rows_above_limit'}
     sample = frame.dropna(subset=used)
     try:
         y = sample[branch['outcome']].to_numpy(dtype=float)
         x = np.column_stack([np.ones(len(sample)), sample[branch['predictors']].to_numpy(dtype=float)])
     except (TypeError, ValueError):
-        return None
+        return {'unavailable': 'non_numeric_terms'}
     n, k = x.shape
     if n <= k + 1:
-        return None
+        return {'unavailable': 'degenerate_fit'}
     xtx_inv = np.linalg.pinv(x.T @ x)
     leverage = np.einsum('ij,jk,ik->i', x, xtx_inv, x)
     residuals = y - x @ (xtx_inv @ x.T @ y)
     scale = residuals @ residuals / (n - k)
     if scale <= 0 or np.any(leverage >= 1):
-        return None
+        return {'unavailable': 'degenerate_fit'}
     cooks = residuals ** 2 / (k * scale) * leverage / (1 - leverage) ** 2
     flagged = sample.index[cooks > threshold]
-    if len(flagged) == 0 or len(flagged) >= n - k - 1:
+    if len(flagged) == 0:
         return None
+    if len(flagged) >= n - k - 1:
+        return {'unavailable': 'too_many_flagged'}
     identifier = next((column for column in frame.columns if column not in used
                        and frame[column].notna().all() and frame[column].is_unique
                        and (is_string_dtype(frame[column]) or is_integer_dtype(frame[column]))), None)
-    if identifier is None:
-        return None
-    excluded = [value.item() if hasattr(value, 'item') else value for value in frame.loc[flagged, identifier]]
     refit = {**spec, 'branches': [{**branch, 'branch_id': 'without_high_influence'}],
              'source': {'from_step': 'drop_high_influence', 'output': 'produced_dataset'}}
+    if identifier is not None:
+        excluded = [value.item() if hasattr(value, 'item') else value for value in frame.loc[flagged, identifier]]
+        named, columns = f'{identifier}: ', [str(identifier), *used]
+        subset = {'columns': columns, 'filters': [{'column': identifier, 'op': 'not_in', 'value': excluded}]}
+    else:
+        excluded = sorted(int(position) for position in frame.index.get_indexer(flagged))
+        named = 'zero-based rows: '
+        subset = {'columns': used, 'exclude_row_indices': excluded}
     return {'label': f"the primary specification without the {len(excluded)} rows whose Cook's distance exceeds "
-                     f"{threshold:g} ({identifier}: {', '.join(map(str, excluded[:12]))}"
+                     f"{threshold:g} ({named}{', '.join(map(str, excluded[:12]))}"
                      f"{', ...' if len(excluded) > 12 else ''})",
             'workflow': _workflow(main_ref['run_id'], dataset, [
-                {'step_id': 'drop_high_influence', 'operation_id': 'data.subset',
-                 'spec': {'columns': [str(identifier), *used],
-                          'filters': [{'column': identifier, 'op': 'not_in', 'value': excluded}]}},
+                {'step_id': 'drop_high_influence', 'operation_id': 'data.subset', 'spec': subset},
                 {'step_id': 'sensitivity', 'operation_id': 'model.genesis', 'depends_on': ['drop_high_influence'],
                  'spec': refit}])}

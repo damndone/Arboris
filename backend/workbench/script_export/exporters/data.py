@@ -68,6 +68,13 @@ def subset(step,ctx):
         if l=='python': lines.append(f'{d} = {d}.iloc[{start}:{stop}].copy()')
         elif l=='r': lines.append(f'{d} <- {d}[seq_len(nrow({d}))>{start} & seq_len(nrow({d}))<={stop},,drop=FALSE]')
         else: lines.append(f'keep if _n > {start} & _n <= {stop}')
+    if p.get('exclude_row_indices') is not None:
+        ids=p['exclude_row_indices']
+        if not ids or any(type(i) is not int or i<0 for i in ids) or len(set(ids))!=len(ids): refuse('Invalid excluded row indices')
+        if l=='python': lines.append(f'{d} = {d}.drop({d}.index[{sorted(ids)!r}]).copy()')
+        elif l=='r': lines.append(f'{d} <- {d}[-{literal(sorted(i+1 for i in ids),l)},,drop=FALSE]')
+        # Highest position first, so each drop leaves the remaining positions unchanged.
+        else: lines += [f'drop in {i+1}' for i in sorted(ids, reverse=True)]
     if l=='python': lines.append(f'{d} = {d}.reset_index(drop=True)')
     return lines
 

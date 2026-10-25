@@ -30,14 +30,13 @@ def _leverage_frame():
     return pd.DataFrame({'city': [f'city_{i}' for i in range(80)], 'density': x.round(3), 'rent': y.round(3)})
 
 
-@pytest.fixture
-def fitted(tmp_path):
+def _fit(tmp_path, frame):
     from workbench.orchestrator import run_workflow
     from workbench.projects import create_project
 
     project = create_project(tmp_path, 'leverage')
     source = tmp_path / 'leverage.csv'
-    _leverage_frame().to_csv(source, index=False)
+    frame.to_csv(source, index=False)
     result = run_workflow(project.root, [source], mode='auto', model_type='ols', y='rent', x=['density'],
                           covariance='robust')
     assert result['status'] == 'completed', result
@@ -46,6 +45,11 @@ def fitted(tmp_path):
     contract = {'playbooks': ['ols'], 'source': {'run_id': run_id, 'artifact_id': 'cleaned_dataset',
                                                 'sha256': hashlib.sha256(data.read_bytes()).hexdigest()}}
     return project.root, run_id, contract
+
+
+@pytest.fixture
+def fitted(tmp_path):
+    return _fit(tmp_path, _leverage_frame())
 
 
 def _check(project, contract):
@@ -66,6 +70,14 @@ def test_the_offered_influence_refit_meets_both_sensitivity_requirements(fitted,
     assert {'city_0', 'city_1', 'city_2'} <= set(rule['value'])
     assert refit['spec']['branches'][0]['predictors'] == ['density'] and refit['spec']['covariance'] == 'robust'
 
+    assert _run_option(project, run_id, option, tmp_path).status == 'completed'
+    checked, notes = _check(project, contract)
+    # The refit on the subset is a variant of the fit on the source, which stays primary.
+    assert checked['missing'] == ['report:registered_nonempty'], checked['missing']
+    assert 'ols:primary' in notes['bound_by_workbench'] and 'sensitivity_options' not in checked
+
+
+def _run_option(project, run_id, option, tmp_path):
     async def run_option():
         from workbench.agent.chains import ChainStore
         from workbench.agent.context_tools import NodeOperationContextProvider
@@ -96,11 +108,7 @@ def test_the_offered_influence_refit_meets_both_sensitivity_requirements(fitted,
         return await orchestrator.execute_confirmed_operation(record.record_id, project_root=project,
             current_context_fingerprint=fingerprint, current_active_head_run_id=run_id)
 
-    assert asyncio.run(run_option()).status == 'completed'
-    checked, notes = _check(project, contract)
-    # The refit on the subset is a variant of the fit on the source, which stays primary.
-    assert checked['missing'] == ['report:registered_nonempty'], checked['missing']
-    assert 'ols:primary' in notes['bound_by_workbench'] and 'sensitivity_options' not in checked
+    return asyncio.run(run_option())
 
 
 def _write_form(project, run_id, **form):
@@ -128,7 +136,7 @@ def test_a_specification_it_cannot_copy_exactly_gets_no_options(fitted):
     assert specification_options(project, {'run_id': run_id, 'artifact_id': 'ols_1'}, {'model_id': 'ols_1'}) == []
 
 
-def test_rows_are_excluded_only_by_a_column_that_identifies_them(fitted):
+def test_rows_are_named_by_an_identifying_column_or_else_by_position(fitted):
     project, run_id, _ = fitted
     path = next((project / 'runs' / run_id / 'processed').glob('cleaned_dataset.*'))
     frame = pd.read_parquet(path).assign(city='same')
@@ -139,4 +147,28 @@ def test_rows_are_excluded_only_by_a_column_that_identifies_them(fitted):
         if item.get('path') == str(path.relative_to(project / 'runs' / run_id)):
             item['sha256'] = hashlib.sha256(path.read_bytes()).hexdigest()
     index.write_text(json.dumps(data))
-    assert influence_option(project, {'run_id': run_id, 'artifact_id': 'ols_1'}, {'model_id': 'ols_1'}, 0.05) is None
+    # Without an identifying column the rows are named by position (Hy3 Auto iv_weak looped on no option).
+    option = influence_option(project, {'run_id': run_id, 'artifact_id': 'ols_1'}, {'model_id': 'ols_1'}, 0.05)
+    subset = option['workflow']['steps'][0]['spec']
+    assert 'filters' not in subset and subset['columns'] == ['rent', 'density']
+    assert {0, 1, 2} <= set(subset['exclude_row_indices']) and 'zero-based rows: 0, 1, 2' in option['label']
+
+
+def test_a_refit_the_data_rules_out_becomes_a_disclosure_not_a_loop(fitted, monkeypatch):
+    project, run_id, contract = fitted
+    monkeypatch.setattr('workbench.agent.completion_sensitivity.MAX_INFLUENCE_ROWS', 10)
+    checked, _ = _check(project, contract)
+    assert 'ols:sensitivity:influence_sample_comparison' not in checked['missing']
+    assert checked['disclosures'] == [{'requirement': 'ols:sensitivity:influence_sample_comparison',
+                                       'reason': 'rows_above_limit', 'action': checked['disclosures'][0]['action']}]
+    assert 'ols:sensitivity:distinct_point_estimation' in checked['missing']
+
+
+def test_the_offered_positional_refit_meets_the_influence_requirement(tmp_path):
+    project, run_id, contract = _fit(tmp_path, _leverage_frame().drop(columns='city'))
+    checked, _ = _check(project, contract)
+    option = checked['sensitivity_options'][0]
+    assert option['workflow']['steps'][0]['spec']['exclude_row_indices'][:3] == [0, 1, 2]
+    assert _run_option(project, run_id, option, tmp_path).status == 'completed'
+    checked, _ = _check(project, contract)
+    assert checked['missing'] == ['report:registered_nonempty'], checked['missing']

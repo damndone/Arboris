@@ -125,6 +125,7 @@ def test_data_operation_native_oracle(operation, language):
 EDGE_CASES = (
  ('subset',pd.DataFrame({'id':[1,2,3,4],'x':[None,2.,8.,9.]}),{'columns':['id','x'],'filters':[{'column':'x','op':'gt','value':5}]},None),
  ('subset',pd.DataFrame({'id':[1,2,3,4],'x':[1.,2.,8.,9.]}),{'columns':['x','id'],'row_indices':[3,1]},None),
+ ('subset',pd.DataFrame({'id':[1,2,3,4,5],'x':[1.,2.,8.,9.,4.]}),{'columns':['id','x'],'filters':[{'column':'x','op':'gt','value':1}],'exclude_row_indices':[3,0]},None),
  ('dedupe',pd.DataFrame({'id':[2,1,2,1],'x':[1.,2.,3.,4.]}),{'columns':['id'],'keep':'last'},None),
  ('recode',pd.DataFrame({'x':[1.,2.,3.,None]}),{'column':'x','output':'code','rules':[{'from':{'low':1,'high':2},'to':10},{'from':2,'to':20},{'from':'missing','to':-1},{'from':'else','to':'copy'}]},None),
  ('rename',pd.DataFrame({'a':[1.,2.],'b':[3.,4.]}),{'mapping':{'a':'b','b':'a'}},None),

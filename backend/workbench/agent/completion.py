@@ -12,7 +12,7 @@ from typing import Any
 
 from ..canonical import sha256_canonical
 from .context_compiler import read_completion_artifact, read_completion_dataset_source, read_arima_completion_product, read_garch_completion_product, completion_candidate_refs
-from .completion_sensitivity import MAX_OPTIONS, SENSITIVITY_NEXT_STEP, influence_option, specification_options
+from .completion_sensitivity import INFLUENCE_DISCLOSURE, MAX_OPTIONS, SENSITIVITY_NEXT_STEP, influence_option, specification_options
 from .completion_profiles import NATIVE_COMPANIONS, companion_model, native_diagnostics, native_findings, verified_iv_ar, with_iv_ar
 
 VERSION = 'analysis-completion/v1'
@@ -243,6 +243,7 @@ def evaluate(project_root, contract, evidence, *, suggest=False, options=False):
               for key in ('models', 'diagnostics', 'sensitivity')}
     repairs = []
     sensitivity_options = []
+    disclosures = []
 
     def bound(ref):
         return source is not None and any(a.sha256 == source.sha256 for a in products.ancestors(ref))
@@ -284,13 +285,20 @@ def evaluate(project_root, contract, evidence, *, suggest=False, options=False):
             missing.append(f'{family}:sensitivity:distinct_point_estimation')
         influential = [v['cooks_distance'] for v in diagnostic_values if (v.get('cooks_distance') or {}).get('n_high', 0) > 0]
         influence_missing = False
+        offered = []
         if family == 'ols' and influential:
             sample = main.get('analysis_sample_fingerprint')
             if not sample or not any(a.get('analysis_sample_fingerprint') and a['analysis_sample_fingerprint'] != sample for a in comparisons):
-                missing.append('ols:sensitivity:influence_sample_comparison')
-                influence_missing = True
+                option = influence_option(project_root, main_ref, main, influential[0].get('threshold')) if main_ref else None
+                if option and 'unavailable' in option:
+                    # The data rules the refit out: the report states why instead of the gate looping.
+                    disclosures.append({'requirement': 'ols:sensitivity:influence_sample_comparison',
+                                        'reason': option['unavailable'], 'action': INFLUENCE_DISCLOSURE})
+                else:
+                    missing.append('ols:sensitivity:influence_sample_comparison')
+                    influence_missing = True
+                    offered = [option]
         if (suggest or options) and main_ref and (influence_missing or not comparisons):
-            offered = [influence_option(project_root, main_ref, main, influential[0].get('threshold'))] if influence_missing else []
             if not comparisons:
                 offered += specification_options(project_root, main_ref, main)
             sensitivity_options.extend(option for option in offered if option)
@@ -320,6 +328,8 @@ def evaluate(project_root, contract, evidence, *, suggest=False, options=False):
         result['repair_steps'] = repairs
     if sensitivity_options:
         result['sensitivity_options'] = sensitivity_options[:MAX_OPTIONS]
+    if disclosures:
+        result['disclosures'] = disclosures
     return result
 
 
