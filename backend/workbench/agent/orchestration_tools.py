@@ -417,13 +417,19 @@ class OrchestrationTools:
 
         async def update_plan(arguments: dict[str, Any], context) -> dict[str, Any]:
             from . import plans as plan_module
-            from .completion import source_receipt
+            from .completion import source_receipt, enforce_request_scope
 
             if context.session_id != session_id:
                 raise ValueError("tool session is outside the registered chain scope")
             try:
                 completion = arguments.get("completion")
                 if completion is not None:
+                    requested = enforce_request_scope({'scope': completion.get('scope', 'analysis'),
+                        'target': completion.get('target'), 'status': 'requirements_met', 'missing': []},
+                        _agent._last_person_text())
+                    if requested['missing']:
+                        raise plan_module.PlanError('Completion contract conflicts with the user request: '
+                            + ', '.join(requested['missing']) + '. Keep full-analysis requirements and the requested estimand; do not narrow the plan question.')
                     root = getattr(self.context_provider, "project_root", self.repository.root.parent)
                     given = completion["source"]
                     receipt = source_receipt(root, {"run_id": given["run_id"], "artifact_id": given["artifact_id"]})

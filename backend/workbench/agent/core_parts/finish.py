@@ -77,9 +77,9 @@ class FinishMixin:
         """An interrupted publication must not reuse an obsolete evidence check."""
         if self.completion_check is None:
             return payload, entry
-        from ..completion import publication, partial_notice
+        from ..completion import publication, partial_notice, enforce_request_scope
 
-        result = self.completion_check()
+        result = enforce_request_scope(self.completion_check(), getattr(self, '_user_text', ''))
         if result == payload.get("completion_check"):
             return payload, entry
         language = detect_language(getattr(self, "_user_text", None))

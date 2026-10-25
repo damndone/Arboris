@@ -29,6 +29,27 @@ class Adapter:
         yield ModelStreamEvent.done(request.request_id)
 
 
+def test_focused_answer_review_receives_the_actual_computed_evidence(tmp_path):
+    from tests.test_agent_completion import artifact
+    from workbench.agent.plans import Plan
+    from workbench.agent.research_review import build_context
+    from workbench.llm.config import LLMConfig
+
+    source, digest = artifact(tmp_path, 'q', 'data', 'processed_data', {})
+    result, _ = artifact(tmp_path, 'q', 'summary', 'statistical_exploration', {
+        'schema_version': 'statistical-exploration.v1', 'result': {'operation': 'tabulate',
+            'weighted_count': 10, 'variables': {'category': {'distinct': 2}}, 'rows': [{'private': 'value'}]}}, ['data'])
+    plan = Plan(plan_id='p', version=1, status='draft', question='Classify this variable.', criteria=(),
+                steps=(), allowed_classes=(), completion={'scope': 'question', 'playbooks': [],
+                    'source': {**source, 'sha256': digest}}, completion_evidence={'results': [result]})
+    context = build_context(tmp_path, plan, mode='ask', candidate='It is categorical.',
+                            config=LLMConfig(base_url='http://127.0.0.1', api_key='test', model='offline'))
+    assert context['complete_packet']
+    assert 'result:0' in context['evidence_keys']
+    assert context['packet']['results'][0]['summary']['result']['weighted_count'] == 10
+    assert 'private' not in json.dumps(context['packet'])
+
+
 def wire(core, *, mode='auto'):
     core.research_review_mode = lambda: mode
     from workbench.agent.research_review import restore_phase

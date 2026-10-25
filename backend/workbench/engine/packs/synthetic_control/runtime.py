@@ -108,14 +108,29 @@ def _fit_weights(target: np.ndarray, donor_matrix: np.ndarray, policy: Mapping[s
     donor_count = donor_matrix.shape[0]
     start = np.full(donor_count, 1.0 / donor_count)
     objective = lambda weights: float(np.sum((target - weights @ donor_matrix) ** 2))
+    # Center before scaling: adding a common level or changing units must not
+    # turn a nonoptimal uniform start into SLSQP's reported success.
+    differences = donor_matrix - target
+    # A zero residual design already has optimum zero for every feasible
+    # weight. Unit scale preserves that exact objective without division by 0.
+    scale = float(np.max(np.abs(differences))) or 1.0
+    design = differences / scale
+    def loss(weights):
+        residual = weights @ design
+        return float(residual @ residual / 2)
+    def gradient(weights):
+        return design @ (weights @ design)
     try:
         fit = minimize(
-            objective,
+            loss,
             start,
             method="SLSQP",
+            jac=gradient,
             bounds=[(0.0, 1.0)] * donor_count,
-            constraints={"type": "eq", "fun": lambda weights: float(np.sum(weights) - 1.0)},
-            options={"ftol": float(policy["tolerance"]), "maxiter": int(policy["max_iter"])},
+            constraints={"type": "eq", "fun": lambda weights: float(np.sum(weights) - 1.0),
+                         "jac": lambda weights: np.ones(donor_count)},
+            options={"ftol": min(float(policy["tolerance"]), float(policy['constraint_tolerance']) ** 2),
+                     "maxiter": int(policy["max_iter"])},
         )
     except (ArithmeticError, FloatingPointError, ValueError, np.linalg.LinAlgError) as exc:
         raise SyntheticControlPackError("SYNTHETIC_CONTROL_NUMERICAL_FAILURE", f"simplex solver failed: {exc}") from exc
@@ -126,7 +141,16 @@ def _fit_weights(target: np.ndarray, donor_matrix: np.ndarray, policy: Mapping[s
         _fail("SYNTHETIC_CONTROL_CONSTRAINT_FAILURE", "simplex weights violate declared bounds")
     weights = np.clip(weights, 0.0, 1.0)
     weights /= weights.sum()
-    return weights, {"success": True, "iterations": int(getattr(fit, "nit", 0) or 0), "objective": objective(weights)}
+    # Convex SSE on the simplex: g'w - min(g) bounds the normalized
+    # suboptimality from above. Check the final weights, not fit.success alone.
+    grad = gradient(weights)
+    gap = float(grad @ weights - np.min(grad))
+    if not np.isfinite(gap) or gap > float(policy['constraint_tolerance']):
+        _fail('SYNTHETIC_CONTROL_OPTIMALITY_FAILURE',
+              f'simplex optimality is unverified: normalized duality gap {gap}; no result was accepted')
+    return weights, {"success": True, "iterations": int(getattr(fit, "nit", 0) or 0), "objective": objective(weights),
+                     'optimality_verified': True, 'simplex_duality_gap': gap,
+                     'optimality_tolerance': float(policy['constraint_tolerance']), 'objective_scale': scale}
 
 
 def _fit_core(outcomes: np.ndarray, labels: list[str], periods: list[int | float], treated_unit: str, donor_pool: Sequence[str], pre_periods: Sequence[int | float], post_periods: Sequence[int | float], solver_policy: Mapping[str, Any], tolerance_policy: Mapping[str, Any]) -> dict[str, Any]:

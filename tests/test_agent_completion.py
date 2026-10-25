@@ -228,6 +228,147 @@ def test_no_contract_does_not_silently_certify_a_completion_claim(tmp_path):
     assert answer.startswith('Partially complete') and 'dataset source' in answer
 
 
+def test_focused_question_verifies_its_result_without_an_unrequested_model(tmp_path):
+    source, digest = artifact(tmp_path, 'q', 'data', 'processed_data', {'fixture': 'category table'})
+    result, _ = artifact(tmp_path, 'q', 'summary', 'statistical_exploration', {
+        'schema_version': 'statistical-exploration.v1', 'result': {
+            'operation': 'tabulate', 'rows': [{'value': 'red', 'count': 7}, {'value': 'blue', 'count': 3}]}}, ['data'])
+    contract = {'scope': 'question', 'playbooks': [], 'source': {**source, 'sha256': digest}}
+    check = api().evaluate(tmp_path, contract, {'results': [result]})
+    assert check['status'] == 'requirements_met' and check['scope'] == 'question'
+    assert api().publication('Answer: categorical. FINAL ANSWER: categorical', check, 'en',
+                             request_text='Classify the recorded variable.') .endswith('categorical')
+    assert api().evaluate(tmp_path, contract, {})['status'] == 'partial'
+    (tmp_path / 'runs/q/summary.json').write_text('{}')
+    assert api().evaluate(tmp_path, contract, {'results': [result]})['status'] == 'partial'
+
+
+def test_focused_scope_cannot_satisfy_a_full_analysis_request(tmp_path):
+    checked = api().enforce_request_scope({'scope': 'question', 'status': 'requirements_met', 'missing': []},
+                                         'Perform the full analysis, diagnostics and report.')
+    assert checked['status'] == 'partial'
+    assert checked['missing'] == ['task_scope:full_analysis_required']
+    contract, evidence = fixture(tmp_path)
+    assert api().evaluate(tmp_path, contract, {'models': evidence['models']})['status'] == 'partial'
+
+
+@pytest.mark.parametrize('problem', ['foreign', 'failed', 'missing', 'empty'])
+def test_focused_question_rejects_bad_evidence_even_alongside_a_valid_result(tmp_path, problem):
+    source, digest = artifact(tmp_path, 'q', 'data', 'processed_data', {})
+    valid, _ = artifact(tmp_path, 'q', 'valid', 'statistical_exploration', {
+        'schema_version': 'statistical-exploration.v1', 'result': {'operation': 'tabulate', 'rows': [{'count': 3}]}}, ['data'])
+    payload = {'schema_version': 'statistical-exploration.v1', 'result': {'operation': 'tabulate'}}
+    if problem == 'failed':
+        payload['result']['status'] = 'failed'
+    if problem == 'empty':
+        payload['result'] = {}
+    invalid, _ = artifact(tmp_path, 'q', 'invalid', 'statistical_exploration', payload,
+                          [] if problem == 'foreign' else ['data'])
+    if problem == 'missing':
+        invalid['artifact_id'] = 'absent'
+    contract = {'scope': 'question', 'playbooks': [], 'source': {**source, 'sha256': digest}}
+    assert api().evaluate(tmp_path, contract, {'results': [valid, invalid]})['status'] == 'partial'
+
+
+def test_focused_question_offline_turn_preserves_answer_and_cannot_downgrade_full_request(tmp_path):
+    from tests.test_numeric_grounding import _agent
+    source, digest = artifact(tmp_path, 'q', 'data', 'processed_data', {})
+    result, _ = artifact(tmp_path, 'q', 'summary', 'statistical_exploration', {
+        'schema_version': 'statistical-exploration.v1', 'result': {'operation': 'tabulate', 'rows': [{'count': 3}]}}, ['data'])
+    contract = {'scope': 'question', 'playbooks': [], 'source': {**source, 'sha256': digest}}
+    for question, allowed in [('Classify this variable.', True), ('Perform the full analysis.', False)]:
+        agent, _, _, _ = _agent(tmp_path / str(allowed), ['Answer: categorical. FINAL ANSWER: categorical'])
+        agent.completion_check = lambda: api().evaluate(tmp_path, contract, {'results': [result]})
+        answer = asyncio.run(agent.prompt(question))
+        assert answer.startswith('Partially complete') != allowed
+        if allowed:
+            assert 'FINAL ANSWER: categorical' in answer
+
+
+def test_question_contract_schema_is_explicit_and_does_not_change_legacy_analysis():
+    from jsonschema import Draft202012Validator
+    validator = Draft202012Validator(api().CONTRACT_SCHEMA)
+    source = {'run_id': 'r', 'artifact_id': 'data', 'sha256': 'a' * 64}
+    assert validator.is_valid({'scope': 'question', 'playbooks': [], 'source': source})
+    assert not validator.is_valid({'playbooks': [], 'source': source})
+    assert not validator.is_valid({'scope': 'question', 'playbooks': ['ols'], 'source': source})
+
+
+def test_question_contract_roundtrips_through_the_actual_plan_tools(tmp_path):
+    from tests.test_read_only_analysis import _Fixture
+    source, digest = artifact(tmp_path, 'q', 'data', 'processed_data', {})
+    result, _ = artifact(tmp_path, 'q', 'summary', 'statistical_exploration', {
+        'schema_version': 'statistical-exploration.v1', 'result': {'operation': 'tabulate', 'rows': [{'count': 3}]}}, ['data'])
+    runtime = _Fixture(tmp_path / 'runtime')
+    runtime.orchestrator.context_provider.project_root = tmp_path
+    registry = runtime.orchestrator.tool_registry('chain-a')
+    call = {'tool_call_id': 'plan', 'tool_id': 'update_plan', 'arguments': {
+        'question': 'Classify the variable.',
+        'steps': [{'step_id': 'summary', 'title': 'Tabulate', 'operation_ids': ['statistical.explore']}],
+        'completion': {'scope': 'question', 'playbooks': [], 'source': source},
+        'completion_evidence': {'results': [result]}}}
+    saved = asyncio.run(registry.execute(call, session_id='chain-session'))
+    assert saved.ok and saved.output['saved'], saved
+    assert saved.output['plan']['completion']['source']['sha256'] == digest
+    check = asyncio.run(registry.execute({'tool_call_id': 'check', 'tool_id': 'inspect_analysis_completion',
+                                         'arguments': {}}, session_id='chain-session'))
+    assert check.ok and check.output['status'] == 'requirements_met', check
+
+
+def test_model_cannot_reword_a_full_user_request_into_a_question_contract(tmp_path):
+    from tests.test_read_only_analysis import _Fixture
+    runtime = _Fixture(tmp_path)
+    runtime.repository.append('chain-session', 'message', {'role': 'user', 'content': 'Perform the full analysis.'})
+    registry = runtime.orchestrator.tool_registry('chain-a')
+    saved = asyncio.run(registry.execute({'tool_call_id': 'plan', 'tool_id': 'update_plan', 'arguments': {
+        'question': 'Only classify a variable.',
+        'steps': [{'step_id': 'summary', 'title': 'Tabulate', 'operation_ids': ['statistical.explore']}],
+        'completion': {'scope': 'question', 'playbooks': [], 'source': {
+            'run_id': runtime.run_id, 'artifact_id': runtime.artifact_id}}}}, session_id='chain-session'))
+    assert saved.ok and not saved.output['saved']
+    assert 'task_scope:full_analysis_required' in saved.output['error']
+
+
+@pytest.mark.parametrize('estimand,matching', [('ATT', True), ('ATC', False), ('ATE', False)])
+def test_delivery_binds_the_requested_estimand_not_an_approximate_regression(tmp_path, estimand, matching):
+    source, digest = artifact(tmp_path, 'r', 'data', 'processed_data', {})
+    matched, _ = artifact(tmp_path, 'r', 'matched', 'p7_analysis', {
+        'schema_version': 'workbench.workflow.p7-pack/v1',
+        'source': {'operation_id': 'matching.att', 'sha256': digest},
+        'result': {'operation_id': 'matching.att', 'status': 'completed',
+                   'result': {'estimand': 'ATT', 'att': .4, 'causal_claim_eligible': True,
+                              'matching_policy': {'outcome_column': 'y', 'treatment_column': 'treated'}}}}, ['data'])
+    contract = {'scope': 'question', 'playbooks': [], 'source': {**source, 'sha256': digest},
+                'target': {'estimand': estimand, 'outcome': 'y', 'treatment': 'treated'}}
+    checked = api().evaluate(tmp_path, contract, {'results': [matched]})
+    assert (checked['status'] == 'requirements_met') == matching
+    _, evidence = fixture(tmp_path / 'ols')
+    ols_contract, _ = fixture(tmp_path / 'ols')
+    ols_contract['target'] = contract['target']
+    assert api().evaluate(tmp_path / 'ols', ols_contract, evidence)['status'] == 'partial'
+
+
+def test_request_for_atc_cannot_be_downgraded_by_omitting_the_target():
+    checked = api().enforce_request_scope({'status': 'requirements_met', 'missing': []}, 'Estimate the ATC.')
+    assert checked['status'] == 'partial' and 'target:requested_estimand_unbound' in checked['missing']
+
+
+def test_full_analysis_report_must_cover_its_target_result_too(tmp_path):
+    contract, evidence = fixture(tmp_path)
+    matched, _ = artifact(tmp_path, 'r', 'matched', 'p7_analysis', {
+        'schema_version': 'workbench.workflow.p7-pack/v1',
+        'source': {'operation_id': 'matching.att', 'sha256': contract['source']['sha256']},
+        'result': {'operation_id': 'matching.att', 'status': 'completed', 'result': {
+            'estimand': 'ATT', 'att': .4, 'causal_claim_eligible': True,
+            'matching_policy': {'outcome_column': 'y', 'treatment_column': 'treated'}}}}, ['data'])
+    contract['target'] = {'estimand': 'ATT', 'outcome': 'y', 'treatment': 'treated'}
+    evidence['results'] = [matched]
+    assert api().evaluate(tmp_path, contract, evidence)['missing'] == ['report:result_sources']
+    derived, notes = api().derive_evidence(tmp_path, contract, evidence)
+    assert derived['results'] == [matched]
+    assert {**matched, 'role': 'diagnostic'} in notes['compose_report']['spec']['result_refs']
+
+
 def test_product_registration_and_plan_tool_share_the_final_gate(tmp_path):
     from tests.test_read_only_analysis import _Fixture
     contract, evidence = fixture(tmp_path / 'project')

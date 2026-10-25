@@ -149,6 +149,7 @@ Subset rows and columns with closed comparison operators. Example spec: {"column
 | `filters` |  | ANDed closed filters with column, op, and operator value. |
 | `equals` |  | Legacy equality map retained for compatibility. |
 | `row_indices` |  | Explicit zero-based row indices. |
+| `exclude_row_indices` |  | Zero-based row indices to leave out; every other row is kept. |
 | `row_index_range` |  | Bounded half-open row range. |
 | `row_range` |  | Legacy alias for row_index_range. |
 
@@ -938,7 +939,7 @@ One exploration over the source table: summarize / summarize_detail / misstable 
 | `operation` | yes | summarize \| summarize_detail \| misstable \| tabulate \| corr. summarize/summarize_detail cover numeric columns and list the others as non_numeric_columns; tabulate gives frequency tables for any column (use it for categorical variables). |
 | `selected_columns` |  | List of column names to analyse. NOT `columns`. |
 | `filters` |  | List of {column, operator, value}; combined with AND. |
-| `options` |  | Operation options. Grouping lives HERE as options.group_by (a column name), never at the top level. options.group_values is optional and defaults to every observed value of that column. |
+| `options` |  | Operation options. Grouping lives HERE as options.group_by (a column name), never at the top level. options.group_values is optional and defaults to every observed value of that column. For tabulate, options.frequency_weight names explicit nonnegative integer counts; counts/percentages then refer to represented individuals, not stored rows. Never infer weights from column names. |
 | `plots` |  | List of {x_column, y_column}; presence makes this a scatter step. |
 | `missing_policy` |  | listwise \| variablewise. |
 

@@ -553,7 +553,9 @@ def base_workflow_step_contracts() -> dict[str, StepSpecContract]:
                 "options": (
                     "Operation options. Grouping lives HERE as options.group_by "
                     "(a column name), never at the top level. options.group_values "
-                    "is optional and defaults to every observed value of that column."
+                    "is optional and defaults to every observed value of that column. "
+                    "For tabulate, options.frequency_weight names explicit nonnegative integer counts; "
+                    "counts/percentages then refer to represented individuals, not stored rows. Never infer weights from column names."
                 ),
                 "plots": "List of {x_column, y_column}; presence makes this a scatter step.",
                 "missing_policy": "listwise | variablewise.",

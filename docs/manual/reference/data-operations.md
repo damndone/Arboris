@@ -123,6 +123,7 @@ Subset rows and columns with closed comparison operators.
 | `filters` |  | ANDed closed filters with column, op, and operator value. |
 | `equals` |  | Legacy equality map retained for compatibility. |
 | `row_indices` |  | Explicit zero-based row indices. |
+| `exclude_row_indices` |  | Zero-based row indices to leave out; every other row is kept. |
 | `row_index_range` |  | Bounded half-open row range. |
 | `row_range` |  | Legacy alias for row_index_range. |
 

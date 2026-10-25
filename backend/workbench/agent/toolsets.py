@@ -101,7 +101,8 @@ def build_chain_tool_registry(
         max_output_budget=12_000,
         input_schema=INSPECT_SCHEMA,
         handler=inspect_analysis_completion,
-        description="Recheck the current plan against registered source, fitted models, computed diagnostics, "
+        description="Recheck the plan's delivery scope and target: a focused question needs its source-bound computed "
+                    "answer; a full analysis still needs fitted models, computed diagnostics, "
                     "distinct sensitivity fits and a source-bound report. Missing evidence means partial; "
                     "requirements met does not certify scientific validity. Optionally pass a source artifact reference "
                     "to discover its verified dataset sha256 before declaring the plan. Read-only; no model call."

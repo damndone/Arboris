@@ -678,6 +678,9 @@ def _run_workflow(
     from ..model_options import canonicalize_model_options
     from ..services.run_service import _normalize_labels
 
+    if mode == 'import' and (y or x or model_type != 'auto' or model_options or imputation or statistical_tests or by_group):
+        raise ValueError('Import-only runs cannot include estimation, imputation or testing requests; import first, then propose the analysis.')
+
     normalized_model_options = canonicalize_model_options(
         {} if model_options is None else model_options
     )
@@ -813,11 +816,25 @@ def _run_workflow(
         "max_missing_rate": getattr(config, "max_missing_rate", 0.4),
         "run_timeout_s": getattr(config, "run_timeout_s", 1800.0),
     }
+    # Import is the same ingestion/cleaning/profile path, with no prerequisite
+    # regression or model-sample validation. It creates data evidence, not a fit.
+    pipeline = [stage for stage in PIPELINE if stage.name in {'source', 'cleaning', 'profiling'}] if mode == 'import' else PIPELINE
     ctx = run_pipeline_traced(
-        PIPELINE, ctx, env, form=form, config=cfg,
+        pipeline, ctx, env, form=form, config=cfg,
         force_full=flags.force_full_recompute() or not flags.incremental_cache(),
         upload_hash=upload_hash,
     )
+    if mode == 'import':
+        from ..graph_model import Stage
+
+        _recorder.record_stage(node_id='stage:cleaned', display_label='Imported dataset',
+                               payload_ref='processed/cleaned_dataset.parquet', stage=Stage.CLEAN,
+                               summary=f'{len(ctx.data.frame)} rows × {len(ctx.data.frame.columns)} cols')
+        _recorder.record_edge(edge_id='raw:cleaned', source_id='stage:raw', target_id='stage:cleaned', op='clean')
+        _recorder.flush()
+        _write_manifest(run_root, run_id, mode, 'completed', _lineage(input_files),
+                        started_at=started_at, y='', x=[], requested_model_type='auto')
+        ctx.terminal_status = 'completed'
     return {"run_id": run_id, "status": ctx.terminal_status}
 
 

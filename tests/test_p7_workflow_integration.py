@@ -91,6 +91,35 @@ def test_p7_step_uses_generic_runtime_and_persists_provenance(tmp_path) -> None:
     assert projected[0]["result"] == payload["result"]
 
 
+def test_real_matching_result_satisfies_only_its_own_source_bound_estimand(tmp_path):
+    from tests.test_matching_pack import _frame, _policy
+    from workbench.agent.completion import evaluate
+
+    frame = _frame()
+    project, run_id, source_id = _source_project(tmp_path, frame)
+    options = {key: value for key, value in _policy().items()
+               if key not in {'treatment_column', 'outcome_column', 'covariate_columns', 'id_column'}}
+    draft = compile_workflow(workflow_id='matching-target',
+        target={'run_id': run_id, 'node_ref': 'stage:source', 'artifact_id': source_id},
+        preconditions={'context_version': 'node-operation-context/v1', 'context_fingerprint': 'sha256:target',
+                       'active_head_run_id': run_id, 'owner_resolution': 'single_candidate'},
+        steps=[{'step_id': 'match', 'operation_id': 'matching.att', 'spec': {
+            'input_mode': 'frame', 'column_bindings': {'treatment': 'treated', 'outcome': 'outcome',
+                                                     'covariates': ['x', 'z'], 'id': 'unit'},
+            'options': options}}], available_columns=list(frame.columns))
+    state = WorkflowExecutor(project).execute(draft, build_workflow_step_executor(project, draft))
+    assert state.status == 'completed', state.steps['match'].error
+    contract = {'scope': 'question', 'playbooks': [],
+                'source': {'run_id': run_id, 'artifact_id': source_id,
+                           'sha256': sha256_file(project / 'runs' / run_id / 'data.csv')},
+                'target': {'estimand': 'ATT', 'outcome': 'outcome', 'treatment': 'treated'}}
+    evidence = {'results': [{'run_id': run_id, 'artifact_id': state.steps['match'].artifact_ids[0]}]}
+    assert evaluate(project, contract, evidence)['status'] == 'requirements_met'
+    for target in [{'estimand': 'ATC', 'outcome': 'outcome', 'treatment': 'treated'},
+                   {'estimand': 'ATT', 'outcome': 'another_outcome', 'treatment': 'treated'}]:
+        assert evaluate(project, {**contract, 'target': target}, evidence)['status'] == 'partial'
+
+
 def test_p7_failed_result_fails_workflow_instead_of_false_success(
     tmp_path, monkeypatch
 ) -> None:

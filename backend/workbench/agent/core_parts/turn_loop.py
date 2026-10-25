@@ -225,11 +225,11 @@ class TurnLoopMixin:
         elif finish_reason == "error" and content.strip() and error not in {"aborted", "tool_runtime_unavailable"}:
             content = f"{content}\n\n{interrupted_reply_note(detect_language(getattr(self, '_user_text', None)))}"
         completion_result = None
-        from ..completion import claims_completion, publication
+        from ..completion import claims_completion, publication, enforce_request_scope
         if (self.completion_check is not None and content.strip()
                 and ((finish_reason == "stop" and not tool_calls) or claims_completion(content))):
 
-            completion_result = self.completion_check()
+            completion_result = enforce_request_scope(self.completion_check(), getattr(self, '_user_text', ''))
             content = publication(content, completion_result, detect_language(getattr(self, "_user_text", None)),
                                   final=finish_reason == "stop" and not tool_calls,
                                   request_text=getattr(self, "_user_text", ""))

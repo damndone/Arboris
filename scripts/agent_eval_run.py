@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Run the v1.9.1 end-to-end Agent evaluation (real provider calls).
 
-Each task gets a fresh project with its scenario's data and the naive first
-model a person would have run on import; a deterministic simulated user then
+Each task gets a fresh project; development scenarios retain their naive first
+model, while external questions import data without unrelated estimation. A deterministic simulated user then
 drives the conversation (see ``agent_eval/runner.py``). Every provider exchange
 is recorded with its usage (``agent_eval/recorder.py``), and the project state
 is kept for grading (``agent_eval_grade.py``).
@@ -34,7 +34,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from agent_eval.recorder import provider_tape  # noqa: E402
 from agent_eval.runner import Policy, run_conversation  # noqa: E402
-from agent_eval.external import ExternalTask, blade_tasks, qrdata_subset, replication_tasks, seed_model_for  # noqa: E402
+from agent_eval.external import ExternalTask, blade_tasks, qrdata_subset, replication_tasks  # noqa: E402
 from agent_eval.heldout import heldout_tasks  # noqa: E402
 from agent_eval.tasks import dev_tasks  # noqa: E402
 from agent_eval.budget import BudgetStop, FreeRouteGuard, RoundBudget, TaskStop  # noqa: E402
@@ -147,6 +147,7 @@ def main() -> int:
                    "execution_policy": "proposal_only", "transport": args.transport,
                    "execution_mode_request": args.mode if args.mode in {"ask", "auto"} else "server_default"},
         "suite": args.suite,
+        "initialization": "import-only/v1" if args.suite == 'external' else "scenario-seed-model",
         "tasks": [task.id for task in tasks],
         "round_budget": str(args.budget_ledger) if args.round_budget_cny is not None else None,
         "free_route_ledger": str(args.free_route_ledger) if args.free_route_ledger is not None else None,
@@ -191,7 +192,11 @@ def main() -> int:
                 if external:
                     dataset = directory / task.data_path.name
                     dataset.write_bytes(task.data_path.read_bytes())
-                    seed_form = seed_model_for(dataset)
+                    # External questions must be reachable before any model is
+                    # chosen. Keep the frozen suite selection unchanged; record
+                    # this setup change for comparison with the historical run.
+                    seed_form = {"mode": "import", "model_type": "auto", "y": "", "x": ""}
+                    record['setup'] = 'import-only/v1'
                 else:
                     dataset = directory / f"{task.scenario.id}.csv"
                     task.scenario.frame(task.seed).to_csv(dataset, index=False)
@@ -204,6 +209,7 @@ def main() -> int:
                 with provider_tape(directory / "provider_tape.jsonl", budget=budget) as tape:
                     tape.context = {"task": name}
                     record["conversation"] = run_conversation(client, project.root, run_id, task.prompt, policy,
+                        focus_node='stage:cleaned' if external else 'model:ols_1',
                         progress_path=directory / "conversation-progress.json")
                 record["status"] = "ran"
             except TaskStop as exc:

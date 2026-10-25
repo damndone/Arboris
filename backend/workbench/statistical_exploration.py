@@ -119,6 +119,11 @@ class ExplorationSpec:
         if not isinstance(self.options, Mapping):
             raise StatisticalExplorationValidationError("options must be a mapping")
         _canonical_value(self.options)
+        if 'frequency_weight' in self.options:
+            if self.operation != 'tabulate':
+                raise StatisticalExplorationValidationError('frequency_weight is supported only for tabulate; it cannot be ignored by another operation')
+            if not isinstance(self.options['frequency_weight'], str) or not self.options['frequency_weight'].strip():
+                raise StatisticalExplorationValidationError('frequency_weight must name a count column')
         if not isinstance(self.derived_definitions, (list, tuple)):
             raise StatisticalExplorationValidationError(
                 "derived definitions must be a list"
@@ -217,7 +222,25 @@ def execute_exploration(frame: Any, spec: ExplorationSpec) -> dict[str, Any]:
         }
 
     if spec.operation == "tabulate":
-        return {**base, "missing_policy": "variablewise", **_frequency_tables(filtered, spec.selected_columns)}
+        weights = None
+        if (column := spec.options.get('frequency_weight')) is not None:
+            column = _require_column(frame, column)
+            counts = filtered[column]
+            if not pd.api.types.is_numeric_dtype(counts) or pd.api.types.is_bool_dtype(counts):
+                raise StatisticalExplorationValidationError('frequency weights must be finite nonnegative integer counts')
+            import numpy as np
+            values = counts.to_numpy(dtype=float, na_value=np.nan)
+            if (not np.isfinite(values).all() or (values < 0).any() or (values != np.floor(values)).any()
+                    or not 0 < values.sum() <= 2 ** 53):
+                raise StatisticalExplorationValidationError('frequency weights must be finite nonnegative integer counts with positive total at most 2^53')
+            weights = counts.astype('int64')
+            if weights.sum() > 2 ** 53:
+                raise StatisticalExplorationValidationError('frequency total exceeds the exact-count limit 2^53')
+        result = {**base, "missing_policy": "variablewise", **_frequency_tables(filtered, spec.selected_columns, weights)}
+        if weights is not None:
+            result.update(frequency_weight=column, weighted_count=int(weights.sum()),
+                          observation_unit='represented individuals; source_row_count counts stored rows')
+        return result
 
     if spec.operation == "misstable":
         columns = _selected_columns(frame, spec.selected_columns)
@@ -919,7 +942,7 @@ def _split_numeric(frame: pd.DataFrame, selected: tuple[str, ...]) -> tuple[list
 MAX_TABULATE_VALUES = 100
 
 
-def _frequency_tables(frame: pd.DataFrame, selected: tuple[str, ...]) -> dict[str, Any]:
+def _frequency_tables(frame: pd.DataFrame, selected: tuple[str, ...], weights=None) -> dict[str, Any]:
     """Frequencies per value (SPSS FREQUENCIES / Stata tabulate), any column type."""
 
     columns = _selected_columns(frame, selected)
@@ -928,12 +951,20 @@ def _frequency_tables(frame: pd.DataFrame, selected: tuple[str, ...]) -> dict[st
     for column in columns:
         series = frame[column]
         valid = series.dropna()
-        counts = valid.value_counts(sort=True)
+        if weights is None:
+            counts = valid.value_counts(sort=True)
+            total, valid_count, missing_count = len(series), len(valid), int(series.isna().sum())
+        else:
+            counts = weights[series.notna()].groupby(valid, observed=True, sort=False).sum()
+            counts = counts[counts > 0].sort_values(ascending=False, kind='stable')
+            total = int(weights.sum())
+            valid_count = int(weights[series.notna()].sum())
+            missing_count = total - valid_count
         shown = counts.head(MAX_TABULATE_VALUES)
         variables[column] = {
-            "obs": int(len(series)),
-            "valid": int(len(valid)),
-            "missing": int(series.isna().sum()),
+            "obs": int(total),
+            "valid": int(valid_count),
+            "missing": int(missing_count),
             "distinct": int(len(counts)),
             "truncated": bool(len(counts) > MAX_TABULATE_VALUES),
         }
@@ -943,8 +974,8 @@ def _frequency_tables(frame: pd.DataFrame, selected: tuple[str, ...]) -> dict[st
                     "variable": column,
                     "value": value.item() if hasattr(value, "item") else value,
                     "count": int(count),
-                    "percent": _safe_number(100.0 * count / len(series)) if len(series) else None,
-                    "valid_percent": _safe_number(100.0 * count / len(valid)) if len(valid) else None,
+                    "percent": _safe_number(100.0 * count / total) if total else None,
+                    "valid_percent": _safe_number(100.0 * count / valid_count) if valid_count else None,
                 }
             )
         if variables[column]["missing"]:
@@ -953,7 +984,7 @@ def _frequency_tables(frame: pd.DataFrame, selected: tuple[str, ...]) -> dict[st
                     "variable": column,
                     "value": None,
                     "count": variables[column]["missing"],
-                    "percent": _safe_number(100.0 * variables[column]["missing"] / len(series)),
+                    "percent": _safe_number(100.0 * variables[column]["missing"] / total),
                     "valid_percent": None,
                 }
             )

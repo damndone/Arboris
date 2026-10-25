@@ -184,7 +184,8 @@ def run_conversation(client, root: Path, run_id: str, prompt: str, policy: Polic
         "/agent/sessions",
         params={"project_root": str(root)},
         json={"role": "chain", "chain_id": f"run:{run_id}", "run_id": run_id, "context_packet": {},
-              "focus": {"kind": "node", "id": focus_node, "run_id": run_id, "label": "Imported data and first model"}},
+              "focus": {"kind": "node", "id": focus_node, "run_id": run_id,
+                        "label": "Imported data" if focus_node.startswith('stage:') else "Imported data and first model"}},
     )
     created.raise_for_status()
     session_id = created.json()["session_id"]

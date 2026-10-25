@@ -28,6 +28,8 @@ def _spec_columns(operation_id: str, spec: Mapping[str, Any]) -> set[str]:
         options = spec.get("options") or {}
         if isinstance(options, Mapping) and options.get("group_by"):
             columns.add(str(options["group_by"]))
+        if options.get('frequency_weight'):
+            columns.add(options['frequency_weight'])
         for plot in spec.get("plots", []) or []:
             if isinstance(plot, Mapping):
                 columns.update(str(plot[key]) for key in ("x_column", "y_column") if plot.get(key))

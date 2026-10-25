@@ -14,6 +14,7 @@ from ..canonical import sha256_canonical
 from .context_compiler import read_completion_artifact, read_completion_dataset_source, read_arima_completion_product, read_garch_completion_product, completion_candidate_refs
 from .completion_sensitivity import INFLUENCE_DISCLOSURE, MAX_OPTIONS, SENSITIVITY_NEXT_STEP, influence_option, specification_options
 from .completion_profiles import NATIVE_COMPANIONS, companion_model, native_diagnostics, native_findings, verified_iv_ar, with_iv_ar
+from .completion_targets import TARGET_SCHEMA, computed_result, matches_target, requested_targets
 
 VERSION = 'analysis-completion/v1'
 PLAYBOOKS = {
@@ -33,10 +34,15 @@ _REF = {'type': 'object', 'required': ['run_id', 'artifact_id'], 'properties': {
     'run_id': {'type': 'string', 'minLength': 1, 'maxLength': 200},
     'artifact_id': {'type': 'string', 'minLength': 1, 'maxLength': 200}}, 'additionalProperties': False}
 CONTRACT_SCHEMA = {'type': 'object', 'required': ['playbooks', 'source'], 'properties': {
-    'playbooks': {'type': 'array', 'minItems': 1, 'maxItems': 8, 'uniqueItems': True,
+    'scope': {'type': 'string', 'enum': ['analysis', 'question']},
+    'target': TARGET_SCHEMA,
+    'playbooks': {'type': 'array', 'maxItems': 8, 'uniqueItems': True,
                  'items': {'type': 'string', 'enum': list(PLAYBOOKS)}},
     'source': {**_REF, 'required': ['run_id', 'artifact_id', 'sha256'], 'properties': {
-        **_REF['properties'], 'sha256': {'type': 'string', 'pattern': '^[a-f0-9]{64}$'}}}}, 'additionalProperties': False}
+        **_REF['properties'], 'sha256': {'type': 'string', 'pattern': '^[a-f0-9]{64}$'}}}}, 'additionalProperties': False,
+    'if': {'required': ['scope'], 'properties': {'scope': {'const': 'question'}}},
+    'then': {'properties': {'playbooks': {'maxItems': 0}}},
+    'else': {'properties': {'playbooks': {'minItems': 1}}}}
 #: The Agent names the source; the Workbench binds its sha256 from the registered artifact
 #: (a weaker model miscopied one hex digit and retried a refused plan to the end of its
 #: nudges, free-route no-thinking round, panel_fe, 2026-10-22).
@@ -47,7 +53,7 @@ AGENT_CONTRACT_SCHEMA = {**CONTRACT_SCHEMA, 'properties': {**CONTRACT_SCHEMA['pr
 INSPECT_SCHEMA = {"type": "object", "properties": {"source": {**_REF, "properties": {
     **_REF["properties"], "sha256": {"type": "string", "maxLength": 128}}}}, "additionalProperties": False}
 EVIDENCE_SCHEMA = {'type': 'object', 'properties': {
-    **{key: {'type': 'array', 'maxItems': 24, 'items': _REF} for key in ('models', 'diagnostics', 'sensitivity')},
+    **{key: {'type': 'array', 'maxItems': 24, 'items': _REF} for key in ('models', 'diagnostics', 'sensitivity', 'results')},
     'report': _REF}, 'additionalProperties': False}
 
 
@@ -240,13 +246,23 @@ def evaluate(project_root, contract, evidence, *, suggest=False, options=False):
             source = None
             missing.append('source:changed_or_unavailable')
     groups = {key: [(ref, products.load(ref)) for ref in evidence.get(key, [])]
-              for key in ('models', 'diagnostics', 'sensitivity')}
+              for key in ('models', 'diagnostics', 'sensitivity', 'results')}
     repairs = []
     sensitivity_options = []
     disclosures = []
 
     def bound(ref):
         return source is not None and any(a.sha256 == source.sha256 for a in products.ancestors(ref))
+
+    target = contract.get('target')
+    if target and not any(bound(ref) and matches_target(target, products.load(ref), contract['source']['sha256'])
+                          for ref in evidence.get('results', [])):
+        missing.append('target:computed_estimand_not_bound')
+    if contract.get('scope') == 'question':
+        results = [(ref, products.load(ref)) for ref in evidence.get('results', [])]
+        if not results or any(not bound(ref) or not computed_result(products, ref, artifact) for ref, artifact in results):
+            missing.append('question:computed_source_bound_result')
+        return {**_result(missing, products, target=target), 'scope': 'question'}
 
     for family in families:
         names = PLAYBOOKS[family]
@@ -315,14 +331,14 @@ def evaluate(project_root, contract, evidence, *, suggest=False, options=False):
                 'action': 'Use an exact registered report reference from the catalog or completed-operation receipt, including its actual format suffix. Never invent or append an ID. Compose a report if no verified report covers the required results.'})
     elif not bound(report_ref) or not all(
         artifact and any(a.sha256 == artifact.sha256 for a in products.ancestors(report_ref))
-        for _, artifact in groups['models'] + groups['diagnostics'] + groups['sensitivity']
+        for _, artifact in groups['models'] + groups['diagnostics'] + groups['sensitivity'] + groups['results']
     ):
         missing.append('report:result_sources')
         if suggest:
             repairs.append({'reason': 'report_does_not_cover_selected_evidence',
                 'action': 'Compose a report using the exact selected primary, diagnostics, sensitivity and AR references. An earlier report cannot cover evidence produced after it; do not relabel or reuse it as complete.'})
     catalog = _evidence_catalog(products, source, contract, evidence, bound, groups) if suggest else None
-    result = _result(missing, products)
+    result = _result(missing, products, target=target)
     if suggest:
         result['evidence_catalog'] = catalog
         result['repair_steps'] = repairs
@@ -390,10 +406,10 @@ def _evidence_catalog(products, source, contract, evidence, bound, groups):
     return catalog
 
 
-def _result(missing, products):
+def _result(missing, products, *, target=None):
     verified = [{'run_id': run, 'artifact_id': key, 'sha256': value.sha256}
                 for (run, key), value in products.cache.items() if value is not None]
-    return {'version': VERSION, 'status': 'partial' if missing else 'requirements_met',
+    return {**({'target': target} if target else {}), 'version': VERSION, 'status': 'partial' if missing else 'requirements_met',
             'missing': missing, 'scientific_validity': 'not_certified', 'verified_artifacts': verified[:8],
             'verified_artifact_count': len(verified), 'omitted_verified_artifacts': max(0, len(verified) - 8),
             'verified_lineage': list(products.verified_lineage.values())[:8],
@@ -410,6 +426,17 @@ _GENERIC_CLAIM = re.compile(r'全部完成|everything\s+is\s+(?:done|complete)',
 _FULL_REQUEST = re.compile(r'完整分析|全部分析|全面分析|(?:full|complete|entire|end.to.end)\s+analysis', re.I)
 
 
+def enforce_request_scope(result, request_text):
+    requested = requested_targets(request_text)
+    if requested and requested != {(result.get('target') or {}).get('estimand')}:
+        result = {**result, 'status': 'partial',
+                  'missing': list(dict.fromkeys([*result['missing'], 'target:requested_estimand_unbound']))}
+    if result.get('scope') == 'question' and _FULL_REQUEST.search(request_text or ''):
+        return {**result, 'status': 'partial',
+                'missing': list(dict.fromkeys([*result['missing'], 'task_scope:full_analysis_required']))}
+    return result
+
+
 def claims_completion(content, request_text=None):
     return bool(_CLAIM.search(content) or (_GENERIC_CLAIM.search(content)
                 and (request_text is None or _FULL_REQUEST.search(request_text))))
@@ -418,6 +445,18 @@ def claims_completion(content, request_text=None):
 def _missing_label(code, language):
     family, _, requirement = code.partition(':')
     special = {
+        'target:requested_estimand_unbound': (
+            'Fix the requested causal target in completion.target; do not substitute a regression coefficient.',
+            '需固定请求的因果目标估计量，不能用普通回归系数替代。'),
+        'target:computed_estimand_not_bound': (
+            'No verified result matches the target estimand and variable bindings. Estimate that target with an applicable method, or report it as unverified and keep a takeover state; do not relabel ATT as ATC/ATE.',
+            '没有已核验产物匹配目标估计量与变量绑定。需用适用方法计算，或明确未验证并保留可接管状态，不能将 ATT 改称 ATC／ATE。'),
+        'question:computed_source_bound_result': (
+            'Bind a successful computed answer artifact to the verified dataset source.',
+            '缺少与已核验数据来源绑定、成功计算的回答产物。'),
+        'task_scope:full_analysis_required': (
+            'The request requires a full analysis; a focused-question contract cannot satisfy it.',
+            '用户要求完整分析，单项问题合同不能替代完整分析验收。'),
         'garch:diagnostics:invalid_variance_parameters': (
             'Production variance parameters fail their native constraints.',
             '生产方差参数未通过原生约束，需修正模型。'),
@@ -525,6 +564,7 @@ def _missing_label(code, language):
 
 def publication(content: str, result: dict, language: str, *, final=True, request_text=""):
     """Publish the machine state; a rejected completion claim is not a result."""
+    result = enforce_request_scope(result, request_text)
     active = result['missing'] != ['completion_contract:select_playbooks_and_source']
     claim = claims_completion(content, request_text) or bool(active and _GENERIC_CLAIM.search(content))
     if (result['status'] == 'requirements_met'
@@ -575,7 +615,7 @@ def derive_evidence(project_root, contract, evidence):
     """
     given = dict(evidence or {})
     notes = {'bound_by_workbench': [], 'dropped': [], 'primary_candidates': {}}
-    if not contract:
+    if not contract or contract.get('scope') == 'question':
         return given, notes
     products = _Products(project_root)
     source = products.load(contract['source'])
@@ -646,7 +686,7 @@ def derive_evidence(project_root, contract, evidence):
                 for ref, model in list(distinct.values())[:6]]
     if not primaries:
         return {**given, 'models': named}, notes
-    result = {'models': primaries}
+    result = {'models': primaries, **({'results': given['results']} if 'results' in given else {})}
     primary_keys = {(ref['run_id'], ref['artifact_id']) for ref in primaries}
     given_alternates = [plain(ref) for ref in given.get('sensitivity') or [] if isinstance(ref, dict)
                         and (ref['run_id'], ref['artifact_id']) in eligible - primary_keys]
@@ -699,7 +739,7 @@ def derive_evidence(project_root, contract, evidence):
     if own:
         notes['bound_by_workbench'].append('diagnostics')
     report = given.get('report')
-    selected_refs = [ref for key in ('models', 'diagnostics', 'sensitivity') for ref in result[key]]
+    selected_refs = [ref for key in ('models', 'diagnostics', 'sensitivity', 'results') for ref in result.get(key, [])]
     selected = [products.load(ref) for ref in selected_refs]
 
     def uncovered(ref):
@@ -726,5 +766,6 @@ def derive_evidence(project_root, contract, evidence):
             notes['compose_report'] = {'operation_id': 'report.compose', 'spec': {'result_refs': (
                 [{**ref, 'role': 'primary'} for ref in result['models']]
                 + [{**ref, 'role': 'diagnostic'} for ref in result['diagnostics']]
-                + [{**ref, 'role': 'sensitivity'} for ref in result['sensitivity']])[:24]}}
+                + [{**ref, 'role': 'sensitivity'} for ref in result['sensitivity']]
+                + [{**ref, 'role': 'diagnostic'} for ref in result.get('results', [])])[:24]}}
     return result, notes

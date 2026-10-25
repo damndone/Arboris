@@ -94,6 +94,7 @@ EXEMPT: dict[tuple[str, str], str] = {
     ("POST", "/llm/providers/{provider_id}/activate"): NO_ANALYSIS,
     ("DELETE", "/llm/providers/{provider_id}"): NO_ANALYSIS,
     ("POST", "/llm/providers/{provider_id}/models/refresh"): NO_ANALYSIS,
+    ("POST", "/llm/providers/{provider_id}/models/detect"): "updates provider-reported model metadata; runs no analysis and changes no project data",
     ("POST", "/llm/providers/{provider_id}/probe"): NO_ANALYSIS,
     ("POST", "/llm/chat"): "narrates existing results",
     ("POST", "/domain-memory/settings/confirmations"): NO_ANALYSIS,

@@ -67,10 +67,11 @@ def _summary(value, depth=0):
 
 
 def build_context(root, plan, *, mode, candidate, config):
-    from .completion import derive_evidence, evaluate
+    from .completion import derive_evidence, evaluate, enforce_request_scope
+    from .completion_targets import computed_result
     # The reviewer judges the evidence the completion gate judged.
     evidence, _bound = derive_evidence(root, plan.completion if plan else None, plan.completion_evidence if plan else None)
-    check = evaluate(root, plan.completion if plan else None, evidence)
+    check = enforce_request_scope(evaluate(root, plan.completion if plan else None, evidence), plan.question if plan else '')
     policy = load_policy(root)
     permitted = config is not None and 'model_result' in policy.allowed_classes(
         provider_id=config.provider_id, locality=config.data_location)
@@ -84,9 +85,20 @@ def build_context(root, plan, *, mode, candidate, config):
         'models': [], 'diagnostics': [], 'scope': 'Verified aggregate summaries; no observation-level access or independent numerical replication.'}
     complete = len(candidate) <= 12_000 and packet['source'] == plan.completion['source']
     keys = ['plan', 'candidate', 'source', 'completion']
-    refs = [(role, ref) for role in ['models', 'sensitivity'] for ref in (evidence or {}).get(role, [])]
+    refs = [(role, ref) for role in ['models', 'sensitivity', 'results'] for ref in (evidence or {}).get(role, [])]
     for role, ref in refs:
         artifact = products.load(ref)
+        if role == 'results' and artifact is not None and artifact.artifact_type in {'statistical_exploration', 'p7_analysis'}:
+            if (not computed_result(products, ref, artifact) or packet['source'] is None
+                    or not any(a.sha256 == packet['source']['sha256'] for a in products.ancestors(ref))):
+                complete = False
+                continue
+            summaries = packet.setdefault('results', [])
+            key = f'result:{len(summaries)}'
+            summaries.append({'evidence_key': key, 'result_ref': {**ref, 'sha256': artifact.sha256},
+                              'summary': _summary(artifact.payload)})
+            keys.append(key)
+            continue
         model = products.model(ref, artifact)
         if model is None:
             complete = False

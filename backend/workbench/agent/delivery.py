@@ -16,11 +16,12 @@ DIGEST_FIELDS = ("status", "missing", "next_step", "compose_report", "sensitivit
 
 
 def delivery_check(project_root, plan, *, suggest=False):
-    from .completion import derive_evidence, evaluate
+    from .completion import derive_evidence, evaluate, enforce_request_scope
 
     evidence, bound = derive_evidence(project_root, plan.completion if plan else None,
                                       plan.completion_evidence if plan else None)
     result = evaluate(project_root, plan.completion if plan else None, evidence, suggest=suggest, options=True)
+    result = enforce_request_scope(result, plan.question if plan else '')
     result['bound_by_workbench'] = bound['bound_by_workbench']
     if bound['dropped']:
         # Named back to the Agent: a reference that does not resolve to the right kind
@@ -29,7 +30,9 @@ def delivery_check(project_root, plan, *, suggest=False):
     if result['status'] == 'requirements_met':
         # In the paid fix2 round (iv_weak, Auto) the Agent met every requirement and still
         # would not call the analysis complete, reading not_certified as unfinished.
-        result['next_step'] = ('Delivery requirements are met: report this analysis as complete and state its '
+        result['next_step'] = ('Delivery requirements are met: answer the focused question and state its limitations.'
+                              if result.get('scope') == 'question' else
+                              'Delivery requirements are met: report this analysis as complete and state its '
                                'scientific limitations. A finding that the data cannot support the requested '
                                'claim is a complete answer, not a missing step.')
     elif bound['primary_candidates']:
