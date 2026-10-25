@@ -286,7 +286,8 @@ def chain_tool_specs(*, top_level_operation_ids: list[str]) -> dict[str, dict[st
                         "maxItems": 12,
                         "description": (
                             "operation.multi_step only: the step operations you will use. Their full "
-                            "specifications are returned; without this you get a one-line index of every step."
+                            "specifications are returned; without this you get a one-line index of every step. "
+                            "The protocol's step reference already holds the most-used steps."
                         ),
                     },
                 },

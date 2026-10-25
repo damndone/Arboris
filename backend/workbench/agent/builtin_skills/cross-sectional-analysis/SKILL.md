@@ -21,7 +21,7 @@ Keep the primary specification and the reason for each sensitivity analysis fixe
 
 ## Required evidence
 
-Before constructing a new operation, call inspect_operation_contract for the actual operation and the named workflow steps. Use exactly its declared fields, options, and scope. Do not offer HC3 or unsupported cluster covariance as available methods. Do not silently substitute a nearby estimator, independent-row standard errors for required dependence-aware inference, or a weaker diagnostic when the requested method is unavailable. State the boundary and leave the affected requirement incomplete.
+Before constructing a new operation, take its fields from the step reference in the protocol, or call inspect_operation_contract for an operation or workflow step the reference does not cover. Use exactly its declared fields, options, and scope. Do not offer HC3 or unsupported cluster covariance as available methods. Do not silently substitute a nearby estimator, independent-row standard errors for required dependence-aware inference, or a weaker diagnostic when the requested method is unavailable. State the boundary and leave the affected requirement incomplete.
 
 For a complete analysis, retain these actual products:
 

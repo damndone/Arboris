@@ -21,7 +21,7 @@ Choose a primary specification and a substantive sensitivity question before com
 
 ## Required evidence
 
-Read inspect_operation_contract for the actual currently registered model and post-estimation steps before constructing an operation. Candidate families include Poisson or negative-binomial for counts, and logit, probit or binomial GLM for binary outcomes, only when the current contract declares them for the requested design. This skill does not add new model or inference capabilities. Do not offer HC3 or unsupported cluster covariance as available methods. Do not silently substitute seed OLS, an unsupported link, or independent-row inference when the requested design or model is unavailable; explain the boundary and leave the requirement incomplete.
+Take the currently registered model and post-estimation steps from the step reference in the protocol, or from inspect_operation_contract for steps it does not cover, before constructing an operation. Candidate families include Poisson or negative-binomial for counts, and logit, probit or binomial GLM for binary outcomes, only when the current contract declares them for the requested design. This skill does not add new model or inference capabilities. Do not offer HC3 or unsupported cluster covariance as available methods. Do not silently substitute seed OLS, an unsupported link, or independent-row inference when the requested design or model is unavailable; explain the boundary and leave the requirement incomplete.
 
 For a complete analysis, retain these actual products:
 

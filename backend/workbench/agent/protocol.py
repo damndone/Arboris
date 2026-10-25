@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from .analysis_integrity import ANALYSIS_INTEGRITY_RULES
 from .operations import OperationRegistry
 from .session import JsonlSessionRepository
@@ -12,7 +14,7 @@ CHAIN_AGENT_PROTOCOL = """Arboris Agent workflow protocol (agent/v1, selected-ch
 - Read-only inspection tools are the evidence source for this turn.
 - For an OLS conventional-to-clustered Analysis Loop, call run_operation with model.rerun, the exact source run/node and active head, and covariance/entity_col changes. When the user supplies a result_id, include target.result_id. The server resolves source facts and binds the PlanDiff before applying the common permissions; never drop an explicit result selector.
 - When the user asks for a multi-step statistical workflow over the selected Raw data node (for example: grouped descriptive statistics, missing-value checks, a correlation matrix, percentile-derived group comparisons, scatter plots, and one or more regressions), use operation.multi_step@v1 as a SINGLE workflow proposal covering the whole request.
-- Compose that workflow yourself in changes.steps. Each step is {step_id, operation_id, spec, depends_on}. Field names are exact and unknown fields are rejected. The index below lists every step the registry has; before writing a step, get its exact fields, types and allowed values from inspect_operation_contract on operation.multi_step with step_operation_ids naming the steps you will use.
+- Compose that workflow yourself in changes.steps. Each step is {step_id, operation_id, spec, depends_on}. Field names are exact and unknown fields are rejected. The index below lists every step the registry has, and the step reference after it gives the exact fields, types and allowed values of the most-used steps: write those steps from the reference without inspecting them. For any other step, get its fields from inspect_operation_contract on operation.multi_step with step_operation_ids naming the steps you will use.
 {step_vocabulary}
 - A composed workflow runs over the dataset, not over one graph node. Once you have the data schema and the operation contract you have everything a plan needs: inspecting further nodes adds nothing and spends the budget that writing the plan requires. Do not walk the graph node by node.
 - Use the columns and grouping values the DATA actually has, taken from inspection — never invented and never copied from an example. depends_on must name the step that produced the evidence a later step relies on; a percentile threshold must depend on the summarize_detail step that produced it.
@@ -31,7 +33,7 @@ CHAIN_AGENT_PROTOCOL = """Arboris Agent workflow protocol (agent/v1, selected-ch
 - For an analysis with more than one step, first call update_plan with the research question, the criteria you will judge results by (fixed before you see any estimate), and typed steps (workflow operation ids, dependencies, expected outputs). Keep it current as you go: mark steps done or skipped, add steps you need. In Auto mode the person approves the plan once; after that, steps it covers run as soon as you propose them and you receive their results in the same turn, so keep going until the analysis is complete. In Ask mode every step that changes something is confirmed; after a confirmation you are resumed with its result.
 - A failed run_operation with status needs_target_decision includes a server-generated recovery plan. Explain the requested versus source-primary result, use its safe read-only next call when available, and draft the correction options in update_plan. Keep the affected estimation step awaiting the user's explicit target decision; continue only independent approved steps. The recovery plan grants no execution permission. Never remove an explicit result_id or substitute the primary to evade the rejection, and never mark the blocked analysis complete. After the person chooses, revise the plan and use the same operation and approval path. Stop repeating a blocked request after two failed attempts.
 - When the whole analysis is done, check it against the question and criteria before your final answer: the right method for the design, the diagnostics it needs, at least one defensible robustness check, and every number traceable to a result.
-- For operation.multi_step, inspect_operation_contract without step_operation_ids returns a one-line index of every step; call it with step_operation_ids (the steps you will use, up to 12) to get their exact fields before composing changes.steps.
+- For operation.multi_step, the step index and step reference in this protocol are what inspect_operation_contract returns for them; call it with step_operation_ids (up to 12) only for steps the reference does not cover.
 - Use the exact operation_id and operation_version returned by inspect_operation_contract. For model.rerun, target contains run_id, node_ref, node_hash, and forest_node_key; map the inspection field op_node_id to node_ref, and do not put active_head_run_id in target. For graph.fork, the backend binds target.source_session_entry_id to the current Chain leaf; do not invent an Agent entry id. In preconditions, include exactly context_version, context_fingerprint, active_head_run_id, and owner_resolution.
 - graph.fork creates a durable fork, child Chain, and child Agent session after confirmation. It does not submit a child statistical run and does not automatically continue with model.rerun.
 - Include changes as the requested field-level change (prefer {"old": ..., "new": ...}), plus evidence_refs, expected_effect, and risks. For model.rerun, model_options must be a direct one-level object patch (for example {"random_slope": false}); never wrap it as an old/new field diff.
@@ -116,7 +118,35 @@ def step_vocabulary_lines() -> str:
         + "."
     )
     lines.append(f"      {source['semantics']}")
+    lines.append(
+        "  - Step reference (exact specifications, identical to inspect_operation_contract with these "
+        "step_operation_ids):"
+    )
+    for operation_id, spec in step_reference(vocabulary).items():
+        lines.append(f"      {operation_id}: " + json.dumps(spec, ensure_ascii=False, separators=(",", ":")))
     return "\n".join(lines)
+
+
+#: The steps whose full specifications ride in the cached protocol. Chosen by
+#: measurement: in the 198 free-route sessions of 2026-10-22/23 these were the
+#: steps the Agent fetched most (model.genesis 116, report.compose 97,
+#: statistical.explore 75, data.subset 15 of 228 contract reads); the next ones
+#: are family-specific and stay on demand.
+REFERENCE_STEP_IDS = ("model.genesis", "report.compose", "statistical.explore", "data.subset")
+
+
+def step_reference(vocabulary: dict | None = None) -> dict:
+    """The reference steps exactly as inspect_operation_contract returns them, minus empty and duplicated keys."""
+
+    from .context_tools_support.node_tools import _step_vocabulary_view
+    from .workflow_contracts import workflow_step_vocabulary
+
+    view = _step_vocabulary_view(vocabulary or workflow_step_vocabulary(), REFERENCE_STEP_IDS)["step_operations"]
+    return {
+        operation_id: {key: value for key, value in spec.items()
+                       if value not in (None, [], {}, "") and not (key == "ui_description" and value == spec.get("summary"))}
+        for operation_id, spec in view.items()
+    }
 
 
 def chain_agent_protocol(registry: OperationRegistry) -> str:
