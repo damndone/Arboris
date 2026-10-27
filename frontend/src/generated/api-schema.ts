@@ -2945,6 +2945,10 @@ export interface components {
             status: string;
             /** Steps */
             steps: components["schemas"]["AgentPlanStepView"][];
+            /** Task Requirements */
+            task_requirements?: {
+                [key: string]: unknown;
+            };
             /** Updated At */
             updated_at: string;
             /** Version */

@@ -5,7 +5,7 @@
 // one at a time ("1 of 3"). Decided proposals leave the bar; the transcript
 // keeps a receipt where they happened.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ProposalFields } from "./ProposalFields";
 import { useAgentSurfaceOptional } from "./AgentSurfaceContext";
 import type { AgentProposal } from "./agentTypes";
@@ -18,18 +18,83 @@ export function AgentApprovalBar({ proposals, projectRoot }: { proposals: AgentP
   const [draft, setDraft] = useState<Record<string, unknown>>({});
   const [issues, setIssues] = useState<string[]>([]);
   const [failure, setFailure] = useState<string | null>(null);
+  const [acting, setActing] = useState(false);
+  const decisionPending = useRef(false);
+  const stopPending = useRef(false);
   useEffect(() => { setIndex((current) => Math.min(current, Math.max(0, proposals.length - 1))); }, [proposals.length]);
   if (!agent || proposals.length === 0) return null;
   const proposal = proposals[index] ?? proposals[0];
-  const busy = agent.confirmationBusyId !== null;
+  const busy = agent.confirmationBusyId !== null || acting || agent.isSubmitting
+    || ["running", "working", "cancelling"].includes(agent.sessionStatus);
   const steps = proposal.readable ?? [];
   const isEditing = editing === proposal.proposal_id;
+  const canStop = typeof agent.abortTurn === "function";
+  const edit = () => {
+    if (busy || decisionPending.current || isEditing) return;
+    setEditing(proposal.proposal_id);
+    setDraft(proposal.changes);
+    setFailure(null);
+  };
+  const decide = async (action: "confirm" | "decline") => {
+    if (busy || decisionPending.current || isEditing || proposal.status !== "pending") return;
+    decisionPending.current = true;
+    setActing(true);
+    setFailure(null);
+    try {
+      if (action === "confirm") await agent.confirmProposal(proposal.proposal_id);
+      else await agent.declineProposal(proposal.proposal_id);
+    } catch (error) {
+      setFailure(error instanceof Error ? error.message : "Could not apply the proposal decision.");
+    } finally {
+      decisionPending.current = false;
+      setActing(false);
+    }
+  };
+  const stop = async () => {
+    if (!canStop || stopPending.current) return;
+    stopPending.current = true;
+    try {
+      await agent.abortTurn();
+    } catch (error) {
+      setFailure(error instanceof Error ? error.message : "Could not request a stop.");
+    } finally {
+      stopPending.current = false;
+    }
+  };
 
   return (
     <article
       data-testid={`agent-proposal-${proposal.proposal_id}`}
       className="wb-agent-approval"
       aria-label={`Agent proposal ${proposal.proposal_id}`}
+      tabIndex={0}
+      aria-keyshortcuts={isEditing ? "Escape" : `Enter E S${canStop ? " Escape" : ""}`}
+      onKeyDown={(event) => {
+        if (event.defaultPrevented || event.repeat || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229
+            || event.altKey || event.ctrlKey || event.metaKey || (event.shiftKey && !["e", "s"].includes(event.key.toLowerCase()))
+            || !event.currentTarget.contains(document.activeElement)) return;
+        if (event.key === "Escape" && isEditing) {
+          event.preventDefault();
+          event.stopPropagation();
+          setEditing(null);
+          event.currentTarget.focus();
+          return;
+        }
+        // Native controls retain their own keys. Shortcuts belong to the card
+        // itself, never to the composer or a focused control inside the card.
+        if (event.target !== event.currentTarget || document.activeElement !== event.currentTarget) return;
+        const key = event.key.toLowerCase();
+        if (event.key === "Escape" && canStop) {
+          event.preventDefault();
+          event.stopPropagation();
+          void stop();
+        } else if (!busy && !isEditing && ["enter", "e", "s"].includes(key)) {
+          event.preventDefault();
+          event.stopPropagation();
+          if (key === "e") edit();
+          else void decide(key === "s" ? "decline" : "confirm");
+        }
+      }}
     >
       <div className="wb-agent-approval__head">
         <span className="wb-agent-approval__ask">Run this?</span>
@@ -100,21 +165,23 @@ export function AgentApprovalBar({ proposals, projectRoot }: { proposals: AgentP
           </div>
         )}
       </details>
+      <small>{isEditing ? "Esc Cancel edit" : `Focus this card: ↵ Confirm · E Edit · S Skip${canStop ? " · Esc Stop" : ""}`}</small>
+      {failure && !isEditing && <div role="alert">{failure}</div>}
       <div className="wb-agent-approval__actions">
         <button
           type="button"
           className="wb-agent-approval__primary"
           aria-label={`Confirm proposal ${proposal.proposal_id}`}
           disabled={busy || isEditing}
-          onClick={() => void agent.confirmProposal(proposal.proposal_id)}
+          onClick={() => void decide("confirm")}
         >
           {agent.confirmationBusyId === proposal.proposal_id ? "Running…" : "Run"}
         </button>
         <button
           type="button"
           aria-label={`Decline proposal ${proposal.proposal_id}`}
-          disabled={busy}
-          onClick={() => void agent.declineProposal(proposal.proposal_id)}
+          disabled={busy || isEditing}
+          onClick={() => void decide("decline")}
         >
           Decline
         </button>
@@ -122,11 +189,7 @@ export function AgentApprovalBar({ proposals, projectRoot }: { proposals: AgentP
           type="button"
           aria-label={`Revise proposal ${proposal.proposal_id}`}
           disabled={busy}
-          onClick={() => {
-            setEditing(proposal.proposal_id);
-            setDraft(proposal.changes);
-            setFailure(null);
-          }}
+          onClick={edit}
         >
           Edit
         </button>

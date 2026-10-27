@@ -187,6 +187,17 @@ describe("AgentPanel", () => {
     );
   });
 
+  it.each(["running", "working", "cancelling"])("does not describe an unconfirmed stop as terminal while the restored turn is %s", (sessionStatus) => {
+    const error = "Could not confirm a stop. The server may still be running. Retry Stop.";
+    render(<AgentSurfaceContext.Provider value={value({ isSubmitting: false, sessionStatus, error })}>
+      <AgentPanel runId="run-a" projectRoot="/proj" />
+    </AgentSurfaceContext.Provider>);
+    expect(screen.queryByTestId("agent-turn-error")).not.toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(error);
+    expect(screen.queryByText(/The Agent stopped before completing/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Stop Agent" })).toBeInTheDocument();
+  });
+
   it("clears the failure once a later turn in the session answers", () => {
     render(
       <AgentSurfaceContext.Provider value={value({

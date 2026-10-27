@@ -6,6 +6,9 @@ from pathlib import Path
 from ..canonical import sha256_canonical
 from .completion import evaluate, source_receipt
 from .session import JsonlSessionRepository
+from .plans import PlanStore
+from .task_requirements import RequirementBinder, signature
+from .delivery import review_plan_basis_sha256
 from .workflow import WorkflowExecutionError
 
 
@@ -29,12 +32,24 @@ def collect_review(root, target, options):
         raise WorkflowExecutionError('research review source does not match the report source')
     inputs = intent.get('verification_inputs')
     current = evaluate(root, inputs['contract'], inputs['evidence']) if inputs else None
-    status = ('verification_unavailable' if current is None else
-        'unchanged' if current['verified_manifest_sha256'] == result['manifest_sha256'] else 'changed_or_unavailable')
+    requirements = None
+    current_basis = None
+    if inputs and 'task_requirements' in inputs:
+        current_plan = PlanStore(repository.root).current(options['session_id'])
+        if current_plan is not None:
+            requirements = RequirementBinder(repository).bind(options['session_id'], current_plan.task_requirements)
+            current_basis = review_plan_basis_sha256(question=current_plan.question,
+                criteria=current_plan.criteria, completion=current_plan.completion)
+    status = ('verification_unavailable' if current is None or requirements is None
+              or result.get('review_plan_basis_sha256') is None else
+        'unchanged' if (current['verified_manifest_sha256'] == result['manifest_sha256']
+                        and signature(requirements) == result.get('task_requirements_sha256')
+                        and current_basis == result['review_plan_basis_sha256'])
+        else 'changed_or_unavailable')
     references = []
     if inputs:
         evidence = inputs['evidence'] or {}
-        references = [ref for kind in ['models', 'diagnostics', 'sensitivity'] for ref in evidence.get(kind, [])]
+        references = [ref for kind in ['models', 'diagnostics', 'sensitivity', 'results'] for ref in evidence.get(kind, [])]
         if evidence.get('report'):
             references.append(evidence['report'])
     return {'session_id':options['session_id'], 'review_id':options['review_id'],

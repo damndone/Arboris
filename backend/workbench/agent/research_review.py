@@ -7,6 +7,7 @@ Its critique is neither an independent numerical oracle nor release acceptance.
 from __future__ import annotations
 
 import json
+import math
 from uuid import uuid4
 
 from jsonschema import Draft202012Validator, ValidationError
@@ -66,21 +67,63 @@ def _summary(value, depth=0):
     return value[:400] if isinstance(value, str) else value
 
 
+def _computed_summary(payload):
+    """Allow aggregate frequency rows only; never promote arbitrary rows to egress."""
+    summary = _summary(payload)
+    result = payload.get('result', {})
+    if result.get('operation') != 'tabulate':
+        return summary, True
+    variables, rows = result.get('variables'), result.get('rows')
+    if not isinstance(variables, dict) or not isinstance(rows, list):
+        return summary, False
+    allowed = {'variable', 'value', 'count', 'percent', 'valid_percent'}
+    aggregate = []
+    complete = not any(v.get('truncated') for v in variables.values() if isinstance(v, dict))
+    for row in rows[:100]:
+        if (not isinstance(row, dict) or not set(row) <= allowed
+                or not {'variable', 'value', 'count'} <= set(row)
+                or row['variable'] not in variables
+                or type(row['count']) is not int or row['count'] < 0
+                or type(row['value']) not in {str, int, float, bool, type(None)}
+                or isinstance(row['value'], str) and len(row['value']) > 200
+                or any(v is not None and (type(v) not in {int, float} or not math.isfinite(v))
+                       for k, v in row.items() if k in {'percent', 'valid_percent'})
+                or type(row['value']) is float and not math.isfinite(row['value'])):
+            complete = False
+            continue
+        aggregate.append(dict(row))
+    complete = complete and len(rows) <= 100 and len(aggregate) == len(rows)
+    # This is a producer-owned table of categories, not source observation rows.
+    summary['result']['rows'] = aggregate
+    if not complete:
+        summary['result']['review_evidence_incomplete'] = True
+    return summary, complete
+
+
 def build_context(root, plan, *, mode, candidate, config):
-    from .completion import derive_evidence, evaluate, enforce_request_scope
+    from .completion import derive_evidence, evaluate
     from .completion_targets import computed_result
+    from .task_requirements import enforce
+    from .delivery import review_plan_basis_sha256
     # The reviewer judges the evidence the completion gate judged.
     evidence, _bound = derive_evidence(root, plan.completion if plan else None, plan.completion_evidence if plan else None)
-    check = enforce_request_scope(evaluate(root, plan.completion if plan else None, evidence), plan.question if plan else '')
+    check = evaluate(root, plan.completion if plan else None, evidence)
+    if plan is not None:
+        check = enforce(check, plan.task_requirements)
+    check['review_plan_basis_sha256'] = review_plan_basis_sha256(
+        question=plan.question if plan else '', criteria=plan.criteria if plan else (),
+        completion=plan.completion if plan else None)
     policy = load_policy(root)
     permitted = config is not None and 'model_result' in policy.allowed_classes(
         provider_id=config.provider_id, locality=config.data_location)
     if plan is None or plan.completion is None:
         return {'mode': mode, 'packet': {}, 'manifest_sha256': check['verified_manifest_sha256'],
+                'review_plan_basis_sha256': check['review_plan_basis_sha256'],
                 'evidence_keys': [], 'complete_packet': False, 'egress_allowed': permitted}
     products = _Products(root)
     packet = {'plan': {'question': plan.question, 'criteria': list(plan.criteria),
-        'plan_id': plan.plan_id, 'version': plan.version}, 'candidate': candidate[:12_000],
+        'plan_id': plan.plan_id, 'version': plan.version,
+        'task_requirements': {k: v for k, v in (plan.task_requirements or {}).items() if k != 'cursor'}}, 'candidate': candidate[:12_000],
         'source': source_receipt(root, plan.completion['source']), 'completion': check,
         'models': [], 'diagnostics': [], 'scope': 'Verified aggregate summaries; no observation-level access or independent numerical replication.'}
     complete = len(candidate) <= 12_000 and packet['source'] == plan.completion['source']
@@ -95,8 +138,10 @@ def build_context(root, plan, *, mode, candidate, config):
                 continue
             summaries = packet.setdefault('results', [])
             key = f'result:{len(summaries)}'
+            summary, summary_complete = _computed_summary(artifact.payload)
+            complete = complete and summary_complete
             summaries.append({'evidence_key': key, 'result_ref': {**ref, 'sha256': artifact.sha256},
-                              'summary': _summary(artifact.payload)})
+                              'summary': summary})
             keys.append(key)
             continue
         model = products.model(ref, artifact)
@@ -125,10 +170,14 @@ def build_context(root, plan, *, mode, candidate, config):
         packet['diagnostics'].append({'evidence_key': key, 'result_ref': {**ref, 'sha256': artifact.sha256},
             'summary': _summary(products.diagnostic(ref, artifact))})
         keys.append(key)
+    complete = complete and len(json.dumps(packet, ensure_ascii=False).encode('utf-8')) <= MAX_PACKET_BYTES
     return {'mode': mode, 'packet': packet, 'manifest_sha256': check['verified_manifest_sha256'],
+            'task_requirements_sha256': check.get('task_requirements_sha256'),
+            'review_plan_basis_sha256': check['review_plan_basis_sha256'],
             'evidence_keys': keys, 'complete_packet': complete, 'egress_allowed': permitted,
             'policy_sha256': sha256_canonical(policy.to_dict()),
-            'verification_inputs': {'contract':plan.completion, 'evidence':evidence}}
+            'verification_inputs': {'contract':plan.completion, 'evidence':evidence,
+                                    'task_requirements':plan.task_requirements}}
 
 
 def _unverified(reason):
@@ -279,7 +328,9 @@ class ResearchReviewPhase:
         if self.state.get('dispatched'):
             return self._terminal(_unverified('review_interrupted_without_durable_result; explicit /review required'))
         current = self.completion_check() if self.completion_check else None
-        if current is not None and current['verified_manifest_sha256'] != self.state['manifest_sha256']:
+        if current is not None and (current['verified_manifest_sha256'] != self.state['manifest_sha256']
+                or current.get('task_requirements_sha256') != self.state.get('task_requirements_sha256')
+                or current.get('review_plan_basis_sha256') != self.state.get('review_plan_basis_sha256')):
             return self._terminal(_unverified('evidence_changed_during_review'))
         self.state['dispatched'] = True
         return PhaseRequest(messages=[{'role':'system','content':PROMPT},
@@ -308,13 +359,19 @@ class ResearchReviewPhase:
         return self._terminal({**result, 'raw_response':text[:MAX_REPLY_CHARS]})
 
     def _terminal(self, result, *, cached=False, reused=False):
+        current = self.completion_check() if self.completion_check else None
+        changed = current is not None and (current['verified_manifest_sha256'] != self.state['manifest_sha256']
+            or current.get('task_requirements_sha256') != self.state.get('task_requirements_sha256')
+            or current.get('review_plan_basis_sha256') != self.state.get('review_plan_basis_sha256'))
+        if changed:
+            result = {**result, **_unverified('evidence_changed_during_review'),
+                      'prior_verdict': result['verdict'], 'prior_findings': result['findings'],
+                      'completion_check': current}
         if not cached and not reused:
-            current = self.completion_check() if self.completion_check else None
-            if current is not None and current['verified_manifest_sha256'] != self.state['manifest_sha256']:
-                result = {**result, **_unverified('evidence_changed_during_review'),
-                          'prior_verdict':result['verdict'], 'prior_findings':result['findings']}
             result = {**result, 'review_id':self.state['review_id'], 'command_id':self.state['command_id'],
                 'packet_sha256':sha256_canonical(self.state['packet']), 'manifest_sha256':self.state['manifest_sha256'],
+                'task_requirements_sha256':self.state.get('task_requirements_sha256'),
+                'review_plan_basis_sha256':self.state.get('review_plan_basis_sha256'),
                 'independent_numerical_oracle':False, 'candidate_entry_id':self.state['candidate_entry_id'],
                 'completion_check':current}
         payload = _publication(self.state['candidate'], result, language=self.state['language'], mode=self.state['mode'],
@@ -327,7 +384,8 @@ class ResearchReviewPhase:
                 'key':self.state['review_id'],'stage':'research_review_result'}]})
 
 
-def _reusable_blocking_review(branch, *, manifest_sha256, model, command_id):
+def _reusable_blocking_review(branch, *, manifest_sha256, model, command_id, task_requirements_sha256=None,
+                             review_plan_basis_sha256=None):
     """The latest blocking review, from an earlier command, of this exact verified evidence by the same model.
 
     The evidence the reviewer judged has not changed, so its blocking findings
@@ -359,6 +417,8 @@ def _reusable_blocking_review(branch, *, manifest_sha256, model, command_id):
         if (e.entry_type == 'research_review_result' and result.get('command_id') != command_id
                 and not about_wording
                 and result.get('manifest_sha256') == manifest_sha256
+                and result.get('task_requirements_sha256') == task_requirements_sha256
+                and result.get('review_plan_basis_sha256') == review_plan_basis_sha256
                 and (result.get('reused_from_review_id') or result.get('review_id')) in same_model
                 and result.get('verdict') == 'issues_found'
                 and any(f.get('severity') == 'blocking' for f in result.get('findings') or [])):
@@ -385,7 +445,9 @@ async def start_review(core, payload, entry, *, request_id, context_fingerprint,
     if cached is None and not payload.get('review_requested'):
         # An explicit /review always asks the reviewer again.
         prior = _reusable_blocking_review(branch, manifest_sha256=ctx['manifest_sha256'], model=core.model_name,
-                                          command_id=core._active_command_id)
+                                          command_id=core._active_command_id,
+                                          task_requirements_sha256=ctx.get('task_requirements_sha256'),
+                                          review_plan_basis_sha256=ctx.get('review_plan_basis_sha256'))
     reason = None
     if cached is None and prior is None:
         if any(e.payload['review_id'] not in received for e in intents):
@@ -401,6 +463,8 @@ async def start_review(core, payload, entry, *, request_id, context_fingerprint,
                 'review_id':digest,'command_id':core._active_command_id,'packet':packet,
                 'packet_sha256':sha256_canonical(packet),'manifest_sha256':ctx['manifest_sha256'],
                 'verification_inputs':ctx.get('verification_inputs'),
+                'task_requirements_sha256':ctx.get('task_requirements_sha256'),
+                'review_plan_basis_sha256':ctx.get('review_plan_basis_sha256'),
                 'model':core.model_name,'candidate_entry_id':entry.entry_id,
             },key=digest,stage='research_review_intent')
     # A reused verdict was already handed back in an earlier command: no further revision turn.
@@ -412,6 +476,8 @@ async def start_review(core, payload, entry, *, request_id, context_fingerprint,
                   'reuse_reason':'verified_evidence_unchanged', 'completion_check':core.completion_check() if core.completion_check else None}
     state = {'review_id':digest,'command_id':core._active_command_id,'packet':packet,'encoded_packet':encoded,
         'candidate':payload,'candidate_entry_id':entry.entry_id,'manifest_sha256':ctx['manifest_sha256'],
+        'task_requirements_sha256':ctx.get('task_requirements_sha256'),
+        'review_plan_basis_sha256':ctx.get('review_plan_basis_sha256'),
         'evidence_keys':ctx['evidence_keys'],'mode':ctx['mode'],'language':language,'review_count':count,
         'remaining_after':None if core._budget.max_steps is None else core._budget.max_steps-core._steps_used-int(reason is None and cached is None and prior is None),
         'original_request_id':request_id,'context_fingerprint':context_fingerprint,

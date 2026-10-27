@@ -38,7 +38,9 @@ def test_focused_answer_review_receives_the_actual_computed_evidence(tmp_path):
     source, digest = artifact(tmp_path, 'q', 'data', 'processed_data', {})
     result, _ = artifact(tmp_path, 'q', 'summary', 'statistical_exploration', {
         'schema_version': 'statistical-exploration.v1', 'result': {'operation': 'tabulate',
-            'weighted_count': 10, 'variables': {'category': {'distinct': 2}}, 'rows': [{'private': 'value'}]}}, ['data'])
+            'weighted_count': 10, 'variables': {'category': {'distinct': 1}},
+            'rows': [{'variable': 'category', 'value': 'red', 'count': 10}],
+            'observation_rows': [{'private': 'value'}]}}, ['data'])
     plan = Plan(plan_id='p', version=1, status='draft', question='Classify this variable.', criteria=(),
                 steps=(), allowed_classes=(), completion={'scope': 'question', 'playbooks': [],
                     'source': {**source, 'sha256': digest}}, completion_evidence={'results': [result]})
@@ -48,6 +50,53 @@ def test_focused_answer_review_receives_the_actual_computed_evidence(tmp_path):
     assert 'result:0' in context['evidence_keys']
     assert context['packet']['results'][0]['summary']['result']['weighted_count'] == 10
     assert 'private' not in json.dumps(context['packet'])
+
+
+@pytest.mark.parametrize('categories,complete', [(2, True), (201, False)])
+def test_tabulate_review_contains_bounded_aggregate_counts_and_reports_truncation(tmp_path, categories, complete):
+    import pandas as pd
+    from tests.test_agent_completion import artifact
+    from workbench.agent.plans import Plan
+    from workbench.agent.research_review import build_context
+    from workbench.statistical_exploration import ExplorationSpec, execute_exploration
+    source, digest = artifact(tmp_path, 'q', 'data', 'processed_data', {})
+    frame = pd.DataFrame({'category': [f'c{i}' for i in range(categories)], 'n': range(1, categories + 1)})
+    computed = execute_exploration(frame, ExplorationSpec(operation='tabulate',
+        selected_columns=('category',), options={'frequency_weight': 'n'}))
+    ref, _ = artifact(tmp_path, 'q', 'summary', 'statistical_exploration', {
+        'schema_version': 'statistical-exploration.v1', 'result': computed}, ['data'])
+    plan = Plan(plan_id='p', version=1, status='draft', question='What proportion belong to each category?',
+        criteria=(), steps=(), allowed_classes=(), completion={'scope': 'question', 'playbooks': [],
+        'source': {**source, 'sha256': digest}}, completion_evidence={'results': [ref]})
+    context = build_context(tmp_path, plan, mode='ask', candidate='The first category is rare.', config=None)
+    assert context['complete_packet'] is complete
+    rows = context['packet']['results'][0]['summary']['result']['rows']
+    assert len(rows) <= 100
+    assert rows[0]['count'] == computed['rows'][0]['count']
+    assert rows[0]['percent'] == computed['rows'][0]['percent']
+    assert rows[0]['value'] == computed['rows'][0]['value']
+
+
+def test_frequency_review_rejects_observation_rows_and_oversize_packets():
+    from workbench.agent.research_review import _computed_summary
+    summary, complete = _computed_summary({'result': {'operation': 'tabulate',
+        'variables': {'category': {'distinct': 1}},
+        'rows': [{'variable': 'category', 'value': 'red', 'count': 1, 'private': 'individual record'}]}})
+    assert not complete and summary['result']['rows'] == []
+    assert 'individual record' not in json.dumps(summary)
+
+
+def test_oversize_review_context_is_marked_incomplete(tmp_path, monkeypatch):
+    from tests.test_agent_completion import artifact
+    from workbench.agent.plans import Plan
+    from workbench.agent import research_review
+    source, digest = artifact(tmp_path, 'q', 'data', 'processed_data', {})
+    plan = Plan(plan_id='p', version=1, status='draft', question='Describe this variable.', criteria=(),
+        steps=(), allowed_classes=(), completion={'scope': 'question', 'playbooks': [],
+        'source': {**source, 'sha256': digest}})
+    monkeypatch.setattr(research_review, 'MAX_PACKET_BYTES', 10)
+    context = research_review.build_context(tmp_path, plan, mode='ask', candidate='A descriptive answer.', config=None)
+    assert not context['complete_packet']
 
 
 def wire(core, *, mode='auto'):
@@ -244,6 +293,54 @@ def test_evidence_change_during_review_never_reuses_a_positive_verdict(tmp_path)
         review = next(e.payload for e in repo.get_branch('session-a') if e.entry_type == 'research_review_result')
         assert review['verdict'] == 'unverified' and review['reason'] == 'evidence_changed_during_review'
         assert review['prior_verdict'] == 'no_issues_found' and 'no_issues_found' in review['raw_response']
+    asyncio.run(scenario())
+
+
+def test_task_requirement_change_during_review_invalidates_verdict_with_same_artifacts(tmp_path):
+    version = {'changed': False}
+    class ChangingAdapter(Adapter):
+        async def stream(self, request):
+            async for event in super().stream(request):
+                yield event
+            if len(self.requests) == 2:
+                version['changed'] = True
+    async def scenario():
+        adapter = ChangingAdapter()
+        core, _, repo = setup(tmp_path, adapter)
+        wire(core)
+        original = core.research_review_context
+        core.research_review_context = lambda candidate: {**original(candidate), 'task_requirements_sha256': 'task-a'}
+        core.completion_check = lambda: {'status': 'partial' if version['changed'] else 'requirements_met',
+            'missing': ['target:requested_estimand_unbound'] if version['changed'] else [],
+            'verified_manifest_sha256': 'evidence-sha',
+            'task_requirements_sha256': 'task-b' if version['changed'] else 'task-a'}
+        await core.prompt('完成分析', budget={'max_steps': 3, 'timeout_s': 30})
+        review = next(e.payload for e in repo.get_branch('session-a') if e.entry_type == 'research_review_result')
+        assert review['verdict'] == 'unverified'
+        assert review['reason'] == 'evidence_changed_during_review'
+    asyncio.run(scenario())
+
+
+def test_plan_criteria_change_during_review_invalidates_verdict_with_same_artifacts(tmp_path):
+    version = {'changed': False}
+    class ChangingAdapter(Adapter):
+        async def stream(self, request):
+            async for event in super().stream(request):
+                yield event
+            if len(self.requests) == 2:
+                version['changed'] = True
+    async def scenario():
+        core, _, repo = setup(tmp_path, ChangingAdapter())
+        wire(core)
+        original = core.research_review_context
+        core.research_review_context = lambda candidate: {**original(candidate), 'review_plan_basis_sha256': 'plan-a'}
+        core.completion_check = lambda: {'status': 'requirements_met', 'missing': [],
+            'verified_manifest_sha256': 'evidence-sha',
+            'review_plan_basis_sha256': 'plan-b' if version['changed'] else 'plan-a'}
+        await core.prompt('完成分析', budget={'max_steps': 3, 'timeout_s': 30})
+        review = next(e.payload for e in repo.get_branch('session-a') if e.entry_type == 'research_review_result')
+        assert review['verdict'] == 'unverified'
+        assert review['reason'] == 'evidence_changed_during_review'
     asyncio.run(scenario())
 
 

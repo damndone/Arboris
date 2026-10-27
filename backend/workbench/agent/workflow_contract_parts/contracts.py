@@ -85,6 +85,9 @@ class StepSpecContract:
     #: without guessing keys inside ``column_bindings`` or ``options``; the
     #: same declaration also enforces object keys, item shapes, and bounds.
     field_schemas: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
+    #: Root spec variants bind a discriminator to its nested parameter schema.
+    #: Published by to_schema and read by the corresponding semantic validator.
+    spec_branches: tuple[Mapping[str, Any], ...] = ()
     #: Capability inventory identity projected from this declaration.
     capability_kind: str = "data_operation"
     #: Informational explanation for a capability that is composable but not a
@@ -174,6 +177,7 @@ class StepSpecContract:
                 name: deepcopy(dict(schema))
                 for name, schema in self.field_schemas.items()
             },
+            **({"spec_branches": deepcopy(list(self.spec_branches))} if self.spec_branches else {}),
             "semantic_validator_key": self.semantic_validator_key,
             "reference_resolver_key": self.reference_resolver_key,
             "column_extractor_key": self.column_extractor_key,
@@ -224,12 +228,15 @@ class StepSpecContract:
             if name in self.field_enums:
                 field_schema["enum"] = list(self.field_enums[name])
             properties[name] = field_schema
-        return {
+        schema = {
             "type": "object",
             "required": list(self.required),
             "properties": properties,
             "additionalProperties": False,
         }
+        if self.spec_branches:
+            schema["oneOf"] = deepcopy(list(self.spec_branches))
+        return schema
 
 
 def pack_step_contract(

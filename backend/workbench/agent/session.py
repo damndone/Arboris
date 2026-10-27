@@ -20,6 +20,7 @@ from typing import Any
 from uuid import uuid4
 
 from ..jsonl_store import _exclusive_jsonl_lock
+from .business_identity import identity_value
 
 
 def _now() -> str:
@@ -347,7 +348,11 @@ class JsonlSessionRepository:
             metadata = self.get_metadata(session_id)
             parent = self._parent_ref(metadata, session_id)
             intent = {"schema_version": "agent.session_append_intent.v1", "session_id": session_id,
-                      "entry_id": uuid4().hex, "entry_type": entry_type,
+                      "entry_id": identity_value(owner="agent.session.append_once", slot="entry_id",
+                          inputs={"session_id": session_id, "entry_type": entry_type,
+                                  "parent_ref": parent.to_dict() if parent else None,
+                                  "key": key, "stage": stage}, create=lambda: uuid4().hex),
+                      "entry_type": entry_type,
                       "parent_ref": parent.to_dict() if parent else None, "created_at": _now(),
                       "idempotency": identity, "base": self._pointer_state(metadata)}
             self._atomic_write_json(self._append_intent_path(session_id), intent)
@@ -488,7 +493,10 @@ class JsonlSessionRepository:
             if parent_ref is None and metadata.get("inherited_parent_ref"):
                 parent_ref = EntryRef.from_dict(metadata["inherited_parent_ref"])
             entry = SessionTreeEntry(
-                entry_id=uuid4().hex,
+                entry_id=identity_value(owner="agent.session.append", slot="entry_id",
+                    inputs={"session_id": session_id, "entry_type": entry_type,
+                            "parent_ref": parent_ref.to_dict() if parent_ref else None},
+                    create=lambda: uuid4().hex),
                 session_id=session_id,
                 entry_type=entry_type,
                 payload=dict(payload),

@@ -380,28 +380,26 @@ def _data_management_step_contracts() -> dict[str, StepSpecContract]:
         },
         "additionalProperties": False,
     }
-    recipe_parameters_schema = {
-        "type": "object",
-        "properties": {
-            "left": {"type": "string", "minLength": 1},
-            "right": {"type": "string", "minLength": 1},
-            "input": {"type": "string", "minLength": 1},
-            "base": {},
-            "numerator": {"type": "string", "minLength": 1},
-            "denominator": {"type": "string", "minLength": 1},
-            "zero_policy": {"type": "string", "enum": ["fail_closed"]},
-            "mapping": {
-                "type": "object",
-                "additionalProperties": {},
-            },
-            "default": {},
-            "operator": {
-                "type": "string",
-                "enum": ["add", "subtract", "multiply"],
-            },
-        },
-        "additionalProperties": False,
+    column_parameter = {"type": "string", "minLength": 1}
+    recipe_parameters = {
+        "interaction": ({"left": column_parameter, "right": column_parameter}, ("left", "right")),
+        "log": ({"input": column_parameter, "base": {}}, ("input",)),
+        "ratio": ({"numerator": column_parameter, "denominator": column_parameter,
+                   "zero_policy": {"type": "string", "enum": ["fail_closed"]}},
+                  ("numerator", "denominator", "zero_policy")),
+        "recode": ({"input": column_parameter, "mapping": {"type": "object", "additionalProperties": {}},
+                    "default": {}}, ("input", "mapping")),
+        "derived_variable": ({"operator": {"type": "string", "enum": ["add", "subtract", "multiply"]}},
+                             ("operator",)),
     }
+    recipe_branches = tuple({
+        "properties": {
+            "recipe_operation_id": {"const": recipe_operation},
+            "parameters": {"type": "object", "properties": properties,
+                           "required": list(required), "additionalProperties": False},
+        },
+        "required": ["recipe_operation_id", "parameters"],
+    } for recipe_operation, (properties, required) in recipe_parameters.items())
 
     def contract(
         operation_id: str,
@@ -413,6 +411,7 @@ def _data_management_step_contracts() -> dict[str, StepSpecContract]:
         *,
         field_enums: Mapping[str, tuple[str, ...]] | None = None,
         natural_language_enabled: bool = False,
+        spec_branches: tuple[Mapping[str, Any], ...] = (),
     ) -> StepSpecContract:
         return StepSpecContract(
             summary=summary,
@@ -421,6 +420,7 @@ def _data_management_step_contracts() -> dict[str, StepSpecContract]:
             field_types=field_types,
             field_enums=field_enums or {},
             field_schemas=field_schemas,
+            spec_branches=spec_branches,
             semantic_validator_key=f"data.{operation_id.removeprefix('data.')}",
             reference_resolver_key="workflow.source_columns",
             column_extractor_key=f"data.{operation_id.removeprefix('data.')}",
@@ -471,12 +471,12 @@ def _data_management_step_contracts() -> dict[str, StepSpecContract]:
                 "recipe_id": {"type": "string", "minLength": 1},
                 "recipe_operation_id": {
                     "type": "string",
-                    "enum": ["interaction", "log", "ratio", "recode", "derived_variable"],
+                    "enum": list(recipe_parameters),
                 },
                 "inputs": _string_list_field_schema(),
                 "output": {"type": "string", "minLength": 1},
                 "output_type": {"type": "string", "enum": ["numeric", "string", "boolean"]},
-                "parameters": recipe_parameters_schema,
+                "parameters": {"type": "object"},
                 "fit_scope": {
                     "type": "string",
                     "enum": ["stateless", "date_local", "period_fitted"],
@@ -485,17 +485,12 @@ def _data_management_step_contracts() -> dict[str, StepSpecContract]:
                 "outlier_policy": {"type": "string", "minLength": 1},
             },
             field_enums={
-                "recipe_operation_id": (
-                    "interaction",
-                    "log",
-                    "ratio",
-                    "recode",
-                    "derived_variable",
-                ),
+                "recipe_operation_id": tuple(recipe_parameters),
                 "fit_scope": ("stateless", "date_local", "period_fitted"),
                 "output_type": ("numeric", "string", "boolean"),
             },
             natural_language_enabled=True,
+            spec_branches=recipe_branches,
         ),
     }
     # Every other data operation is declared in the data-operation registry;

@@ -301,6 +301,7 @@ def test_question_contract_roundtrips_through_the_actual_plan_tools(tmp_path):
         'schema_version': 'statistical-exploration.v1', 'result': {'operation': 'tabulate', 'rows': [{'count': 3}]}}, ['data'])
     runtime = _Fixture(tmp_path / 'runtime')
     runtime.orchestrator.context_provider.project_root = tmp_path
+    runtime.repository.append('chain-session', 'message', {'role': 'user', 'content': 'Classify the variable.'})
     registry = runtime.orchestrator.tool_registry('chain-a')
     call = {'tool_call_id': 'plan', 'tool_id': 'update_plan', 'arguments': {
         'question': 'Classify the variable.',
@@ -374,6 +375,8 @@ def test_product_registration_and_plan_tool_share_the_final_gate(tmp_path):
     contract, evidence = fixture(tmp_path / 'project')
     f = _Fixture(tmp_path / 'runtime')
     f.orchestrator.context_provider.project_root = tmp_path / 'project'
+    f.repository.append('chain-session', 'message', {
+        'role': 'user', 'content': 'Complete the source-bound linear analysis.'})
     registry = f.orchestrator.tool_registry('chain-a')
     call = {'tool_call_id': 'plan', 'tool_id': 'update_plan', 'arguments': {
         'question': 'Complete the source-bound linear analysis',
@@ -643,6 +646,8 @@ def test_the_source_sha256_is_bound_from_the_registered_dataset(tmp_path, given)
         source['sha256'] = truth[:10] + ('0' if truth[10] != '0' else '1') + truth[11:]
     f = _Fixture(tmp_path / 'runtime')
     f.orchestrator.context_provider.project_root = tmp_path / 'project'
+    f.repository.append('chain-session', 'message', {
+        'role': 'user', 'content': 'Complete the source-bound linear analysis.'})
     registry = f.orchestrator.tool_registry('chain-a')
     call = {'tool_call_id': 'plan', 'tool_id': 'update_plan', 'arguments': {
         'question': 'Complete the source-bound linear analysis',

@@ -5,6 +5,7 @@
 import { useState } from "react";
 import type { AgentMessage } from "../agentTypes";
 import { chapterTitle, messageTime } from "./turns";
+import { confirmAgentRewind } from "../rewindConfirmation";
 
 const Icon = ({ d }: { d: string }) => (
   <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -57,7 +58,7 @@ export function MessageActions({ message, pinned, busy, onRewind, onFork, onPin,
           aria-label="Rewind to here"
           title="Restore the conversation and analysis head before this message on a new branch. Original evidence is retained; external actions are not reversed."
           disabled={busy}
-          onClick={() => onRewind(message.entry_id)}
+          onClick={() => { if (confirmAgentRewind()) onRewind(message.entry_id); }}
         >
           <Icon d={REWIND} />
         </button>

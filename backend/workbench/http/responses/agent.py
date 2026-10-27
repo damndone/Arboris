@@ -52,7 +52,8 @@ ActivityEventItem = view_of(AgentActivityEventItem, "ActivityEventItem", kind=Li
 IntentDecisionView = view_of(AnalysisLoopDecision, "IntentDecisionView", omit=("packets",))
 AgentPlanStepView = view_of(PlanStep, "AgentPlanStepView", permission_class=str)
 AgentAnalysisPlan = view_of(Plan, "AgentAnalysisPlan", steps=list[AgentPlanStepView],
-                           completion=NotRequired[dict[str, Any]], completion_evidence=NotRequired[dict[str, Any]])
+                           completion=NotRequired[dict[str, Any]], completion_evidence=NotRequired[dict[str, Any]],
+                           task_requirements=NotRequired[dict[str, Any]])
 AgentTurnRecord = view_of(TurnRecord, "AgentTurnRecord")
 
 

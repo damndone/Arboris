@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { useSearchParams } from "react-router-dom";
-import type { PostEstimationResult } from "../../api";
+import { ApiError, type PostEstimationResult } from "../../api";
 import { useLineage } from "../../lineage/LineageContext";
 import { buildAskAIContextPacket } from "../../lineage/detail/sections/askAiContextPacket";
 import { resolveNodeOperationContext } from "../../lineage/api/nodeOperationContext";
@@ -58,7 +58,6 @@ import type {
   AgentRole,
 } from "./agentTypes";
 import type { ForestViewModel } from "../../lineage/api/graphViewTypes";
-import type { ApiError } from "../../api";
 
 /** Terminal operation-record states — reconcile polling stops here. */
 const TERMINAL_OPERATION_STATUSES = new Set([
@@ -188,6 +187,9 @@ function boundedGlobalProjectContext(
 export interface AgentSurfaceContextValue {
   executionMode?: "ask" | "auto";
   setExecutionMode?: (mode: "ask" | "auto") => void;
+  /** Reveal the current plan without approving or executing it. */
+  showPlan?: () => void;
+  planViewRequest?: number;
   plan?: AgentPlan | null;
   planVersions?: AgentPlanVersion[];
   planBusy?: boolean;
@@ -341,6 +343,8 @@ export function AgentSurfaceProvider({
   }, [draftKey]);
   const [executionPolicy, setExecutionPolicy] = useState<"auto_read_only" | "proposal_only">("proposal_only");
   const [executionMode, setExecutionMode] = useState<"ask"|"auto">("ask");
+  const [planViewRequest, setPlanViewRequest] = useState(0);
+  const showPlan = useCallback(() => setPlanViewRequest(request => request + 1), []);
   const [plan, setPlan] = useState<AgentPlan|null>(null);
   const latestPlanRef = useRef(plan);
   latestPlanRef.current = plan;
@@ -351,6 +355,7 @@ export function AgentSurfaceProvider({
   const [queueMessageBusy, setQueueMessageBusy] = useState(false);
   const [queueMessageNotice, setQueueMessageNotice] = useState<string|null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  useEffect(() => { setPlanViewRequest(0); }, [sessionId]);
   const planReadRevisionRef = useRef(0);
   const turnReadRevisionRef = useRef(0);
   const currentSessionRef = useRef(sessionId);
@@ -973,6 +978,7 @@ export function AgentSurfaceProvider({
 
   const abortTurn = useCallback(async () => {
     const controller = activeTurnControllerRef.current;
+    const requestScope = sessionScope;
     // Stopping confirmation suppresses the next model request; the operation's
     // durable receipt still determines whether its effect completed.
     if (confirmationControllerRef.current) {
@@ -986,15 +992,26 @@ export function AgentSurfaceProvider({
     if (activeSessionId) {
       try {
         await abortAgentTurn(projectRoot, activeSessionId);
-      } catch {
-        // A completed turn can leave the active map between the click and this
-        // request. The local request still needs to stop without showing a
-        // misleading provider failure.
+      } catch (reason) {
+        // Only this typed response proves the server has no active owner.
+        // A transport/server failure must leave the original request attached.
+        if (!(reason instanceof ApiError && reason.status === 409 && reason.code === "AGENT_TURN_NOT_ACTIVE")) {
+          if (activeScopeRef.current !== requestScope || currentSessionRef.current !== activeSessionId
+              || (controller && activeTurnControllerRef.current !== controller)) return;
+          const detail = reason instanceof Error ? ` ${reason.message}` : "";
+          setError(`Could not confirm a stop. The server may still be running. Retry Stop or inspect the original turn before starting another request.${detail}`);
+          setSessionStatus((current) => current === "cancelling"
+            ? (isSubmitting || sessionStatus === "cancelling" ? "running" : sessionStatus) : current);
+          return;
+        }
       }
     }
+    if (activeScopeRef.current !== requestScope
+        || (activeSessionId && currentSessionRef.current !== activeSessionId)
+        || (controller && activeTurnControllerRef.current !== controller)) return;
     controller?.abort();
     if (controller) setSessionStatus("cancelled");
-  }, [isSubmitting, projectRoot, sessionId, sessionStatus]);
+  }, [isSubmitting, projectRoot, sessionId, sessionStatus, sessionScope]);
 
   const confirmProposal = useCallback(async (proposalId: string) => {
     if (!sessionId || confirmationBusyId !== null || confirmationControllerRef.current) return;
@@ -1248,7 +1265,7 @@ export function AgentSurfaceProvider({
   const openConversation = useCallback((nextSessionId: string) => switchConversation(nextSessionId), [switchConversation]);
 
   const value = useMemo<AgentSurfaceContextValue>(() => ({
-    executionMode,setExecutionMode,plan,planVersions,planBusy,planError,refreshPlan,savePlan,approvePlan,approveAndRunPlan,
+    executionMode,setExecutionMode,showPlan,planViewRequest,plan,planVersions,planBusy,planError,refreshPlan,savePlan,approvePlan,approveAndRunPlan,
     durableTurns,continueTurn,resumeTurn,queueTurnMessage,queueMessageBusy,queueMessageNotice,
     messages,
     prompt,
@@ -1296,7 +1313,7 @@ export function AgentSurfaceProvider({
     activeTurnStartedAt,
     capabilityCatalog,
   }), [
-    executionMode,plan,planVersions,planBusy,planError,refreshPlan,savePlan,approvePlan,approveAndRunPlan,
+    executionMode,showPlan,planViewRequest,plan,planVersions,planBusy,planError,refreshPlan,savePlan,approvePlan,approveAndRunPlan,
     durableTurns,continueTurn,resumeTurn,queueTurnMessage,queueMessageBusy,queueMessageNotice,
     activeOperation,
     contextPercent,

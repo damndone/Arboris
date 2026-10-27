@@ -73,6 +73,7 @@ class Plan:
     updated_at: str = ""
     completion: dict[str, Any] | None = None
     completion_evidence: dict[str, Any] | None = None
+    task_requirements: dict[str, Any] | None = None  # Server-owned; absent from Agent tool inputs.
 
     def to_dict(self) -> dict[str, Any]:
         value = {"plan_id": self.plan_id, "version": self.version, "status": self.status, "question": self.question,
@@ -84,6 +85,8 @@ class Plan:
             value["completion"] = self.completion
         if self.completion_evidence is not None:
             value["completion_evidence"] = self.completion_evidence
+        if self.task_requirements is not None:
+            value["task_requirements"] = self.task_requirements
         return value
 
     @classmethod
@@ -101,6 +104,7 @@ class Plan:
             approved_version=value.get("approved_version"), approved_at=value.get("approved_at"),
             updated_at=value.get("updated_at", ""),
             completion=value.get("completion"), completion_evidence=value.get("completion_evidence"),
+            task_requirements=value.get("task_requirements"),
         )
 
 
@@ -182,7 +186,8 @@ def merge(previous: Plan | None, *, question: str, criteria: list[str], steps: t
                         create=lambda: f"plan_{uuid4().hex[:12]}"),
                     version=(previous.version + 1) if previous else 1, status="draft", question=question,
                     criteria=tuple(criteria), steps=steps, allowed_classes=tuple(allowed),
-                    budget=dict(budget or {}), completion=completion, completion_evidence=completion_evidence, updated_at=identity_value(
+                    budget=dict(budget or {}), completion=completion, completion_evidence=completion_evidence,
+                    task_requirements=previous.task_requirements if previous else None, updated_at=identity_value(
                         owner="agent.plan.merge", slot="updated_at", inputs=identity_inputs, create=_now))
     old_ids = {step.step_id for step in previous.steps}
     marked = tuple(replace(step, added_after_results=step.step_id not in old_ids or

@@ -131,6 +131,12 @@ class PlanControl:
                 basis = replace(previous, completion=contract, completion_evidence=None)
             plan = plans.merge(basis, question=question, criteria=changes.get("criteria", list(previous.criteria)),
                                steps=steps, budget=previous.budget, allowed_classes=list(previous.allowed_classes))
+            # The editor sends the whole form, including an unchanged question.
+            # Editing criteria alone cannot authorize narrowing the original task.
+            if question != previous.question:
+                from .task_requirements import human_revision
+                plan = replace(plan, task_requirements=human_revision(self.repository, self.session_id, question,
+                    plan_id=plan.plan_id, version=plan.version, changes=changes))
             def execution_scope(items):
                 return [(step.step_id, step.operation_ids, step.depends_on, step.expected_outputs) for step in items]
             if previous.approved_version is not None and (contract_changed or execution_scope(steps) != execution_scope(previous.steps)):

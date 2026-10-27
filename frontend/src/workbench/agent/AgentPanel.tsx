@@ -6,6 +6,7 @@ import { MessageActions } from "./transcript/MessageActions";
 import { useAgentSurface } from "./AgentSurfaceContext";
 import { agentAuditExportUrl } from "./agentApi";
 import { AgentComposer } from "./AgentComposer";
+import { agentTurnActive } from "./AgentRunControls";
 import type { AgentMessage } from "./agentTypes";
 import { AgentRowsTable, shownRows } from "./AgentRowsTable";
 import { AgentTargetRecovery } from "./AgentTargetRecovery";
@@ -244,9 +245,9 @@ export function AgentPanel({
   const transcriptRef = useRef<HTMLDivElement | null>(null);
   const shouldFollowTranscriptRef = useRef(true);
   const hasMeasuredTranscriptRef = useRef(false);
-  const turnActive = agent.isSubmitting || agent.sessionStatus.toLowerCase() === "running";
+  const turnActive = agentTurnActive(agent);
   const elapsedSeconds = useElapsedSeconds(agent.activeTurnStartedAt, turnActive);
-  const terminalFailure = agent.isSubmitting
+  const terminalFailure = turnActive
     ? null
     : terminalFailureMessage(
       agent.messages,

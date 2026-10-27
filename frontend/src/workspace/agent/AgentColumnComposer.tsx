@@ -14,6 +14,7 @@ import { ContextUsageRing } from "../../workbench/agent/ContextUsageRing";
 import { SendIcon, StopIcon } from "../icons";
 import { AgentModeMenu, cycleMode } from "./AgentModeMenu";
 import { AgentModelMenu } from "./AgentModelMenu";
+import { useAgentSlashCommands } from "../../workbench/agent/useAgentSlashCommands";
 import "./agentColumnComposer.css";
 import "./composerMenu.css";
 
@@ -27,6 +28,7 @@ export function focusChipText(label: string): string {
 
 export function AgentColumnComposer() {
   const agent = useAgentSurfaceOptional();
+  const { handleCommand, feedback } = useAgentSlashCommands(agent);
   const textRef = useRef<HTMLTextAreaElement>(null);
   const prompt = agent?.prompt ?? "";
   const [steer, setSteer] = useState(false);
@@ -57,11 +59,13 @@ export function AgentColumnComposer() {
     setPrompt,
   } = agent;
   const canSend = prompt.trim().length > 0;
+  const commandDraft = prompt.trim().startsWith("/");
   const busy = busyNow;
   // While a turn runs, a message waits for it (or steers it) instead of starting another.
   const canQueue = busy && Boolean(agent.queueTurnMessage) && !agent.queueMessageBusy;
   const submit = () => {
     if (!canSend) return;
+    if (handleCommand(prompt)) return;
     if (!busy) void sendPrompt(prompt);
     else if (canQueue) void agent.queueTurnMessage?.(steer ? "steer" : "follow_up", prompt);
   };
@@ -83,7 +87,7 @@ export function AgentColumnComposer() {
           </button>
         </div>
       ))}
-      {busy && agent.queueTurnMessage && (
+      {busy && agent.queueTurnMessage && !commandDraft && (
         <div className="ws-composer__queue">
           <span>{steer ? "Your message steers the current turn" : "Your message waits for this turn to finish"}</span>
           <button type="button" aria-pressed={steer} onClick={() => setSteer((value) => !value)}>
@@ -162,8 +166,10 @@ export function AgentColumnComposer() {
             onSelect={(value) => void setModel(value)}
             onSettings={agent.setModelSettings ? (value, patch) => void agent.setModelSettings?.(value, patch) : undefined}
           />
-          {busy && canQueue && canSend && (
-            <button type="submit" className="ws-composer__send" aria-label={steer ? "Steer the Agent" : "Queue for the Agent"} title={steer ? "Steer (Enter)" : "Queue (Enter)"}>
+          {busy && canSend && (canQueue || commandDraft) && (
+            <button type="submit" className="ws-composer__send"
+              aria-label={commandDraft ? "Run Agent command" : steer ? "Steer the Agent" : "Queue for the Agent"}
+              title={commandDraft ? "Run command (Enter)" : steer ? "Steer (Enter)" : "Queue (Enter)"}>
               <SendIcon />
             </button>
           )}
@@ -178,6 +184,7 @@ export function AgentColumnComposer() {
           )}
         </div>
       </form>
+      {feedback && <p role={feedback.error ? "alert" : "status"} className="ws-composer__note">{feedback.text}</p>}
       {error && (
         <p role="alert" className="ws-composer__error">
           {error}

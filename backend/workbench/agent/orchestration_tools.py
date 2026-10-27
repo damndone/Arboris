@@ -417,19 +417,15 @@ class OrchestrationTools:
 
         async def update_plan(arguments: dict[str, Any], context) -> dict[str, Any]:
             from . import plans as plan_module
-            from .completion import source_receipt, enforce_request_scope
+            from .completion import source_receipt
+            from .task_requirements import enforce
+            from dataclasses import replace
 
             if context.session_id != session_id:
                 raise ValueError("tool session is outside the registered chain scope")
             try:
                 completion = arguments.get("completion")
                 if completion is not None:
-                    requested = enforce_request_scope({'scope': completion.get('scope', 'analysis'),
-                        'target': completion.get('target'), 'status': 'requirements_met', 'missing': []},
-                        _agent._last_person_text())
-                    if requested['missing']:
-                        raise plan_module.PlanError('Completion contract conflicts with the user request: '
-                            + ', '.join(requested['missing']) + '. Keep full-analysis requirements and the requested estimand; do not narrow the plan question.')
                     root = getattr(self.context_provider, "project_root", self.repository.root.parent)
                     given = completion["source"]
                     receipt = source_receipt(root, {"run_id": given["run_id"], "artifact_id": given["artifact_id"]})
@@ -442,9 +438,17 @@ class OrchestrationTools:
                         wrong = sum(a != b for a, b in zip(str(given["sha256"]), receipt["sha256"]))
                         tool_note(f"completion.source.sha256 is bound from the registered dataset; the value given "
                                   f"differed in {wrong} of 64 characters and was not used.")
-                    arguments = {**arguments, "completion": {**completion, "source": receipt}}
+                    completion = {**completion, "source": receipt}
+                    arguments = {**arguments, "completion": completion}
                 steps = plan_module.parse_steps(arguments.get("steps"), self.known_plan_operations())
                 def revise(previous):
+                    requirements = self._bind_task_requirements(session_id, previous)
+                    if completion is not None and requirements['status'] == 'verified':
+                        requested = enforce({'scope': completion.get('scope', 'analysis'),
+                            'target': completion.get('target'), 'status': 'requirements_met', 'missing': []}, requirements)
+                        if requested['missing']:
+                            raise plan_module.PlanError('Completion contract conflicts with the user request: '
+                                + ', '.join(requested['missing']) + '. Keep the server-bound task requirements; only a human plan revision can narrow them.')
                     # A status update that leaves out the question or criteria keeps them:
                     # reading the omission as "now empty" made each such update a change
                     # of criteria needing approval again (paid fix2 round, panel, Auto).
@@ -452,8 +456,19 @@ class OrchestrationTools:
                                 else previous.question if previous is not None else "")
                     criteria = ([str(c)[:300] for c in arguments.get("criteria") or ()][:12] if "criteria" in arguments
                                 else list(previous.criteria) if previous is not None else [])
+                    basis = previous
+                    if (previous is not None and previous.completion is not None and completion is not None
+                            and previous.completion.get('scope') == 'question'
+                            and completion.get('scope', 'analysis') == 'analysis'
+                            and requirements['status'] == 'verified' and requirements['scope'] == 'analysis'
+                            and {k: v for k, v in previous.completion.items() if k not in {'scope', 'playbooks'}}
+                                == {k: v for k, v in completion.items() if k not in {'scope', 'playbooks'}}):
+                        # A real user expanded the task. Draft the stronger contract;
+                        # preserve source/target and retire the old approval/evidence.
+                        basis = replace(previous, completion=completion, completion_evidence=None,
+                                        status='needs_approval' if previous.approved_version is not None else 'draft')
                     plan = plan_module.merge(
-                        previous,
+                        basis,
                         question=question,
                         criteria=criteria,
                         steps=steps,
@@ -463,6 +478,7 @@ class OrchestrationTools:
                         completion=arguments.get("completion"),
                         completion_evidence=arguments.get("completion_evidence"),
                     )
+                    plan = replace(plan, task_requirements=requirements)
                     if not plan.question:
                         raise plan_module.PlanError("question is required")
                     if (previous is not None and previous.approved_version is not None
@@ -479,7 +495,8 @@ class OrchestrationTools:
                 plan = self.plan_store.update(session_id, revise)
             except plan_module.PlanError as exc:
                 return {"saved": False, "error": str(exc),
-                        "guidance": "Fix the plan as the error says and call update_plan again."}
+                        "guidance": "The rejected change was not applied. Follow the error; if it requires a "
+                                    "human revision, pause for takeover rather than retrying the same change."}
             needs_person = self.execution_mode == "auto" and plan.status in {"draft", "needs_approval"}
             reopened = plan.status == "needs_approval" and plan.approved_version is not None
             return {

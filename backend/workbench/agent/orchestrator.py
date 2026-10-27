@@ -658,7 +658,7 @@ class WorkbenchOrchestrator(OrchestrationWorkflows, OrchestrationProposals, Orch
         agent.research_review_mode = lambda: self.execution_mode
         agent.research_review_context = lambda candidate: build_context(
             getattr(self.context_provider, "project_root", self.repository.root.parent),
-            self.plan_store.current(session_id), mode=self.execution_mode, candidate=candidate,
+            self._bound_plan(session_id), mode=self.execution_mode, candidate=candidate,
             config=getattr(agent.adapter, "config", None))
         def restore_core_phase(checkpoint):
             if checkpoint.get("kind") == "research_review/v1":
@@ -672,7 +672,26 @@ class WorkbenchOrchestrator(OrchestrationWorkflows, OrchestrationProposals, Orch
         from .delivery import delivery_check
 
         project_root = getattr(self.context_provider, "project_root", self.repository.root.parent)
-        return delivery_check(project_root, self.plan_store.current(session_id), suggest=suggest)
+        return delivery_check(project_root, self._bound_plan(session_id), suggest=suggest)
+
+    def _bind_task_requirements(self, session_id, plan):
+        from .task_requirements import RequirementBinder
+        if not hasattr(self, '_task_requirement_binder'):
+            self._task_requirement_binder = RequirementBinder(self.repository)
+        return self._task_requirement_binder.bind(session_id, plan.task_requirements if plan else None)
+
+    def _bound_plan(self, session_id):
+        from dataclasses import replace
+        from .task_requirements import signature
+        plan = self.plan_store.current(session_id)
+        if plan is None:
+            return None
+        requirements = self._bind_task_requirements(session_id, plan)
+        if signature(requirements) != signature(plan.task_requirements):
+            def bind(current):
+                return replace(current, task_requirements=self._bind_task_requirements(session_id, current))
+            return self.plan_store.update(session_id, bind)
+        return replace(plan, task_requirements=requirements)
 
 
     def _chain(self, chain_id: str) -> tuple[str, AgentCore]:

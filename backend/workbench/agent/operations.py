@@ -704,8 +704,11 @@ class OperationRegistry:
         try:
             return self._definitions[(operation_id, operation_version)]
         except KeyError as exc:
+            versions = sorted(version for name, version in self._definitions if name == operation_id)
             raise UnknownOperationError(
-                f"operation is not registered: {operation_id}@{operation_version}"
+                f"operation is not registered: {operation_id}@{operation_version}; "
+                f"registered versions: {', '.join(versions[:8]) or 'none'}. "
+                "Use a registered version; do not change the operation to repair a version typo."
             ) from exc
 
 

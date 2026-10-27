@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAgentSurfaceOptional } from "./AgentSurfaceContext";
 import type { AgentPlanPatch } from "./agentTypes";
 
@@ -8,8 +8,15 @@ export function AgentPlanPanel() {
   const [draft, setDraft] = useState<AgentPlanPatch | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
+  const summaryRef = useRef<HTMLElement>(null);
   const plan = agent?.plan;
   useEffect(() => { setDraft(null); setFailure(null); }, [agent?.sessionId]);
+  useEffect(() => {
+    if (!agent?.planViewRequest) return;
+    setOpen(true);
+    summaryRef.current?.focus();
+    summaryRef.current?.scrollIntoView?.({ block: "nearest" });
+  }, [agent?.planViewRequest]);
   if (!agent) return null;
   if (!plan) return agent.planError ? <section className="wb-agent-plan" aria-label="Analysis plan"><p role="alert">{agent.planError}</p><button onClick={() => void agent.refreshPlan?.()}>Reload current plan</button></section> : null;
   const busy = agent.planBusy || agent.isSubmitting || agent.sessionStatus === "running";
@@ -20,7 +27,7 @@ export function AgentPlanPanel() {
   // v1.9.1: one line until opened, so the conversation keeps the panel.
   return <details className="wb-agent-plan" aria-label="Analysis plan" open={open || draft !== null || undefined}
     onToggle={event => setOpen((event.currentTarget as HTMLDetailsElement).open)}>
-    <summary>
+    <summary ref={summaryRef} tabIndex={0}>
       <span className="wb-agent-plan__title">Plan v{plan.version}</span>
       <span className="wb-agent-plan__meta">{plan.status} · {done ? `${done}/` : ""}{plan.steps.length} {plan.steps.length === 1 ? "step" : "steps"}</span>
       {!draft && awaitingApproval && <button type="button" className="wb-agent-plan__approve" disabled={busy}

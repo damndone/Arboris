@@ -15,7 +15,7 @@ export function AgentRunControls() {
     <label>Mode <select aria-label="Agent execution mode" value={agent.executionMode ?? "ask"} disabled={active} onChange={e => agent.setExecutionMode?.(e.target.value as "ask"|"auto")}>
       <option value="ask">Ask every step</option><option value="auto">Auto within approved plan</option>
     </select></label>
-    {active && agent.queueTurnMessage && <>
+    {active && agent.queueTurnMessage && !agent.prompt.trim().startsWith("/") && <>
       <select aria-label="Active-turn message delivery" value={delivery} onChange={e => setDelivery(e.target.value as typeof delivery)}>
         <option value="">Choose message delivery…</option><option value="steer">Steer current turn</option><option value="follow_up">Queue follow-up</option>
       </select>

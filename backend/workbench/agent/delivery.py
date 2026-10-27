@@ -15,13 +15,24 @@ DIGEST_FIELDS = ("status", "missing", "next_step", "compose_report", "sensitivit
                  "dropped_references", "disclosures")
 
 
+def review_plan_basis_sha256(*, question, criteria, completion):
+    """Research-review inputs that change its meaning, excluding execution progress."""
+    from ..canonical import sha256_canonical
+    return sha256_canonical({'question': question, 'criteria': list(criteria), 'completion': completion})
+
+
 def delivery_check(project_root, plan, *, suggest=False):
-    from .completion import derive_evidence, evaluate, enforce_request_scope
+    from .completion import derive_evidence, evaluate
+    from .task_requirements import enforce
 
     evidence, bound = derive_evidence(project_root, plan.completion if plan else None,
                                       plan.completion_evidence if plan else None)
     result = evaluate(project_root, plan.completion if plan else None, evidence, suggest=suggest, options=True)
-    result = enforce_request_scope(result, plan.question if plan else '')
+    if plan is not None:
+        result = enforce(result, plan.task_requirements)
+    result['review_plan_basis_sha256'] = review_plan_basis_sha256(
+        question=plan.question if plan else '', criteria=plan.criteria if plan else (),
+        completion=plan.completion if plan else None)
     result['bound_by_workbench'] = bound['bound_by_workbench']
     if bound['dropped']:
         # Named back to the Agent: a reference that does not resolve to the right kind

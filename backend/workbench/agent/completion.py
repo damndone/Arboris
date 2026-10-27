@@ -445,6 +445,9 @@ def claims_completion(content, request_text=None):
 def _missing_label(code, language):
     family, _, requirement = code.partition(':')
     special = {
+        'task_requirements:unverified': (
+            'The original user task requirements are unverified. Restore the user-message evidence or explicitly revise the plan as a person before certifying completion.',
+            '原始用户任务要求尚未核验。需恢复真实用户消息证据，或由用户明确修订计划后才能确认完成。'),
         'target:requested_estimand_unbound': (
             'Fix the requested causal target in completion.target; do not substitute a regression coefficient.',
             '需固定请求的因果目标估计量，不能用普通回归系数替代。'),

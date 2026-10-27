@@ -269,6 +269,19 @@ def _discriminated_branch(schema: dict[str, Any], instance: Any) -> dict[str, An
         }
         if consts and all(instance.get(key) == value for key, value in consts.items()):
             return branch
+    # Identity selects the error branch even when another constraint (such as
+    # operation_version) is invalid. Requiring every const first sent callers
+    # to an unrelated target schema and made them add then remove fields.
+    constants = [(branch, {key: spec['const'] for key, spec in (branch.get('properties') or {}).items()
+                          if isinstance(spec, dict) and 'const' in spec})
+                 for branch in branches if isinstance(branch, dict)]
+    identities = {key for _, values in constants for key in values
+                  if len({json.dumps(values[key], sort_keys=True) for _, values in constants if key in values}) > 1}
+    matches = [branch for branch, values in constants
+               if any(key in instance and instance[key] == values[key] for key in identities & values.keys())
+               and all(key not in instance or instance[key] == values[key] for key in identities & values.keys())]
+    if len(matches) == 1:
+        return matches[0]
     # Some compatibility unions have no const discriminator. Prefer the one
     # branch that recognizes the most supplied keys; never infer a different
     # operation when a const discriminator exists but does not match.
@@ -371,6 +384,7 @@ def _is_agent_input_fault(exc: BaseException) -> bool:
     from ..contracts.common.errors import OperationValidationError
     from ..analysis_loop.plan import PlanValidationError
     from ..analysis_loop.resolver import AnalysisLoopSourceResolutionError
+    from .operation_definitions import UnknownOperationError
 
     # PlanValidationError rejects the Agent's own Analysis Loop intent with a code
     # and a message; shown as its class name only, the Agent retried blind twice
@@ -382,6 +396,7 @@ def _is_agent_input_fault(exc: BaseException) -> bool:
             OperationContractUnavailableError,
             AnalysisLoopSourceResolutionError,
             PlanValidationError,
+            UnknownOperationError,
         ),
     )
 

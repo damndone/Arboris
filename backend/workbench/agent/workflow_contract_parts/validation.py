@@ -918,31 +918,31 @@ def _validate_data_management_step(operation_id: str, spec: Mapping[str, Any]) -
         parameters = spec.get("parameters")
         if not isinstance(parameters, Mapping):
             raise OperationValidationError(f"{operation_id} parameters must be an object")
-        allowed: dict[str, set[str]] = {
-            "interaction": {"left", "right"},
-            "log": {"input", "base"},
-            "ratio": {"numerator", "denominator", "zero_policy"},
-            "recode": {"input", "mapping", "default"},
-            "derived_variable": {"operator"},
-        }
-        required: dict[str, set[str]] = {
-            "interaction": {"left", "right"},
-            "log": {"input"},
-            "ratio": {"numerator", "denominator", "zero_policy"},
-            "recode": {"input", "mapping"},
-            "derived_variable": {"operator"},
-        }
-        if recipe_operation not in allowed:
+        contract = WORKFLOW_STEP_SPEC_CONTRACTS[operation_id]
+        branch = next((branch for branch in contract.spec_branches
+                       if branch["properties"]["recipe_operation_id"]["const"] == recipe_operation), None)
+        if branch is None:
             raise OperationValidationError(f"{operation_id} recipe operation is not registered")
-        unknown = set(parameters) - allowed[recipe_operation]
-        if unknown:
+        parameter_schema = branch["properties"]["parameters"]
+        allowed = set(parameter_schema["properties"])
+        required = set(parameter_schema["required"])
+        hint = (f" Allowed parameters: {', '.join(sorted(allowed))}."
+                f" Required parameters: {', '.join(sorted(required))}.")
+        unknown = set(parameters) - allowed
+        missing = required - set(parameters)
+        if unknown or missing:
+            problems = []
+            if unknown:
+                problems.append(f"unsupported fields: {sorted(unknown)}")
+            if missing:
+                problems.append(f"missing fields: {sorted(missing)}")
             raise OperationValidationError(
-                f"{operation_id} parameters contain unsupported fields: {sorted(unknown)}"
+                f"{operation_id} {recipe_operation} parameters contain {'; '.join(problems)}.{hint}"
             )
-        missing = required[recipe_operation] - set(parameters)
-        if missing:
+        if not _schema_value_matches(parameters, parameter_schema):
             raise OperationValidationError(
-                f"{operation_id} parameters are missing: {sorted(missing)}"
+                f"{operation_id} {recipe_operation} "
+                + _schema_mismatch(parameters, parameter_schema, "parameters") + "." + hint
             )
         if recipe_operation in {"interaction", "ratio"} and len(inputs) != 2:
             raise OperationValidationError(f"{operation_id} {recipe_operation} requires two inputs")
@@ -955,18 +955,6 @@ def _validate_data_management_step(operation_id: str, spec: Mapping[str, Any]) -
                 raise OperationValidationError(
                     f"{operation_id} parameter {key} must reference inputs"
                 )
-        if recipe_operation == "ratio" and parameters.get("zero_policy") != "fail_closed":
-            raise OperationValidationError(f"{operation_id} ratio requires zero_policy=fail_closed")
-        if recipe_operation == "recode" and not isinstance(parameters.get("mapping"), Mapping):
-            raise OperationValidationError(f"{operation_id} recode mapping must be an object")
-        if recipe_operation == "derived_variable" and parameters.get("operator") not in {
-            "add",
-            "subtract",
-            "multiply",
-        }:
-            raise OperationValidationError(
-                f"{operation_id} derived_variable operator is not registered"
-            )
         for policy_name in ("missing_policy", "outlier_policy"):
             if policy_name in spec and spec[policy_name] == "silent":
                 raise OperationValidationError(

@@ -1,11 +1,12 @@
 import "@testing-library/jest-dom/vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentPanel } from "./AgentPanel";
 import { AgentSurfaceProvider } from "./AgentSurfaceContext";
 import type { AgentMessage, AgentProposal } from "./agentTypes";
 import { agentMessageFixture, agentProposalFixture } from "../../apiFixtures";
+import { ApiError } from "../../api";
 
 const mocks = vi.hoisted(() => ({
   rewindAgentSession: vi.fn(),
@@ -157,7 +158,9 @@ function mount() {
 }
 
 describe("AgentSurfaceProvider", () => {
+  afterEach(() => vi.mocked(window.confirm).mockRestore());
   beforeEach(() => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
     sessionStorage.clear();
     localStorage.clear();
     vi.clearAllMocks();
@@ -615,6 +618,73 @@ describe("AgentSurfaceProvider", () => {
     ));
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("cancelled"));
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["HTTP 500", new ApiError(500, "Cancellation service failed", "AGENT_ABORT_FAILED")],
+    ["network failure", new TypeError("Failed to fetch")],
+    ["a different HTTP 409", new ApiError(409, "The current owner cannot be interrupted", "AGENT_TURN_OWNED")],
+    ["the inactive code with a failed HTTP status", new ApiError(500, "Cancellation service failed", "AGENT_TURN_NOT_ACTIVE")],
+  ])("keeps the original request and offers retry when stopping fails with %s", async (_label, failure) => {
+    let signal!: AbortSignal;
+    mocks.sendAgentTurn.mockImplementationOnce((_root, _session, _question, activeSignal: AbortSignal) => {
+      signal = activeSignal;
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+      });
+    });
+    mocks.abortAgentTurn.mockRejectedValueOnce(failure);
+    mount();
+    fireEvent.change(await screen.findByRole("textbox", { name: "Ask Agent" }), { target: { value: "Inspect the original turn." } });
+    fireEvent.click(screen.getByRole("button", { name: "Send to Agent" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Stop Agent" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/server may still be running.*retry/i);
+    expect(signal.aborted).toBe(false);
+    expect(screen.getByRole("status")).not.toHaveTextContent("cancelled");
+    expect(screen.getByRole("button", { name: "Stop Agent" })).toBeEnabled();
+    expect(mocks.sendAgentTurn).toHaveBeenCalledTimes(1);
+    expect(mocks.continueAgentTurn).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Stop Agent" }));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("cancelled"));
+    expect(mocks.abortAgentTurn).toHaveBeenCalledTimes(2);
+    expect(signal.aborted).toBe(true);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("retains a restored durable turn after a failed stop instead of replacing it", async () => {
+    mocks.getAgentSession.mockResolvedValue({ ...session("saved"), status: "running" });
+    mocks.getAgentTurnState.mockResolvedValue({ turns: [{ turn_id: "original-turn", status: "running", requires_reconcile: false }] });
+    mocks.abortAgentTurn.mockRejectedValueOnce(new ApiError(500, "Cancellation service failed", "AGENT_ABORT_FAILED"));
+    render(<MemoryRouter initialEntries={["/?agent_session=saved"]}><AgentSurfaceProvider projectRoot="/proj" runId="run-a"><AgentPanel projectRoot="/proj" runId="run-a" /></AgentSurfaceProvider></MemoryRouter>);
+    fireEvent.click(await screen.findByRole("button", { name: "Stop Agent" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/server may still be running/i);
+    expect(screen.getByRole("button", { name: "Resume original turn" })).toBeInTheDocument();
+    expect(screen.getByText(/Unfinished turn: running/)).toBeInTheDocument();
+    expect(screen.queryByTestId("agent-turn-error")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).not.toHaveTextContent("cancelled");
+    expect(screen.getByRole("button", { name: "Stop Agent" })).toBeEnabled();
+    expect(mocks.sendAgentTurn).not.toHaveBeenCalled();
+    expect(mocks.continueAgentTurn).not.toHaveBeenCalled();
+    expect(mocks.resumeAgentTurn).not.toHaveBeenCalled();
+  });
+
+  it("accepts only the explicit inactive-turn race without reporting a stop failure", async () => {
+    let signal!: AbortSignal;
+    mocks.sendAgentTurn.mockImplementationOnce((_root, _session, _question, activeSignal: AbortSignal) => {
+      signal = activeSignal;
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+      });
+    });
+    mocks.abortAgentTurn.mockRejectedValueOnce(new ApiError(409, "This Agent session has no active turn to stop.", "AGENT_TURN_NOT_ACTIVE"));
+    mount();
+    fireEvent.change(await screen.findByRole("textbox", { name: "Ask Agent" }), { target: { value: "Inspect the original turn." } });
+    fireEvent.click(screen.getByRole("button", { name: "Send to Agent" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Stop Agent" }));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("cancelled"));
+    expect(signal.aborted).toBe(true);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(mocks.continueAgentTurn).not.toHaveBeenCalled();
   });
 
   it("binds a run-rail focus to the active model node instead of sending a run pseudo-key", async () => {
