@@ -130,7 +130,8 @@ class PlanControl:
                     raise plans.PlanError("completion source is unavailable or changed")
                 basis = replace(previous, completion=contract, completion_evidence=None)
             plan = plans.merge(basis, question=question, criteria=changes.get("criteria", list(previous.criteria)),
-                               steps=steps, budget=previous.budget, allowed_classes=list(previous.allowed_classes))
+                               steps=steps, budget=previous.budget, allowed_classes=list(previous.allowed_classes),
+                               human_revision=True)
             # The editor sends the whole form, including an unchanged question.
             # Editing criteria alone cannot authorize narrowing the original task.
             if question != previous.question:

@@ -23,13 +23,14 @@ export function AgentPlanPanel() {
   const changed = draft !== null && draft.version !== plan.version;
   const awaitingApproval = plan.approved_version !== plan.version && ["draft","needs_approval"].includes(plan.status);
   const approve = () => {setFailure(null);void agent.approvePlan?.(plan.version).catch(error => setFailure(error instanceof Error ? error.message : "Could not approve plan."));};
-  const done = plan.steps.filter(step => ["done","completed"].includes(step.status)).length;
+  const verifiedDone = new Set(plan.steps.filter(step => ["done", "completed"].includes(step.status)
+    && step.operation_ids.every(operation => step.completed_operation_ids?.includes(operation))).map(step => step.step_id));
   // v1.9.1: one line until opened, so the conversation keeps the panel.
   return <details className="wb-agent-plan" aria-label="Analysis plan" open={open || draft !== null || undefined}
     onToggle={event => setOpen((event.currentTarget as HTMLDetailsElement).open)}>
     <summary ref={summaryRef} tabIndex={0}>
       <span className="wb-agent-plan__title">Plan v{plan.version}</span>
-      <span className="wb-agent-plan__meta">{plan.status} · {done ? `${done}/` : ""}{plan.steps.length} {plan.steps.length === 1 ? "step" : "steps"}</span>
+      <span className="wb-agent-plan__meta">{plan.status} · {verifiedDone.size}/{plan.steps.length} completed {plan.steps.length === 1 ? "step" : "steps"}</span>
       {!draft && awaitingApproval && <button type="button" className="wb-agent-plan__approve" disabled={busy}
         onClick={event => {event.preventDefault();approve();}}>Approve plan v{plan.version}</button>}
     </summary>
@@ -38,7 +39,7 @@ export function AgentPlanPanel() {
       <label>Question<textarea aria-label="Plan question" maxLength={1000} value={draft.question ?? ""} onChange={e => setDraft({...draft,question:e.target.value})}/></label>
       <label>Criteria (one per line)<textarea aria-label="Plan criteria" value={(draft.criteria ?? []).join("\n")} onChange={e => setDraft({...draft,criteria:e.target.value.split("\n")})}/></label>
     </> : <><p>{plan.question}</p><ul>{plan.criteria.map((criterion, i) => <li key={i}>{criterion}</li>)}</ul></>}
-    <ol>{plan.steps.map(step => <li key={step.step_id} data-status={step.status}>
+    <ol>{plan.steps.map(step => <li key={step.step_id} data-status={["done", "completed"].includes(step.status) && !verifiedDone.has(step.step_id) ? "unverified" : step.status}>
       <span className="wb-agent-plan__dot" aria-hidden="true" />
       <div className="wb-agent-plan__step">
         {draft ? <input aria-label={`Step ${step.step_id} title`} maxLength={200} value={draft.steps?.find(s => s.step_id === step.step_id)?.title ?? step.title}
@@ -49,6 +50,12 @@ export function AgentPlanPanel() {
           {" · "}{step.operation_ids.join(", ")}
           {step.added_after_results && <> · later plan change</>}
         </div>
+        {["done", "completed"].includes(step.status) && !verifiedDone.has(step.step_id) && <p role="note">
+          Recorded as done; execution evidence is unavailable. Inspect the original operations before continuing.
+        </p>}
+        {Boolean(step.completed_operation_ids?.length) && <div className="wb-agent-plan__detail">
+          Recorded operations: {step.operation_ids.filter(operation => step.completed_operation_ids?.includes(operation)).length}/{step.operation_ids.length}
+        </div>}
         {step.expected_outputs.length > 0 && <div className="wb-agent-plan__detail">Expected: {step.expected_outputs.join(", ")}</div>}
       </div>
     </li>)}</ol>

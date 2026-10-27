@@ -98,6 +98,8 @@ class OrchestrationPermissions:
             if self.execution_policy != "auto_read_only" and decision.outcome == permissions.Outcome.ASK and not decision.floor:
                 reason = "Review before execution was requested for this turn."
             return {"requires_confirmation": True, "proposal": proposal.to_dict(), "confirmation_reason": reason,
+                    **({"plan_recovery": self.plan_scope["plan_recovery"]}
+                       if self.plan_scope and self.plan_scope.get("plan_recovery") else {}),
                     "permission_class": request.permission_class.value}
         actor = ACTOR if request.permission_class == permissions.PermissionClass.ANALYZE else decision.authority
         try:
@@ -120,7 +122,7 @@ class OrchestrationPermissions:
         if record.status == "completed" and results_reader is not None:
             results = results_reader(record)
         plan_update_conflict = False
-        if plan is not None and actor == "approved_plan":
+        if plan is not None and request.in_plan:
             from . import plans as plan_module
 
             expected_plan = plan

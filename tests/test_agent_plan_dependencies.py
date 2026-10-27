@@ -32,16 +32,18 @@ def test_missing_dependency_is_not_treated_as_success_when_loading_a_plan():
 @pytest.mark.parametrize('open_status', ['pending', 'running', 'awaiting'])
 def test_all_dependencies_must_be_done_and_independent_steps_remain_selectable(open_status):
     plan = _approved(
-        plans.PlanStep('a', 'A', ('model.genesis',), status='done'),
+        plans.PlanStep('a', 'A', ('model.genesis',)),
         plans.PlanStep('b', 'B', ('test.t_tests',), status='skipped'),
         plans.PlanStep('blocked', 'Blocked', ('data.recode',), depends_on=('a', 'b'), status=open_status),
         plans.PlanStep('independent', 'Independent', ('statistical.derive_numeric',), status=open_status),
     )
+    plan = plans.mark_executed(plan, ['model.genesis'], 'completed')
     assert plans.scope_for(plan, ['data.recode'])['in_plan'] is False
     assert plans.scope_for(plan, ['statistical.derive_numeric'])['in_plan'] is True
     done = plans.mark_executed(plan, ['statistical.derive_numeric'], 'completed')
     assert [step.status for step in done.steps][-2:] == [open_status, 'done']
-    ready = replace(plan, steps=tuple(replace(step, status='done') if step.step_id == 'b' else step for step in plan.steps))
+    ready = replace(plan, steps=tuple(replace(step, status='pending') if step.step_id == 'b' else step for step in plan.steps))
+    ready = plans.mark_executed(ready, ['test.t_tests'], 'completed')
     assert plans.scope_for(ready, ['data.recode'])['in_plan'] is True
     assert plans.mark_executed(ready, ['data.recode'], 'completed').steps[2].status == 'done'
 
@@ -75,7 +77,9 @@ def test_selection_skips_blocked_duplicates_and_preserves_ready_plan_order(resul
 
 @pytest.mark.parametrize('terminal', ['done', 'skipped', 'failed'])
 def test_closed_steps_and_empty_requests_cannot_supply_plan_authority(terminal):
-    plan = _approved(plans.PlanStep('closed', 'Closed', ('data.recode',), status=terminal))
+    plan = _approved(plans.PlanStep('closed', 'Closed', ('data.recode',), status='pending' if terminal == 'done' else terminal))
+    if terminal == 'done':
+        plan = plans.mark_executed(plan, ['data.recode'], 'completed')
     assert plans.scope_for(plan, ['data.recode'])['in_plan'] is False
     assert plans.scope_for(plan, [])['in_plan'] is False
     assert plans.mark_executed(plan, [], 'completed').steps == plan.steps
@@ -83,7 +87,7 @@ def test_closed_steps_and_empty_requests_cannot_supply_plan_authority(terminal):
 
 def test_auto_orchestrator_requires_dependency_success_before_using_plan_authority(tmp_path):
     from tests.test_agent_execution_modes import _with_authority_runner
-    from tests.test_read_only_analysis import _Fixture, _recode
+    from tests.test_read_only_analysis import _Fixture, _recode, _explore
 
     fixture = _Fixture(tmp_path)
     seen = _with_authority_runner(fixture)
@@ -100,9 +104,10 @@ def test_auto_orchestrator_requires_dependency_success_before_using_plan_authori
     assert fixture.orchestrator.operation_store.list_records() == []
     assert store.current('chain-session').steps == plan.steps
 
-    store.save('chain-session', replace(plan, steps=(replace(plan.steps[0], status='done'), plan.steps[1])))
+    inspection = fixture.propose([_explore('inspect', 'region')])
+    assert inspection['executed'] and inspection['operation']['status'] == 'completed'
     result = fixture.propose([_recode()])
     assert result['executed'] is True and result['authorized_by'] == 'approved_plan'
-    assert seen == ['approved_plan']
+    assert seen == ['read_only_policy', 'approved_plan']
     assert [step.status for step in store.current('chain-session').steps] == ['done', 'done']
     assert store.current('chain-session').status == 'completed'

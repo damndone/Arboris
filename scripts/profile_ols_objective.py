@@ -6,6 +6,7 @@ journals all outputs before removing the sole active benchmark directory.
 from __future__ import annotations
 
 import cProfile
+import argparse
 import json
 from pathlib import Path
 import pstats
@@ -22,13 +23,15 @@ from workbench.projects import create_project
 
 def main():
     root = Path.cwd()
-    area = root / "local/perf-evidence/ols-objective-profile"
-    area.mkdir(parents=True, exist_ok=True)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--out', type=Path, required=True, help='Fresh evidence directory; existing evidence is never overwritten')
+    area = parser.parse_args().out.resolve()
     require_space(root)
     manifest = json.loads((root / "local/perf-inputs/ols/source.json").read_text())
     source = Path(manifest["source"])
     if digest(source) != manifest["sha256"]:
         raise ValueError("fixed input checksum changed")
+    area.mkdir(parents=True, exist_ok=False)
     active = area / "active"
     active.mkdir(exist_ok=False)
     project = create_project(active, "benchmark")

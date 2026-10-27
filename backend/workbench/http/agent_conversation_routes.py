@@ -31,6 +31,7 @@ class AgentConversationUpdate(BaseModel):
     #: A new title; an empty one returns to the first-message title.
     title: str | None = Field(default=None, max_length=120)
     archived: bool | None = None
+    desktop_notifications: bool | None = Field(default=None, strict=True)
 
 
 @router.patch("/agent/conversations/{session_id}")
@@ -43,6 +44,12 @@ def update_agent_conversation(session_id: str, project_root: str, body: AgentCon
         fields["title"] = (body.title or "").strip() or None
     if body.archived is not None:
         fields["archived"] = True if body.archived else None
+    if body.desktop_notifications is not None:
+        from ..agent.desktop_notifications import supported
+        if body.desktop_notifications and not supported():
+            raise WorkbenchAPIError(status_code=422, code="DESKTOP_NOTIFICATIONS_UNAVAILABLE",
+                message="Desktop notifications require the backend to run on this Mac.", details={})
+        fields["desktop_notifications"] = body.desktop_notifications
     metadata = repository.update_metadata(session_id, **fields)
     item = summary(repository, metadata)
     if item is None:

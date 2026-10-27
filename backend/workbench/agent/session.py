@@ -551,7 +551,7 @@ class JsonlSessionRepository:
         """Set display fields (title, archived) and the conversation's permission
         grants (v1.9.1 "don't ask again"); the log itself is untouched."""
 
-        allowed = {"title", "archived", "permission_grants", "execution_mode", "analysis_rewind"}
+        allowed = {"title", "archived", "permission_grants", "execution_mode", "analysis_rewind", "desktop_notifications"}
         unknown = set(fields) - allowed
         if unknown:
             raise ValueError(f"not editable: {sorted(unknown)}")

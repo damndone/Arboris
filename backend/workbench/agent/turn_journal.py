@@ -182,6 +182,8 @@ class TurnJournal:
                   response=getattr(core, "_durable_response", ""))
         self._edit(self.store.transition, status="failed" if core._final_status == "blocked"
                    else core._final_status or "completed")
+        from .desktop_notifications import schedule_notification
+        schedule_notification(self.repository, self.record)
 
     def interrupted(self, core):
         # Do not replace the pre-assistant checkpoint with half-applied state.

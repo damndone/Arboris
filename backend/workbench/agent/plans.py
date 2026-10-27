@@ -46,6 +46,7 @@ class PlanStep:
     expected_outputs: tuple[str, ...] = ()
     status: str = "pending"
     added_after_results: bool = False
+    completed_operation_ids: tuple[str, ...] = ()  # Server execution receipts only.
 
     @property
     def permission_class(self) -> PermissionClass:
@@ -55,7 +56,8 @@ class PlanStep:
         return {"step_id": self.step_id, "title": self.title, "operation_ids": list(self.operation_ids),
                 "depends_on": list(self.depends_on), "expected_outputs": list(self.expected_outputs),
                 "status": self.status, "added_after_results": self.added_after_results,
-                "permission_class": self.permission_class.value}
+                "permission_class": self.permission_class.value,
+                **({"completed_operation_ids": list(self.completed_operation_ids)} if self.completed_operation_ids else {})}
 
 
 @dataclass(frozen=True)
@@ -98,7 +100,8 @@ class Plan:
                                  depends_on=tuple(s.get("depends_on") or ()),
                                  expected_outputs=tuple(s.get("expected_outputs") or ()),
                                  status=s.get("status", "pending"),
-                                 added_after_results=bool(s.get("added_after_results")))
+                                 added_after_results=bool(s.get("added_after_results")),
+                                 completed_operation_ids=tuple(s.get("completed_operation_ids") or ()))
                         for s in value.get("steps") or ()),
             allowed_classes=tuple(value.get("allowed_classes") or ()), budget=dict(value.get("budget") or {}),
             approved_version=value.get("approved_version"), approved_at=value.get("approved_at"),
@@ -121,6 +124,8 @@ def parse_steps(raw: Any, known_operations: set[str]) -> tuple[PlanStep, ...]:
     for index, item in enumerate(raw):
         if not isinstance(item, dict):
             raise PlanError(f"step {index + 1} must be an object")
+        if "completed_operation_ids" in item:
+            raise PlanError("completed_operation_ids is server-owned execution evidence")
         step_id = str(item.get("step_id") or "").strip()
         if not step_id or step_id in seen:
             raise PlanError(f"step {index + 1}: step_id is missing or repeated")
@@ -160,7 +165,8 @@ def _require_acyclic(steps: tuple[PlanStep, ...] | list[PlanStep]) -> None:
 
 def merge(previous: Plan | None, *, question: str, criteria: list[str], steps: tuple[PlanStep, ...],
           budget: dict[str, int] | None, allowed_classes: list[str] | None,
-          completion: dict[str, Any] | None = None, completion_evidence: dict[str, Any] | None = None) -> Plan:
+          completion: dict[str, Any] | None = None, completion_evidence: dict[str, Any] | None = None,
+          human_revision: bool = False) -> Plan:
     """The next version: new steps after approval are exploratory; widening the plan needs approval again."""
 
     if previous is not None and previous.completion is not None:
@@ -169,6 +175,32 @@ def merge(previous: Plan | None, *, question: str, criteria: list[str], steps: t
         completion = previous.completion
         if completion_evidence is None:
             completion_evidence = previous.completion_evidence
+    old_steps = {step.step_id: step for step in previous.steps} if previous else {}
+    incoming_ids = {step.step_id for step in steps}
+    if not human_revision:
+        removed = [step.step_id for step in old_steps.values() if step.operation_ids
+                   and (step.completed_operation_ids or step.status in {"done", "running"})
+                   and step.step_id not in incoming_ids]
+        if removed:
+            raise PlanError(f"steps {removed} have execution history; only a human plan revision can remove them")
+    preserved = []
+    for step in steps:
+        old = old_steps.get(step.step_id)
+        if (old and old.operation_ids and (old.completed_operation_ids or old.status in {"done", "running"})
+                and step.operation_ids != old.operation_ids and not human_revision):
+            raise PlanError(f"step {step.step_id} has execution history; only a human plan revision can change its declared operation_ids")
+        coverage = old.completed_operation_ids if old else step.completed_operation_ids
+        status = step.status
+        if old and old.status in {"done", "failed"}:
+            # Preserve historical terminal records; missing old receipts remain
+            # unverified, never an implicit request to rerun the old operation.
+            status = old.status
+        elif step.operation_ids and status == "done" and not set(step.operation_ids) <= set(coverage):
+            raise PlanError(f"step {step.step_id} cannot be done without successful execution receipts; inspect or reconcile the original operations")
+        elif human_revision and step.operation_ids and coverage and set(step.operation_ids) <= set(coverage):
+            status = "done"
+        preserved.append(replace(step, status=status, completed_operation_ids=coverage))
+    steps = tuple(preserved)
     classes = sorted({step.permission_class.value for step in steps if step.permission_class in PLANNABLE})
     allowed = sorted(set(allowed_classes or classes) & {c.value for c in PLANNABLE})
     identity_inputs = {"previous": previous.to_dict() if previous else None,
@@ -193,7 +225,9 @@ def merge(previous: Plan | None, *, question: str, criteria: list[str], steps: t
     marked = tuple(replace(step, added_after_results=step.step_id not in old_ids or
                            next((s.added_after_results for s in previous.steps if s.step_id == step.step_id), False))
                    for step in steps)
-    widened = (set(allowed) - set(previous.allowed_classes)) or question.strip() != previous.question.strip() or \
+    dependency_changed = any(step.step_id in old_steps and set(step.depends_on) != set(old_steps[step.step_id].depends_on)
+                             for step in steps)
+    widened = dependency_changed or (set(allowed) - set(previous.allowed_classes)) or question.strip() != previous.question.strip() or \
         tuple(criteria) != previous.criteria or _bigger(budget, previous.budget)
     status = "needs_approval" if previous.status in {"approved", "needs_approval"} and widened else previous.status
     return replace(previous, version=previous.version + 1, status=status, completion=completion,
@@ -218,13 +252,17 @@ def approve(plan: Plan) -> Plan:
                                              inputs=plan.to_dict(), create=_now))
 
 
+def _verified_done(step: PlanStep) -> bool:
+    return step.status == "done" and set(step.operation_ids) <= set(step.completed_operation_ids)
+
+
 def _ready_step_index(plan: Plan, operation_ids: list[str]) -> int | None:
     """Select one covering open step, in plan order, after every dependency succeeded."""
 
     requested = set(operation_ids)
     if not requested:
         return None
-    done = {step.step_id for step in plan.steps if step.status == "done"}
+    done = {step.step_id for step in plan.steps if _verified_done(step)}
     for index, step in enumerate(plan.steps):
         if (step.status in {"pending", "running", "awaiting"}
                 and all(dependency in done for dependency in step.depends_on)
@@ -236,13 +274,33 @@ def _ready_step_index(plan: Plan, operation_ids: list[str]) -> int | None:
 def scope_for(plan: Plan | None, operation_ids: list[str], *, executed_steps: int = 0) -> dict[str, Any]:
     """What the permission engine needs to know about a request and the approved plan."""
 
-    if plan is None or plan.status != "approved":
+    if plan is None:
         return {"in_plan": False, "allowed_classes": []}
-    in_plan = _ready_step_index(plan, operation_ids) is not None
+    gaps = [{"step_id": step.step_id,
+             "missing_operation_ids": sorted(set(step.operation_ids) - set(step.completed_operation_ids))}
+            for step in plan.steps if step.status == "done" and not _verified_done(step)]
+    in_plan = plan.status == "approved" and _ready_step_index(plan, operation_ids) is not None
     max_steps = int(plan.budget.get("steps") or 0)
     return {"in_plan": in_plan, "allowed_classes": list(plan.allowed_classes),
             "within_budget": not max_steps or executed_steps < max_steps,
-            "plan_id": plan.plan_id, "plan_version": plan.version}
+            "plan_id": plan.plan_id, "plan_version": plan.version,
+            **({"plan_recovery": {"code": "PLAN_EXECUTION_COVERAGE_UNVERIFIED", "steps": gaps,
+                "guidance": "Old done labels lack successful execution coverage. Inspect/reconcile the original bound operation receipts, or ask the person to revise the plan for a controlled rerun. No operation was automatically rerun."}} if gaps else {})}
+
+
+def _with_receipt(step: PlanStep, operation_ids: list[str], status: str) -> PlanStep:
+    """Both confirmation and Auto paths accumulate only successful receipt types."""
+    if status == "failed":
+        return replace(step, status="failed")
+    if status != "completed":
+        return step
+    covered = tuple(sorted(set(step.completed_operation_ids) | (set(step.operation_ids) & set(operation_ids))))
+    return replace(step, completed_operation_ids=covered,
+                   status="done" if set(step.operation_ids) <= set(covered) else step.status)
+
+
+def _finished(steps) -> bool:
+    return all(step.status == "skipped" or _verified_done(step) for step in steps)
 
 
 def mark_executed(plan: Plan, operation_ids: list[str], status: str) -> Plan:
@@ -251,8 +309,8 @@ def mark_executed(plan: Plan, operation_ids: list[str], status: str) -> Plan:
     steps = list(plan.steps)
     index = _ready_step_index(plan, operation_ids)
     if index is not None:
-        steps[index] = replace(steps[index], status="done" if status == "completed" else "failed")
-    finished = all(step.status in {"done", "skipped"} for step in steps)
+        steps[index] = _with_receipt(steps[index], operation_ids, status)
+    finished = _finished(steps)
     return replace(plan, steps=tuple(steps), status="completed" if finished and plan.status == "approved" else plan.status,
                    updated_at=identity_value(owner="agent.plan.mark_executed", slot="updated_at",
                                              inputs={"previous": plan.to_dict(), "operation_ids": operation_ids,
@@ -260,22 +318,19 @@ def mark_executed(plan: Plan, operation_ids: list[str], status: str) -> Plan:
 
 
 def mark_covered(plan: Plan, operation_ids: list[str], status: str) -> Plan:
-    """After a confirmed operation: mark the ready steps it fully covers, nothing more.
-
-    A step is marked only when every operation it lists ran in this one, so a
-    step that still has work keeps its status and the plan's authority over that
-    work (unlike mark_executed, which serves the plan running its own step).
-    """
+    """Apply confirmed receipt coverage; partial steps keep their remaining work."""
 
     ran = set(operation_ids)
-    done = {step.step_id for step in plan.steps if step.status == "done"}
-    steps = [replace(step, status="done" if status == "completed" else "failed")
-             if (step.status in {"pending", "running", "awaiting"} and step.operation_ids
+    done = {step.step_id for step in plan.steps if _verified_done(step)}
+    selected = _ready_step_index(plan, operation_ids)
+    steps = [_with_receipt(step, operation_ids, status)
+             if (index == selected or selected is None
+                 and step.status in {"pending", "running", "awaiting"} and step.operation_ids
                  and set(step.operation_ids) <= ran and all(item in done for item in step.depends_on))
-             else step for step in plan.steps]
+             else step for index, step in enumerate(plan.steps)]
     if steps == list(plan.steps):
         return plan
-    return replace(plan, steps=tuple(steps),
+    return replace(plan, steps=tuple(steps), status="completed" if _finished(steps) and plan.status == "approved" else plan.status,
                    updated_at=identity_value(owner="agent.plan.mark_covered", slot="updated_at",
                                              inputs={"previous": plan.to_dict(), "operation_ids": operation_ids,
                                                      "status": status}, create=_now))

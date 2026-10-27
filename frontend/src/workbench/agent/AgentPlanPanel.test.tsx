@@ -11,6 +11,27 @@ const plan = () => ({ plan_id:"p1",version:3,status:"draft",question:"Compare gr
 beforeEach(() => { state.agent = {plan:plan(),planVersions:[{version:3,status:"draft",updated_at:"today"}],planBusy:false,planError:null,
   approvePlan:vi.fn().mockResolvedValue(undefined),savePlan:vi.fn().mockResolvedValue(undefined),refreshPlan:vi.fn().mockResolvedValue(undefined),
   executionMode:"ask",setExecutionMode:vi.fn(),isSubmitting:false,sessionStatus:"idle",prompt:"new direction",queueTurnMessage:vi.fn().mockResolvedValue(undefined),sendPrompt:vi.fn(),continueTurn:vi.fn(),durableTurns:[]}; });
+it("keeps an old done label but does not count missing execution evidence as complete", () => {
+  render(<AgentPlanPanel />);
+  expect(screen.getByText(/0\/2 completed steps/)).toBeInTheDocument();
+  expect(screen.getByText("done")).toBeInTheDocument();
+  expect(screen.getByText(/execution evidence is unavailable/i)).toBeInTheDocument();
+});
+it("counts completion only when every declared operation has a server receipt", () => {
+  state.agent.plan = {...plan(), steps: [
+    {...plan().steps[0], completed_operation_ids: ["stat.describe"]}, plan().steps[1]]};
+  render(<AgentPlanPanel />);
+  expect(screen.getByText(/1\/2 completed steps/)).toBeInTheDocument();
+  expect(screen.queryByText(/execution evidence is unavailable/i)).not.toBeInTheDocument();
+});
+it("shows partial execution coverage without completing the step", () => {
+  state.agent.plan = {...plan(), steps: [
+    {...plan().steps[0], status: "pending", operation_ids: ["stat.describe", "stat.test"],
+      completed_operation_ids: ["stat.describe"]}, plan().steps[1]]};
+  render(<AgentPlanPanel />);
+  expect(screen.getByText(/0\/2 completed steps/)).toBeInTheDocument();
+  expect(screen.getByText("Recorded operations: 1/2")).toBeInTheDocument();
+});
 it("observes plan-event to DOM latency separately from browser paint", () => {
   const view = render(<AgentPlanPanel />);
   const samples: number[] = [];

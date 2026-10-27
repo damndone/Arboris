@@ -3069,6 +3069,12 @@ export interface components {
             archived: boolean;
             /** Created At */
             created_at: string;
+            /** Desktop Notification Status */
+            desktop_notification_status?: string | null;
+            /** Desktop Notifications */
+            desktop_notifications?: boolean;
+            /** Desktop Notifications Supported */
+            desktop_notifications_supported?: boolean;
             focus: components["schemas"]["AgentConversationFocus"] | null;
             /** Forked From */
             forked_from: string | null;
@@ -3116,6 +3122,8 @@ export interface components {
         AgentConversationUpdate: {
             /** Archived */
             archived?: boolean | null;
+            /** Desktop Notifications */
+            desktop_notifications?: boolean | null;
             /** Title */
             title?: string | null;
         };
@@ -3348,6 +3356,8 @@ export interface components {
         AgentPlanStepView: {
             /** Added After Results */
             added_after_results: boolean;
+            /** Completed Operation Ids */
+            completed_operation_ids?: string[];
             /** Depends On */
             depends_on: string[];
             /** Expected Outputs */

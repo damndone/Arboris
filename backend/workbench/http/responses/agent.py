@@ -50,7 +50,8 @@ PublicProposal = view_of(
 ActivityOperationItem = view_of(AgentActivityItem, "ActivityOperationItem", kind=Literal["operation"])
 ActivityEventItem = view_of(AgentActivityEventItem, "ActivityEventItem", kind=Literal["event"])
 IntentDecisionView = view_of(AnalysisLoopDecision, "IntentDecisionView", omit=("packets",))
-AgentPlanStepView = view_of(PlanStep, "AgentPlanStepView", permission_class=str)
+AgentPlanStepView = view_of(PlanStep, "AgentPlanStepView", permission_class=str,
+                          completed_operation_ids=NotRequired[list[str]])
 AgentAnalysisPlan = view_of(Plan, "AgentAnalysisPlan", steps=list[AgentPlanStepView],
                            completion=NotRequired[dict[str, Any]], completion_evidence=NotRequired[dict[str, Any]],
                            task_requirements=NotRequired[dict[str, Any]])
@@ -407,6 +408,9 @@ class AgentConversation(TypedDict):
     status: str | None
     #: The conversation it branched from, if any.
     forked_from: str | None
+    desktop_notifications: NotRequired[bool]
+    desktop_notifications_supported: NotRequired[bool]
+    desktop_notification_status: NotRequired[str | None]
 
 
 class AgentConversations(TypedDict):

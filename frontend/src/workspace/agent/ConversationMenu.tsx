@@ -127,6 +127,23 @@ export function ConversationMenu() {
             onChange={(event) => setQuery(event.target.value)}
           />
           {error && <p className="ws-conv__error" role="alert">{error}</p>}
+          {current && <div className="ws-conv__notifications">
+            <label>
+              <input type="checkbox" aria-label="Notify on this Mac"
+                checked={current.desktop_notifications ?? false}
+                disabled={current.desktop_notifications_supported === false}
+                onChange={(event) => {
+                  const enabled = event.target.checked;
+                  void act(async () => { await updateAgentConversation(projectRoot, current.session_id, { desktop_notifications: enabled }); });
+                }} />
+              Notify on this Mac
+            </label>
+            <p>For this conversation on the backend Mac while the backend keeps running, even after closing this window. macOS controls whether notices appear.</p>
+            {current.desktop_notifications_supported === false && <p>Available only when the backend runs on this Mac.</p>}
+            {current.desktop_notification_status === "submitted" && <p role="status">Notification submitted to macOS; visible delivery is not confirmed.</p>}
+            {current.desktop_notification_status === "failed" && <p role="alert">Notification failed. No automatic retry; details remain in the conversation audit.</p>}
+            {current.desktop_notification_status === "unknown" && <p role="alert">Notification outcome is unknown. No automatic retry; inspect the conversation audit.</p>}
+          </div>}
           <ul className="ws-conv__list">
             {shown.length === 0 && <li className="ws-conv__empty">{query ? "No conversation matches." : "No conversations yet."}</li>}
             {shown.map((item) => (
