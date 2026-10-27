@@ -43,8 +43,8 @@ model, containment, browser, performance, or release acceptance evidence.
   measurements and median comparisons; sampling noise must be below 5%.
   Retain failed measurements. Numerical coefficients, standard errors and test
   statistics must remain bit-identical; do not widen reference tolerances.
-- Check free disk space before every measurement; below 10 GB, report and do
-  not start. Keep one fixed CSV per family under `local/perf-inputs/`, with
+- Check free disk space before every measurement; below 5 GB, report and do
+  not start (user changed the floor from 10 GB on 2026-10-27). Keep one fixed CSV per family under `local/perf-inputs/`, with
   its registered SHA256; the reproducer must not make per-run input copies.
   Product snapshots/uploads remain normal product outputs. Do not patch product
   functions, replace file writes, change configuration or alter the worker

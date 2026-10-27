@@ -11,7 +11,7 @@ import shutil
 import tarfile
 
 BASELINE = '402d2d3eac3695d836255a424372930850b73a95'
-MIN_FREE_BYTES = 10_000_000_000
+MIN_FREE_BYTES = 5_000_000_000  # User-approved floor, 2026-10-27.
 PRIMARY_MODELS = {'ols_1', 'panel_ols_1', 'iv_2sls_1', 'did_1', 'survival_cox_1'}
 
 
@@ -307,7 +307,7 @@ def require_space(path):
         path = path.parent
     free = shutil.disk_usage(path).free
     if free < MIN_FREE_BYTES:
-        raise SystemExit(f'Only {free/1e9:.3f} GB free; 10 GB minimum. Measurement not started.')
+        raise SystemExit(f'Only {free/1e9:.3f} GB free; {MIN_FREE_BYTES/1e9:g} GB minimum. Measurement not started.')
     return free
 
 

@@ -125,12 +125,20 @@ def test_existing_ols_sample_arrays_are_not_reencoded_in_the_journal(evidence, t
     assert tests['ols_1']['x']['estimate_over_se'] == 2.
 
 
-def test_ten_gb_floor_blocks_measurement(evidence, tmp_path, monkeypatch):
+@pytest.mark.parametrize('free_bytes', [0, 4_999_999_999])
+def test_five_gb_floor_blocks_measurement(evidence, tmp_path, monkeypatch, free_bytes):
     import shutil
     from types import SimpleNamespace
-    monkeypatch.setattr(shutil, 'disk_usage', lambda _: SimpleNamespace(free=9_999_999_999))
-    with pytest.raises(SystemExit, match='10 GB'):
+    monkeypatch.setattr(shutil, 'disk_usage', lambda _: SimpleNamespace(free=free_bytes))
+    with pytest.raises(SystemExit, match='5 GB'):
         evidence.require_space(tmp_path)
+
+
+def test_five_gb_floor_accepts_the_authorized_boundary(evidence, tmp_path, monkeypatch):
+    import shutil
+    from types import SimpleNamespace
+    monkeypatch.setattr(shutil, 'disk_usage', lambda _: SimpleNamespace(free=5_000_000_000))
+    assert evidence.require_space(tmp_path) == 5_000_000_000
 
 
 def test_active_run_is_removed_only_after_verified_journal(evidence, tmp_path):

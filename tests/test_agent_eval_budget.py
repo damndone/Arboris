@@ -155,7 +155,7 @@ def test_each_task_checks_storage_before_seed_or_provider(tmp_path, monkeypatch)
     monkeypatch.setattr(module, "load_llm_config", lambda: config)
     monkeypatch.setattr(module, "dev_tasks", lambda: [SimpleNamespace(id="task")])
     import shutil
-    monkeypatch.setattr(shutil, "disk_usage", lambda root: SimpleNamespace(free=9_999_999_999))
+    monkeypatch.setattr(shutil, "disk_usage", lambda root: SimpleNamespace(free=4_999_999_999))
     monkeypatch.setattr(module, "_seed", lambda *a, **k: pytest.fail("low storage reached seed execution"))
     monkeypatch.setattr(module, "run_conversation", lambda *a, **k: pytest.fail("low storage reached provider execution"))
     monkeypatch.setattr(sys, "argv", ["agent_eval_run.py", "--out", str(tmp_path / "round"),

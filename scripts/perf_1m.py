@@ -25,7 +25,7 @@ import pandas as pd
 sys.path.insert(0, str(Path.cwd() / "backend"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from perf_evidence import finalize_active, require_space  # noqa: E402
+from perf_evidence import MIN_FREE_BYTES, finalize_active, require_space  # noqa: E402
 
 from workbench.orchestrator import run_workflow  # noqa: E402
 from workbench.projects import create_project  # noqa: E402
@@ -445,7 +445,7 @@ def ab_main(argv):
               'default_product_path':True, 'worker_environment':'inherited unchanged',
               'inputs_policy':'one_fixed_CSV_per_case; product snapshots/uploads written normally',
               'retention':'one_active_tree; durable_verified_JSONL_then_removal; one_archive_per_case_release',
-              'minimum_free_bytes':10_000_000_000, 'cases':{}}
+              'minimum_free_bytes':MIN_FREE_BYTES, 'cases':{}}
     failed = []
     driver = Path(__file__).resolve()
     ledger = out/'measurements.jsonl'

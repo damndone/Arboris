@@ -38,6 +38,7 @@ from agent_eval.external import ExternalTask, blade_tasks, qrdata_subset, replic
 from agent_eval.heldout import heldout_tasks  # noqa: E402
 from agent_eval.tasks import dev_tasks  # noqa: E402
 from agent_eval.budget import BudgetStop, FreeRouteGuard, RoundBudget, TaskStop  # noqa: E402
+from perf_evidence import MIN_FREE_BYTES  # noqa: E402
 from workbench.app import app  # noqa: E402
 from workbench.dev_fixtures.agent_navigation import _wait_for_terminal_run  # noqa: E402
 from workbench.events import get_event_manager  # noqa: E402
@@ -167,9 +168,9 @@ def main() -> int:
         for rep in range(1, args.repeat + 1):
             # Each new task is a new measurement, not just each mode/process.
             free = shutil.disk_usage(ROOT).free
-            if free < 10_000_000_000 and not args.allow_low_space_this_round:
+            if free < MIN_FREE_BYTES and not args.allow_low_space_this_round:
                 if budget is not None:
-                    budget.stop("storage threshold: less than 10 GB free before next task")
+                    budget.stop(f"storage threshold: less than {MIN_FREE_BYTES/1e9:g} GB free before next task")
                 print(f"storage stop: {free / 1e9:.3f} GB free; no new task started", flush=True)
                 return 86
             name = f"{task.id}.r{rep}"
