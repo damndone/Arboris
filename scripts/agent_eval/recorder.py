@@ -187,9 +187,9 @@ class _RecordingTransport(httpx.AsyncBaseTransport):
         # The task's own directory: Ask and Auto runs of one task share its name and ledger.
         if tolerate is not None and not isinstance(exc, KeyboardInterrupt) and tolerate(
                 type(exc).__name__, task=str(self.tape.path.parent)):
-            # Free route: nothing is billed, so an interrupted call is the product's to
-            # handle (including its own no-progress cancel); after repeated
-            # interruptions in one task the guard ends that task.
+            # Only a guard with an explicitly authorized recovery policy can
+            # permit this. The current free-route guard raises BudgetStop on
+            # the first unknown usage; catalog pricing is not billing evidence.
             return
         if self.budget is not None:
             self.budget.stop("transport interrupted; preserve reservation until billing is reconciled")

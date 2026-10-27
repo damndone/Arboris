@@ -247,54 +247,49 @@ def test_the_free_route_guard_stops_on_any_non_zero_or_missing_credit(tmp_path):
 
 
 
-def test_the_free_route_tolerates_a_few_transport_interruptions_per_task(tmp_path):
-    from agent_eval.budget import FreeRouteGuard, TaskStop
-
+def test_the_free_route_stops_at_first_unknown_usage_and_keeps_the_interruption(tmp_path):
+    from agent_eval.budget import BudgetStop, FreeRouteGuard
     guard = FreeRouteGuard(tmp_path / "free.json", provider_id="magpie-workbuddy-ai", base_url="http://127.0.0.1:3425/v1")
-    assert all(guard.tolerate_transport_interruption("CancelledError", task="a") for _ in range(3))
-    with pytest.raises(TaskStop, match="4 transport interruptions .* task a"):
-        guard.tolerate_transport_interruption("ReadTimeout", task="a")
-    # The round goes on: the next task has its own allowance.
-    assert not guard.stopped
-    assert all(guard.tolerate_transport_interruption("CancelledError", task="b") for _ in range(3))
-    assert guard.state["transport_interruptions"][3] == {"task": "a", "error": "ReadTimeout"}
+    with pytest.raises(BudgetStop, match="unknown usage"):
+        guard.tolerate_transport_interruption("ReadTimeout", task="iv")
+    assert guard.stopped
+    assert guard.state["transport_interruptions"] == [{"task": "iv", "error": "ReadTimeout"}]
+    with pytest.raises(BudgetStop):
+        guard.reserve(b"{}")
 
 
-def test_repeated_stalls_end_the_task_through_the_recorder_and_not_the_round(tmp_path):
-    from agent_eval.budget import FreeRouteGuard, TaskStop
+@pytest.mark.parametrize('usage', [{'credit': 0}, {'credit': 0, 'prompt_tokens': 10},
+    {'credit': 0, 'prompt_tokens': True, 'completion_tokens': 2},
+    {'credit': 0, 'prompt_tokens': 10, 'completion_tokens': -1}])
+def test_zero_credit_does_not_turn_missing_or_invalid_tokens_into_zero(tmp_path, usage):
+    from agent_eval.budget import BudgetStop, FreeRouteGuard
+    guard = FreeRouteGuard(tmp_path / 'free.json', provider_id='magpie-workbuddy-ai', base_url=FREE_BASE)
+    with pytest.raises(BudgetStop, match='token usage'):
+        guard.settle(guard.reserve(b'{}'), usage)
+    assert guard.stopped and guard.state['calls'] == 0
+
+
+def test_unknown_usage_stops_the_round_through_the_recorder_before_a_second_request(tmp_path):
+    from agent_eval.budget import BudgetStop, FreeRouteGuard
     from agent_eval.recorder import _Tape, _RecordingTransport
-
     guard = FreeRouteGuard(tmp_path / "free.json", provider_id="magpie-workbuddy-ai", base_url=FREE_BASE)
     tape = _Tape(tmp_path / "tape.jsonl", "record")
     tape.context = {"task": "panel_fe.specific.r1"}
-
+    calls = []
     def stall(request):
+        calls.append(request)
         raise httpx.ReadTimeout("no first byte", request=request)
-
     async def scenario():
         transport = _RecordingTransport(tape, httpx.MockTransport(stall), budget=guard)
         async with httpx.AsyncClient(transport=transport) as client:
-            for _ in range(3):
-                with pytest.raises(httpx.ReadTimeout):
-                    await client.post(f"{FREE_BASE}/chat/completions", json={"max_tokens": 10})
-            with pytest.raises(TaskStop):
+            with pytest.raises(BudgetStop, match="unknown usage"):
+                await client.post(f"{FREE_BASE}/chat/completions", json={"max_tokens": 10})
+            with pytest.raises(BudgetStop):
                 await client.post(f"{FREE_BASE}/chat/completions", json={"max_tokens": 10})
     asyncio.run(scenario())
-    assert not guard.stopped
-    assert len(tape.path.read_text().splitlines()) == 4  # every interrupted call is still taped
-
-    # The same task in the other mode (its own directory, same name and ledger) starts afresh.
-    (tmp_path / "auto").mkdir()
-    other = _Tape(tmp_path / "auto" / "tape.jsonl", "record")
-    other.context = {"task": "panel_fe.specific.r1"}
-
-    async def again():
-        transport = _RecordingTransport(other, httpx.MockTransport(stall), budget=guard)
-        async with httpx.AsyncClient(transport=transport) as client:
-            for _ in range(3):
-                with pytest.raises(httpx.ReadTimeout):
-                    await client.post(f"{FREE_BASE}/chat/completions", json={"max_tokens": 10})
-    asyncio.run(again())
+    assert guard.stopped and len(calls) == 1
+    [record] = [json.loads(line) for line in tape.path.read_text().splitlines()]
+    assert record["usage"] is None and record["transport_error"] == "ReadTimeout"
 
 
 FREE_BASE = "http://127.0.0.1:3425/v1"
@@ -328,6 +323,16 @@ def test_a_rate_limited_free_route_stops_with_the_providers_reason(tmp_path):
     assert len(calls) == 1 and guard.stopped
     assert "rate-limited (HTTP 429)" in reason and "2026-10-23 20:56:28" in reason and "credit" not in reason
     assert json.loads(tape.path.read_text().splitlines()[0])["status"] == 429
+
+
+def test_the_recorded_account_restriction_stops_before_a_second_request(tmp_path):
+    calls = []
+    response = {'error': {'message': 'WorkBuddy AI: request illegal — WorkBuddy restricted this account for unusual activity'}}
+    reason, guard, tape = _free_call(tmp_path, lambda request: calls.append(request) or httpx.Response(403, json=response))
+    assert len(calls) == 1 and guard.stopped
+    assert 'HTTP 403' in reason and 'restricted this account' in reason
+    [record] = [json.loads(line) for line in tape.path.read_text().splitlines()]
+    assert record['status'] == 403 and record['usage'] is None
 
 
 def test_an_unreachable_free_gateway_stops_the_round_at_once(tmp_path):
@@ -395,7 +400,7 @@ def test_a_streamed_reply_reaches_the_product_as_it_arrives_and_is_taped_at_the_
 
 
 def test_a_stream_the_product_abandons_is_taped_as_interrupted(tmp_path):
-    from agent_eval.budget import FreeRouteGuard
+    from agent_eval.budget import BudgetStop, FreeRouteGuard
     from agent_eval.recorder import _Tape, _RecordingTransport
 
     guard = FreeRouteGuard(tmp_path / "free.json", provider_id="magpie-workbuddy-ai", base_url=FREE_BASE)
@@ -406,10 +411,11 @@ def test_a_stream_the_product_abandons_is_taped_as_interrupted(tmp_path):
         async with httpx.AsyncClient(transport=transport) as client:
             async with client.stream("POST", f"{FREE_BASE}/chat/completions", json={"max_tokens": 10}) as response:
                 await response.aiter_bytes().__anext__()  # then leaves, as a no-progress cancel does
-    asyncio.run(scenario())
+    with pytest.raises(BudgetStop, match="unknown usage"):
+        asyncio.run(scenario())
     [record] = [json.loads(line) for line in tape.path.read_text().splitlines()]
     assert record["transport_error"] == "CancelledError" and record["sent"] is True and "thinking" in record["response_raw"]
-    assert not guard.stopped and len(guard.state["transport_interruptions"]) == 1
+    assert guard.stopped and len(guard.state["transport_interruptions"]) == 1
 
 
 def test_a_stream_closed_after_its_usage_arrived_is_complete(tmp_path):

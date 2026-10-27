@@ -241,10 +241,14 @@ class FreeRouteGuard:
         if type(credit) not in (int, float) or credit != 0:
             self.stop(f"free route reported credit {credit!r}; stopping before any further call")
             raise BudgetStop(self.state["reason"])
+        if any(type(usage.get(field)) is not int or usage[field] < 0
+               for field in ('prompt_tokens', 'completion_tokens')):
+            self.stop('free route reported missing or invalid token usage; stopping before any further call')
+            raise BudgetStop(self.state['reason'])
         with self._change() as state:
             state["calls"] += 1
-            state["prompt_tokens"] += int(usage.get("prompt_tokens") or 0)
-            state["completion_tokens"] += int(usage.get("completion_tokens") or 0)
+            state["prompt_tokens"] += usage['prompt_tokens']
+            state["completion_tokens"] += usage['completion_tokens']
 
     def refused(self, status, body):
         """A response without usage: say why, from the provider's own message.
@@ -267,19 +271,18 @@ class FreeRouteGuard:
         self.stop(f"free route gateway {self._identity[1]} unreachable ({error}); no request was sent")
         raise BudgetStop(self.state["reason"])
 
-    #: Interrupted calls one task tolerates before it ends (each is still taped).
-    MAX_TRANSPORT_INTERRUPTIONS = 3
-
     def tolerate_transport_interruption(self, error: str, task: str | None = None) -> bool:
-        """Nothing is billed on this route; let the product retry, up to a bound per task.
-        Beyond it the task ends (TaskStop) and the round goes on."""
+        """Recorder hook: preserve the interruption and refuse unknown-usage retry.
+
+        The user-approved 2026-10-27 protocol stops the entire round at the first
+        unknown usage. A free catalog entry cannot establish an interrupted
+        request's actual usage or bill; the prior three-interruption allowance
+        is no longer an authorized policy.
+        """
         with self._change() as state:
             state.setdefault("transport_interruptions", []).append({"task": task, "error": error})
-            count = sum(1 for item in state["transport_interruptions"]
-                        if isinstance(item, dict) and item.get("task") == task)
-        if count > self.MAX_TRANSPORT_INTERRUPTIONS:
-            raise TaskStop(f"{count} transport interruptions on the free route in task {task}")
-        return True
+            state.update(stopped=True, reason=f'unknown usage after free-route {error}; no further call authorized')
+        raise BudgetStop(self.state['reason'])
 
     def resume_storage_stop(self):
         with self._change() as state:
