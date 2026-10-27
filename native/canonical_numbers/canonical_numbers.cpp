@@ -1,0 +1,165 @@
+// Independent canonical-v1 numeric-list pilot; never imported by product code.
+// Keep Python's repr, arbitrary-precision str, and dictionary equality/hash.
+// std::to_chars/iostream floating formatting cannot establish byte equivalence.
+// No input buffer/list copy: the GIL stays held while exact list/tuple items are
+// read. Memory: O(distinct values) Python dictionary/text cache plus O(JSON bytes)
+// native assembly and the returned Python Unicode copy. This is not zero-copy,
+// streaming, a cancellable worker, or an end-to-end performance result.
+// Do not call Python signal handlers inside the loops: they could resize the
+// borrowed list while its fixed count/items are being read. The synchronous
+// entry point keeps the GIL and has no bounded cancellation-latency guarantee.
+
+#define PY_SSIZE_T_CLEAN
+#include <Python.h>
+
+#include <cmath>
+#include <memory>
+#include <new>
+#include <stdexcept>
+#include <string>
+
+struct Decref {
+    void operator()(PyObject* value) const { Py_XDECREF(value); }
+};
+using Owned = std::unique_ptr<PyObject, Decref>;
+
+static PyObject* nonfinite_error(PyObject* module) {
+    Owned error(PyObject_GetAttrString(module, "CanonicalJSONError"));
+    if (error) {
+        PyErr_SetString(error.get(), "canonical JSON does not allow NaN or Infinity");
+    }
+    return nullptr;
+}
+
+static PyObject* format_float(PyObject* value) {
+    const double number = PyFloat_AS_DOUBLE(value);
+    if (number == 0.0) {
+        return PyUnicode_FromString("0");
+    }
+    Owned representation(PyObject_Repr(value));
+    if (!representation) return nullptr;
+    const char* raw = PyUnicode_AsUTF8(representation.get());
+    if (!raw) return nullptr;
+    std::string text(raw);
+    const bool negative = text.front() == '-';
+    if (negative) text.erase(0, 1);
+    const auto exponent_at = text.find('e');
+    const int exponent = exponent_at == std::string::npos
+        ? 0 : std::stoi(text.substr(exponent_at + 1));
+    const std::string mantissa = text.substr(0, exponent_at);
+    const auto dot_at = mantissa.find('.');
+    const int integer_length = static_cast<int>(
+        dot_at == std::string::npos ? mantissa.size() : dot_at);
+    std::string digits = mantissa;
+    if (dot_at != std::string::npos) digits.erase(dot_at, 1);
+    const int position = integer_length + exponent;
+    std::string rendered;
+    const double magnitude = std::fabs(number);
+    if (1e-6 <= magnitude && magnitude < 1e21) {
+        if (position <= 0) {
+            rendered = "0." + std::string(-position, '0') + digits;
+        } else if (position >= static_cast<int>(digits.size())) {
+            rendered = digits + std::string(position - digits.size(), '0');
+        } else {
+            rendered = digits.substr(0, position) + "." + digits.substr(position);
+        }
+        if (rendered.find('.') != std::string::npos) {
+            while (rendered.back() == '0') rendered.pop_back();
+            if (rendered.back() == '.') rendered.pop_back();
+        }
+    } else {
+        rendered = digits.substr(0, 1);
+        std::string trailing = digits.substr(1);
+        while (!trailing.empty() && trailing.back() == '0') trailing.pop_back();
+        if (!trailing.empty()) rendered += "." + trailing;
+        const int power = position - 1;
+        rendered += "e" + std::string(power >= 0 ? "+" : "") + std::to_string(power);
+    }
+    if (negative) rendered.insert(0, "-");
+    return PyUnicode_FromStringAndSize(rendered.data(), static_cast<Py_ssize_t>(rendered.size()));
+}
+
+static PyObject* encode_impl(PyObject* module, PyObject* values) {
+    if (!PyList_CheckExact(values) && !PyTuple_CheckExact(values)) {
+        PyErr_SetString(PyExc_TypeError, "native canonical numbers requires an exact list or tuple");
+        return nullptr;
+    }
+    // Allocate the GC-capable cache before borrowing the fixed sequence view.
+    // Subsequent exact-number formatting produces only untracked text objects.
+    Owned cache(PyDict_New());
+    if (!cache) return nullptr;
+    const bool is_list = PyList_CheckExact(values);
+    const Py_ssize_t count = is_list ? PyList_GET_SIZE(values) : PyTuple_GET_SIZE(values);
+    const auto item_at = [values, is_list](Py_ssize_t index) {
+        return is_list ? PyList_GET_ITEM(values, index) : PyTuple_GET_ITEM(values, index);
+    };
+    // Match _numeric_list's exact-type boundary before invoking numeric APIs.
+    for (Py_ssize_t index = 0; index < count; ++index) {
+        PyObject* item = item_at(index);
+        if (!PyLong_CheckExact(item) && !PyFloat_CheckExact(item)) {
+            PyErr_SetString(PyExc_TypeError, "native canonical numbers requires exact int or float items");
+            return nullptr;
+        }
+    }
+    // _normalize validates all(math.isfinite, values) before formatting. This
+    // intentionally retains its OverflowError on integers beyond double range.
+    for (Py_ssize_t index = 0; index < count; ++index) {
+        PyObject* item = item_at(index);
+        const double number = PyFloat_CheckExact(item) ? PyFloat_AS_DOUBLE(item) : PyLong_AsDouble(item);
+        if (PyErr_Occurred()) return nullptr;
+        if (!std::isfinite(number)) return nonfinite_error(module);
+    }
+    std::string output("[");
+    for (Py_ssize_t index = 0; index < count; ++index) {
+        PyObject* item = item_at(index);
+        PyObject* encoded = PyDict_GetItemWithError(cache.get(), item);
+        if (!encoded) {
+            if (PyErr_Occurred()) return nullptr;
+            Owned fresh(PyLong_CheckExact(item) ? PyObject_Str(item) : format_float(item));
+            if (!fresh || PyDict_SetItem(cache.get(), item, fresh.get()) < 0) return nullptr;
+            encoded = fresh.get();  // cache owns a reference after insertion.
+        }
+        Py_ssize_t length;
+        const char* text = PyUnicode_AsUTF8AndSize(encoded, &length);
+        if (!text) return nullptr;
+        if (index) output.push_back(',');
+        output.append(text, static_cast<size_t>(length));
+    }
+    output.push_back(']');
+    if (output.size() > static_cast<size_t>(PY_SSIZE_T_MAX)) {
+        return PyErr_NoMemory();
+    }
+    return PyUnicode_FromStringAndSize(output.data(), static_cast<Py_ssize_t>(output.size()));
+}
+
+static PyObject* encode_numbers(PyObject* module, PyObject* values) {
+    try {
+        return encode_impl(module, values);
+    } catch (const std::bad_alloc&) {
+        return PyErr_NoMemory();
+    } catch (const std::length_error&) {
+        return PyErr_NoMemory();
+    }
+}
+
+static PyMethodDef methods[] = {
+    {"encode_numbers", encode_numbers, METH_O,
+     "Encode exact int/float list/tuple using the existing canonical-v1 bytes."},
+    {nullptr, nullptr, 0, nullptr}
+};
+
+static PyModuleDef definition = {
+    PyModuleDef_HEAD_INIT, "_canonical_numbers",
+    "Independent opt-in native canonical numeric-sequence pilot.",
+    -1, methods, nullptr, nullptr, nullptr, nullptr
+};
+
+PyMODINIT_FUNC PyInit__canonical_numbers() {
+    Owned module(PyModule_Create(&definition));
+    if (!module) return nullptr;
+    Owned canonical(PyImport_ImportModule("workbench.canonical"));
+    if (!canonical) return nullptr;
+    Owned error(PyObject_GetAttrString(canonical.get(), "CanonicalJSONError"));
+    if (!error || PyModule_AddObjectRef(module.get(), "CanonicalJSONError", error.get()) < 0) return nullptr;
+    return module.release();
+}
