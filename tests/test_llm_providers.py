@@ -2250,3 +2250,124 @@ def test_the_run_can_choose_the_v4_effort(monkeypatch) -> None:
     monkeypatch.setenv("WORKBENCH_REASONING_EFFORT", "extreme")
     with pytest.raises(LLMUpstreamError):
         _chat_request_payload(messages, gateway, None)
+
+
+@pytest.fixture
+def nvidia_finish_before_usage_raw():
+    """Verbatim response of the one stopped 2026-10-28 request; no request/API key."""
+    from pathlib import Path
+    return (Path(__file__).parent / 'fixtures/llm/nvidia_ultra_finish_before_usage.sse').read_bytes()
+
+
+@pytest.mark.parametrize('done_marker', [True, False])
+def test_nvidia_consumes_usage_tail_before_emitting_completed_tools(monkeypatch, nvidia_finish_before_usage_raw, done_marker):
+    usage = {'prompt_tokens': 20000, 'completion_tokens': 200}
+    consumed = []
+    closed = []
+    class ProviderStream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            yield nvidia_finish_before_usage_raw
+            consumed.append('usage')
+            yield ('data: ' + json.dumps({'id': 'tail-id', 'choices': [], 'usage': usage}) + '\n\n').encode()
+            if done_marker:
+                consumed.append('DONE')
+                yield b'data: [DONE]\n\n'
+        async def aclose(self):
+            closed.append(True)
+    seen = _install_async_upstream(monkeypatch, lambda request: httpx.Response(200,
+        headers={'content-type': 'text/event-stream'}, stream=ProviderStream()))
+    config = LLMConfig(base_url='https://integrate.api.nvidia.com/v1', api_key=API_KEY,
+        model='nvidia/nemotron-3-ultra-550b-a55b')
+    async def scenario():
+        events = []
+        stream = llm_client.async_stream_chat_completion([{'role': 'user', 'content': 'offline'}], config)
+        async for event in stream:
+            if event['type'] in {'tool_call', 'done'}:
+                assert consumed and closed, 'completion escaped before usage tail was consumed and HTTP stream closed'
+            events.append(event)
+            if event['type'] == 'done':
+                await stream.aclose()
+                break
+        return events
+    events = asyncio.run(scenario())
+    assert len(seen) == 1 and closed == [True]
+    assert len([event for event in events if event['type'] == 'tool_call']) == 1
+    [done] = [event for event in events if event['type'] == 'done']
+    assert done['usage'] == usage and done['finish_reason'] == 'tool_calls'
+    assert done['provider_request_id'] == 'tail-id'
+
+
+@pytest.mark.parametrize('tail', ['missing_usage', 'timeout', 'cancel', 'deadline', 'line_bound'])
+def test_nvidia_finish_without_completed_usage_tail_never_emits_done(monkeypatch, nvidia_finish_before_usage_raw, tail):
+    closed = []
+    class BrokenStream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            yield nvidia_finish_before_usage_raw
+            if tail == 'timeout':
+                raise httpx.ReadTimeout('tail interrupted')
+            if tail == 'cancel':
+                raise asyncio.CancelledError()
+            if tail == 'deadline':
+                await asyncio.Event().wait()
+            if tail == 'line_bound':
+                for _ in range(257):
+                    yield b': keep-alive\n'
+        async def aclose(self):
+            closed.append(True)
+    _install_async_upstream(monkeypatch, lambda request: httpx.Response(200,
+        headers={'content-type': 'text/event-stream'}, stream=BrokenStream()))
+    config = LLMConfig(base_url='https://integrate.api.nvidia.com/v1', api_key=API_KEY,
+        model='nvidia/nemotron-3-ultra-550b-a55b')
+    if tail == 'deadline':
+        from dataclasses import replace
+        config = replace(config, timeout_s=0.01)
+    events = []
+    async def scenario():
+        with pytest.raises(asyncio.CancelledError if tail == 'cancel' else LLMUpstreamError):
+            async for event in llm_client.async_stream_chat_completion([{'role': 'user', 'content': 'offline'}], config):
+                events.append(event)
+    asyncio.run(scenario())
+    assert closed == [True] and not any(e['type'] in {'tool_call', 'done'} for e in events)
+
+
+@pytest.mark.parametrize('host,model,stream,include_usage', [
+    ('https://integrate.api.nvidia.com/v1', 'nvidia/nemotron-3-ultra-550b-a55b', True, True),
+    ('https://integrate.api.nvidia.com/v1', 'nvidia/nemotron-3-ultra-550b-a55b', False, False),
+    ('https://integrate.api.nvidia.com/v1', 'nvidia/nemotron-3.5-super-vl-120b-a12b', True, False),
+    ('https://api.example.com/v1', 'nvidia/nemotron-3-ultra-550b-a55b', True, False),
+    ('https://integrate.api.nvidia.com/wrong', 'nvidia/nemotron-3-ultra-550b-a55b', True, False),
+])
+def test_nvidia_ultra_stream_explicitly_requests_usage_on_its_exact_route(monkeypatch, host, model, stream, include_usage):
+    config = LLMConfig(base_url=host, api_key=API_KEY, model=model)
+    payload = llm_client._chat_request_payload([{'role': 'user', 'content': 'offline'}], config, None, stream=stream)
+    if include_usage:
+        assert payload.get('stream_options') == {'include_usage': True}
+    else:
+        assert 'stream_options' not in payload
+
+
+def test_other_nvidia_models_keep_completion_without_usage(monkeypatch):
+    _install_async_upstream(monkeypatch, lambda request: httpx.Response(200,
+        headers={'content-type': 'text/event-stream'}, content=(
+            b'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n')))
+    config = LLMConfig(base_url='https://integrate.api.nvidia.com/v1', api_key=API_KEY,
+        model='nvidia/nemotron-3.5-super-vl-120b-a12b')
+    async def scenario():
+        return [event async for event in llm_client.async_stream_chat_completion(
+            [{'role': 'user', 'content': 'offline'}], config)]
+    assert asyncio.run(scenario()) == [{'type': 'done', 'finish_reason': 'stop', 'model': config.model}]
+
+
+def test_nvidia_usage_before_finish_cannot_certify_final_usage(monkeypatch, nvidia_finish_before_usage_raw):
+    early_usage = b'data: {"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":1}}\n\n'
+    _install_async_upstream(monkeypatch, lambda request: httpx.Response(200,
+        headers={'content-type': 'text/event-stream'}, content=early_usage + nvidia_finish_before_usage_raw))
+    config = LLMConfig(base_url='https://integrate.api.nvidia.com/v1', api_key=API_KEY,
+        model='nvidia/nemotron-3-ultra-550b-a55b')
+    events = []
+    async def scenario():
+        with pytest.raises(LLMUpstreamError, match='valid token usage'):
+            async for event in llm_client.async_stream_chat_completion([{'role': 'user', 'content': 'offline'}], config):
+                events.append(event)
+    asyncio.run(scenario())
+    assert not any(event['type'] in {'tool_call', 'done'} for event in events)

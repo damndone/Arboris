@@ -7,6 +7,7 @@ anything raised from here.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -105,6 +106,12 @@ def deepseek_v4_request_config(config: LLMConfig) -> dict[str, Any]:
 # 60 s timeout before failing, so each retry cost a minute. Silence this long
 # means the connection is dead; give up and let the adapter retry.
 STREAM_SILENCE_S = 30.0
+
+
+def _nvidia_ultra_usage_tail(config: LLMConfig) -> bool:
+    """Explicit Ultra usage contract; other routes retain their existing protocol."""
+    return (config.base_url.rstrip("/") == "https://integrate.api.nvidia.com/v1"
+            and config.model == "nvidia/nemotron-3-ultra-550b-a55b")
 
 
 def provider_stream_wait_s(config: LLMConfig, *, default_s: float) -> float:
@@ -301,6 +308,11 @@ async def async_stream_chat_completion(
     tool_fragments: dict[int, dict[str, Any]] = {}
     model = config.model
     finish_reason: str | None = None
+    nvidia_tail = _nvidia_ultra_usage_tail(config)
+    completed_usage: dict[str, Any] | None = None
+    provider_request_id: str | None = None
+    tail_deadline: float | None = None
+    tail_lines = 0
     try:
         async with _async_client_factory(config) as client:
             async with client.stream(
@@ -321,18 +333,41 @@ async def async_stream_chat_completion(
                         upstream_status=response.status_code,
                         context_overflow=is_context_overflow(response.status_code, body),
                     )
-                async for line in response.aiter_lines():
+                lines = response.aiter_lines()
+                while True:
+                    try:
+                        if tail_deadline is None:
+                            line = await anext(lines)
+                        else:
+                            tail_lines += 1
+                            if tail_lines > 256:
+                                raise LLMUpstreamError("NVIDIA completion usage tail exceeded its line bound")
+                            remaining = tail_deadline - asyncio.get_running_loop().time()
+                            line = await asyncio.wait_for(anext(lines), timeout=max(0, remaining))
+                    except StopAsyncIteration:
+                        break
                     if not line or line.startswith(":"):
                         continue
                     if not line.startswith("data:"):
                         continue
                     raw_data = line[5:].strip()
                     if raw_data == "[DONE]":
+                        if nvidia_tail:
+                            break
                         if finish_reason is not None:
                             return
                         break
                     try:
                         payload = json.loads(raw_data)
+                        if not isinstance(payload, dict):
+                            raise TypeError
+                        if nvidia_tail:
+                            if finish_reason is not None and isinstance(payload.get("usage"), dict):
+                                completed_usage = payload["usage"]
+                            if isinstance(payload.get("id"), str) and payload["id"]:
+                                provider_request_id = payload["id"]
+                            if payload.get("choices") == [] and isinstance(payload.get("usage"), dict):
+                                continue
                         choice = payload["choices"][0]
                         if not isinstance(choice, dict):
                             raise TypeError
@@ -383,6 +418,12 @@ async def async_stream_chat_completion(
                                 "LLM provider returned an unexpected streaming response shape"
                             )
                         finish_reason = candidate_finish_reason
+                        if nvidia_tail:
+                            if isinstance(payload.get("usage"), dict):
+                                completed_usage = payload["usage"]
+                            if tail_deadline is None:
+                                tail_deadline = asyncio.get_running_loop().time() + config.timeout_s
+                            continue
                         for tool_call in _complete_stream_tool_calls(tool_fragments):
                             yield {"type": "tool_call", "tool_call": tool_call}
                         yield {
@@ -396,10 +437,22 @@ async def async_stream_chat_completion(
                         return
     except LLMUpstreamError:
         raise
-    except (httpx.HTTPError, ValueError) as exc:
+    except (httpx.HTTPError, ValueError, TimeoutError) as exc:
         raise LLMUpstreamError(
             f"LLM provider request failed: {type(exc).__name__}"
         ) from exc
+    if nvidia_tail and finish_reason is not None:
+        if completed_usage is None or any(type(completed_usage.get(field)) is not int or completed_usage[field] < 0
+                for field in ("prompt_tokens", "completion_tokens")):
+            raise LLMUpstreamError("NVIDIA completion ended without valid token usage")
+        # NVIDIA reports usage after finish_reason. Close the HTTP response and
+        # client before exposing tools/done: the Agent closes this generator at done.
+        for tool_call in _complete_stream_tool_calls(tool_fragments):
+            yield {"type": "tool_call", "tool_call": tool_call}
+        yield {"type": "done", "finish_reason": finish_reason, "model": model,
+            "usage": completed_usage,
+            **({"provider_request_id": provider_request_id} if provider_request_id else {})}
+        return
     raise LLMUpstreamError("LLM provider ended the stream without a completion")
 
 
@@ -428,6 +481,10 @@ def _chat_request_payload(
         "messages": guarded,
         "stream": stream,
     }
+    if stream and _nvidia_ultra_usage_tail(config):
+        # Request accounting under the OpenAI-compatible contract. Ultra's live
+        # support remains unverified; a rejection must not retry without this field.
+        payload["stream_options"] = {"include_usage": True}
     if tools:
         payload["tools"] = tools
     if model_config:

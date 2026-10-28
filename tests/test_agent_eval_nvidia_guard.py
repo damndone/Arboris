@@ -261,3 +261,41 @@ def test_http_200_explicit_provider_error_stops_even_with_valid_usage(tmp_path, 
     assert g.state['reservations'] and not g.state['charges']
     [record] = [json.loads(line) for line in tape.path.read_text().splitlines()]
     assert record['response_raw'] == raw.decode() and record['usage'] == USAGE
+
+
+def test_nvidia_product_stream_consumes_usage_tail_and_recorder_settles_once(tmp_path, monkeypatch):
+    from agent_eval.recorder import provider_tape
+    from workbench.agent.model import ModelRequest, OpenAICompatibleModelAdapter
+    from workbench.llm.config import LLMConfig
+    g, _ = guard(tmp_path, monkeypatch)
+    raw = (Path(__file__).parent / 'fixtures/llm/nvidia_ultra_finish_before_usage.sse').read_bytes()
+    closed, calls = [], []
+    class ProviderStream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            yield raw
+            yield ('data: ' + json.dumps({'choices': [], 'usage': USAGE}) + '\n\n').encode()
+            yield b'data: [DONE]\n\n'
+        async def aclose(self):
+            closed.append(True)
+    def handle(request):
+        calls.append(request)
+        assert json.loads(request.content)['stream_options'] == {'include_usage': True}
+        return httpx.Response(200, headers={'content-type': 'text/event-stream'}, stream=ProviderStream())
+    monkeypatch.setattr(httpx, 'AsyncHTTPTransport', lambda: httpx.MockTransport(handle))
+    config = LLMConfig(base_url=BASE, api_key='offline', model=MODEL, provider_id='nvidia-nemotron-free')
+    tape_path = tmp_path / 'tape.jsonl'
+    async def scenario():
+        with provider_tape(tape_path, budget=g):
+            adapter = OpenAICompatibleModelAdapter(config)
+            async for event in adapter.stream(ModelRequest(messages=[{'role': 'user', 'content': 'offline'}])):
+                if event.type == 'done':
+                    assert closed == [True] and g.state['calls'] == 1
+                    break
+    asyncio.run(scenario())
+    assert len(calls) == 1 and g.state['requests'] == g.state['calls'] == 1
+    assert not g.state['reservations'] and not g.stopped
+    assert len(g.state['charges']) == 1 and g.state['charges'][0]['usage'] == USAGE
+    [record] = [json.loads(line) for line in tape_path.read_text().splitlines()]
+    assert record['status'] == 200 and record['usage'] == USAGE
+    assert record['response_raw'].startswith(raw.decode()) and '[DONE]' in record['response_raw']
+    assert 'transport_error' not in record
