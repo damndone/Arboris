@@ -202,7 +202,12 @@ def merge(previous: Plan | None, *, question: str, criteria: list[str], steps: t
         preserved.append(replace(step, status=status, completed_operation_ids=coverage))
     steps = tuple(preserved)
     classes = sorted({step.permission_class.value for step in steps if step.permission_class in PLANNABLE})
-    allowed = sorted(set(allowed_classes or classes) & {c.value for c in PLANNABLE})
+    if previous is not None and allowed_classes is None:
+        classes = sorted(set(previous.allowed_classes) | {
+            step.permission_class.value for step in steps if step.permission_class in PLANNABLE
+            and (step.step_id not in old_steps or step.operation_ids != old_steps[step.step_id].operation_ids)})
+    allowed = sorted(set(classes if allowed_classes is None else allowed_classes) & {c.value for c in PLANNABLE})
+    effective_budget = {**(previous.budget if previous else {}), **(budget or {})}
     identity_inputs = {"previous": previous.to_dict() if previous else None,
                        "question": question, "criteria": list(criteria),
                        "steps": [step.to_dict() for step in steps], "budget": budget,
@@ -218,7 +223,7 @@ def merge(previous: Plan | None, *, question: str, criteria: list[str], steps: t
                         create=lambda: f"plan_{uuid4().hex[:12]}"),
                     version=(previous.version + 1) if previous else 1, status="draft", question=question,
                     criteria=tuple(criteria), steps=steps, allowed_classes=tuple(allowed),
-                    budget=dict(budget or {}), completion=completion, completion_evidence=completion_evidence,
+                    budget=effective_budget, completion=completion, completion_evidence=completion_evidence,
                     task_requirements=previous.task_requirements if previous else None, updated_at=identity_value(
                         owner="agent.plan.merge", slot="updated_at", inputs=identity_inputs, create=_now))
     old_ids = {step.step_id for step in previous.steps}
@@ -232,14 +237,15 @@ def merge(previous: Plan | None, *, question: str, criteria: list[str], steps: t
     status = "needs_approval" if previous.status in {"approved", "needs_approval"} and widened else previous.status
     return replace(previous, version=previous.version + 1, status=status, completion=completion,
                    completion_evidence=completion_evidence, question=question, criteria=tuple(criteria),
-                   steps=marked, allowed_classes=tuple(sorted(set(allowed) | set(previous.allowed_classes)))
+                   steps=marked, allowed_classes=tuple(allowed) if allowed_classes is not None else tuple(sorted(set(allowed) | set(previous.allowed_classes)))
                    if status == "needs_approval" else previous.allowed_classes,
-                   budget=dict(budget or previous.budget), updated_at=identity_value(
+                   budget=effective_budget, updated_at=identity_value(
                        owner="agent.plan.merge", slot="updated_at", inputs=identity_inputs, create=_now))
 
 
 def _bigger(new: dict[str, int] | None, old: dict[str, int]) -> bool:
-    return any(int(value) > int(old.get(key, value)) for key, value in (new or {}).items())
+    return any((key == "steps" and value == 0 and old.get(key, 0) > 0)
+               or int(value) > int(old.get(key, value)) for key, value in (new or {}).items())
 
 
 def approve(plan: Plan) -> Plan:

@@ -69,6 +69,41 @@ def test_scope_covers_only_open_planned_operations() -> None:
                                        steps=_steps(_step("a", ["data.recode"]))), ["data.recode"])["in_plan"] is False
 
 
+def test_editing_one_budget_cannot_silently_remove_other_approved_limits():
+    approved = plans.approve(plans.merge(None, question="q", criteria=[],
+        budget={"steps": 1, "wall_s": 120, "inferential": 2}, allowed_classes=None,
+        steps=_steps(_step("a", ["data.recode"]))))
+    revised = plans.merge(approved, question="q", criteria=[], budget={"wall_s": 60},
+        allowed_classes=None, steps=approved.steps)
+    assert revised.budget == {"steps": 1, "wall_s": 60, "inferential": 2}
+    assert revised.status == "approved"
+    assert plans.scope_for(revised, ["data.recode"], executed_steps=1)["within_budget"] is False
+    wider = plans.merge(revised, question="q", criteria=[], budget={"steps": 2},
+        allowed_classes=None, steps=revised.steps)
+    assert wider.status == "needs_approval"
+    assert wider.budget == {"steps": 2, "wall_s": 60, "inferential": 2}
+    assert plans.scope_for(wider, ["data.recode"])["in_plan"] is False
+
+
+def test_explicit_class_restrictions_take_effect_and_cannot_be_silently_reopened():
+    approved = plans.approve(plans.merge(None, question="q", criteria=[], budget=None,
+        allowed_classes=None, steps=_steps(_step("a", ["statistical.explore"]), _step("b", ["model.genesis"]))))
+    restricted = plans.merge(approved, question="q", criteria=[], budget=None,
+        allowed_classes=["analyze"], steps=approved.steps)
+    assert restricted.allowed_classes == ("analyze",)
+    assert restricted.status == "approved"
+    revoked = plans.merge(restricted, question="q", criteria=[], budget=None,
+        allowed_classes=[], steps=restricted.steps)
+    assert revoked.allowed_classes == ()
+    assert plans.scope_for(revoked, ["statistical.explore"])["allowed_classes"] == []
+    progress = plans.merge(revoked, question="q", criteria=[], budget=None,
+        allowed_classes=None, steps=revoked.steps)
+    assert progress.status == "approved" and progress.allowed_classes == ()
+    widened = plans.merge(revoked, question="q", criteria=[], budget=None,
+        allowed_classes=["analyze"], steps=revoked.steps)
+    assert widened.status == "needs_approval"
+
+
 def test_store_keeps_every_version(tmp_path: Path) -> None:
     store = PlanStore(tmp_path)
     plan = plans.merge(None, question="q", criteria=[], budget=None, allowed_classes=None,
@@ -126,3 +161,39 @@ def test_a_status_update_without_question_or_criteria_keeps_them_and_the_approva
     loosened = update({"criteria": ["report any share"], "steps": [step]})
     assert store.current("chain-session").status == "needs_approval"
     assert "send update_plan without them" in loosened.output["approval_reopened"]
+
+
+@pytest.mark.parametrize("restriction", ["budget", "allowed_classes", "unlimited_steps"])
+def test_real_plan_updates_keep_auto_inside_the_restricted_authority(tmp_path, restriction):
+    fixture = _Fixture(tmp_path)
+    seen = _with_authority_runner(fixture)
+    orchestrator = fixture.orchestrator
+    orchestrator.execution_mode = "auto"
+    registry = orchestrator.tool_registry("chain-a")
+    steps = [{"step_id": f"recode-{i}", "title": f"Recode {i}", "operation_ids": ["data.recode"]}
+             for i in range(2)]
+
+    def update(patch):
+        result = asyncio.run(registry.execute({"tool_call_id": "plan", "tool_id": "update_plan",
+            "arguments": {"steps": steps, **patch}}, session_id="chain-session"))
+        assert result.ok and result.output["saved"], result
+        return orchestrator.plan_store.current("chain-session")
+
+    initial = update({"question": "Describe the wage recodes", "criteria": ["Report both recodes"],
+        "budget": {"steps": 1, "wall_s": 60}})
+    orchestrator.plan_store.save("chain-session", plans.approve(initial))
+    if restriction == "budget":
+        revised = update({"budget": {"wall_s": 30}})
+        assert revised.budget == {"steps": 1, "wall_s": 30}
+        assert fixture.propose([_recode()])["executed"] is True
+        assert seen == ["approved_plan"]
+    elif restriction == "allowed_classes":
+        revised = update({"allowed_classes": []})
+        assert revised.allowed_classes == ()
+    else:
+        revised = update({"budget": {"steps": 0}})
+        assert revised.status == "needs_approval"
+        assert revised.budget == {"steps": 0, "wall_s": 60}
+    receipt = fixture.propose([_recode()])
+    assert receipt["requires_confirmation"] is True
+    assert len(seen) == (1 if restriction == "budget" else 0)
