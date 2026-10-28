@@ -105,6 +105,15 @@ def provider_failure_message(language: str, error: str) -> str:
     analysis the Agent ran earlier in the turn did run and stays recorded.
     """
 
+    if error == "provider_output_limit":
+        if language == "zh":
+            return ("本次回复达到模型输出上限（provider_output_limit），没有写完，不能作为完整回答；"
+                    "其中的数字尚未核验。未完成的工具请求不会执行，已执行的操作与证据仍保留。"
+                    "没有自动重试；建议将剩余报告拆成较小步骤，核对已有结果后再明确继续。")
+        return ("The reply reached the model output limit (provider_output_limit) and is incomplete; "
+                "its numbers are unverified. Unfinished tool requests are not executed; earlier operations "
+                "and evidence are retained. No automatic retry was made. Split the remaining report into "
+                "smaller steps, inspect existing results, then explicitly continue.")
     if error == "agent_timeout":
         if language == "zh":
             return "这次请求超时（agent_timeout），没有生成完整回答。已经执行的操作与证据仍保留；你可以重试或让我继续。"

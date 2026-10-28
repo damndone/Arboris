@@ -179,6 +179,11 @@ class TurnLoopMixin:
         if active_phase is not None:
             return await self._consume_phase(active_phase, phase_events, phase_error, tool_context=tool_context)
 
+        if finish_reason == "length":
+            # Usage was still received by the provider-event boundary, but a
+            # truncated reply or tool request is not a successful turn.
+            finish_reason, error = "error", "provider_output_limit"
+
         if finish_reason == "tool_calls" and tool_calls and self.tool_runtime is None:
             finish_reason = "error"
             error = "tool_runtime_unavailable"
@@ -219,7 +224,10 @@ class TurnLoopMixin:
             return await self._run_turn(None, append_user=False, tool_context=tool_context)
 
         content = "".join(chunks)
-        if finish_reason == "error" and not content.strip() and not tool_calls and error != "tool_runtime_unavailable":
+        if error == "provider_output_limit":
+            note = provider_failure_message(detect_language(getattr(self, '_user_text', None)), error)
+            content = f"{content}\n\n{note}" if content.strip() else note
+        elif finish_reason == "error" and not content.strip() and not tool_calls and error != "tool_runtime_unavailable":
             # An empty failed turn reads as a hang; say what happened instead.
             content = provider_failure_message(detect_language(getattr(self, "_user_text", None)), str(error))
         elif finish_reason == "error" and content.strip() and error not in {"aborted", "tool_runtime_unavailable"}:

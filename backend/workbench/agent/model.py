@@ -15,6 +15,7 @@ from workbench.llm.client import (
     LLMUpstreamError,
     async_stream_chat_completion,
     deepseek_v4_request_config,
+    is_nvidia_ultra,
     provider_stream_wait_s,
 )
 from workbench.llm.config import LLMConfig
@@ -360,6 +361,8 @@ class OpenAICompatibleModelAdapter:
                         return
             received_event = False
             public_progress = False
+            meaningful_deadline = (asyncio.get_running_loop().time() + self.idle_timeout_s
+                                   if is_nvidia_ultra(self.config) else None)
             reasoning_parts: list[str] = []  # this attempt's only; a retry starts over
             try:
                 request_config = (
@@ -374,10 +377,15 @@ class OpenAICompatibleModelAdapter:
                     **request_config,
                 )
                 while True:
-                    signal, item = await _next_stream_item_or_signal(
-                        stream, abort_event, self.idle_timeout_s
-                    )
+                    remaining = (max(0.0, meaningful_deadline - asyncio.get_running_loop().time())
+                                 if meaningful_deadline is not None else self.idle_timeout_s)
+                    if meaningful_deadline is not None and remaining <= 0:
+                        signal, item = "timeout", None
+                    else:
+                        signal, item = await _next_stream_item_or_signal(stream, abort_event, remaining)
                     if signal == "timeout":
+                        if meaningful_deadline is not None:
+                            await stream.aclose()
                         if not public_progress and (wait := self._take_stall_retry(request)) is not None:
                             yield ModelStreamEvent.retrying(request.request_id, "provider_no_progress")
                             stall_wait = wait
@@ -395,6 +403,15 @@ class OpenAICompatibleModelAdapter:
                         yield ModelStreamEvent.from_error(request.request_id, "aborted")
                         return
                     event_type = item.get("type")
+                    if meaningful_deadline is not None and (
+                        event_type == "text_delta" and isinstance(item.get("delta"), str) and item["delta"].strip()
+                        or event_type == "tool_call"
+                        or event_type == "provider_activity" and (
+                            item.get("meaningful") is True
+                            or isinstance(item.get("reasoning"), str) and item["reasoning"].strip()
+                        )
+                    ):
+                        meaningful_deadline = asyncio.get_running_loop().time() + self.idle_timeout_s
                     if event_type == "text_delta":
                         delta = item.get("delta")
                         if isinstance(delta, str) and delta:

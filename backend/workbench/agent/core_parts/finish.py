@@ -280,7 +280,9 @@ class FinishMixin:
             command_id=command_id,
         )
         self._active_turn_started = False
-        return content if finish_reason == "stop" else ""
+        # Headless callers need the same explicit truncation explanation that
+        # was persisted and emitted to the UI; failed status remains separate.
+        return content if finish_reason == "stop" or error == "provider_output_limit" else ""
 
     def _has_step_left(self) -> bool:
         return self._budget.max_steps is None or self._steps_used < self._budget.max_steps

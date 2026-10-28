@@ -108,8 +108,8 @@ def deepseek_v4_request_config(config: LLMConfig) -> dict[str, Any]:
 STREAM_SILENCE_S = 30.0
 
 
-def _nvidia_ultra_usage_tail(config: LLMConfig) -> bool:
-    """Explicit Ultra usage contract; other routes retain their existing protocol."""
+def is_nvidia_ultra(config: LLMConfig) -> bool:
+    """The exact official Ultra route with provider-specific controls."""
     return (config.base_url.rstrip("/") == "https://integrate.api.nvidia.com/v1"
             and config.model == "nvidia/nemotron-3-ultra-550b-a55b")
 
@@ -308,7 +308,7 @@ async def async_stream_chat_completion(
     tool_fragments: dict[int, dict[str, Any]] = {}
     model = config.model
     finish_reason: str | None = None
-    nvidia_tail = _nvidia_ultra_usage_tail(config)
+    nvidia_tail = is_nvidia_ultra(config)
     completed_usage: dict[str, Any] | None = None
     provider_request_id: str | None = None
     tail_deadline: float | None = None
@@ -398,19 +398,30 @@ async def async_stream_chat_completion(
                         raise LLMUpstreamError(
                             "LLM provider returned an unexpected streaming response shape"
                         )
+                    meaningful_tool_progress = False
                     for raw_tool_call in raw_tool_calls:
+                        if nvidia_tail and isinstance(raw_tool_call, dict):
+                            index = raw_tool_call.get("index")
+                            previous = tool_fragments.get(index, {}) if type(index) is int else {}
+                            function = raw_tool_call.get("function") or {}
+                            if isinstance(function, dict):
+                                arguments = function.get("arguments")
+                                meaningful_tool_progress |= (
+                                    isinstance(arguments, str) and bool(arguments.strip())
+                                    or bool(raw_tool_call.get("id")) and raw_tool_call.get("id") != previous.get("tool_call_id")
+                                    or bool(function.get("name")) and function.get("name") != previous.get("tool_id")
+                                )
                         _merge_stream_tool_call(tool_fragments, raw_tool_call)
-                    if raw_tool_calls and any(
+                    if raw_tool_calls and (nvidia_tail or any(
                         _is_json_argument_prefix(str(fragment.get("arguments", "")))
                         for fragment in tool_fragments.values()
-                    ):
-                        # A tool call is assembled only after the provider sends
-                        # a finish reason, but receiving any valid fragment is
-                        # already actionable provider progress. Keep that
-                        # signal internal so the adapter does not retry a
-                        # request after a disconnect halfway through a typed
-                        # submission.
-                        yield {"type": "provider_activity", "public": True}
+                    )):
+                        # Public fragments prevent replay, including Ultra's
+                        # whitespace or malformed JSON prefixes. Only new ids
+                        # or non-whitespace arguments advance its idle clock;
+                        # tool assembly still requires validated JSON at finish.
+                        yield {"type": "provider_activity", "public": True,
+                               **({"meaningful": meaningful_tool_progress} if nvidia_tail else {})}
                     candidate_finish_reason = choice.get("finish_reason")
                     if candidate_finish_reason is not None:
                         if not isinstance(candidate_finish_reason, str) or not candidate_finish_reason:
@@ -447,8 +458,13 @@ async def async_stream_chat_completion(
             raise LLMUpstreamError("NVIDIA completion ended without valid token usage")
         # NVIDIA reports usage after finish_reason. Close the HTTP response and
         # client before exposing tools/done: the Agent closes this generator at done.
-        for tool_call in _complete_stream_tool_calls(tool_fragments):
-            yield {"type": "tool_call", "tool_call": tool_call}
+        # A real output-limit finish owns the failure: even parseable fragments
+        # are incomplete execution intent. Preserve its usage and length status
+        # for the Core, rather than misclassifying partial JSON as a retryable
+        # tool-argument correction and dropping the provider's final accounting.
+        if finish_reason != "length":
+            for tool_call in _complete_stream_tool_calls(tool_fragments):
+                yield {"type": "tool_call", "tool_call": tool_call}
         yield {"type": "done", "finish_reason": finish_reason, "model": model,
             "usage": completed_usage,
             **({"provider_request_id": provider_request_id} if provider_request_id else {})}
@@ -481,7 +497,7 @@ def _chat_request_payload(
         "messages": guarded,
         "stream": stream,
     }
-    if stream and _nvidia_ultra_usage_tail(config):
+    if stream and is_nvidia_ultra(config):
         # Request accounting under the OpenAI-compatible contract. Ultra's live
         # support remains unverified; a rejection must not retry without this field.
         payload["stream_options"] = {"include_usage": True}
@@ -505,6 +521,11 @@ def _chat_request_payload(
             payload["thinking"] = {"type": "disabled"}
         else:
             payload["reasoning_effort"] = effort
+    if is_nvidia_ultra(config):
+        # Official ChatRequest schema: max_tokens is supported, 1..32768
+        # (documented default 16384). These are Workbench's bounded defaults;
+        # a caller's explicit limit stays authoritative, including validation.
+        payload.setdefault("max_tokens", 8192 if payload.get("reasoning_effort") == "none" else 32768)
     return payload
 
 

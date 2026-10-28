@@ -2371,3 +2371,183 @@ def test_nvidia_usage_before_finish_cannot_certify_final_usage(monkeypatch, nvid
                 events.append(event)
     asyncio.run(scenario())
     assert not any(event['type'] in {'tool_call', 'done'} for event in events)
+
+
+@pytest.mark.parametrize("effort,expected", [("none", 8192), ("medium", 32768), ("high", 32768)])
+@pytest.mark.parametrize("explicit", [None, 512, 4096, 65536])
+def test_ultra_default_output_cap_is_explicit_and_preserves_caller_limits(monkeypatch, effort, expected, explicit):
+    monkeypatch.delenv("WORKBENCH_REASONING_EFFORT", raising=False)
+    config = LLMConfig(base_url="https://integrate.api.nvidia.com/v1", api_key=API_KEY,
+        model="nvidia/nemotron-3-ultra-550b-a55b", reasoning_efforts=("none", "medium", "high"), reasoning_effort=effort)
+    controls = {"max_tokens": explicit} if explicit is not None else None
+    payload = llm_client._chat_request_payload([{"role": "user", "content": "offline"}], config, None, model_config=controls)
+    assert payload["max_tokens"] == (expected if explicit is None else explicit)
+    overridden = llm_client._chat_request_payload([], config, None, model_config={"reasoning_effort": "none"})
+    assert overridden["max_tokens"] == 8192
+
+
+@pytest.mark.parametrize("base_url,model", [
+    ("https://integrate.api.nvidia.com/v1", "nvidia/nemotron-3.5-super-vl-120b-a12b"),
+    ("https://api.example.com/v1", "nvidia/nemotron-3-ultra-550b-a55b"),
+    ("https://integrate.api.nvidia.com/wrong", "nvidia/nemotron-3-ultra-550b-a55b"),
+])
+def test_ultra_output_cap_does_not_change_other_routes(monkeypatch, base_url, model):
+    monkeypatch.delenv("WORKBENCH_REASONING_EFFORT", raising=False)
+    config = LLMConfig(base_url=base_url, api_key=API_KEY, model=model)
+    assert "max_tokens" not in llm_client._chat_request_payload([], config, None)
+
+
+@pytest.mark.parametrize("kind", ["text", "tool", "reasoning"])
+def test_ultra_continuous_whitespace_does_not_extend_meaningful_idle_timeout(monkeypatch, kind):
+    attempts, closed, sent = [], [], []
+    class WhitespaceStream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            def frame(delta, finish=None):
+                return ("data: " + json.dumps({"choices": [{"delta": delta, "finish_reason": finish}]}) + "\n\n").encode()
+            yield frame({"content": "Let me fix the JSON."})
+            if kind == "tool":
+                yield frame({"tool_calls": [{"index": 0, "id": "call-1", "function": {"name": "inspect_node", "arguments": "{"}}]})
+            for _ in range(100):
+                await asyncio.sleep(0.002)
+                delta = ({"content": " \n\t"} if kind == "text" else
+                         {"reasoning_content": " \n\t"} if kind == "reasoning" else
+                         {"tool_calls": [{"index": 0, "function": {"arguments": "   "}}]})
+                sent.append(delta)
+                yield frame(delta)
+            if kind == "tool":
+                yield frame({"tool_calls": [{"index": 0, "function": {"arguments": "}"}}]}, "tool_calls")
+            else:
+                yield frame({}, "stop")
+            yield b'data: {"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":10}}\n\n'
+            yield b'data: [DONE]\n\n'
+        async def aclose(self):
+            closed.append(True)
+    def handler(request):
+        attempts.append(request)
+        return httpx.Response(200, stream=WhitespaceStream())
+    _install_async_upstream(monkeypatch, handler)
+    async def scenario():
+        config = LLMConfig(base_url="https://integrate.api.nvidia.com/v1", api_key=API_KEY,
+            model="nvidia/nemotron-3-ultra-550b-a55b")
+        adapter = OpenAICompatibleModelAdapter(config, idle_timeout_s=0.04)
+        adapter.retry_delays_s = adapter.stall_retry_delays_s = (0.0, 0.0)
+        return [event async for event in adapter.stream(ModelRequest(messages=[{"role": "user", "content": "offline"}]))]
+    events = asyncio.run(scenario())
+    assert len(attempts) == 1 and closed == [True]
+    assert 0 < len(sent) < 100
+    assert events[-1].type == "error" and events[-1].error == "provider_no_progress"
+    assert not any(event.type in {"done", "retry", "tool_call_delta"} for event in events)
+    if kind == "text":
+        assert "".join(event.delta for event in events if event.type == "text_delta") == "Let me fix the JSON." + " \n\t" * len(sent)
+
+
+@pytest.mark.parametrize("arguments", ['{"node_ref":', '{"node_ref":"model:ols_1"}'])
+def test_ultra_length_reports_actual_usage_without_assembling_a_tool(monkeypatch, arguments):
+    frame = ("data: " + json.dumps({"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "call-1",
+        "function": {"name": "inspect_node", "arguments": arguments}}]}, "finish_reason": "length"}]}) + "\n\n").encode()
+    _install_async_upstream(monkeypatch, lambda request: httpx.Response(200, content=frame + (
+        b'data: {"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":8192}}\n\n'
+        b'data: [DONE]\n\n')))
+    config = LLMConfig(base_url="https://integrate.api.nvidia.com/v1", api_key=API_KEY,
+        model="nvidia/nemotron-3-ultra-550b-a55b")
+    async def scenario():
+        adapter = OpenAICompatibleModelAdapter(config)
+        return [event async for event in adapter.stream(ModelRequest(messages=[{"role": "user", "content": "offline"}]))]
+    events = asyncio.run(scenario())
+    assert [event.type for event in events] == ["done"]
+    assert events[0].finish_reason == "length"
+    assert events[0].usage == {"prompt_tokens": 5, "completion_tokens": 8192}
+
+
+@pytest.mark.parametrize("arguments", ['{"value":', '{"value":"original"}'])
+def test_ultra_length_client_adapter_and_actual_core_stop_after_one_request(tmp_path, monkeypatch, arguments):
+    from tests.test_agent_core_restart import Runtime, setup
+
+    usage = {"prompt_tokens": 5, "completion_tokens": 8192}
+    frame = ("data: " + json.dumps({"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "call-a",
+        "function": {"name": "save", "arguments": arguments}}]}, "finish_reason": "length"}]}) + "\n\n").encode()
+    tail = ("data: " + json.dumps({"choices": [], "usage": usage}) + "\n\ndata: [DONE]\n\n").encode()
+    requests = _install_async_upstream(monkeypatch, lambda request: httpx.Response(200, content=frame + tail))
+    observed = []
+    class ObservedAdapter(OpenAICompatibleModelAdapter):
+        async def stream(self, request):
+            async for event in super().stream(request):
+                observed.append(event)
+                yield event
+    adapter = ObservedAdapter(LLMConfig(base_url="https://integrate.api.nvidia.com/v1", api_key=API_KEY,
+        model="nvidia/nemotron-3-ultra-550b-a55b"))
+    core, _store, repository = setup(tmp_path, adapter, runtime=Runtime(tmp_path))
+    asyncio.run(core.prompt("Save the result.", budget={"max_steps": 3, "timeout_s": 30}))
+    messages = [entry.payload for entry in repository.get_branch("session-a")
+                if entry.entry_type == "message" and entry.payload.get("role") == "assistant"]
+    assert len(requests) == 1 and not (tmp_path / "effects.txt").exists()
+    assert messages[-1]["stop_reason"] == "error" and messages[-1]["error"] == "provider_output_limit"
+    assert [event.type for event in observed] == ["done"]
+    assert observed[0].finish_reason == "length" and observed[0].usage == usage
+
+
+@pytest.mark.parametrize("model,expected", [("nvidia/nemotron-3-ultra-550b-a55b", "error"), ("other-model", "done")])
+def test_only_exact_ultra_whitespace_is_not_idle_progress_but_always_disables_retry(monkeypatch, model, expected):
+    calls, emitted = [], []
+    async def fake_stream(*args, **kwargs):
+        calls.append(True)
+        for _ in range(100):
+            await asyncio.sleep(0.002)
+            emitted.append(" \n")
+            yield {"type": "text_delta", "delta": " \n"}
+        yield {"type": "done", "finish_reason": "stop"}
+    monkeypatch.setattr("workbench.agent.model.async_stream_chat_completion", fake_stream)
+    async def scenario():
+        adapter = OpenAICompatibleModelAdapter(LLMConfig(base_url="https://integrate.api.nvidia.com/v1", api_key=API_KEY,
+            model=model), idle_timeout_s=0.04)
+        adapter.retry_delays_s = adapter.stall_retry_delays_s = (0.0, 0.0)
+        return [e async for e in adapter.stream(ModelRequest(messages=[{"role": "user", "content": "offline"}]))]
+    events = asyncio.run(scenario())
+    assert len(calls) == 1 and events[-1].type == expected
+    assert not any(e.type == "retry" for e in events)
+    assert "".join(e.delta for e in events if e.type == "text_delta") == "".join(emitted)
+
+
+def test_ultra_meaningful_tokens_refresh_idle_without_stripping_paragraph_whitespace(monkeypatch):
+    parts = ["First paragraph", "\n\n  ", "Second paragraph", "  \n", "  code", "\n"]
+    async def fake_stream(*args, **kwargs):
+        for part in parts:
+            await asyncio.sleep(0.008)
+            yield {"type": "text_delta", "delta": part}
+        yield {"type": "done", "finish_reason": "stop"}
+    monkeypatch.setattr("workbench.agent.model.async_stream_chat_completion", fake_stream)
+    async def scenario():
+        adapter = OpenAICompatibleModelAdapter(LLMConfig(base_url="https://integrate.api.nvidia.com/v1", api_key=API_KEY,
+            model="nvidia/nemotron-3-ultra-550b-a55b"), idle_timeout_s=0.04)
+        return [e async for e in adapter.stream(ModelRequest(messages=[{"role": "user", "content": "offline"}]))]
+    events = asyncio.run(scenario())
+    assert events[-1].type == "done"
+    assert "".join(e.delta for e in events if e.type == "text_delta") == "".join(parts)
+
+
+def test_ultra_tool_code_whitespace_is_preserved_and_invalid_prefix_never_retries(monkeypatch):
+    attempts = []
+    expected = {"code": "if x:\n    pass\n"}
+    class ToolStream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            arguments = json.dumps(expected) if len(attempts) == 1 else "not-json"
+            yield ("data: " + json.dumps({"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "call-1",
+                "function": {"name": "inspect_node", "arguments": arguments}}]}, "finish_reason": None}]}) + "\n\n").encode()
+            if len(attempts) != 1:
+                raise httpx.ReadError("offline disconnect after public malformed prefix")
+            yield b'data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}\n\n'
+            yield b'data: {"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":10}}\n\n'
+            yield b'data: [DONE]\n\n'
+    def handler(request):
+        attempts.append(request)
+        return httpx.Response(200, stream=ToolStream())
+    _install_async_upstream(monkeypatch, handler)
+    async def scenario():
+        adapter = OpenAICompatibleModelAdapter(LLMConfig(base_url="https://integrate.api.nvidia.com/v1", api_key=API_KEY,
+            model="nvidia/nemotron-3-ultra-550b-a55b"))
+        adapter.retry_delays_s = (0.0, 0.0)
+        request = ModelRequest(messages=[{"role": "user", "content": "offline"}])
+        return ([e async for e in adapter.stream(request)], [e async for e in adapter.stream(request)])
+    valid, invalid = asyncio.run(scenario())
+    assert valid[0].tool_call["arguments"] == expected and valid[-1].type == "done"
+    assert len(attempts) == 2 and [e.type for e in invalid] == ["error"]
