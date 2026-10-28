@@ -170,6 +170,21 @@ describe("LlmProviderEditor", () => {
     expect(screen.getByLabelText(/default model/i)).toHaveValue("");
   });
 
+  it("offers NVIDIA NIM as a remote provider without replacing the person's model or key", () => {
+    render(<LlmProviderEditor provider={provider} onSaved={vi.fn()} onBack={vi.fn()} />);
+    expect(screen.getByRole("option", { name: "NVIDIA NIM" })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("api key", { exact: true }), { target: { value: "local-test-key" } });
+    fireEvent.change(screen.getByLabelText("Data processing location"), { target: { value: "local" } });
+    fireEvent.change(screen.getByLabelText(/provider preset/i), { target: { value: "NVIDIA NIM" } });
+    expect(screen.getByLabelText(/provider name/i)).toHaveValue("NVIDIA NIM");
+    expect(screen.getByLabelText(/base url/i)).toHaveValue("https://integrate.api.nvidia.com/v1");
+    expect(screen.getByLabelText("Data processing location")).toHaveValue("remote");
+    expect(screen.getByLabelText(/default model/i)).toHaveValue(provider.model);
+    expect(screen.getByLabelText("api key", { exact: true })).toHaveValue("local-test-key");
+    expect(discoverLlmProviderModels).not.toHaveBeenCalled();
+    expect(probeLlmProvider).not.toHaveBeenCalled();
+  });
+
   it("refreshes actual DeepSeek mappings without versioned built-in presets", async () => {
     const deepSeekProvider = { ...provider, id: "deepseek", name: "DeepSeek", base_url: "https://api.deepseek.com" };
     render(<LlmProviderEditor provider={deepSeekProvider} onSaved={vi.fn()} onBack={vi.fn()} />);
