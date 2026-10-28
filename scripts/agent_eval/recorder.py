@@ -109,6 +109,7 @@ class _RecordingTransport(httpx.AsyncBaseTransport):
             request_json = json.loads(body)
         except ValueError:
             request_json = None
+        response = None
         try:
             response = await self.inner.handle_async_request(request)
             content_type = response.headers.get("content-type", "")
@@ -124,7 +125,8 @@ class _RecordingTransport(httpx.AsyncBaseTransport):
                 return httpx.Response(response.status_code, headers=headers, stream=tee)
             raw = await response.aread()
         except BaseException as exc:
-            self._interrupted(request, digest, body, started, reservation, exc, b"", sent=not isinstance(exc, _NOT_SENT))
+            self._interrupted(request, digest, body, started, reservation, exc, b"",
+                sent=not isinstance(exc, _NOT_SENT), response=response)
             raise
         self._record(request, digest, body, request_json, started, reservation, response, raw)
         # ``aread`` already decoded the body: pass it on without the
@@ -145,7 +147,7 @@ class _RecordingTransport(httpx.AsyncBaseTransport):
         if exc is None or (isinstance(exc, asyncio.CancelledError) and _usage_from_stream(raw) is not None):
             self._record(request, digest, body, request_json, started, reservation, response, raw)
         else:
-            self._interrupted(request, digest, body, started, reservation, exc, raw, sent=True)
+            self._interrupted(request, digest, body, started, reservation, exc, raw, sent=True, response=response)
 
     def _record(self, request, digest, body, request_json, started, reservation, response, raw):
         content_type = response.headers.get("content-type", "")
@@ -171,13 +173,17 @@ class _RecordingTransport(httpx.AsyncBaseTransport):
         if self.budget is not None:
             self.budget.settle(reservation, usage)
 
-    def _interrupted(self, request, digest, body, started, reservation, exc, raw, *, sent):
+    def _interrupted(self, request, digest, body, started, reservation, exc, raw, *, sent, response=None):
         """Tape an exchange that did not complete, then apply the round's rules.
         Raises when the round (or, on the free route, the task) must stop."""
         self.tape.write({**self.tape.context, "at": started, "elapsed_s": time.time() - started,
-            "url_path": request.url.path, "status": 0, "content_type": "", "request_sha256": digest,
+            "url_path": request.url.path, "status": 0,
+            "upstream_http_status": response.status_code if response is not None else None,
+            "content_type": response.headers.get("content-type", "") if response is not None else "", "request_sha256": digest,
             "request": json.loads(body), "request_bytes": len(body), "response_raw": raw.decode("utf-8", "replace"),
             "usage": None, "transport_error": type(exc).__name__, "budget_reservation": reservation, "sent": sent})
+        if response is not None and hasattr(self.budget, "check_response"):
+            self.budget.check_response(response.status_code, raw)
         if not sent and hasattr(self.budget, "unreachable"):
             self.budget.release(reservation)
             self.budget.unreachable(type(exc).__name__)

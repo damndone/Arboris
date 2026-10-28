@@ -352,7 +352,11 @@ class NvidiaFreeEndpointGuard(FreeRouteGuard):
             except (ValueError, TypeError):
                 continue
             if isinstance(payload, dict) and "error" in payload:
-                self.stop("NVIDIA provider error in HTTP 200 response; no further request authorized")
+                error = payload["error"]
+                code = error.get("code") if isinstance(error, dict) else None
+                code_label = f" ({code})" if type(code) in (int, str) else ""
+                usage_note = "usage unknown" if not isinstance(payload.get("usage"), dict) else "usage not settled"
+                self.stop(f"NVIDIA provider error{code_label} in HTTP 200 response; {usage_note}; no further request authorized")
                 raise BudgetStop(self.state["reason"])
 
     def reserve(self, body):

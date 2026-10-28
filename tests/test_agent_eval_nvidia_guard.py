@@ -299,3 +299,42 @@ def test_nvidia_product_stream_consumes_usage_tail_and_recorder_settles_once(tmp
     assert record['status'] == 200 and record['usage'] == USAGE
     assert record['response_raw'].startswith(raw.decode()) and '[DONE]' in record['response_raw']
     assert 'transport_error' not in record
+
+
+def test_nvidia_sse_overload_preserves_original_error_and_stops_after_taping(tmp_path, monkeypatch):
+    from agent_eval.recorder import provider_tape
+    from workbench.agent.model import ModelRequest, OpenAICompatibleModelAdapter
+    from workbench.llm.config import LLMConfig
+    g, _ = guard(tmp_path, monkeypatch)
+    # Verbatim final raw response from the stopped panel_fe.specific request.
+    raw = b'data: {"error":{"message":"Service temporarily overloaded","type":"service_unavailable","code":503}}\n\ndata: [DONE]\n\n'
+    calls = []
+    class OverloadStream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            yield raw
+    def handle(request):
+        calls.append(request)
+        return httpx.Response(200, headers={'content-type': 'text/event-stream'}, stream=OverloadStream())
+    monkeypatch.setattr(httpx, 'AsyncHTTPTransport', lambda: httpx.MockTransport(handle))
+    config = LLMConfig(base_url=BASE, api_key='offline', model=MODEL, provider_id='nvidia-nemotron-free')
+    tape_path = tmp_path / 'tape.jsonl'
+    original_check = g.check_response
+    def checked_after_tape(status, body):
+        assert tape_path.exists(), 'provider error policy ran before saving raw response'
+        original_check(status, body)
+    monkeypatch.setattr(g, 'check_response', checked_after_tape)
+    async def scenario():
+        with provider_tape(tape_path, budget=g):
+            for _ in range(2):
+                adapter = OpenAICompatibleModelAdapter(config)
+                with pytest.raises(budget.BudgetStop, match='provider error.*503.*usage unknown'):
+                    async for _ in adapter.stream(ModelRequest(messages=[{'role': 'user', 'content': 'offline'}])):
+                        pass
+    asyncio.run(scenario())
+    assert len(calls) == g.state['requests'] == 1 and g.stopped
+    assert g.state['reservations'] and not g.state['charges'] and g.state['calls'] == 0
+    [record] = [json.loads(line) for line in tape_path.read_text().splitlines()]
+    assert record['status'] == 0 and record['upstream_http_status'] == 200
+    assert record['content_type'] == 'text/event-stream'
+    assert record['transport_error'] == 'CancelledError'
+    assert record['response_raw'] == raw.decode() and record['usage'] is None
