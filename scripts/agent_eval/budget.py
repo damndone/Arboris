@@ -311,14 +311,18 @@ class NvidiaOverloadRecovery(FreeRouteGuard):
 
     _change = RoundBudget._change
 
-    def __init__(self, path):
+    def __init__(self, path, *, unanswered_read_errors=False):
+        self.unanswered_read_errors = unanswered_read_errors
+        self.schema = "nvidia-overload-recovery/v2" if unanswered_read_errors else "nvidia-overload-recovery/v1"
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.lock = FileLock(str(self.path) + ".lock")
         with self._change() as state:
-            expected = {"schema": "nvidia-overload-recovery/v1", "provider_id": NVIDIA_PROVIDER_ID,
+            expected = {"schema": self.schema, "provider_id": NVIDIA_PROVIDER_ID,
                 "base_url": NVIDIA_BASE_URL, "model": NVIDIA_MODEL, "retry_limit": 10,
                 "per_request_retry_limit": 2, "delays_s": [60, 120]}
+            if unanswered_read_errors:
+                expected["unanswered_read_errors"] = True
             if any(state.get(key) != value for key, value in expected.items()):
                 raise ValueError("NVIDIA shared overload recovery configuration changed")
 
@@ -326,11 +330,12 @@ class NvidiaOverloadRecovery(FreeRouteGuard):
     def state(self):
         if self.path.exists():
             return json.loads(self.path.read_text())
-        return {"schema": "nvidia-overload-recovery/v1", "provider_id": NVIDIA_PROVIDER_ID,
+        return {"schema": self.schema, "provider_id": NVIDIA_PROVIDER_ID,
             "base_url": NVIDIA_BASE_URL, "model": NVIDIA_MODEL, "retry_limit": 10,
             "per_request_retry_limit": 2, "delays_s": [60, 120], "retries": 0,
             "request_retries": {}, "tickets": {}, "pending": None, "manual_restarts": {},
-            "stopped": False, "reason": None}
+            "stopped": False, "reason": None,
+            **({"unanswered_read_errors": True} if self.unanswered_read_errors else {})}
 
     def record_manual_restart(self, *, source_path, reason):
         """Charge the explicitly approved task restart once, without settling any request."""
@@ -416,7 +421,8 @@ class NvidiaFreeEndpointGuard(FreeRouteGuard):
 
     _change = RoundBudget._change
 
-    def __init__(self, path, *, provider_id, base_url, model, round_kind, overload_recovery_ledger=None):
+    def __init__(self, path, *, provider_id, base_url, model, round_kind, overload_recovery_ledger=None,
+                 recover_unanswered_read_errors=False):
         if (provider_id, base_url, model) != (NVIDIA_PROVIDER_ID, NVIDIA_BASE_URL, NVIDIA_MODEL):
             raise ValueError("NVIDIA evaluation requires the exact authorized provider, base URL and Ultra model")
         if round_kind not in {"dev8", "qrdata40"}:
@@ -428,11 +434,15 @@ class NvidiaFreeEndpointGuard(FreeRouteGuard):
         self.round_kind = round_kind
         self.request_limit = 240 if round_kind == "dev8" else 1200
         self.overload_recovery = None
+        self.recover_unanswered_read_errors = recover_unanswered_read_errors
         self._retry_ticket = None
+        if recover_unanswered_read_errors and overload_recovery_ledger is None:
+            raise ValueError("unanswered ReadError recovery requires its explicit shared recovery ledger")
         if overload_recovery_ledger is not None:
             if self.path.resolve() == Path(overload_recovery_ledger).resolve():
                 raise ValueError("NVIDIA request and recovery ledgers must be separate")
-            self.overload_recovery = NvidiaOverloadRecovery(overload_recovery_ledger)
+            self.overload_recovery = NvidiaOverloadRecovery(overload_recovery_ledger,
+                unanswered_read_errors=recover_unanswered_read_errors)
         with self._change() as state:
             expected = {"schema": "nvidia-free-endpoint/v1", "provider_id": provider_id,
                 "base_url": base_url, "model": model, "round_kind": round_kind,
@@ -544,6 +554,16 @@ class NvidiaFreeEndpointGuard(FreeRouteGuard):
         if (not isinstance(error, dict) or type(error.get("code")) is not int
                 or error != {"message": "Service temporarily overloaded", "type": "service_unavailable", "code": 503}):
             return
+        self._recover_unknown(raw, key, "user-authorized complete error-only SSE 503 recovery; usage and billing remain unknown")
+
+    def recover_unanswered_read_error(self, *, response, raw, sent, error, key):
+        from httpx import ReadError
+        if (not self.recover_unanswered_read_errors or self.overload_recovery is None
+                or response is not None or raw or not sent or not isinstance(error, ReadError)):
+            return
+        self._recover_unknown(raw, key, "user-authorized unanswered ReadError recovery; usage and billing remain unknown")
+
+    def _recover_unknown(self, raw, key, reason):
         state = self.state
         reservation = state["reservations"].get(key)
         if state["stopped"] or reservation is None or not reservation.get("request_sha256"):
@@ -558,7 +578,7 @@ class NvidiaFreeEndpointGuard(FreeRouteGuard):
             original = state["reservations"].pop(key)
             state.setdefault("accepted_unknown_requests", []).append({"key": key, "reservation": original,
                 "request_sha256": original["request_sha256"], "raw_sha256": hashlib.sha256(raw).hexdigest(),
-                "reason": "user-authorized complete error-only SSE 503 recovery; usage and billing remain unknown",
+                "reason": reason,
                 "retry_ticket": retry.ticket})
         raise retry
 
