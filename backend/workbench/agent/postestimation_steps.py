@@ -153,7 +153,11 @@ def validate_postestimation_spec(operation_id: str, spec: Mapping[str, Any]) -> 
             if model_step_reference(spec.get("restricted_model_ref")) is None:
                 model_id_from_ref(spec.get("restricted_model_ref"))
     except Exception as exc:  # noqa: BLE001 - the model_ref message is the validation message
-        raise OperationValidationError(str(exc)) from exc
+        raise OperationValidationError(
+            "model_ref must name a model node or step:<producer>:<branch>. "
+            "inspect_operation_contract(operation_id=operation.multi_step, "
+            f"step_operation_ids=[{operation_id}])."
+        ) from exc
     for key in ("model_run_id", "restricted_model_run_id"):
         if key in spec and not (isinstance(spec[key], str) and _RUN_ID.fullmatch(spec[key])):
             raise OperationValidationError(f"{operation_id} {key} must be a run id")

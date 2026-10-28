@@ -154,3 +154,26 @@ def test_recovery_cli_requires_nvidia_opt_in_and_records_shared_ledger(tmp_path,
     assert meta['overload_recovery_ledger'] == str(tmp_path / 'shared.json')
     assert meta['overload_recovery'] == {'shared_retry_limit': 10, 'per_request_retry_limit': 2,
         'delays_s': [60, 120], 'eligibility': 'complete observed error-only SSE 503 plus DONE; no generated output'}
+
+
+def test_read_error_before_headers_stops_without_spending_overload_recovery(tmp_path, monkeypatch):
+    g, calls, waits, now = setup_recovery(tmp_path, monkeypatch, [])
+    shared_before = g.overload_recovery.state
+    def fail_read(request):
+        calls.append(request.content)
+        now[0] += 46.8665  # Reproduce the saved elapsed value without waiting or measuring.
+        raise httpx.ReadError('upstream closed before any response', request=request)
+    monkeypatch.setattr(httpx, 'AsyncHTTPTransport', lambda: httpx.MockTransport(fail_read))
+    with pytest.raises(budget.BudgetStop, match='unknown usage.*ReadError'):
+        asyncio.run(run(g, tmp_path))
+    assert len(calls) == 1 and waits == [] and g.stopped
+    assert g.state['requests'] == 1 and g.state['calls'] == 0
+    assert len(g.state['reservations']) == 1 and g.state['charges'] == []
+    assert not g.state.get('accepted_unknown_requests')
+    assert g.overload_recovery.state == shared_before
+    [record] = [json.loads(line) for line in (tmp_path / 'tape.jsonl').read_text().splitlines()]
+    assert record['status'] == 0 and record['upstream_http_status'] is None
+    assert record['transport_error'] == 'ReadError' and record['response_raw'] == ''
+    assert record['usage'] is None and record['sent'] is True
+    assert record['elapsed_s'] == pytest.approx(46.8665)
+    assert record['budget_reservation'] in g.state['reservations']

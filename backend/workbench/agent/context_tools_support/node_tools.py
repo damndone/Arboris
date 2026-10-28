@@ -187,6 +187,8 @@ class NodeToolsMixin:
                     "schema_id": contract.schema_id,
                     "editable_schema": contract.editable_schema,
                 }
+                if request.operation_id == "model.rerun":
+                    contract_payload.update(_rerun_contract_view(contract.editable_schema, operation))
                 # A pack whose whole option surface is a single `model_options` JSON
                 # control tells the Agent nothing about what may go inside it. Where
                 # the pack publishes a vocabulary, attach it so a proposal can be
@@ -563,6 +565,42 @@ class NodeToolsMixin:
             )
         return run_root
 
+
+
+def _rerun_contract_view(editable_schema: list[dict[str, Any]], operation) -> dict[str, Any]:
+    """Project manual controls onto the actual Agent patch, without changing either executor."""
+    from ...engine.capabilities import build_capabilities
+
+    branches = operation.proposal_schema["properties"]["changes"]["oneOf"]
+    writable = set(branches[0]["properties"])
+    legacy = set(branches[1]["properties"])
+    requirements = {}
+    for entry in build_capabilities()["model_types"]:
+        if entry["key"] == "auto":
+            continue
+        required = [field["key"] for field in entry.get("params", ()) if field.get("required")]
+        requirements[entry["key"]] = {
+            "required_fields": required,
+            "not_writable_fields": [field for field in required if field not in writable],
+        }
+    return {
+        "editable_schema": [field for field in editable_schema if field["key"] in writable],
+        "analysis_loop_editable_schema": [field for field in editable_schema if field["key"] in legacy],
+        "analysis_loop_guidance": (
+            "The legacy covariance/entity_col patch is only for the server-bound Analysis Loop. "
+            "For normal OLS reruns use the model_options vocabulary."
+        ),
+        "family_switch_requirements": requirements,
+        "family_switch_guidance": (
+            "Source form fields are retained except model_options, which is owned by the target family; "
+            "switching a source with nonempty options requires an explicit target-owned replacement. "
+            "Required fields must be present in the retained source or be writable in this patch. "
+            "To set new bindings outside this patch, inspect_operation_contract with "
+            "operation_id=operation.multi_step and step_operation_ids=[model.genesis], "
+            "then put the new specification in changes.steps[].spec. "
+            "Do not put family binding fields into model_options."
+        ),
+    }
 
 
 #: Implementation identities in a step specification that tell a model nothing

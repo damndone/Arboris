@@ -270,9 +270,10 @@ def _model_rerun_change_branch() -> dict[str, Any]:
             "type": "string",
             "description": (
                 "Switch the model family. This changes what the analysis means, "
-                "not just how it is estimated, so the new family's own required "
-                "fields must be supplied in the same patch. Read the legal values "
-                "and those requirements from inspect_operation_contract first."
+                "not just how it is estimated. Read the legal values and "
+                "family_switch_requirements from inspect_operation_contract first. "
+                "Required fields may be retained from the source; to set bindings "
+                "outside this patch use model.genesis inside operation.multi_step."
             ),
         },
     }

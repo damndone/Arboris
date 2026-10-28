@@ -607,8 +607,11 @@ def test_configured_chain_exposes_read_only_node_context_provider(
     assert contract_result.output["contract"]["op_type"] == "ols"
     assert contract_result.output["contract"]["schema_id"] == "ols@v1"
     assert {item["key"] for item in contract_result.output["contract"]["editable_schema"]} >= {
-        "x",
+        "model_options",
         "model_type",
+    }
+    assert {item["key"] for item in contract_result.output["contract"]["analysis_loop_editable_schema"]} == {
+        "covariance", "entity_col",
     }
 
     diagnostics_result = asyncio.run(

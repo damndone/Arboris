@@ -210,14 +210,27 @@ class ToolContext:
 MAX_ALLOWED_PROPERTIES = 24
 
 
-def _format_validation_error(error) -> dict[str, Any]:
+def _format_validation_error(error, *, prefix=()) -> dict[str, Any]:
+    path = ".".join(str(part) for part in (*prefix, *error.absolute_path)) or "<root>"
     message = error.message
+    type_details = {}
+    if error.validator == "type":
+        expected = error.validator_value
+        actual = {"dict": "object", "list": "array", "str": "string", "NoneType": "null",
+                  "bool": "boolean", "int": "integer", "float": "number"}.get(
+                      type(error.instance).__name__, type(error.instance).__name__)
+        type_details = {"expected_type": expected, "actual_type": actual}
+        expected_text = " or ".join(expected) if isinstance(expected, list) else str(expected)
+        # jsonschema puts the instance first and the type last. A long value
+        # must not truncate away the only information needed to fix its shape.
+        message = f"{path}: expected {expected_text}, got {actual}. {message}"
     if len(message) > MAX_VALIDATION_MESSAGE_CHARS:
-        message = message[:MAX_VALIDATION_MESSAGE_CHARS] + "… [truncated]"
+        message = message[:MAX_VALIDATION_MESSAGE_CHARS - len(_STRING_MARKER)] + _STRING_MARKER
     formatted: dict[str, Any] = {
-        "path": ".".join(str(part) for part in error.absolute_path) or "<root>",
+        "path": path,
         "message": message,
         "constraint": str(error.validator),
+        **type_details,
     }
     if error.validator == "additionalProperties":
         formatted.update(_unexpected_field_help(error))
@@ -360,8 +373,7 @@ def validation_details(schema: dict[str, Any], arguments: Any) -> list[dict[str,
     errors = sorted(_specific_validation_errors(schema,arguments),
                     key=lambda pair:[str(p) for p in (*pair[1],*pair[0].absolute_path)])
     for error, prefix in errors:
-        formatted = _format_validation_error(error)
-        formatted["path"] = ".".join(str(p) for p in (*prefix,*error.absolute_path)) or "<root>"
+        formatted = _format_validation_error(error, prefix=prefix)
         key = (formatted["path"], formatted["message"])
         if key in seen:
             continue
