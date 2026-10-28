@@ -90,6 +90,8 @@ def main() -> int:
                         help="explicit NVIDIA Ultra free-listed endpoint opt-in; persist across modes; billing remains unknown")
     parser.add_argument("--nvidia-free-round", choices=("dev8", "qrdata40"),
                         help="NVIDIA round request limit: dev8=240, qrdata40=1200; use separate ledgers")
+    parser.add_argument("--nvidia-overload-recovery-ledger", type=Path,
+                        help="explicit 503-only recovery opt-in; same durable 10-retry ledger for dev8 and QRData40")
     parser.add_argument("--allow-low-space-this-round", action="store_true",
                         help="explicit user-authorized storage exception; never releases financial stops")
     args = parser.parse_args()
@@ -97,6 +99,8 @@ def main() -> int:
         parser.error("choose one CNY budget, Magpie free route, or NVIDIA free endpoint guard")
     if (args.nvidia_free_ledger is None) != (args.nvidia_free_round is None):
         parser.error("NVIDIA opt-in requires both --nvidia-free-ledger and --nvidia-free-round")
+    if args.nvidia_overload_recovery_ledger is not None and args.nvidia_free_ledger is None:
+        parser.error("NVIDIA overload recovery requires the explicit NVIDIA endpoint guard")
     if args.nvidia_free_round is not None:
         if args.allow_low_space_this_round:
             parser.error("NVIDIA evaluation cannot bypass its 5 GB storage floor")
@@ -119,7 +123,8 @@ def main() -> int:
     if args.nvidia_free_ledger is not None:
         try:
             budget = NvidiaFreeEndpointGuard(args.nvidia_free_ledger, provider_id=config.provider_id,
-                base_url=config.base_url, model=config.model, round_kind=args.nvidia_free_round)
+                base_url=config.base_url, model=config.model, round_kind=args.nvidia_free_round,
+                overload_recovery_ledger=args.nvidia_overload_recovery_ledger)
         except ValueError as exc:
             parser.error(str(exc))
         if budget.stopped:
@@ -185,6 +190,10 @@ def main() -> int:
             "request_limit": budget.request_limit, "minimum_start_interval_s": 2, "serial": True,
             "billing_status": budget.state["billing_status"], "default_output_limit": "provider_default_unverified",
             "explicit_output_token_limit": 32768, "per_task_wall_s": args.max_wall_s,
+            "overload_recovery_ledger": str(args.nvidia_overload_recovery_ledger) if args.nvidia_overload_recovery_ledger is not None else None,
+            "overload_recovery": ({"shared_retry_limit": 10, "per_request_retry_limit": 2,
+                "delays_s": [60, 120], "eligibility": "complete observed error-only SSE 503 plus DONE; no generated output"}
+                if args.nvidia_overload_recovery_ledger is not None else None),
             "fallback": "forbidden; actual request URL and model checked"} if args.nvidia_free_ledger is not None else None),
         "provider": {key: getattr(config, key, None) for key in ("provider_id", "base_url", "model", "data_location")},
         "reasoning_effort": os.environ.get("WORKBENCH_REASONING_EFFORT") or "default(high)",

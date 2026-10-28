@@ -1,5 +1,6 @@
 """Native-CNY peak-price cap; retain the user's M4 USD table for comparison."""
 from contextlib import contextmanager
+import asyncio
 from decimal import Decimal
 import hashlib
 import json
@@ -297,6 +298,115 @@ NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
 NVIDIA_MODEL = "nvidia/nemotron-3-ultra-550b-a55b"
 
 
+class NvidiaOverloadRetry(BaseException):
+    """Consumed only by the explicitly installed evaluation stream wrapper."""
+
+    def __init__(self, ticket, delay_s):
+        self.ticket, self.delay_s = ticket, delay_s
+        super().__init__(f"authorized NVIDIA overload retry after {delay_s}s")
+
+
+class NvidiaOverloadRecovery(FreeRouteGuard):
+    """One durable retry allowance shared by the authorized dev8 and QRData40 rounds."""
+
+    _change = RoundBudget._change
+
+    def __init__(self, path):
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.lock = FileLock(str(self.path) + ".lock")
+        with self._change() as state:
+            expected = {"schema": "nvidia-overload-recovery/v1", "provider_id": NVIDIA_PROVIDER_ID,
+                "base_url": NVIDIA_BASE_URL, "model": NVIDIA_MODEL, "retry_limit": 10,
+                "per_request_retry_limit": 2, "delays_s": [60, 120]}
+            if any(state.get(key) != value for key, value in expected.items()):
+                raise ValueError("NVIDIA shared overload recovery configuration changed")
+
+    @property
+    def state(self):
+        if self.path.exists():
+            return json.loads(self.path.read_text())
+        return {"schema": "nvidia-overload-recovery/v1", "provider_id": NVIDIA_PROVIDER_ID,
+            "base_url": NVIDIA_BASE_URL, "model": NVIDIA_MODEL, "retry_limit": 10,
+            "per_request_retry_limit": 2, "delays_s": [60, 120], "retries": 0,
+            "request_retries": {}, "tickets": {}, "pending": None, "manual_restarts": {},
+            "stopped": False, "reason": None}
+
+    def record_manual_restart(self, *, source_path, reason):
+        """Charge the explicitly approved task restart once, without settling any request."""
+        identity = hashlib.sha256(json.dumps([str(source_path), reason]).encode()).hexdigest()
+        refused = None
+        with self._change() as state:
+            if identity in state["manual_restarts"]:
+                return
+            if state["stopped"] or state["retries"] >= 10 or state["pending"]:
+                refused = "NVIDIA shared recovery allowance cannot authorize a manual restart"
+                state.update(stopped=True, reason=refused)
+            else:
+                state["retries"] += 1
+                state["manual_restarts"][identity] = {"kind": "manual_task_restart",
+                    "source_path": str(source_path), "reason": reason, "at": time.time()}
+        if refused:
+            raise BudgetStop(refused)
+
+    def claim(self, request_sha256, *, round_ledger, reservation):
+        refused, ticket, delay = None, uuid4().hex, None
+        with self._change() as state:
+            count = state["request_retries"].get(request_sha256, 0)
+            if state["stopped"]:
+                refused = state["reason"]
+            elif state["pending"]:
+                refused = "NVIDIA pending recovery ticket forbids parallel recovery"
+            elif state["retries"] >= 10:
+                refused = "NVIDIA shared recovery retry limit reached"
+            elif count >= 2:
+                refused = "NVIDIA per-request overload retry limit reached"
+            if refused:
+                state.update(stopped=True, reason=refused)
+            else:
+                delay = [60, 120][count]
+                state["retries"] += 1
+                state["request_retries"][request_sha256] = count + 1
+                state["tickets"][ticket] = {"request_sha256": request_sha256,
+                    "round_ledger": str(round_ledger), "reservation": reservation,
+                    "delay_s": delay, "ready_at": time.time() + delay, "status": "waiting"}
+                state["pending"] = ticket
+        if refused:
+            raise BudgetStop(refused)
+        return NvidiaOverloadRetry(ticket, delay)
+
+    def ready(self, ticket):
+        refused = None
+        with self._change() as state:
+            entry = state["tickets"].get(ticket)
+            if (state["stopped"] or state["pending"] != ticket or entry is None
+                    or entry["status"] != "waiting" or time.time() < entry["ready_at"]):
+                refused = "NVIDIA pending recovery ticket cannot resume"
+                state.update(stopped=True, reason=refused)
+            else:
+                entry["status"] = "ready"
+        if refused:
+            raise BudgetStop(refused)
+
+    def before_send(self, request_sha256, ticket):
+        refused = None
+        with self._change() as state:
+            if state["stopped"]:
+                refused = state["reason"]
+            elif state["pending"]:
+                entry = state["tickets"][state["pending"]]
+                if (ticket != state["pending"] or entry["status"] != "ready"
+                        or entry["request_sha256"] != request_sha256):
+                    refused = "NVIDIA pending recovery requires its original sender and payload; restart refused"
+                else:
+                    entry["status"] = "sent"
+                    state["pending"] = None
+            if refused:
+                state.update(stopped=True, reason=refused)
+        if refused:
+            raise BudgetStop(refused)
+
+
 class NvidiaFreeEndpointGuard(FreeRouteGuard):
     """Explicit free-listed endpoint authorization, not a zero-cost billing claim.
 
@@ -306,7 +416,7 @@ class NvidiaFreeEndpointGuard(FreeRouteGuard):
 
     _change = RoundBudget._change
 
-    def __init__(self, path, *, provider_id, base_url, model, round_kind):
+    def __init__(self, path, *, provider_id, base_url, model, round_kind, overload_recovery_ledger=None):
         if (provider_id, base_url, model) != (NVIDIA_PROVIDER_ID, NVIDIA_BASE_URL, NVIDIA_MODEL):
             raise ValueError("NVIDIA evaluation requires the exact authorized provider, base URL and Ultra model")
         if round_kind not in {"dev8", "qrdata40"}:
@@ -317,6 +427,12 @@ class NvidiaFreeEndpointGuard(FreeRouteGuard):
         self._identity = (provider_id, base_url)
         self.round_kind = round_kind
         self.request_limit = 240 if round_kind == "dev8" else 1200
+        self.overload_recovery = None
+        self._retry_ticket = None
+        if overload_recovery_ledger is not None:
+            if self.path.resolve() == Path(overload_recovery_ledger).resolve():
+                raise ValueError("NVIDIA request and recovery ledgers must be separate")
+            self.overload_recovery = NvidiaOverloadRecovery(overload_recovery_ledger)
         with self._change() as state:
             expected = {"schema": "nvidia-free-endpoint/v1", "provider_id": provider_id,
                 "base_url": base_url, "model": model, "round_kind": round_kind,
@@ -324,6 +440,12 @@ class NvidiaFreeEndpointGuard(FreeRouteGuard):
                 "min_start_interval_s": 2}
             if any(state.get(key) != value for key, value in expected.items()):
                 raise ValueError("NVIDIA ledger configuration changed; use a separate round ledger")
+            recovery_path = str(Path(overload_recovery_ledger).resolve()) if overload_recovery_ledger is not None else None
+            bound_path = state.get("overload_recovery_ledger")
+            if bound_path is not None and bound_path != recovery_path:
+                raise ValueError("NVIDIA round requires its original overload recovery ledger")
+            if recovery_path is not None:
+                state["overload_recovery_ledger"] = recovery_path
 
     @property
     def state(self):
@@ -374,6 +496,14 @@ class NvidiaFreeEndpointGuard(FreeRouteGuard):
         except (ValueError, TypeError) as exc:
             self.stop(f"NVIDIA request rejected: {exc}")
             raise BudgetStop(self.state["reason"])
+        request_sha256 = hashlib.sha256(body).hexdigest()
+        if self.overload_recovery is not None:
+            try:
+                self.overload_recovery.before_send(request_sha256, self._retry_ticket)
+                self._retry_ticket = None
+            except BudgetStop as exc:
+                self.stop(str(exc))
+                raise
         key = uuid4().hex
         refused = False
         with self._change() as state:
@@ -391,10 +521,57 @@ class NvidiaFreeEndpointGuard(FreeRouteGuard):
                 state["last_start"] = time.time()
                 state["requests"] += 1
                 state["reservations"][key] = {"started_at": state["last_start"], "output_bound": output,
-                    "output_limit": "provider_default_unverified" if output is None else output}
+                    "output_limit": "provider_default_unverified" if output is None else output,
+                    "request_sha256": request_sha256}
         if refused:
             raise BudgetStop(self.state["reason"])
         return key
+
+    def recover_overload(self, status, raw, key):
+        if self.overload_recovery is None or status != 200:
+            return
+        # Only the complete, actually observed error-only SSE shape is eligible.
+        lines = [line.strip() for line in raw.splitlines() if line.strip()]
+        if len(lines) != 2 or not lines[0].startswith(b"data:") or lines[1] != b"data: [DONE]":
+            return
+        try:
+            payload = json.loads(lines[0][5:])
+        except (ValueError, TypeError):
+            return
+        if not isinstance(payload, dict) or set(payload) != {"error"}:
+            return
+        error = payload["error"]
+        if (not isinstance(error, dict) or type(error.get("code")) is not int
+                or error != {"message": "Service temporarily overloaded", "type": "service_unavailable", "code": 503}):
+            return
+        state = self.state
+        reservation = state["reservations"].get(key)
+        if state["stopped"] or reservation is None or not reservation.get("request_sha256"):
+            self.stop("NVIDIA recovery has no active authorized request reservation")
+            raise BudgetStop(self.state["reason"])
+        try:
+            retry = self.overload_recovery.claim(reservation["request_sha256"], round_ledger=self.path, reservation=key)
+        except BudgetStop as exc:
+            self.stop(str(exc))
+            raise
+        with self._change() as state:
+            original = state["reservations"].pop(key)
+            state.setdefault("accepted_unknown_requests", []).append({"key": key, "reservation": original,
+                "request_sha256": original["request_sha256"], "raw_sha256": hashlib.sha256(raw).hexdigest(),
+                "reason": "user-authorized complete error-only SSE 503 recovery; usage and billing remain unknown",
+                "retry_ticket": retry.ticket})
+        raise retry
+
+    async def wait_for_retry(self, retry):
+        try:
+            await asyncio.sleep(retry.delay_s)
+            self.overload_recovery.ready(retry.ticket)
+            self._retry_ticket = retry.ticket
+        except BaseException:
+            reason = "NVIDIA overload recovery wait interrupted; no further request authorized"
+            self.stop(reason)
+            self.overload_recovery.stop(reason)
+            raise
 
     def settle(self, key, usage):
         reason = None

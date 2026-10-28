@@ -166,6 +166,8 @@ class _RecordingTransport(httpx.AsyncBaseTransport):
             "usage": usage,
             "budget_reservation": reservation,
         })
+        if hasattr(self.budget, "recover_overload"):
+            self.budget.recover_overload(response.status_code, raw, reservation)
         if hasattr(self.budget, "check_response"):
             self.budget.check_response(response.status_code, raw)
         if usage is None and response.status_code >= 400 and hasattr(self.budget, "refused"):
@@ -182,6 +184,8 @@ class _RecordingTransport(httpx.AsyncBaseTransport):
             "content_type": response.headers.get("content-type", "") if response is not None else "", "request_sha256": digest,
             "request": json.loads(body), "request_bytes": len(body), "response_raw": raw.decode("utf-8", "replace"),
             "usage": None, "transport_error": type(exc).__name__, "budget_reservation": reservation, "sent": sent})
+        if response is not None and hasattr(self.budget, "recover_overload"):
+            self.budget.recover_overload(response.status_code, raw, reservation)
         if response is not None and hasattr(self.budget, "check_response"):
             self.budget.check_response(response.status_code, raw)
         if not sent and hasattr(self.budget, "unreachable"):
@@ -229,9 +233,11 @@ class _TeeStream(httpx.AsyncByteStream):
     async def aclose(self) -> None:
         # Closed before the end: the reader abandoned the stream (the product's
         # own no-progress cancel, or its Stop).
-        if not self._done:
-            self._end(asyncio.CancelledError())
-        await self._response.aclose()
+        try:
+            if not self._done:
+                self._end(asyncio.CancelledError())
+        finally:
+            await self._response.aclose()
 
     def _end(self, exc) -> None:
         if self._done:
@@ -257,7 +263,28 @@ def provider_tape(path: Path, *, mode: str = "record", budget=None) -> Iterator[
         return httpx.AsyncClient(timeout=config.timeout_s, transport=_RecordingTransport(tape, inner, budget=budget))
 
     llm_client._async_client_factory = factory
+    stream_original = model_original = None
+    if mode == "record" and getattr(budget, "overload_recovery", None) is not None:
+        from workbench.agent import model as agent_model
+        from .budget import NvidiaOverloadRetry
+        stream_original = llm_client.async_stream_chat_completion
+        model_original = agent_model.async_stream_chat_completion
+
+        async def recovering_stream(*args, **kwargs):
+            while True:
+                try:
+                    async for event in stream_original(*args, **kwargs):
+                        yield event
+                    return
+                except NvidiaOverloadRetry as retry:
+                    await budget.wait_for_retry(retry)
+
+        llm_client.async_stream_chat_completion = recovering_stream
+        agent_model.async_stream_chat_completion = recovering_stream
     try:
         yield tape
     finally:
         llm_client._async_client_factory = original
+        if stream_original is not None:
+            llm_client.async_stream_chat_completion = stream_original
+            agent_model.async_stream_chat_completion = model_original
