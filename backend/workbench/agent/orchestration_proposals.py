@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Any, Iterable
 from ..lineage.run_inputs import read_run_inputs
+from ..api_errors import WorkbenchAPIError
 from .chains import ChainStore
 from . import operation_requests
 from .operation_requests import OperationRequest, OperationReceipt
@@ -68,17 +69,23 @@ class OrchestrationProposals:
             return
         try:
             run_root = _resolve_run_root(str(project_root), run_id)
-        except Exception:
-            return
-        _require_editable_rerun_target(run_root, run_id, arguments)
-        try:
+            _require_editable_rerun_target(run_root, run_id, arguments)
             inputs = read_run_inputs(run_root)
+            if (not isinstance(inputs, dict) or not isinstance(inputs.get("form"), dict)
+                    or not isinstance(inputs.get("upload"), dict)
+                    or not isinstance(inputs["upload"].get("sha256"), str)):
+                raise ValueError("Invalid saved rerun inputs")
             upload_bytes = verify_upload(
-                Path(project_root), str((inputs.get("upload") or {}).get("sha256") or "")
+                Path(project_root), inputs["upload"]["sha256"]
             ).read_bytes()
-        except Exception:
-            # Unreadable inputs are execution's to report, with its own codes.
-            return
+        except ToolVisibleError:
+            raise
+        except (WorkbenchAPIError, OSError, ValueError) as exc:
+            raise ToolVisibleError(
+                f"MODEL_RERUN_SOURCE_UNAVAILABLE: Cannot verify the saved inputs for {run_id[:160]}. "
+                "No proposal was created. Inspect the source run and restore its registered inputs/upload, "
+                "or select another rerunnable model. Do not retry the unchanged request."
+            ) from exc
         try:
             reject_invalid_rerun_declarations(
                 inputs["form"],
@@ -88,8 +95,6 @@ class OrchestrationProposals:
                 metadata_edit=metadata_edit,
             )
         except RerunDeclarationError as exc:
-            from .tools import ToolVisibleError
-
             # A plain ValueError reaches the model as its type name only; this
             # message is what lets the Agent re-plan.
             raise ToolVisibleError(f"{exc.code}: {exc}") from exc

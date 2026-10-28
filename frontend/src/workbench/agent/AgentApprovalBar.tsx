@@ -2,7 +2,8 @@
 // message box (Claude Code's "Do you want to proceed?"): what it will do in one
 // line, its main risk in a muted line, Run / Decline / Edit. The steps, expected
 // effect, risks and parameters open on request. Several pending proposals show
-// one at a time ("1 of 3"). Decided proposals leave the bar; the transcript
+// one group at a time. Ordinary same-turn reruns can be checked individually.
+// Decided proposals leave the bar; the transcript
 // keeps a receipt where they happened.
 
 import { useEffect, useRef, useState } from "react";
@@ -10,6 +11,7 @@ import { ProposalFields } from "./ProposalFields";
 import { useAgentSurfaceOptional } from "./AgentSurfaceContext";
 import type { AgentProposal } from "./agentTypes";
 import { changeSummary, proposalTitle } from "./proposalText";
+import { groupPendingProposals } from "./proposalGroups";
 
 export function AgentApprovalBar({ proposals, projectRoot }: { proposals: AgentProposal[]; projectRoot: string }) {
   const agent = useAgentSurfaceOptional();
@@ -19,11 +21,22 @@ export function AgentApprovalBar({ proposals, projectRoot }: { proposals: AgentP
   const [issues, setIssues] = useState<string[]>([]);
   const [failure, setFailure] = useState<string | null>(null);
   const [acting, setActing] = useState(false);
+  const [reviewing, setReviewing] = useState<string | null>(null);
+  const [unchecked, setUnchecked] = useState<Set<string>>(new Set());
   const decisionPending = useRef(false);
   const stopPending = useRef(false);
-  useEffect(() => { setIndex((current) => Math.min(current, Math.max(0, proposals.length - 1))); }, [proposals.length]);
-  if (!agent || proposals.length === 0) return null;
-  const proposal = proposals[index] ?? proposals[0];
+  const visibleIds = new Set(proposals.map(item => item.proposal_id));
+  // Keep decided/other-kind barriers from the original session order even
+  // though this bar receives only pending proposals from the composer.
+  const groups = groupPendingProposals(agent?.proposals ?? proposals, agent?.capabilityCatalog)
+    .map(group => group.filter(item => visibleIds.has(item.proposal_id))).filter(group => group.length > 0);
+  useEffect(() => { setIndex((current) => Math.min(current, Math.max(0, groups.length - 1))); }, [groups.length]);
+  if (!agent || groups.length === 0) return null;
+  const group = groups[index] ?? groups[0];
+  const proposal = group.find(item => item.proposal_id === reviewing) ?? group[0];
+  const isBatch = group.length > 1 && typeof agent.confirmProposals === "function";
+  const selectionKey = (item: AgentProposal) => `${item.proposal_id}:${item.revision}:${item.fingerprint}`;
+  const selected = group.filter(item => !unchecked.has(selectionKey(item)));
   const busy = agent.confirmationBusyId !== null || acting || agent.isSubmitting
     || ["running", "working", "cancelling"].includes(agent.sessionStatus);
   const steps = proposal.readable ?? [];
@@ -41,7 +54,12 @@ export function AgentApprovalBar({ proposals, projectRoot }: { proposals: AgentP
     setActing(true);
     setFailure(null);
     try {
-      if (action === "confirm") await agent.confirmProposal(proposal.proposal_id);
+      if (action === "confirm") {
+        if (isBatch) {
+          if (!selected.length) return;
+          await agent.confirmProposals!(selected.map(item => item.proposal_id));
+        } else await agent.confirmProposal(proposal.proposal_id);
+      }
       else await agent.declineProposal(proposal.proposal_id);
     } catch (error) {
       setFailure(error instanceof Error ? error.message : "Could not apply the proposal decision.");
@@ -97,16 +115,30 @@ export function AgentApprovalBar({ proposals, projectRoot }: { proposals: AgentP
       }}
     >
       <div className="wb-agent-approval__head">
-        <span className="wb-agent-approval__ask">Run this?</span>
+        <span className="wb-agent-approval__ask">{isBatch ? `Run selected? ${selected.length} of ${group.length} selected` : "Run this?"}</span>
         {proposal.revision > 1 && <span>revision {proposal.revision}</span>}
-        {proposals.length > 1 && (
+        {groups.length > 1 && (
           <span className="wb-agent-approval__pager">
             <button type="button" aria-label="Previous proposal" disabled={index === 0} onClick={() => setIndex(index - 1)}>‹</button>
-            {index + 1} of {proposals.length}
-            <button type="button" aria-label="Next proposal" disabled={index === proposals.length - 1} onClick={() => setIndex(index + 1)}>›</button>
+            {index + 1} of {groups.length}
+            <button type="button" aria-label="Next proposal" disabled={index === groups.length - 1} onClick={() => setIndex(index + 1)}>›</button>
           </span>
         )}
       </div>
+      {isBatch && <ul className="wb-agent-proposal-change" aria-label="Same-turn reruns">
+        {group.map(item => <li key={selectionKey(item)}>
+          <label><input type="checkbox" aria-label={`Select proposal ${item.proposal_id}`}
+            checked={!unchecked.has(selectionKey(item))} disabled={busy || isEditing}
+            onChange={event => setUnchecked(current => {
+              const next = new Set(current);
+              if (event.target.checked) next.delete(selectionKey(item)); else next.add(selectionKey(item));
+              return next;
+            })} /> {proposalTitle(item)}</label>{" "}
+          <button type="button" aria-label={`Review proposal ${item.proposal_id}`} disabled={busy || isEditing}
+            aria-pressed={proposal.proposal_id === item.proposal_id}
+            onClick={() => setReviewing(item.proposal_id)}>Review</button>
+        </li>)}
+      </ul>}
       <p className="wb-agent-approval__title">
         {proposalTitle(proposal)}
         {steps.length > 1 && <span className="wb-agent-approval__more"> · {steps.length} steps</span>}
@@ -171,11 +203,11 @@ export function AgentApprovalBar({ proposals, projectRoot }: { proposals: AgentP
         <button
           type="button"
           className="wb-agent-approval__primary"
-          aria-label={`Confirm proposal ${proposal.proposal_id}`}
-          disabled={busy || isEditing}
+          aria-label={isBatch ? "Run selected proposals" : `Confirm proposal ${proposal.proposal_id}`}
+          disabled={busy || isEditing || (isBatch && selected.length === 0)}
           onClick={() => void decide("confirm")}
         >
-          {agent.confirmationBusyId === proposal.proposal_id ? "Running…" : "Run"}
+          {agent.confirmationBusyId !== null ? "Running…" : isBatch ? `Run ${selected.length} selected` : "Run"}
         </button>
         <button
           type="button"

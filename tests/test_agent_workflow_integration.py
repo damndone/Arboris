@@ -117,6 +117,8 @@ def _write_project_run(project_root: Path) -> None:
     runs_root = project_root / "runs"
     run_root = runs_root / "run-a"
     run_root.mkdir(parents=True)
+    from workbench.lineage.upload_store import store_upload_bytes
+    upload_sha = store_upload_bytes(project_root, b"y,x\n2,1\n4,2\n6,3\n", filename="source.csv")
     GraphStore(runs_root).write(
         Graph(
             schema_version=3,
@@ -140,7 +142,8 @@ def _write_project_run(project_root: Path) -> None:
         json.dumps({"model:ols_1": {"node_hash": "hash-a"}}), encoding="utf-8"
     )
     (run_root / "run_inputs.json").write_text(
-        json.dumps({"rerun_of": None, "form": {"model_type": "ols"}}), encoding="utf-8"
+        json.dumps({"rerun_of": None, "form": {"model_type": "ols", "y": "y", "x": "x"},
+                    "upload": {"sha256": upload_sha, "filename": "source.csv"}}), encoding="utf-8"
     )
     (run_root / "run_manifest.json").write_text(
         json.dumps(

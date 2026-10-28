@@ -58,6 +58,7 @@ import type {
   AgentRole,
 } from "./agentTypes";
 import type { ForestViewModel } from "../../lineage/api/graphViewTypes";
+import { groupPendingProposals } from "./proposalGroups";
 
 /** Terminal operation-record states — reconcile polling stops here. */
 const TERMINAL_OPERATION_STATUSES = new Set([
@@ -240,6 +241,7 @@ export interface AgentSurfaceContextValue {
   proposals: AgentProposal[];
   confirmationBusyId: string | null;
   confirmProposal: (proposalId: string) => Promise<void>;
+  confirmProposals?: (proposalIds: string[]) => Promise<void>;
   declineProposal: (proposalId: string, reason?: string) => Promise<boolean>;
   reviseProposal: (
     proposalId: string,
@@ -369,6 +371,8 @@ export function AgentSurfaceProvider({
   const [conversationVersion, setConversationVersion] = useState(0);
   const restoredSessionRef = useRef<string | null>(null);
   const [proposals, setProposals] = useState<AgentProposal[]>([]);
+  const latestProposalsRef = useRef(proposals);
+  latestProposalsRef.current = proposals;
   const [confirmationBusyId, setConfirmationBusyId] = useState<string | null>(null);
   const [activeOperation, setActiveOperation] = useState<AgentOperationStatus | null>(null);
   const [eventCursor, setEventCursor] = useState(0);
@@ -386,6 +390,7 @@ export function AgentSurfaceProvider({
   const activeTurnControllerRef = useRef<AbortController | null>(null);
   const activeTurnSessionIdRef = useRef<string | null>(null);
   const confirmationControllerRef = useRef<AbortController | null>(null);
+  useEffect(() => () => { confirmationControllerRef.current?.abort(); }, []);
 
   const selectedKey = workbench.state.selectedKey;
   const graphNodes = Array.isArray(graphModel?.nodes) ? graphModel.nodes : [];
@@ -1013,65 +1018,97 @@ export function AgentSurfaceProvider({
     if (controller) setSessionStatus("cancelled");
   }, [isSubmitting, projectRoot, sessionId, sessionStatus, sessionScope]);
 
-  const confirmProposal = useCallback(async (proposalId: string) => {
+  const confirmProposals = useCallback(async (proposalIds: string[]) => {
     if (!sessionId || confirmationBusyId !== null || confirmationControllerRef.current) return;
     const requestScope = sessionScope;
     if (activeScopeRef.current !== requestScope) return;
-    const proposal = proposals.find((item) => item.proposal_id === proposalId);
-    if (!proposal || proposal.status !== "pending") return;
+    const selected = proposalIds.map(id => proposals.find(item => item.proposal_id === id));
+    if (!selected.length || new Set(proposalIds).size !== selected.length
+        || selected.some(item => !item || item.status !== "pending")) return;
+    const batch = selected as AgentProposal[];
+    if (batch.length > 1 && (batch.some(item => item.session_id !== sessionId) || !groupPendingProposals(proposals, capabilityCatalog).some(group =>
+      batch.every(item => group.includes(item))))) {
+      setError("These proposals require separate confirmations.");
+      return;
+    }
     const ownership = contextPacket.ownership;
     const activeHead = ownership && typeof ownership === "object"
       ? (ownership as { active_head_run_id?: unknown }).active_head_run_id
       : undefined;
-    const proposalHead = proposal.preconditions.active_head_run_id;
-    const activeHeadRunId = typeof proposalHead === "string" && proposalHead
-      ? proposalHead
-      : typeof activeHead === "string" && activeHead ? activeHead
-      : forest?.activeRunId ?? runId;
     const controller = new AbortController();
     confirmationControllerRef.current = controller;
-    setConfirmationBusyId(proposalId);
+    setConfirmationBusyId(batch[0].proposal_id);
     setError(null);
+    const ownsSession = () => activeScopeRef.current === requestScope && currentSessionRef.current === sessionId;
     try {
-      const result = await confirmAgentProposal(projectRoot, sessionId, proposalId, {
-        revision: proposal.revision,
-        fingerprint: proposal.fingerprint,
-        active_head_run_id: activeHeadRunId,
-      });
-      if (activeScopeRef.current !== requestScope) return;
-      setProposals((current) => current.map((item) => (
-        item.proposal_id === proposalId ? result.proposal : item
-      )));
-      // Confirmation EXECUTES (design §8.2): surface the running operation
-      // and poll the idempotent reconcile endpoint until the backend proves a
-      // terminal state. The forest's own polling picks up the child run.
-      let operation = toOperationStatus(result.operation);
-      setActiveOperation(operation);
-      while (!TERMINAL_OPERATION_STATUSES.has(operation.status)) {
-        await new Promise((resolve) => setTimeout(resolve, 1500));
-        if (activeScopeRef.current !== requestScope) return;
-        const reconciled = await reconcileAgentOperation(
-          projectRoot,
-          sessionId,
-          operation.record_id,
-        );
-        if (activeScopeRef.current !== requestScope) return;
-        operation = toOperationStatus(reconciled.operation);
+      for (const proposal of batch) {
+        if (controller.signal.aborted || !ownsSession()) return;
+        const latest = latestProposalsRef.current.find(item => item.proposal_id === proposal.proposal_id);
+        if (!latest || latest.status !== "pending" || latest.revision !== proposal.revision || latest.fingerprint !== proposal.fingerprint) {
+          throw new Error("A selected proposal changed. Review it before confirming again.");
+        }
+        const proposalId = proposal.proposal_id;
+        setConfirmationBusyId(proposalId);
+        const proposalHead = proposal.preconditions.active_head_run_id;
+        const activeHeadRunId = typeof proposalHead === "string" && proposalHead
+          ? proposalHead
+          : typeof activeHead === "string" && activeHead ? activeHead
+          : forest?.activeRunId ?? runId;
+        const result = await confirmAgentProposal(projectRoot, sessionId, proposalId, {
+          revision: proposal.revision,
+          fingerprint: proposal.fingerprint,
+          active_head_run_id: activeHeadRunId,
+        });
+        if (!ownsSession()) return;
+        setProposals((current) => current.map((item) => (
+          item.proposal_id === proposalId ? result.proposal : item
+        )));
+        // Confirmation EXECUTES (design §8.2): surface the running operation
+        // and poll the idempotent reconcile endpoint until the backend proves a
+        // terminal state. The forest's own polling picks up the child run.
+        let operation = toOperationStatus(result.operation);
         setActiveOperation(operation);
+        // Keep the real approval/initial operation receipt, but Stop or a
+        // closed surface ends observation; it does not cancel the operation.
+        if (controller.signal.aborted) return;
+        while (!TERMINAL_OPERATION_STATUSES.has(operation.status)) {
+          if (controller.signal.aborted || !ownsSession()) return;
+          await new Promise<void>((resolve) => {
+            const finish = () => {
+              clearTimeout(timer);
+              controller.signal.removeEventListener("abort", finish);
+              resolve();
+            };
+            const timer = setTimeout(finish, 1500);
+            controller.signal.addEventListener("abort", finish, { once: true });
+          });
+          if (controller.signal.aborted || !ownsSession()) return;
+          const reconciled = await reconcileAgentOperation(
+            projectRoot,
+            sessionId,
+            operation.record_id,
+          );
+          if (controller.signal.aborted || !ownsSession()) return;
+          operation = toOperationStatus(reconciled.operation);
+          setActiveOperation(operation);
+        }
+        await refreshNavigation(sessionId, requestScope);
+        if (!ownsSession()) return;
+        if (operation.status !== "completed") {
+          setError(`Operation ${proposalId} ${operation.status}. Remaining proposals were not run.`);
+          return;
+        }
       }
-      await refreshNavigation(sessionId, requestScope);
-      if (operation.status === "completed" && !controller.signal.aborted
-          && activeScopeRef.current === requestScope && currentSessionRef.current === sessionId) {
-        await runContinuation();
-      }
+      if (!controller.signal.aborted && ownsSession()) await runContinuation();
     } catch (requestError) {
-      if (activeScopeRef.current !== requestScope) return;
+      if (!ownsSession()) return;
       setError(requestError instanceof Error ? requestError.message : "Proposal confirmation failed");
     } finally {
       if (confirmationControllerRef.current === controller) confirmationControllerRef.current = null;
-      if (activeScopeRef.current === requestScope) setConfirmationBusyId(null);
+      if (ownsSession()) setConfirmationBusyId(null);
     }
-  }, [confirmationBusyId, contextPacket, forest?.activeRunId, linkedSessionId, projectRoot, proposals, refreshNavigation, runContinuation, runId, sessionId, sessionScope]);
+  }, [capabilityCatalog, confirmationBusyId, contextPacket, forest?.activeRunId, projectRoot, proposals, refreshNavigation, runContinuation, runId, sessionId, sessionScope]);
+  const confirmProposal = useCallback((proposalId: string) => confirmProposals([proposalId]), [confirmProposals]);
 
   const declineProposal = useCallback(async (proposalId: string, reason?: string) => {
     if (!sessionId || confirmationBusyId !== null) return false;
@@ -1295,6 +1332,7 @@ export function AgentSurfaceProvider({
     proposals,
     confirmationBusyId,
     confirmProposal,
+    confirmProposals,
     declineProposal,
     reviseProposal,
     forkFromMessage,
@@ -1344,6 +1382,7 @@ export function AgentSurfaceProvider({
     proposals,
     confirmationBusyId,
     confirmProposal,
+    confirmProposals,
     declineProposal,
     reviseProposal,
     forkFromMessage,

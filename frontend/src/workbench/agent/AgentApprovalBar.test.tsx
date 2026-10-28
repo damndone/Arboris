@@ -1,9 +1,12 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { agentProposalFixture } from "../../apiFixtures";
+import { agentCapabilitiesFixture, agentProposalFixture, operationCapabilityFixture } from "../../apiFixtures";
 import type { AgentProposal } from "./agentTypes";
 
-const surface = { confirmationBusyId: null as string | null, confirmProposal: vi.fn(), declineProposal: vi.fn(), reviseProposal: vi.fn(),
+const surface = { confirmationBusyId: null as string | null, confirmProposal: vi.fn(), confirmProposals: vi.fn(),
+  proposals: undefined as AgentProposal[] | undefined,
+  capabilityCatalog: agentCapabilitiesFixture({ capabilities: [operationCapabilityFixture({operation_id:"model.rerun"})] }),
+  declineProposal: vi.fn(), reviseProposal: vi.fn(),
   abortTurn: vi.fn() as ReturnType<typeof vi.fn> | undefined, isSubmitting: false, sessionStatus: "idle" };
 vi.mock("./AgentSurfaceContext", () => ({ useAgentSurfaceOptional: () => surface }));
 vi.mock("./ProposalFields", () => ({ ProposalFields: () => <>
@@ -31,10 +34,34 @@ describe("AgentApprovalBar", () => {
     surface.confirmationBusyId = null;
     surface.isSubmitting = false;
     surface.sessionStatus = "idle";
+    surface.proposals = undefined;
     surface.confirmProposal.mockReset().mockResolvedValue(undefined);
+    surface.confirmProposals.mockReset().mockResolvedValue(undefined);
     surface.declineProposal.mockReset().mockResolvedValue(true);
     surface.reviseProposal.mockReset().mockResolvedValue(true);
     surface.abortTurn = vi.fn().mockResolvedValue(undefined);
+  });
+
+  test("same-turn reruns share a card and run only the checked proposals", async () => {
+    render(<AgentApprovalBar proposals={[proposal("p1", {operation_id:"model.rerun",command_id:"turn"}),
+      proposal("p2", {operation_id:"model.rerun",command_id:"turn",readable:["Fit sensitivity"]})]} projectRoot="/proj" />);
+    expect(screen.getByRole("checkbox", { name: /Select proposal p1/ })).toBeChecked();
+    fireEvent.click(screen.getByRole("checkbox", { name: /Select proposal p2/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Run selected proposals" }));
+    expect(surface.confirmProposals).toHaveBeenCalledWith(["p1"]);
+    expect(surface.confirmProposal).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByRole("button", {name:"Run selected proposals"})).not.toBeDisabled());
+    fireEvent.click(screen.getByRole("checkbox", { name: /Select proposal p1/ }));
+    expect(screen.getByRole("button", {name:"Run selected proposals"})).toBeDisabled();
+  });
+
+  test("a decided item between pending reruns remains a grouping boundary", () => {
+    const first = proposal("p1",{operation_id:"model.rerun",command_id:"turn"});
+    const second = proposal("p2",{operation_id:"model.rerun",command_id:"turn"});
+    surface.proposals = [first,proposal("barrier",{status:"confirmed"}),second];
+    render(<AgentApprovalBar proposals={[first,second]} projectRoot="/proj" />);
+    expect(screen.queryByRole("button",{name:"Run selected proposals"})).not.toBeInTheDocument();
+    expect(screen.getByText(/1 of 2/)).toBeInTheDocument();
   });
 
   test("one line says what it will do and its main risk; Run, Decline and Edit act on it", async () => {

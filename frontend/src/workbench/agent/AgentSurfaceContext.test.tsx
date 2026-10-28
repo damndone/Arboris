@@ -3,9 +3,9 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentPanel } from "./AgentPanel";
-import { AgentSurfaceProvider } from "./AgentSurfaceContext";
+import { AgentSurfaceProvider, useAgentSurface } from "./AgentSurfaceContext";
 import type { AgentMessage, AgentProposal } from "./agentTypes";
-import { agentMessageFixture, agentProposalFixture } from "../../apiFixtures";
+import { agentCapabilitiesFixture, agentMessageFixture, agentProposalFixture, operationCapabilityFixture } from "../../apiFixtures";
 import { ApiError } from "../../api";
 
 const mocks = vi.hoisted(() => ({
@@ -1118,6 +1118,152 @@ describe("AgentSurfaceProvider", () => {
     fireEvent.click(await screen.findByRole("button", {name:"Stop Agent"}));
     await act(async () => finish({proposal:{...pendingProposal,status:"confirmed"},
       operation:{record_id:"record-1",operation_id:"model.rerun",status:"completed"}}));
+    expect(mocks.continueAgentTurn).not.toHaveBeenCalled();
+  });
+
+  it("confirms checked same-turn reruns serially with each source binding and continues once", async () => {
+    sessionStorage.setItem("workbench:agent-session:/proj:run-a:project%3Arun-a%3Anone", "agent_chain_saved");
+    const first = {...pendingProposal,command_id:"turn"};
+    const second = {...first,proposal_id:"proposal-2",fingerprint:"fp-2",revision:2};
+    mocks.getAgentCapabilities.mockResolvedValue(agentCapabilitiesFixture({capabilities:[operationCapabilityFixture({operation_id:"model.rerun"})]}));
+    mocks.getAgentSession.mockResolvedValue(session("agent_chain_saved", [], [first,second]));
+    let finish!: (value: unknown) => void;
+    mocks.confirmAgentProposal.mockImplementation((_root,_session,id) => id === first.proposal_id
+      ? new Promise(resolve => {finish=resolve;})
+      : Promise.resolve({proposal:{...second,status:"confirmed"},operation:{record_id:"op-2",operation_id:"model.rerun",status:"completed"}}));
+    mount();
+    fireEvent.click(await screen.findByRole("button",{name:"Run selected proposals"}));
+    expect(mocks.confirmAgentProposal).toHaveBeenCalledTimes(1);
+    expect(mocks.continueAgentTurn).not.toHaveBeenCalled();
+    await act(async () => finish({proposal:{...first,status:"confirmed"},operation:{record_id:"op-1",operation_id:"model.rerun",status:"completed"}}));
+    await waitFor(() => expect(mocks.continueAgentTurn).toHaveBeenCalledTimes(1));
+    expect(mocks.confirmAgentProposal).toHaveBeenNthCalledWith(1,"/proj","agent_chain_saved","proposal-1",{revision:1,fingerprint:"fingerprint-1",active_head_run_id:"run-a"});
+    expect(mocks.confirmAgentProposal).toHaveBeenNthCalledWith(2,"/proj","agent_chain_saved","proposal-2",{revision:2,fingerprint:"fp-2",active_head_run_id:"run-a"});
+  });
+
+  it.each(["stop", "unmount"].flatMap(action => ["confirmation", "delay", "reconcile"].map(phase => ({action,phase}))))(
+    "ends confirmation polling after $action during $phase without cancelling the authorized operation", async ({action,phase}) => {
+      sessionStorage.setItem("workbench:agent-session:/proj:run-a:project%3Arun-a%3Anone", "agent_chain_saved");
+      const first = {...pendingProposal,command_id:"turn"};
+      mocks.getAgentCapabilities.mockResolvedValue(agentCapabilitiesFixture({capabilities:[operationCapabilityFixture({operation_id:"model.rerun"})]}));
+      mocks.getAgentSession.mockResolvedValue(session("agent_chain_saved",[],[first,{...first,proposal_id:"proposal-2"}]));
+      let finishConfirmation!: (value:unknown)=>void, finishReconcile!: (value:unknown)=>void;
+      mocks.confirmAgentProposal.mockReturnValue(new Promise(resolve=>{finishConfirmation=resolve;}));
+      mocks.reconcileAgentOperation.mockReturnValue(new Promise(resolve=>{finishReconcile=resolve;}));
+      const view = mount();
+      const run = await screen.findByRole("button",{name:"Run selected proposals"});
+      vi.useFakeTimers();
+      try {
+        fireEvent.click(run);
+        const response = {proposal:{...first,status:"confirmed"},operation:{record_id:"op-1",operation_id:"model.rerun",status:"running"}};
+        if (phase !== "confirmation") await act(async()=>finishConfirmation(response));
+        if (phase === "reconcile") {
+          await act(async()=>vi.advanceTimersByTimeAsync(1500));
+          expect(mocks.reconcileAgentOperation).toHaveBeenCalledTimes(1);
+        }
+        if (action === "unmount") view.unmount();
+        else fireEvent.click(screen.getByRole("button",{name:"Stop Agent"}));
+        if (phase === "confirmation") await act(async()=>finishConfirmation(response));
+        if (phase === "reconcile") await act(async()=>finishReconcile({operation:response.operation}));
+        await act(async()=>vi.advanceTimersByTimeAsync(3000));
+        expect(mocks.reconcileAgentOperation).toHaveBeenCalledTimes(phase === "reconcile" ? 1 : 0);
+        expect(mocks.confirmAgentProposal).toHaveBeenCalledTimes(1);
+        expect(mocks.continueAgentTurn).not.toHaveBeenCalled();
+        expect(mocks.abortAgentTurn).not.toHaveBeenCalled();
+      } finally {
+        view.unmount();
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it.each(["failed", "cancelled", "stale", "error", "stop", "switch", "unmount"])("stops a batch after %s without confirming the next item or continuing", async outcome => {
+    sessionStorage.setItem("workbench:agent-session:/proj:run-a:project%3Arun-a%3Anone", "agent_chain_saved");
+    sessionStorage.setItem("workbench:agent-session:/proj:run-b:project%3Arun-b%3Anone", "session-b");
+    const first = {...pendingProposal,command_id:"turn"};
+    const second = {...first,proposal_id:"proposal-2",fingerprint:"fp-2"};
+    mocks.getAgentCapabilities.mockResolvedValue(agentCapabilitiesFixture({capabilities:[operationCapabilityFixture({operation_id:"model.rerun"})]}));
+    mocks.getAgentSession.mockImplementation(async (_root,id) => session(id, [], id === "agent_chain_saved" ? [first,second] : []));
+    let finish!: (value:unknown) => void, fail!: (error:Error) => void;
+    mocks.confirmAgentProposal.mockReturnValue(new Promise((resolve,reject) => {finish=resolve;fail=reject;}));
+    const view = mount();
+    fireEvent.click(await screen.findByRole("button",{name:"Run selected proposals"}));
+    if (outcome === "stop") fireEvent.click(await screen.findByRole("button",{name:"Stop Agent"}));
+    if (outcome === "switch") {
+      view.rerender(<MemoryRouter><AgentSurfaceProvider projectRoot="/proj" runId="run-b"><AgentPanel projectRoot="/proj" runId="run-b" /></AgentSurfaceProvider></MemoryRouter>);
+      await waitFor(() => expect(mocks.getAgentSession).toHaveBeenCalledWith("/proj","session-b"));
+    }
+    if (outcome === "unmount") view.unmount();
+    await act(async () => {
+      if (outcome === "error") fail(new Error("Source validation failed"));
+      else finish({proposal:{...first,status:"confirmed"},operation:{record_id:"op-1",operation_id:"model.rerun",status:["stop","switch","unmount"].includes(outcome)?"completed":outcome}});
+    });
+    expect(mocks.confirmAgentProposal).toHaveBeenCalledTimes(1);
+    expect(mocks.continueAgentTurn).not.toHaveBeenCalled();
+    if (!["switch","unmount"].includes(outcome)) {
+      if (outcome === "error") {
+        expect(screen.getByRole("checkbox",{name:"Select proposal proposal-2"})).toBeInTheDocument();
+        expect(screen.getByText("Source validation failed")).toBeInTheDocument();
+      } else {
+        expect(screen.getByRole("button",{name:"Confirm proposal proposal-2"})).toBeInTheDocument();
+        expect(screen.getByTestId("agent-proposal-proposal-1")).toHaveTextContent("Approved");
+      }
+    }
+  });
+
+  it("leaves unchecked proposals pending and continues only after the checked subset", async () => {
+    sessionStorage.setItem("workbench:agent-session:/proj:run-a:project%3Arun-a%3Anone", "agent_chain_saved");
+    const first = {...pendingProposal,command_id:"turn"};
+    const second = {...first,proposal_id:"proposal-2",fingerprint:"fp-2"};
+    mocks.getAgentCapabilities.mockResolvedValue(agentCapabilitiesFixture({capabilities:[operationCapabilityFixture({operation_id:"model.rerun"})]}));
+    mocks.getAgentSession.mockResolvedValue(session("agent_chain_saved",[],[first,second]));
+    mocks.continueAgentTurn.mockResolvedValue({session:session("agent_chain_saved",[],[{...first,status:"confirmed"},second]),status:"idle"});
+    mocks.confirmAgentProposal.mockResolvedValue({proposal:{...first,status:"confirmed"},operation:{record_id:"op-1",operation_id:"model.rerun",status:"completed"}});
+    mount();
+    fireEvent.click(await screen.findByRole("checkbox",{name:"Select proposal proposal-2"}));
+    fireEvent.click(screen.getByRole("button",{name:"Run selected proposals"}));
+    await waitFor(() => expect(mocks.continueAgentTurn).toHaveBeenCalledTimes(1));
+    expect(mocks.confirmAgentProposal).toHaveBeenCalledTimes(1);
+    expect(mocks.confirmAgentProposal.mock.calls[0][2]).toBe("proposal-1");
+    expect(mocks.declineAgentProposal).not.toHaveBeenCalled();
+    expect(screen.getByRole("button",{name:"Confirm proposal proposal-2"})).toBeInTheDocument();
+  });
+
+  it("retains earlier approvals when a later item fails and leaves the rest pending", async () => {
+    sessionStorage.setItem("workbench:agent-session:/proj:run-a:project%3Arun-a%3Anone", "agent_chain_saved");
+    const proposals = [1,2,3].map(n => ({...pendingProposal,command_id:"turn",proposal_id:`proposal-${n}`,fingerprint:`fp-${n}`}));
+    mocks.getAgentCapabilities.mockResolvedValue(agentCapabilitiesFixture({capabilities:[operationCapabilityFixture({operation_id:"model.rerun"})]}));
+    mocks.getAgentSession.mockResolvedValue(session("agent_chain_saved",[],proposals));
+    mocks.confirmAgentProposal.mockImplementation(async (_root,_session,id) => ({proposal:{...proposals.find(p=>p.proposal_id===id),status:"confirmed"},
+      operation:{record_id:id,operation_id:"model.rerun",status:id==="proposal-1"?"completed":"failed"}}));
+    mount();
+    fireEvent.click(await screen.findByRole("button",{name:"Run selected proposals"}));
+    await screen.findByText("Operation proposal-2 failed. Remaining proposals were not run.");
+    expect(mocks.confirmAgentProposal).toHaveBeenCalledTimes(2);
+    expect(mocks.continueAgentTurn).not.toHaveBeenCalled();
+    expect(screen.getByTestId("agent-proposal-proposal-1")).toHaveTextContent("Approved");
+    expect(screen.getByTestId("agent-proposal-proposal-2")).toHaveTextContent("Approved");
+    expect(screen.getByRole("button",{name:"Confirm proposal proposal-3"})).toBeInTheDocument();
+  });
+
+  it("does not surface an old batch error in another conversation in the same view", async () => {
+    sessionStorage.setItem("workbench:agent-session:/proj:run-a:project%3Arun-a%3Anone", "agent_chain_saved");
+    const first = {...pendingProposal,command_id:"turn"};
+    mocks.getAgentCapabilities.mockResolvedValue(agentCapabilitiesFixture({capabilities:[operationCapabilityFixture({operation_id:"model.rerun"})]}));
+    mocks.getAgentSession.mockImplementation(async (_root,id) => session(id,[],id==="agent_chain_saved"?[first,{...first,proposal_id:"proposal-2"}]:[]));
+    let fail!: (error:Error)=>void;
+    mocks.confirmAgentProposal.mockReturnValue(new Promise((_resolve,reject)=>{fail=reject;}));
+    function SwitchConversation() {
+      const agent = useAgentSurface();
+      return <button onClick={()=>agent.openConversation?.("other-session")}>Switch conversation</button>;
+    }
+    render(<MemoryRouter><AgentSurfaceProvider projectRoot="/proj" runId="run-a"><AgentPanel projectRoot="/proj" runId="run-a" /><SwitchConversation /></AgentSurfaceProvider></MemoryRouter>);
+    fireEvent.click(await screen.findByRole("button",{name:"Run selected proposals"}));
+    fireEvent.click(screen.getByRole("button",{name:"Switch conversation"}));
+    await waitFor(()=>expect(mocks.getAgentSession).toHaveBeenCalledWith("/proj","other-session"));
+    await act(async()=>fail(new Error("Old batch failure")));
+    expect(screen.queryByText("Old batch failure")).not.toBeInTheDocument();
+    expect(mocks.confirmAgentProposal).toHaveBeenCalledTimes(1);
     expect(mocks.continueAgentTurn).not.toHaveBeenCalled();
   });
 

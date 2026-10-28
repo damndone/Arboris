@@ -67,10 +67,46 @@ def _summary(value, depth=0):
     return value[:400] if isinstance(value, str) else value
 
 
+def _correlation_summary(result, summary):
+    """The producer's named aggregate pairs, never its source observations."""
+    variables, pairs = result.get('variables'), result.get('pairs')
+    n = result.get('correlation_n')
+    valid_variables = (isinstance(variables, list) and 2 <= len(variables) <= 24
+        and all(isinstance(name, str) and 0 < len(name) <= 200 for name in variables)
+        and len(set(variables)) == len(variables))
+    expected = ([(a, b) for i, a in enumerate(variables) for b in variables[i+1:]]
+                if valid_variables else [])
+    complete = (valid_variables and isinstance(pairs, list) and len(pairs) == len(expected)
+                and len(pairs) <= 100 and type(n) is int and n >= 0)
+    aggregate = []
+    if valid_variables and isinstance(pairs, list):
+        for index, pair in enumerate(pairs[:100]):
+            if (not isinstance(pair, dict) or set(pair) != {'a', 'b', 'r', 'n'}
+                    or index >= len(expected) or (pair['a'], pair['b']) != expected[index]
+                    or type(pair['n']) is not int or pair['n'] != n
+                    or pair['r'] is not None and (type(pair['r']) not in {int, float}
+                        or not math.isfinite(pair['r']) or not -1 <= pair['r'] <= 1)):
+                complete = False
+                continue
+            aggregate.append(dict(pair))
+        summary['result']['variables'] = list(variables)
+    summary['result']['pairs'] = aggregate
+    if not complete:
+        summary['result']['review_evidence_incomplete'] = True
+    return summary, complete
+
+
 def _computed_summary(payload):
-    """Allow aggregate frequency rows only; never promote arbitrary rows to egress."""
+    """Only explicitly supported aggregate lists may cross the review boundary."""
     summary = _summary(payload)
     result = payload.get('result', {})
+    if result.get('operation') == 'corr':
+        return _correlation_summary(result, summary)
+    if result.get('group_by') is not None:
+        # The production group summaries are a list, omitted by _summary.
+        # Do not certify a packet containing only the pooled row counts.
+        summary['result']['review_evidence_incomplete'] = True
+        return summary, False
     if result.get('operation') != 'tabulate':
         return summary, True
     variables, rows = result.get('variables'), result.get('rows')
