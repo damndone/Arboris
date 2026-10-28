@@ -326,7 +326,10 @@ describe("AgentSurfaceProvider", () => {
     let finishStalePoll!: (value: ReturnType<typeof session>) => void;
     const staleSession = { ...session("saved"), status: "running" };
     mocks.getAgentSession.mockResolvedValueOnce(staleSession).mockReturnValue(new Promise(resolve => { finishStalePoll = resolve; }));
-    mocks.getAgentEvents.mockResolvedValue({ events: [{ seq: 1, event_type: "message_update", payload: { delta: "An interrupted draft" } }] });
+    mocks.getAgentEvents.mockResolvedValue({ events: [
+      { seq: 1, event_type: "message_update", payload: { delta: "An interrupted draft" } },
+      { seq: 2, event_type: "tool_execution_end", payload: { entry_id: "recorded-tool" } },
+    ] });
     mocks.getAgentTurnState.mockResolvedValue({ turns: [{ turn_id: "original", status: "interrupted", requires_reconcile: true }] });
     render(<MemoryRouter initialEntries={["/?agent_session=saved"]}><AgentSurfaceProvider projectRoot="/proj" runId="run-a">
       <AgentPanel projectRoot="/proj" runId="run-a" compactHeader={surface === "column"} composer={surface === "column" ? <AgentColumnComposer /> : undefined} />
@@ -379,6 +382,60 @@ describe("AgentSurfaceProvider", () => {
     expect(mocks.sendAgentTurn).toHaveBeenCalledTimes(1);
     expect(mocks.continueAgentTurn).not.toHaveBeenCalled();
     expect(mocks.resumeAgentTurn).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["awaiting_approval", "completed"], ["idle", "failed"], ["awaiting_approval", "interrupted"],
+  ])("tails a %s session for external progress and %s without repeatedly downloading its history", async (initialStatus, finalStatus) => {
+    let saved = { ...session("saved", [agentMessageFixture({ entry_id: "u1", role: "user", content: "First request" })]), status: initialStatus };
+    let events: Array<{ seq: number; event_type: string; payload: Record<string, unknown> }> = [];
+    mocks.getAgentSession.mockImplementation(async () => saved);
+    mocks.getAgentEvents.mockImplementation(async () => ({ events }));
+    const Status = () => <output data-testid="external-session-status">{useAgentSurface().sessionStatus}</output>;
+    render(<MemoryRouter initialEntries={["/?agent_session=saved"]}><AgentSurfaceProvider projectRoot="/proj" runId="run-a">
+      <AgentPanel projectRoot="/proj" runId="run-a" /><Status />
+    </AgentSurfaceProvider></MemoryRouter>);
+    await waitFor(() => expect(screen.getByTestId("external-session-status")).toHaveTextContent(initialStatus));
+    const initialTails = mocks.getAgentEvents.mock.calls.length;
+    await waitFor(() => expect(mocks.getAgentEvents.mock.calls.length).toBeGreaterThan(initialTails), { timeout: 1500 });
+    expect(mocks.getAgentSession).toHaveBeenCalledTimes(1);
+
+    saved = { ...saved, status: finalStatus, messages: [...saved.messages,
+      agentMessageFixture({ entry_id: "t-external", role: "tool", name: "inspect_result", content: JSON.stringify({ ok: false, error: "artifact_unavailable" }) }),
+      agentMessageFixture({ entry_id: "a-external", role: "assistant", content: "External terminal reply", stop_reason: finalStatus === "failed" ? "error" : "stop" }),
+    ] };
+    events = [{ seq: 1, event_type: "tool_execution_end", payload: { entry_id: "t-external" } },
+      { seq: 2, event_type: "message_end", payload: { entry_id: "a-external" } },
+      { seq: 3, event_type: "agent_end", payload: { stop_reason: finalStatus } }];
+    expect(await screen.findByText("External terminal reply", {}, { timeout: 1500 })).toBeInTheDocument();
+    expect(screen.getByTestId("agent-message-tool")).toHaveTextContent("artifact_unavailable");
+    expect(screen.getByTestId("external-session-status")).toHaveTextContent(finalStatus);
+    expect(screen.queryByRole("button", { name: "Stop Agent" })).not.toBeInTheDocument();
+    const settledTails = mocks.getAgentEvents.mock.calls.length;
+    await waitFor(() => expect(mocks.getAgentEvents.mock.calls.length).toBeGreaterThan(settledTails), { timeout: 1500 });
+    expect(mocks.getAgentSession).toHaveBeenCalledTimes(2);
+    expect(mocks.sendAgentTurn).not.toHaveBeenCalled();
+    expect(mocks.continueAgentTurn).not.toHaveBeenCalled();
+    expect(mocks.resumeAgentTurn).not.toHaveBeenCalled();
+  });
+
+  it("ignores an external refresh arriving after switching session scope", async () => {
+    let added = false;
+    let finishRead!: (result: ReturnType<typeof session>) => void;
+    mocks.getAgentSession.mockResolvedValueOnce({ ...session("saved"), status: "awaiting_approval" })
+      .mockReturnValue(new Promise(resolve => { finishRead = resolve; }));
+    mocks.getAgentEvents.mockImplementation(async () => ({ events: added ? [{ seq: 1, event_type: "message_end", payload: {} }] : [] }));
+    const tree = () => <MemoryRouter initialEntries={["/?agent_session=saved"]}><AgentSurfaceProvider projectRoot="/proj" runId="run-a"><AgentPanel projectRoot="/proj" runId="run-a" /></AgentSurfaceProvider></MemoryRouter>;
+    const view = render(tree());
+    await waitFor(() => expect(mocks.getAgentSession).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mocks.getAgentEvents.mock.calls.length).toBeGreaterThanOrEqual(2));
+    added = true;
+    await waitFor(() => expect(mocks.getAgentSession).toHaveBeenCalledTimes(2), { timeout: 1500 });
+    mocks.workbenchState.agentFocus = { kind: "report", id: "other-scope", runId: "run-a" };
+    view.rerender(tree());
+    await act(async () => { finishRead(session("saved", [agentMessageFixture({ entry_id: "late", role: "assistant", content: "Stale external reply" })])); });
+    expect(screen.queryByText("Stale external reply")).not.toBeInTheDocument();
+    expect(mocks.sendAgentTurn).not.toHaveBeenCalled();
   });
 
   it("loads the session plan and approves its exact visible version without continuing", async () => {

@@ -216,8 +216,20 @@ describe("AgentPanel", () => {
       "The configured provider did not return a usable response",
     );
     expect(screen.getByTestId("agent-turn-error")).toHaveTextContent(
-      "Nothing in your data or models was changed",
+      "Completed operations and results remain recorded",
     );
+  });
+
+  it.each(["agent_timeout", "tool_runtime_error"])("retains completed work when reporting %s", error => {
+    render(<AgentSurfaceContext.Provider value={value({messages: [
+      agentMessageFixture({entry_id: "u1", role: "user", content: "Fit the model."}),
+      agentMessageFixture({entry_id: "t1", role: "tool", name: "run_operation",
+        content: JSON.stringify({ok: true, output: {executed: true}})}),
+      agentMessageFixture({entry_id: "a1", role: "assistant", content: "", stop_reason: "error", error}),
+    ]})}><AgentPanel runId="run-a" projectRoot="/proj" /></AgentSurfaceContext.Provider>);
+    expect(screen.getByTestId("agent-turn-error")).toHaveTextContent("Completed operations and results remain recorded");
+    expect(screen.getByTestId("agent-turn-error")).not.toHaveTextContent(/nothing.*was changed/i);
+    expect(screen.getByTestId("agent-reasoning-u1")).toHaveTextContent("run_operation");
   });
 
   it.each(["running", "working", "cancelling"])("does not describe an unconfirmed stop as terminal while the restored turn is %s", (sessionStatus) => {
@@ -324,7 +336,7 @@ describe("AgentPanel", () => {
       "will not execute automatically",
     );
     expect(screen.getByTestId("agent-turn-error")).not.toHaveTextContent(
-      "Nothing in your data or models was changed",
+      "Completed operations and results remain recorded",
     );
   });
 
@@ -484,6 +496,18 @@ describe("AgentPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open result model" }));
     expect(openNavigation).toHaveBeenCalledWith(resultLink);
     expect(screen.queryByText(/recent steps/)).not.toBeInTheDocument();
+  });
+
+  it("keeps the last actual execution open after a follow-up has no recorded tools", () => {
+    render(<AgentSurfaceContext.Provider value={value({sessionStatus: "interrupted", messages: [
+      agentMessageFixture({entry_id: "u1", role: "user", content: "Fit the model."}),
+      agentMessageFixture({entry_id: "t1", role: "tool", name: "inspect_result_summary",
+        content: JSON.stringify({ok: true, output: {}})}),
+      agentMessageFixture({entry_id: "a1", role: "assistant", content: "The fit is saved; diagnostics remain.", stop_reason: "stop"}),
+      agentMessageFixture({entry_id: "u2", role: "user", content: "Continue."}),
+    ]})}><AgentPanel runId="run-a" projectRoot="/proj" /></AgentSurfaceContext.Provider>);
+    expect(screen.getByTestId("agent-reasoning-u1")).toHaveAttribute("open");
+    expect(screen.getByText("Continue.")).toBeVisible();
   });
 
   it("files a draft withdrawn by the numeric check under reasoning and says why", () => {

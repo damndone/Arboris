@@ -511,7 +511,7 @@ export function AgentSurfaceProvider({
     scope: string,
   ) => {
     const result = await getAgentEvents(projectRoot, activeSessionId, afterSeq);
-    if (activeScopeRef.current !== scope || !Array.isArray(result.events)) return;
+    if (activeScopeRef.current !== scope || currentSessionRef.current !== activeSessionId || !Array.isArray(result.events)) return;
     applyEvents(result.events);
     return result.events.filter(event => event.seq > afterSeq);
   }, [applyEvents, projectRoot]);
@@ -614,18 +614,23 @@ export function AgentSurfaceProvider({
   }, [conversationVersion, linkedDiffFocused, linkedOperationId, linkedSessionId, projectRoot, refreshNavigation, replayEvents, sessionScope, storageKey]);
 
   useEffect(() => {
-    if (!sessionId || (!isSubmitting && !["running","working","cancelling"].includes(sessionStatus))) return;
+    if (!sessionId) return;
     let cancelled = false;
+    let refreshPending = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const poll = async () => {
       try {
         const events = await replayEvents(sessionId, eventCursorRef.current, sessionScope);
-        // Tool-end events refer to already durable messages. Show those actions
-        // while the model request is still open, using the same session read.
-        if (!isSubmitting || events?.some(event => event.event_type === "tool_execution_end")) {
+        if (cancelled) return;
+        // Other entry points can continue a session while this page is idle or
+        // awaiting approval. Keep tailing; token deltas and usage observations
+        // use their existing projections without downloading the full history.
+        if (events?.some(event => !["message_update", "provider_step"].includes(event.event_type))) refreshPending = true;
+        if (refreshPending) {
           const result = await getAgentSession(projectRoot, sessionId);
           if (!cancelled && currentSessionRef.current === sessionId && activeScopeRef.current === sessionScope) {
             setMessages(result.messages);setProposals(result.proposals ?? []);setSessionStatus(result.status ?? "idle");
+            refreshPending = false;
           }
         }
       } catch {
@@ -638,7 +643,7 @@ export function AgentSurfaceProvider({
       cancelled = true;
       if (timer !== undefined) clearTimeout(timer);
     };
-  }, [isSubmitting, replayEvents, sessionId, sessionScope, sessionStatus, projectRoot]);
+  }, [isSubmitting, replayEvents, sessionId, sessionScope, projectRoot]);
 
   useEffect(() => {
     let cancelled = false;

@@ -73,13 +73,14 @@ function terminalFailureMessage(
   if (error === "max_steps_exceeded" && hasPendingProposal) {
     return "The Agent reached its step limit after creating a proposal that is still awaiting your review. The proposal will not execute automatically; confirm, revise, or decline it below.";
   }
+  const retained = "Completed operations and results remain recorded. Review the steps and resolve unfinished work before continuing.";
   if (error === "LLMUpstreamError" || error.startsWith("LLMUpstreamError:")) {
-    return "The configured provider did not return a usable response. Check the selected model in Settings, then retry. Nothing in your data or models was changed.";
+    return `The configured provider did not return a usable response. Check the selected model in Settings. ${retained}`;
   }
   if (error === "tool_runtime_error") {
-    return "The Agent tool runtime stopped unexpectedly. Retry the request; nothing in your data or models was changed.";
+    return `The Agent tool runtime stopped unexpectedly. ${retained}`;
   }
-  return `The Agent stopped before completing the request (${error}). Nothing in your data or models was changed.`;
+  return `The Agent stopped before completing the request (${error}). ${retained}`;
 }
 
 function useElapsedSeconds(startedAt: number | null | undefined, active: boolean): number {
@@ -282,6 +283,7 @@ export function AgentPanel({
     (link) => link.kind === "operation" && typeof link.href.session_id === "string",
   )?.href.session_id;
   const turns = buildTurns(agent.messages);
+  const lastActivityTurn = [...turns].reverse().find(turn => turn.steps.length > 0 || turn.drafts.length > 0);
   const pendingProposals = agent.proposals.filter((proposal) => proposal.status === "pending");
   const settledProposals = agent.proposals.filter((proposal) => proposal.status !== "pending");
   const receipts = receiptsByTurn(turns, settledProposals);
@@ -469,7 +471,7 @@ export function AgentPanel({
             <div key={turn.id} className="wb-agent-turn">
               {turn.user && renderTranscriptMessage(turn.user)}
               {(turn.steps.length > 0 || turn.drafts.length > 0) && (
-                <details data-testid={`agent-reasoning-${turn.id}`} className="wb-agent-reasoning" open={latest}>
+                <details data-testid={`agent-reasoning-${turn.id}`} className="wb-agent-reasoning" open={turn === lastActivityTurn}>
                   <summary>
                     <span>
                       {live ? `${turn.steps.length} recorded steps` : workSummary(turn.steps.length, turn.drafts.length)}
