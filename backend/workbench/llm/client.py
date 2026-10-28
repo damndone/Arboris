@@ -430,7 +430,10 @@ def _chat_request_payload(
         # The effort is always stated: a gateway serving the same model
         # (Magpie/WorkBuddy) otherwise answers without thinking.
         effort = agent_reasoning_effort(config)
-        if effort == "none":
+        # WorkBuddy's DeepSeek route treats any reasoning_effort as enabling
+        # thinking. Other compatible providers (including NVIDIA) accept the
+        # standard "none" value and must not receive DeepSeek-only controls.
+        if effort == "none" and is_deepseek_v4(config):
             payload["thinking"] = {"type": "disabled"}
         else:
             payload["reasoning_effort"] = effort

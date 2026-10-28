@@ -9,11 +9,14 @@ the model's window, which it only caps.
 from __future__ import annotations
 
 import pytest
+import httpx
+import json
 from fastapi.testclient import TestClient
 
 from workbench.api import app
 from workbench.http import llm_routes
 from workbench.llm.client import _chat_request_payload, reported_capabilities
+from workbench.llm import client as llm_client
 from workbench.llm.config import LLMConfig, load_llm_config
 from workbench.llm.provider_store import load_provider_store, model_from_dict
 
@@ -73,6 +76,41 @@ def test_a_model_without_efforts_gets_none_and_one_without_high_gets_its_stronge
     payload = _payload(monkeypatch, None, efforts=())
     assert "reasoning_effort" not in payload and "thinking" not in payload
     assert _payload(monkeypatch, None, efforts=("low", "medium"), model="other")["reasoning_effort"] == "medium"
+
+
+@pytest.mark.parametrize("effort", ["none", "medium", "high"])
+def test_nvidia_tool_request_uses_its_documented_effort_without_deepseek_controls(monkeypatch, effort):
+    monkeypatch.delenv("WORKBENCH_REASONING_EFFORT", raising=False)
+    config = LLMConfig(
+        base_url="https://integrate.api.nvidia.com/v1", api_key="test-only",
+        model="nvidia/nemotron-3-ultra-550b-a55b", provider_id="nvidia-nemotron-free",
+        reasoning_efforts=("none", "medium", "high"), reasoning_effort=effort,
+    )
+    calls = []
+    tools = [{"type": "function", "function": {"name": "connection_check",
+              "description": "Return the supplied test marker.",
+              "parameters": {"type": "object", "properties": {"marker": {"type": "string"}},
+                             "required": ["marker"], "additionalProperties": False}}}]
+
+    def upstream(request):
+        calls.append(request)
+        payload = json.loads(request.content)
+        assert str(request.url) == "https://integrate.api.nvidia.com/v1/chat/completions"
+        assert payload["model"] == config.model
+        assert payload["reasoning_effort"] == effort
+        assert "thinking" not in payload
+        assert payload["tools"] == tools
+        assert payload["tool_choice"] == "required" and payload["max_tokens"] == 512
+        return httpx.Response(200, json={"model": config.model, "choices": [{"message": {
+            "role": "assistant", "content": None, "tool_calls": [{"id": "call-check", "type": "function",
+                "function": {"name": "connection_check", "arguments": '{"marker":"ARBORIS_OK"}'}}]}}]})
+
+    monkeypatch.setattr(llm_client, "_client_factory", lambda _: httpx.Client(transport=httpx.MockTransport(upstream)))
+    result = llm_client.chat_completion([{"role": "user", "content": "Call connection_check with ARBORIS_OK."}],
+        config, tools=tools, model_config={"tool_choice": "required", "max_tokens": 512})
+    assert result["tool_calls"] == [{"tool_call_id": "call-check", "tool_id": "connection_check",
+                                     "arguments": {"marker": "ARBORIS_OK"}}]
+    assert len(calls) == 1
 
 
 def test_the_listing_reports_window_efforts_and_images_and_nothing_it_does_not_say():
