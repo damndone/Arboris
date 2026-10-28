@@ -3,6 +3,8 @@ from contextlib import contextmanager
 from decimal import Decimal
 import hashlib
 import json
+import shutil
+import time
 from pathlib import Path
 from uuid import uuid4
 
@@ -288,3 +290,135 @@ class FreeRouteGuard:
         with self._change() as state:
             if state["stopped"] and str(state["reason"]).startswith("storage threshold"):
                 state.update(stopped=False, reason=None)
+
+
+NVIDIA_PROVIDER_ID = "nvidia-nemotron-free"
+NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
+NVIDIA_MODEL = "nvidia/nemotron-3-ultra-550b-a55b"
+
+
+class NvidiaFreeEndpointGuard(FreeRouteGuard):
+    """Explicit free-listed endpoint authorization, not a zero-cost billing claim.
+
+    Request reservations and start times survive both modes/process restarts.
+    Missing billing metadata remains unknown; missing token usage stops the round.
+    """
+
+    _change = RoundBudget._change
+
+    def __init__(self, path, *, provider_id, base_url, model, round_kind):
+        if (provider_id, base_url, model) != (NVIDIA_PROVIDER_ID, NVIDIA_BASE_URL, NVIDIA_MODEL):
+            raise ValueError("NVIDIA evaluation requires the exact authorized provider, base URL and Ultra model")
+        if round_kind not in {"dev8", "qrdata40"}:
+            raise ValueError("NVIDIA evaluation supports only dev8 or qrdata40")
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.lock = FileLock(str(self.path) + ".lock")
+        self._identity = (provider_id, base_url)
+        self.round_kind = round_kind
+        self.request_limit = 240 if round_kind == "dev8" else 1200
+        with self._change() as state:
+            expected = {"schema": "nvidia-free-endpoint/v1", "provider_id": provider_id,
+                "base_url": base_url, "model": model, "round_kind": round_kind,
+                "request_limit": self.request_limit, "output_token_limit": 32768,
+                "min_start_interval_s": 2}
+            if any(state.get(key) != value for key, value in expected.items()):
+                raise ValueError("NVIDIA ledger configuration changed; use a separate round ledger")
+
+    @property
+    def state(self):
+        if self.path.exists():
+            return json.loads(self.path.read_text())
+        return {"schema": "nvidia-free-endpoint/v1", "provider_id": NVIDIA_PROVIDER_ID,
+            "base_url": NVIDIA_BASE_URL, "model": NVIDIA_MODEL, "round_kind": self.round_kind,
+            "request_limit": self.request_limit, "output_token_limit": 32768, "min_start_interval_s": 2,
+            "requests": 0, "calls": 0, "last_start": None, "reservations": {}, "charges": [],
+            "prompt_tokens": 0, "completion_tokens": 0, "stopped": False, "reason": None,
+            "billing_status": "unknown; free-listed endpoint is not billing certification"}
+
+    def check_request(self, request):
+        if str(request.url) != NVIDIA_BASE_URL + "/chat/completions":
+            self.stop("NVIDIA actual request URL differs from the authorized endpoint; no fallback allowed")
+            raise BudgetStop(self.state["reason"])
+
+    def check_response(self, status, body):
+        if status != 200:
+            self.refused(status, body)
+        payloads = [body]
+        payloads.extend(line[5:].strip() for line in body.splitlines() if line.startswith(b"data:"))
+        for raw in payloads:
+            try:
+                payload = json.loads(raw)
+            except (ValueError, TypeError):
+                continue
+            if isinstance(payload, dict) and "error" in payload:
+                self.stop("NVIDIA provider error in HTTP 200 response; no further request authorized")
+                raise BudgetStop(self.state["reason"])
+
+    def reserve(self, body):
+        if shutil.disk_usage(self.path.parent).free < 5_000_000_000:
+            self.stop("storage threshold: less than 5 GB free before NVIDIA request")
+            raise BudgetStop(self.state["reason"])
+        try:
+            request = json.loads(body)
+            if not isinstance(request, dict) or request.get("model") != NVIDIA_MODEL:
+                raise ValueError("unauthorized actual request model")
+            output = request.get("max_tokens", request.get("max_completion_tokens"))
+            for field in ("max_tokens", "max_completion_tokens"):
+                if field in request and (type(request[field]) is not int or not 0 < request[field] <= 32768):
+                    raise ValueError("unbounded actual output token limit")
+        except (ValueError, TypeError) as exc:
+            self.stop(f"NVIDIA request rejected: {exc}")
+            raise BudgetStop(self.state["reason"])
+        key = uuid4().hex
+        refused = False
+        with self._change() as state:
+            reason = state["reason"] if state["stopped"] else None
+            if not reason and state["reservations"]:
+                reason = "NVIDIA unsettled request; parallel calls or unknown-usage restart forbidden"
+            if not reason and state["requests"] >= self.request_limit:
+                reason = "NVIDIA durable round request limit reached"
+            if reason:
+                state.update(stopped=True, reason=reason)
+                refused = True
+            else:
+                if state["last_start"] is not None:
+                    time.sleep(max(0, state["last_start"] + 2 - time.time()))
+                state["last_start"] = time.time()
+                state["requests"] += 1
+                state["reservations"][key] = {"started_at": state["last_start"], "output_bound": output,
+                    "output_limit": "provider_default_unverified" if output is None else output}
+        if refused:
+            raise BudgetStop(self.state["reason"])
+        return key
+
+    def settle(self, key, usage):
+        reason = None
+        if not isinstance(usage, dict) or any(type(usage.get(field)) is not int or usage[field] < 0
+                for field in ("prompt_tokens", "completion_tokens")):
+            reason = "NVIDIA missing or invalid token usage; unknown usage stops the round"
+        elif "credit" in usage and (type(usage["credit"]) not in (int, float) or usage["credit"] != 0):
+            reason = f"NVIDIA reported credit {usage['credit']!r}; no further request authorized"
+        with self._change() as state:
+            reservation = state["reservations"].get(key)
+            if not reason and (reservation is None or (reservation["output_bound"] is not None
+                    and usage["completion_tokens"] > reservation["output_bound"])):
+                reason = "NVIDIA usage exceeds reserved output bound or has no reservation"
+            if reason:
+                state.update(stopped=True, reason=reason)
+            else:
+                state["reservations"].pop(key)
+                state["calls"] += 1
+                state["prompt_tokens"] += usage["prompt_tokens"]
+                state["completion_tokens"] += usage["completion_tokens"]
+                state["charges"].append({"key": key, "usage": usage,
+                    "billing_status": "reported zero credit" if "credit" in usage else "unknown; credit not reported"})
+        if reason:
+            raise BudgetStop(reason)
+
+    def unreachable(self, error):
+        self.stop(f"NVIDIA endpoint connection failed ({error}); stop the round; billing remains unknown")
+        raise BudgetStop(self.state["reason"])
+
+    def resume_storage_stop(self):
+        raise BudgetStop("NVIDIA storage floor cannot be bypassed for this round")

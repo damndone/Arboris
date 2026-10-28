@@ -37,7 +37,7 @@ from agent_eval.runner import Policy, run_conversation  # noqa: E402
 from agent_eval.external import ExternalTask, blade_tasks, qrdata_subset, replication_tasks  # noqa: E402
 from agent_eval.heldout import heldout_tasks  # noqa: E402
 from agent_eval.tasks import dev_tasks  # noqa: E402
-from agent_eval.budget import BudgetStop, FreeRouteGuard, RoundBudget, TaskStop  # noqa: E402
+from agent_eval.budget import BudgetStop, FreeRouteGuard, NvidiaFreeEndpointGuard, RoundBudget, TaskStop  # noqa: E402
 from perf_evidence import MIN_FREE_BYTES  # noqa: E402
 from workbench.app import app  # noqa: E402
 from workbench.dev_fixtures.agent_navigation import _wait_for_terminal_run  # noqa: E402
@@ -86,11 +86,26 @@ def main() -> int:
     parser.add_argument("--budget-ledger", type=Path, help="same ledger for both modes, never reset between tasks")
     parser.add_argument("--free-route-ledger", type=Path,
                         help="run on the free Magpie/WorkBuddy provider; every response must report usage.credit == 0")
+    parser.add_argument("--nvidia-free-ledger", type=Path,
+                        help="explicit NVIDIA Ultra free-listed endpoint opt-in; persist across modes; billing remains unknown")
+    parser.add_argument("--nvidia-free-round", choices=("dev8", "qrdata40"),
+                        help="NVIDIA round request limit: dev8=240, qrdata40=1200; use separate ledgers")
     parser.add_argument("--allow-low-space-this-round", action="store_true",
                         help="explicit user-authorized storage exception; never releases financial stops")
     args = parser.parse_args()
-    if args.round_budget_cny is not None and args.free_route_ledger is not None:
-        parser.error("choose either a CNY round budget or the free route, not both")
+    if sum(item is not None for item in (args.round_budget_cny, args.free_route_ledger, args.nvidia_free_ledger)) > 1:
+        parser.error("choose one CNY budget, Magpie free route, or NVIDIA free endpoint guard")
+    if (args.nvidia_free_ledger is None) != (args.nvidia_free_round is None):
+        parser.error("NVIDIA opt-in requires both --nvidia-free-ledger and --nvidia-free-round")
+    if args.nvidia_free_round is not None:
+        if args.allow_low_space_this_round:
+            parser.error("NVIDIA evaluation cannot bypass its 5 GB storage floor")
+        if args.transport != "headless" or args.mode not in {"ask", "auto"} or args.repeat != 1:
+            parser.error("NVIDIA round requires headless Ask/Auto and repeat=1")
+        if not 0 < args.max_wall_s <= 1800:
+            parser.error("NVIDIA round requires a positive per-task wall limit no greater than 1800 seconds")
+        if args.suite != ("dev" if args.nvidia_free_round == "dev8" else "external"):
+            parser.error("NVIDIA dev8 requires dev; qrdata40 requires external; heldout is unauthorized")
     if args.round_budget_cny is not None:
         from decimal import Decimal
         if not args.budget_ledger or not Decimal(0) < Decimal(args.round_budget_cny) <= Decimal(5):
@@ -101,6 +116,15 @@ def main() -> int:
         print("no model provider configured", file=sys.stderr)
         return 2
     budget = None
+    if args.nvidia_free_ledger is not None:
+        try:
+            budget = NvidiaFreeEndpointGuard(args.nvidia_free_ledger, provider_id=config.provider_id,
+                base_url=config.base_url, model=config.model, round_kind=args.nvidia_free_round)
+        except ValueError as exc:
+            parser.error(str(exc))
+        if budget.stopped:
+            print(f"NVIDIA endpoint guard already stopped ({budget.state['reason']}); no provider call", flush=True)
+            return 86
     if args.round_budget_cny is not None:
         if config.model != "deepseek-flash" or args.suite != "dev":
             parser.error("the authorized small budget is pinned to deepseek-flash development tasks")
@@ -129,6 +153,11 @@ def main() -> int:
     if selected - {task.id for task in tasks}:
         print(f"unknown task ids: {sorted(selected - {t.id for t in tasks})}", file=sys.stderr)
         return 2
+    if args.nvidia_free_round == "dev8" and (not selected or not selected <= {
+            "iv_weak.goal", "panel_fe.specific", "leverage.goal", "survival.open"}):
+        parser.error("NVIDIA dev8 accepts only explicit subsets of iv_weak.goal,panel_fe.specific,leverage.goal,survival.open")
+    if args.nvidia_free_round == "qrdata40" and (not selected or not selected <= {task.id for task in qrdata_subset()}):
+        parser.error("NVIDIA qrdata40 accepts only explicit subsets of the original frozen QRData40 tasks")
 
     out = args.out.resolve()
     out.mkdir(parents=True, exist_ok=True)
@@ -152,6 +181,11 @@ def main() -> int:
         "tasks": [task.id for task in tasks],
         "round_budget": str(args.budget_ledger) if args.round_budget_cny is not None else None,
         "free_route_ledger": str(args.free_route_ledger) if args.free_route_ledger is not None else None,
+        "nvidia_free_endpoint": ({"ledger": str(args.nvidia_free_ledger), "round": args.nvidia_free_round,
+            "request_limit": budget.request_limit, "minimum_start_interval_s": 2, "serial": True,
+            "billing_status": budget.state["billing_status"], "default_output_limit": "provider_default_unverified",
+            "explicit_output_token_limit": 32768, "per_task_wall_s": args.max_wall_s,
+            "fallback": "forbidden; actual request URL and model checked"} if args.nvidia_free_ledger is not None else None),
         "provider": {key: getattr(config, key, None) for key in ("provider_id", "base_url", "model", "data_location")},
         "reasoning_effort": os.environ.get("WORKBENCH_REASONING_EFFORT") or "default(high)",
         "low_space_exception": args.allow_low_space_this_round,

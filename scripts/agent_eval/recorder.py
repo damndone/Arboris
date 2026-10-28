@@ -94,6 +94,8 @@ class _RecordingTransport(httpx.AsyncBaseTransport):
         self.budget = budget
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        if self.tape.mode != "replay" and hasattr(self.budget, "check_request"):
+            self.budget.check_request(request)
         body = request.content if isinstance(request.content, bytes) else await request.aread()
         digest = _body_hash(body)
         if self.tape.mode == "replay":
@@ -162,6 +164,8 @@ class _RecordingTransport(httpx.AsyncBaseTransport):
             "usage": usage,
             "budget_reservation": reservation,
         })
+        if hasattr(self.budget, "check_response"):
+            self.budget.check_response(response.status_code, raw)
         if usage is None and response.status_code >= 400 and hasattr(self.budget, "refused"):
             self.budget.refused(response.status_code, raw)
         if self.budget is not None:
