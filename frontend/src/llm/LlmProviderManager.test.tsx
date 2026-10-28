@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { LlmProviderManager } from "./LlmProviderManager";
 import {
@@ -183,6 +183,50 @@ describe("LlmProviderManager", () => {
     await waitFor(() => expect(activateLlmProvider).toHaveBeenCalledWith("openai"));
     await waitFor(() => expect(fetchLlmProviders).toHaveBeenCalledTimes(2));
     expect(await screen.findByTestId("llm-provider-active-openai")).toHaveTextContent("Active");
+  });
+
+  it("reloads externally updated provider settings and all mapped models without switching the default", async () => {
+    const nvidia = {
+      ...providers[0],
+      id: "nvidia",
+      name: "NVIDIA · Nemotron 3 Ultra (Free Trial)",
+      model: "nvidia/nemotron-3-ultra-550b-a55b",
+      models: [llmModelFixture({ display_name: "Nemotron 3 Ultra", request_model: "nvidia/nemotron-3-ultra-550b-a55b", context_window_tokens: 1048576, supports_1m: true })],
+    };
+    const updated = {
+      ...nvidia,
+      name: "NVIDIA NIM",
+      models: [
+        ...nvidia.models,
+        llmModelFixture({ display_name: "GLM 5.3", request_model: "z-ai/glm-5.3", context_window_tokens: 1048576, supports_1m: true }),
+        llmModelFixture({ display_name: "DeepSeek V4.1 Flash", request_model: "deepseek-ai/deepseek-v4.1-flash", context_window_tokens: 1048576, supports_1m: true }),
+        llmModelFixture({ display_name: "GLM 5.3 Flash", request_model: "z-ai/glm-5.3-flash", context_window_tokens: 1048576, supports_1m: true }),
+      ],
+    };
+    vi.mocked(fetchLlmProviders)
+      .mockResolvedValueOnce({ active_provider_id: nvidia.id, providers: [nvidia] })
+      .mockResolvedValueOnce({ active_provider_id: nvidia.id, providers: [updated] });
+    render(<LlmProviderManager onBack={vi.fn()} />);
+    await screen.findByText(nvidia.name);
+
+    fireEvent.click(screen.getByRole("button", { name: "Reload providers" }));
+
+    await screen.findByText(updated.name);
+    expect(fetchLlmProviders).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText(nvidia.name)).not.toBeInTheDocument();
+    const selector = screen.getByRole("combobox", { name: "Model for NVIDIA NIM" });
+    expect(selector).toHaveValue(nvidia.model);
+    expect(within(selector).getAllByRole("option")).toHaveLength(4);
+    const modelList = screen.getByTestId("llm-provider-models-nvidia");
+    for (const model of updated.models) {
+      expect(within(selector).getByRole("option", { name: model.display_name })).toHaveValue(model.request_model);
+      expect(within(modelList).getByText(model.display_name)).toHaveAttribute("title", model.request_model);
+    }
+    expect(screen.getByTestId("llm-provider-active-nvidia")).toHaveTextContent("Active");
+    expect(refreshLlmProviderModels).not.toHaveBeenCalled();
+    expect(probeLlmProvider).not.toHaveBeenCalled();
+    expect(activateLlmProvider).not.toHaveBeenCalled();
+    expect(updateLlmProvider).not.toHaveBeenCalled();
   });
 
   it("deletes only after confirmation and refreshes after deletion", async () => {

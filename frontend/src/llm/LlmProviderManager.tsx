@@ -206,9 +206,14 @@ export function LlmProviderManager({ onBack, projectRoot }: LlmProviderManagerPr
         <h1 id="llm-provider-manager-title" style={{ margin: 0, fontFamily: "var(--font-serif, serif)", fontSize: 25 }}>
           Settings
         </h1>
-        {settingsSection === "providers" ? <button type="button" onClick={() => { setIsCopy(false); setEditingProvider(null); }} style={{ ...buttonStyle, marginLeft: "auto" }}>
-          + Add provider
-        </button> : null}
+        {settingsSection === "providers" ? <div style={{ display: "flex", gap: 8, marginLeft: "auto" }}>
+          <button type="button" onClick={() => void refreshProviders()} disabled={loading || busyId !== null} style={buttonStyle}>
+            Reload providers
+          </button>
+          <button type="button" onClick={() => { setIsCopy(false); setEditingProvider(null); }} style={buttonStyle}>
+            + Add provider
+          </button>
+        </div> : null}
       </header>
 
       <nav aria-label="Settings sections" style={{ display: "flex", gap: 8, margin: "0 0 20px" }}>
