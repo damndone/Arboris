@@ -169,8 +169,7 @@
 
 .ws-menu__segmented {
   display: grid;
-  grid-auto-columns: 1fr;
-  grid-auto-flow: column;
+  grid-template-columns: repeat(auto-fit, minmax(68px, 1fr));
   gap: 2px;
   padding: 2px;
   border-radius: var(--radius-sm);
@@ -188,6 +187,10 @@
   font: inherit;
   font-weight: 500;
   cursor: pointer;
+}
+
+.ws-model-context-limit .ws-menu__segmented {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .ws-menu__segmented button[aria-checked="true"] {

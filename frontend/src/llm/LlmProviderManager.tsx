@@ -13,6 +13,7 @@ import {
   updateLlmProvider,
 } from "./llmApi";
 import type { LlmProvider } from "./llmTypes";
+import "./llmProviders.css";
 
 export interface LlmProviderManagerProps {
   onBack: () => void;
@@ -30,6 +31,7 @@ const shellStyle: React.CSSProperties = {
   height: "100%",
   maxHeight: "100%",
   minHeight: 0,
+  minWidth: 0,
   overflowY: "auto",
   overscrollBehavior: "contain",
   WebkitOverflowScrolling: "touch",
@@ -199,7 +201,7 @@ export function LlmProviderManager({ onBack, projectRoot }: LlmProviderManagerPr
 
   return (
     <div role="dialog" aria-labelledby="llm-provider-manager-title" data-testid="llm-provider-manager" style={shellStyle}>
-      <header style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 28 }}>
+      <header style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 14, marginBottom: 28 }}>
         <button type="button" onClick={onBack} style={{ ...buttonStyle, background: "transparent" }}>
           ← Back
         </button>
@@ -216,7 +218,7 @@ export function LlmProviderManager({ onBack, projectRoot }: LlmProviderManagerPr
         </div> : null}
       </header>
 
-      <nav aria-label="Settings sections" style={{ display: "flex", gap: 8, margin: "0 0 20px" }}>
+      <nav aria-label="Settings sections" style={{ display: "flex", flexWrap: "wrap", gap: 8, margin: "0 0 20px" }}>
         <button type="button" aria-pressed={settingsSection === "providers"} onClick={() => setSettingsSection("providers")} style={settingsSectionButtonStyle(settingsSection === "providers")}>LLM providers</button>
         {projectRoot ? <button type="button" aria-pressed={settingsSection === "instructions"} onClick={() => setSettingsSection("instructions")} style={settingsSectionButtonStyle(settingsSection === "instructions")}>Agent instructions</button> : null}
         {projectRoot ? <button type="button" aria-pressed={settingsSection === "memory"} onClick={() => setSettingsSection("memory")} style={settingsSectionButtonStyle(settingsSection === "memory")}>Memory</button> : null}
@@ -248,10 +250,10 @@ export function LlmProviderManager({ onBack, projectRoot }: LlmProviderManagerPr
                 ...provider.models,
               ];
           return (
-            <article key={provider.id} style={{ border: "1px solid var(--separator)", borderRadius: 12, padding: 16, background: "var(--bg-card-2)" }}>
+            <article key={provider.id} aria-label={`${provider.name} provider`} className="llm-provider-card" data-active={isActive}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                <strong>{provider.name}</strong>
-                <span data-testid={`llm-provider-active-${provider.id}`} style={{ color: isActive ? "var(--green)" : "var(--label-tertiary)" }}>
+                <strong style={{ overflowWrap: "anywhere" }}>{provider.name}</strong>
+                <span className="llm-provider-status" data-testid={`llm-provider-active-${provider.id}`}>
                   {isActive ? "Active" : "Available"}
                 </span>
                 <span style={{ color: "var(--label-secondary)" }}>{provider.key_present ? "API key configured" : "API key missing"}</span>
@@ -262,7 +264,8 @@ export function LlmProviderManager({ onBack, projectRoot }: LlmProviderManagerPr
                     disabled={busyId === provider.id}
                     onChange={(event) => void changeModel(provider.id, event.target.value)}
                     style={{
-                      maxWidth: 240,
+                      maxWidth: "min(100%, 320px)",
+                      minWidth: 0,
                       border: "1px solid var(--separator)",
                       borderRadius: 6,
                       padding: "3px 6px",
@@ -284,24 +287,24 @@ export function LlmProviderManager({ onBack, projectRoot }: LlmProviderManagerPr
                   </span>
                 )}
               </div>
-              <div style={{ marginTop: 8, color: "var(--label-secondary)", fontSize: 12 }}>Base URL: {provider.base_url || "—"}</div>
+              <div style={{ marginTop: 8, color: "var(--label-secondary)", fontSize: 12, overflowWrap: "anywhere" }}>Base URL: {provider.base_url || "—"}</div>
               <div
                 data-testid={`llm-provider-models-${provider.id}`}
-                style={{
-                  display: "flex",
-                  flexWrap: "wrap",
-                  gap: "5px 10px",
-                  marginTop: 8,
-                  color: "var(--label-secondary)",
-                  fontSize: 12,
-                  fontFamily: "var(--font-mono, monospace)",
-                }}
+                className="llm-provider-models"
+                role="group"
+                aria-label={`Mapped models for ${provider.name}`}
               >
                 {provider.models.length > 0
                   ? provider.models.map((model) => (
-                    <span key={model.request_model} title={model.request_model}>
-                      {model.display_name}
-                    </span>
+                    <button key={model.request_model} type="button" className="llm-model-card"
+                      aria-label={`Use model ${model.display_name}`}
+                      aria-pressed={model.request_model === provider.model}
+                      title={`${model.display_name}\n${model.request_model}${model.context_window_tokens !== null ? `\nContext: ${model.context_window_tokens.toLocaleString("en-US")} tokens` : ""}`}
+                      disabled={busyId === provider.id}
+                      onClick={() => void changeModel(provider.id, model.request_model)}>
+                      {model.request_model === provider.model && <span aria-hidden="true">✓</span>}
+                      <span className="llm-model-card-name">{model.display_name}</span>
+                    </button>
                   ))
                   : <span>No mapped models</span>}
               </div>

@@ -19,7 +19,7 @@ export function defaultEffort(efforts: readonly Effort[]): Effort | null {
 }
 
 const ONE_MILLION = 1_000_000;
-const LIMITS = [256_000, 128_000, 64_000];
+const LIMITS = [768_000, 512_000, 256_000, 128_000, 64_000];
 
 function tokens(value: number): string {
   return value >= ONE_MILLION ? `${+(value / ONE_MILLION).toFixed(1)}M` : `${Math.round(value / 1000)}K`;
@@ -93,14 +93,16 @@ export function AgentModelMenu({
                 />
               )}
               {limits.length > 1 && (
-                <Segmented
-                  label="Context limit"
-                  options={limits}
-                  value={current.context_limit_tokens ? String(current.context_limit_tokens) : "full"}
-                  onChange={(value) => onSettings(current.request_model, {
-                    context_limit_tokens: value === "full" ? null : Number(value),
-                  })}
-                />
+                <div className="ws-model-context-limit">
+                  <Segmented
+                    label="Context limit"
+                    options={limits}
+                    value={current.context_limit_tokens ? String(current.context_limit_tokens) : "full"}
+                    onChange={(value) => onSettings(current.request_model, {
+                      context_limit_tokens: value === "full" ? null : Number(value),
+                    })}
+                  />
+                </div>
               )}
               <p className="ws-menu__hint">
                 Saved for this model. A lower limit compacts the conversation sooner: faster and cheaper, less remembered.

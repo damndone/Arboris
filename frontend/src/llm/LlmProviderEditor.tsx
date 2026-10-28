@@ -9,6 +9,7 @@ import {
 } from "./llmApi";
 import { providerPresets } from "./providerPresets";
 import type { LlmModel, LlmProvider, ProviderUpsertInput } from "./llmTypes";
+import "./llmProviders.css";
 
 export interface LlmProviderEditorProps {
   provider?: LlmProvider | null;
@@ -26,6 +27,7 @@ const shellStyle: CSSProperties = {
   height: "100%",
   maxHeight: "100%",
   minHeight: 0,
+  minWidth: 0,
   overflowY: "auto",
   overscrollBehavior: "contain",
   WebkitOverflowScrolling: "touch",
@@ -38,6 +40,7 @@ const shellStyle: CSSProperties = {
 
 const inputStyle: CSSProperties = {
   width: "100%",
+  minWidth: 0,
   boxSizing: "border-box",
   marginTop: 6,
   padding: "9px 10px",
@@ -271,7 +274,7 @@ export function LlmProviderEditor({ provider, isCopy = false, onSaved, onBack }:
       {requestError && <div role="alert" data-testid="llm-provider-editor-error" style={{ color: "var(--status-fails-fg)", marginBottom: 14 }}>{requestError}</div>}
       {success && <div aria-live="polite" data-testid="llm-provider-editor-success" style={{ color: "var(--green)", marginBottom: 14 }}>{success}</div>}
 
-      <main style={{ maxWidth: 980, margin: "0 auto", display: "grid", gap: 18 }}>
+      <main className="llm-provider-editor-content">
         <section style={{ padding: 20, border: "1px solid var(--separator)", borderRadius: 14, background: "var(--bg-card-2)" }}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 16 }}>
             <label>Provider preset
@@ -356,27 +359,32 @@ export function LlmProviderEditor({ provider, isCopy = false, onSaved, onBack }:
             <datalist id="llm-discovered-models">{models.map((entry) => <option key={entry.request_model} value={entry.request_model}>{entry.display_name}</option>)}</datalist>
             {fieldErrors.model && <span style={{ display: "block", marginTop: 5, color: "var(--status-fails-fg)" }}>{fieldErrors.model}</span>}
           </label>
-          <div style={{ display: "grid", gap: 8, marginTop: 16 }}>
+          <div className="llm-model-mappings" role="region" aria-label="Model mappings" tabIndex={0}>
             {models.map((entry, index) => (
-              <div key={`${entry.request_model}-${index}`} data-testid={`llm-provider-model-row-${entry.request_model}`} style={{ display: "grid", gridTemplateColumns: "1.2fr 1.2fr 0.8fr auto auto", gap: 8, alignItems: "center", padding: 10, borderTop: "1px solid var(--separator)" }}>
-                <input aria-label={`display name ${entry.request_model}`} value={entry.display_name} onChange={(event) => updateModel(index, { display_name: event.target.value })} style={inputStyle} />
-                <input aria-label={`request model ${entry.request_model}`} value={entry.request_model} onChange={(event) => updateModel(index, { request_model: event.target.value })} style={inputStyle} />
-                <label style={{ fontSize: 12 }}>Context window
-                  <input aria-label={`context window ${entry.request_model}`} type="number" value={entry.context_window_tokens ?? ""} onChange={(event) => updateModel(index, { context_window_tokens: event.target.value ? Number(event.target.value) : null })} style={inputStyle} />
-                </label>
-                <label style={{ fontSize: 12, whiteSpace: "nowrap" }}><input aria-label={`supports 1M ${entry.request_model}`} type="checkbox" checked={entry.supports_1m} onChange={(event) => updateModel(index, { supports_1m: event.target.checked })} /> Supports 1M
-                  <div style={{ color: "var(--label-secondary)", marginTop: 6 }}>{formatContextWindow(entry.context_window_tokens)} · {entry.supports_1m ? "Yes" : "No"}</div>
-                </label>
-                <button type="button" aria-label={`Remove model ${entry.request_model}`} onClick={() => removeModel(index)} style={{ ...actionStyle, color: "var(--status-fails-fg)" }}>Remove</button>
+              <div key={index} data-testid={`llm-provider-model-row-${entry.request_model}`} className="llm-model-row">
+                <div className="llm-model-fields">
+                  <label>Display name<input aria-label={`display name ${entry.request_model}`} value={entry.display_name} onChange={(event) => updateModel(index, { display_name: event.target.value })} style={inputStyle} /></label>
+                  <label>Model ID<input aria-label={`request model ${entry.request_model}`} value={entry.request_model} onChange={(event) => updateModel(index, { request_model: event.target.value })} style={inputStyle} /></label>
+                </div>
+                <div className="llm-model-options">
+                  <label>Context window (tokens)
+                    <input aria-label={`context window ${entry.request_model}`} type="number" value={entry.context_window_tokens ?? ""} onChange={(event) => updateModel(index, { context_window_tokens: event.target.value ? Number(event.target.value) : null })} style={inputStyle} />
+                  </label>
+                  <div>
+                    <label style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}><input aria-label={`supports 1M ${entry.request_model}`} type="checkbox" checked={entry.supports_1m} onChange={(event) => updateModel(index, { supports_1m: event.target.checked })} /> Supports 1M</label>
+                    <div style={{ color: "var(--label-secondary)", marginTop: 6 }}>{formatContextWindow(entry.context_window_tokens)} · {entry.supports_1m ? "Yes" : "No"}</div>
+                  </div>
+                  <button type="button" aria-label={`Remove model ${entry.request_model}`} onClick={() => removeModel(index)} style={{ ...actionStyle, color: "var(--status-fails-fg)" }}>Remove</button>
+                </div>
               </div>
             ))}
           </div>
         </section>
 
-        <section style={{ padding: 20, border: "1px solid var(--separator)", borderRadius: 14, background: "var(--bg-card-2)" }}>
-          <h2 style={{ margin: "0 0 10px", fontSize: 16 }}>Sanitized config preview</h2>
-          <pre data-testid="llm-provider-config-preview" style={{ margin: 0, padding: 14, overflow: "auto", background: "var(--bg-canvas)", color: "var(--label-secondary)", fontFamily: "var(--font-mono, monospace)", fontSize: 12 }}>{preview}</pre>
-        </section>
+        <details className="llm-provider-config">
+          <summary>Sanitized config preview</summary>
+          <pre data-testid="llm-provider-config-preview">{preview}</pre>
+        </details>
       </main>
     </div>
   );

@@ -36,6 +36,23 @@ describe("AgentModelMenu", () => {
     expect(defaultEffort(["low", "medium"])).toBe("medium");
   });
 
+  test("fills the gap below 1M and persists the new caps without exceeding smaller windows", () => {
+    const onSettings = vi.fn();
+    render(<AgentModelMenu model={flash.request_model} options={[flash]} onSelect={vi.fn()} onSettings={onSettings} />);
+    fireEvent.click(screen.getByRole("button", { name: "Model: DeepSeek V4.1 Flash" }));
+    expect(limitOptions(flash).map(({ label }) => label)).toEqual(["Full 1M", "768K", "512K", "256K", "128K", "64K"]);
+    for (const cap of [768_000, 512_000]) {
+      fireEvent.click(screen.getByRole("radio", { name: `${cap / 1000}K` }));
+      expect(onSettings).toHaveBeenLastCalledWith(flash.request_model, { context_limit_tokens: cap });
+    }
+    fireEvent.click(screen.getByRole("radio", { name: "Full 1M" }));
+    expect(onSettings).toHaveBeenLastCalledWith(flash.request_model, { context_limit_tokens: null });
+    expect(limitOptions({ ...flash, context_window_tokens: 262_144 }).map(({ label }) => label))
+      .toEqual(["Full 262K", "256K", "128K", "64K"]);
+    expect(limitOptions({ ...flash, context_window_tokens: 65_536 }).map(({ label }) => label))
+      .toEqual(["Full 66K", "64K"]);
+  });
+
   test("a model with no efforts and no known window shows neither control", () => {
     render(<AgentModelMenu model="plain" options={[plain]} onSelect={vi.fn()} onSettings={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Model: Plain" }));

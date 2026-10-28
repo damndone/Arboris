@@ -220,7 +220,8 @@ describe("LlmProviderManager", () => {
     const modelList = screen.getByTestId("llm-provider-models-nvidia");
     for (const model of updated.models) {
       expect(within(selector).getByRole("option", { name: model.display_name })).toHaveValue(model.request_model);
-      expect(within(modelList).getByText(model.display_name)).toHaveAttribute("title", model.request_model);
+      expect(within(modelList).getByRole("button", { name: `Use model ${model.display_name}` }))
+        .toHaveAttribute("title", expect.stringContaining(model.request_model));
     }
     expect(screen.getByTestId("llm-provider-active-nvidia")).toHaveTextContent("Active");
     expect(refreshLlmProviderModels).not.toHaveBeenCalled();
@@ -281,6 +282,30 @@ describe("LlmProviderManager", () => {
     expect(await screen.findByTestId("llm-provider-manager-status")).toHaveTextContent(
       /model switched/i,
     );
+  });
+
+  it("lets each of eighteen model cards select a default without probing or activating another provider", async () => {
+    const models = Array.from({ length: 18 }, (_, index) => llmModelFixture({
+      display_name: `Nemotron variant ${index + 1}`,
+      request_model: `nvidia/variant-${index + 1}`,
+      context_window_tokens: 1_048_576,
+      supports_1m: true,
+    }));
+    vi.mocked(fetchLlmProviders).mockResolvedValue({ active_provider_id: "deepseek", providers: [{ ...providers[0], models, model: models[0].request_model }] });
+    vi.mocked(updateLlmProvider).mockResolvedValue({ ...providers[0], models, model: models[17].request_model });
+    render(<LlmProviderManager onBack={vi.fn()} />);
+    const list = await screen.findByTestId("llm-provider-models-deepseek");
+    expect(within(list).getAllByRole("button")).toHaveLength(18);
+    expect(within(list).getByRole("button", { name: "Use model Nemotron variant 18" }))
+      .toHaveAttribute("title", `Nemotron variant 18\nnvidia/variant-18\nContext: 1,048,576 tokens`);
+    expect(within(list).getByRole("button", { name: "Use model Nemotron variant 1" })).toHaveAttribute("aria-pressed", "true");
+    expect(updateLlmProvider).not.toHaveBeenCalled();
+    fireEvent.click(within(list).getByRole("button", { name: "Use model Nemotron variant 18" }));
+    await waitFor(() => expect(updateLlmProvider).toHaveBeenCalledWith("deepseek", { model: models[17].request_model }));
+    await waitFor(() => expect(within(list).getByRole("button", { name: "Use model Nemotron variant 18" })).toHaveAttribute("aria-pressed", "true"));
+    expect(activateLlmProvider).not.toHaveBeenCalled();
+    expect(probeLlmProvider).not.toHaveBeenCalled();
+    expect(refreshLlmProviderModels).not.toHaveBeenCalled();
   });
 
   it("opens a fresh create editor for copy without carrying the API key", async () => {
