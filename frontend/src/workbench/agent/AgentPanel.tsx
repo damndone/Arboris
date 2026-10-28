@@ -118,7 +118,15 @@ export function toolStatusLine(content: string, toolName?: string | null): strin
     tool_id?: unknown;
     ok?: unknown;
     error?: unknown;
+    error_details?: Array<{ message?: unknown }>;
     output?: {
+      saved?: unknown;
+      error?: unknown;
+      available?: unknown;
+      reason?: unknown;
+      reason_code?: unknown;
+      time_series_summary?: { available?: unknown; reason?: unknown; reason_code?: unknown };
+      artifact_evidence?: { available?: unknown; reason?: unknown; reason_code?: unknown };
       requires_confirmation?: unknown;
       proposal?: { proposal_id?: unknown };
       confirmation_reason?: unknown;
@@ -135,7 +143,23 @@ export function toolStatusLine(content: string, toolName?: string | null): strin
         : "tool";
   if (record.ok === false) {
     const error = typeof record.error === "string" ? record.error : "failed";
-    return `${toolId} ✗ ${error}`;
+    const message = Array.isArray(record.error_details)
+      ? record.error_details.map(detail => detail?.message).find((message): message is string => typeof message === "string" && Boolean(message.trim()))
+      : undefined;
+    const detail = message?.replace(/\s+/g, " ").trim().slice(0, 240);
+    return `${toolId} ✗ ${error}${detail ? ` — ${detail}` : ""}`;
+  }
+  if (record.output?.saved === false) {
+    const error = typeof record.output.error === "string" ? record.output.error.replace(/\s+/g, " ").trim().slice(0, 240) : "";
+    return `${toolId} ✗ not saved${error ? ` — ${error}` : ""}`;
+  }
+  const unavailable = record.output?.available === false ? record.output
+    : record.output?.time_series_summary?.available === false ? record.output.time_series_summary
+    : record.output?.artifact_evidence?.available === false ? record.output.artifact_evidence : null;
+  if (unavailable) {
+    const reason = [unavailable.reason, unavailable.reason_code].find((value): value is string => typeof value === "string" && Boolean(value.trim()));
+    const detail = reason?.replace(/\s+/g, " ").trim().slice(0, 240);
+    return `${toolId} ✗ result unavailable${detail ? ` — ${detail}` : ""}`;
   }
   const calculations = (record.output as { results?: unknown } | undefined)?.results;
   if (toolId === "calculate" && Array.isArray(calculations)) {
@@ -257,10 +281,6 @@ export function AgentPanel({
   const auditSessionId = agent.navigationLinks.find(
     (link) => link.kind === "operation" && typeof link.href.session_id === "string",
   )?.href.session_id;
-  const recentToolSteps = agent.messages
-    .filter((message) => message.role === "tool")
-    .slice(-3)
-    .map((message) => toolStatusLine(message.content, message.name));
   const turns = buildTurns(agent.messages);
   const pendingProposals = agent.proposals.filter((proposal) => proposal.status === "pending");
   const settledProposals = agent.proposals.filter((proposal) => proposal.status !== "pending");
@@ -437,15 +457,25 @@ export function AgentPanel({
             <div>Ask about the selected node, active head, or model output.</div>
           </div>
         ) : turns.map((turn, index) => {
-          const live = turnActive && index === turns.length - 1;
+          const latest = index === turns.length - 1;
+          const live = turnActive && latest;
+          const lastToolStep = [...turn.steps].reverse().find(message => message.role === "tool");
+          const lastToolStatus = lastToolStep ? toolStatusLine(lastToolStep.content, lastToolStep.name) : null;
+          const activityStatus = live ? "in progress"
+            : latest && agent.sessionStatus !== "idle" ? agent.sessionStatus.replace(/_/g, " ")
+            : turn.responses.some(message => message.stop_reason === "stop") ? "completed" : "recorded";
           if (turn.summary) return <CompactionMarker key={turn.id} message={turn.summary} />;
           return (
             <div key={turn.id} className="wb-agent-turn">
               {turn.user && renderTranscriptMessage(turn.user)}
-              {!live && (turn.steps.length > 0 || turn.drafts.length > 0) && (
-                <details data-testid={`agent-reasoning-${turn.id}`} className="wb-agent-reasoning">
+              {(turn.steps.length > 0 || turn.drafts.length > 0) && (
+                <details data-testid={`agent-reasoning-${turn.id}`} className="wb-agent-reasoning" open={latest}>
                   <summary>
-                    <span>{workSummary(turn.steps.length, turn.drafts.length)}</span>
+                    <span>
+                      {live ? `${turn.steps.length} recorded steps` : workSummary(turn.steps.length, turn.drafts.length)}
+                      {` · Execution ${activityStatus}`}
+                      {lastToolStatus && <small className="wb-agent-activity-summary">Latest: {lastToolStatus.length > 180 ? `${lastToolStatus.slice(0, 177)}…` : lastToolStatus}</small>}
+                    </span>
                     {turn.seconds !== null && <span>{duration(turn.seconds)}</span>}
                   </summary>
                   <div className="wb-agent-reasoning-content">
@@ -482,12 +512,6 @@ export function AgentPanel({
               <span className="agt-working__dot" aria-hidden="true" />
               <span>{observableActivity(agent.lastEventType)}</span>
               <span className="agt-working__time">{elapsedSeconds} s</span>
-              {recentToolSteps.length > 0 && (
-                <details className="agt-working__steps">
-                  <summary>{recentToolSteps.length} recent {recentToolSteps.length === 1 ? "step" : "steps"}</summary>
-                  <ul>{recentToolSteps.map((step, stepIndex) => <li key={`${stepIndex}:${step}`}>{step}</li>)}</ul>
-                </details>
-              )}
             </div>
             {agent.liveResponseText && (
               <div

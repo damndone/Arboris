@@ -20,7 +20,47 @@ def test_a_repeated_notice_is_replaced_not_stacked():
     assert published.count('部分完成') == 1 and 'Partially complete' not in published
     assert published.endswith('密度与租金没有可辨识的线性关联。')
     only = publication('部分完成：以下必需证据尚未核验。\n- 缺少引用已核验结果的报告。', PARTIAL, 'zh')
-    assert only == '部分完成：以下必需证据尚未核验。\n- 缺少引用已核验结果的报告。'
+    assert only.startswith('部分完成：以下必需证据尚未核验。')
+    assert '下一步建议' in only and '报告' in only
+
+
+def test_a_rejected_completion_keeps_findings_but_not_its_success_claim():
+    answer = ('分析完成。\n\n已执行 IV 拟合，结果尚不能支持摘要中的因果表述。\n'
+              '诊断显示工具变量较弱，需要稳健推断。')
+    result = {**PARTIAL, 'verified_artifacts': [
+        {'run_id': 'fit-run', 'artifact_id': 'iv-fit', 'sha256': 'a' * 64}]}
+    published = publication(answer, result, 'zh')
+    assert published.startswith('部分完成') and '分析完成' not in published
+    assert '已执行 IV 拟合' in published and '工具变量较弱' in published
+    assert '阶段性说明' in published and '仍需核验' in published
+    assert 'fit-run/iv-fit' in published and '下一步建议' in published
+    assert published.count('部分完成') == 1
+    assert publication(published, result, 'zh') == published
+
+
+def test_missing_contract_explains_how_to_resume_without_discarding_existing_work():
+    result = {'status': 'partial', 'missing': ['completion_contract:select_playbooks_and_source']}
+    published = publication('分析完成。', result, 'zh')
+    assert '数据来源' in published and '分析计划' in published
+    assert '已有结果' in published and '重复计算' in published
+    assert '下一步建议' in published and len(published) < 3000
+
+
+def test_completion_claim_across_newlines_cannot_be_reassembled():
+    published = publication('The analysis\nis complete.\nThe sensitivity comparison is still pending.', PARTIAL, 'en')
+    assert 'The analysis\nis complete' not in published
+    assert 'sensitivity comparison is still pending' in published
+
+
+def test_changed_check_replaces_previous_machine_advice_and_artifact_references():
+    old = {**PARTIAL, 'verified_artifacts': [{'run_id': 'old-run', 'artifact_id': 'old-fit'}]}
+    first = publication('分析完成。\n已取得拟合结果，但还需敏感性对照。', old, 'zh')
+    new = {'status': 'partial', 'missing': ['completion_contract:select_playbooks_and_source']}
+    second = publication(first, new, 'zh')
+    assert 'old-run/old-fit' not in second
+    assert '缺少引用已核验结果的报告' not in second
+    assert second.count('下一步建议') == 1
+    assert '已取得拟合结果' in second
 
 
 class Adapter:

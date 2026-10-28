@@ -38,7 +38,13 @@ def delivery_check(project_root, plan, *, suggest=False):
         # Named back to the Agent: a reference that does not resolve to the right kind
         # of verified product is not evidence, whatever it was meant to be.
         result['dropped_references'] = bound['dropped'][:12]
-    if result['status'] == 'requirements_met':
+    if 'completion_contract:select_playbooks_and_source' in result['missing']:
+        result['next_step'] = ('No completion contract was saved. Call update_plan with completion: select scope '
+            'and playbooks from the user request, and bind the registered dataset source. '
+            'When adding steps, omit status or use pending; only stored execution receipts can mark them done. '
+            'For work already executed, bind its verified completion_evidence; do not rerun it to create plan history. '
+            'Check saved is true before checking completion again. Keep unverified evidence partial.')
+    elif result['status'] == 'requirements_met':
         # In the paid fix2 round (iv_weak, Auto) the Agent met every requirement and still
         # would not call the analysis complete, reading not_certified as unfinished.
         result['next_step'] = ('Delivery requirements are met: answer the focused question and state its limitations.'

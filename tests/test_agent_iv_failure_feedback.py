@@ -176,3 +176,33 @@ def test_reference_guidance_does_not_accept_unknown_producers_or_branches(refere
 
     with pytest.raises(OperationValidationError):
         _compile(_model_workflow_steps(reference))
+
+
+def test_absent_completion_contract_returns_an_actionable_plan_repair(tmp_path):
+    from tests.test_read_only_analysis import _Fixture
+
+    runtime = _Fixture(tmp_path)
+    registry = runtime.orchestrator.tool_registry("chain-a")
+    result = asyncio.run(registry.execute({"tool_call_id": "missing-contract",
+        "tool_id": "inspect_analysis_completion", "arguments": {}}, session_id="chain-session"))
+    assert result.ok
+    assert result.output["status"] == "partial"
+    guidance = result.output["next_step"]
+    assert "update_plan" in guidance and "completion" in guidance
+    assert "pending" in guidance and "not rerun" in guidance
+    assert runtime.orchestrator.plan_store.current("chain-session") is None
+
+
+def test_done_without_receipts_can_be_corrected_without_rerunning_an_operation(tmp_path):
+    from tests.test_agent_plan_coverage import _runtime, _update
+
+    runtime = _runtime(tmp_path)
+    refused = _update(runtime, status="done")
+    assert refused.ok and not refused.output["saved"]
+    assert "pending" in refused.output["error"]
+    assert "not rerun" in refused.output["error"]
+    assert runtime.orchestrator.plan_store.current("chain-session") is None
+    corrected = _update(runtime)
+    assert corrected.ok and corrected.output["saved"]
+    assert corrected.output["plan"]["steps"][0]["status"] == "pending"
+    assert not corrected.output["plan"]["steps"][0].get("completed_operation_ids")

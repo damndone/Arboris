@@ -163,6 +163,17 @@ def outcome_text(facts: Mapping[str, Any]) -> str:
                 "(add the original run to compare), and report them. Do not say you could not execute it: confirming executed it."
             )
     if facts.get("results"):
+        model_runs = list(dict.fromkeys(
+            branch["run_id"] for result in facts["results"] if isinstance(result, Mapping)
+            for branch in result.get("model_branches", []) if isinstance(branch, Mapping) and branch.get("run_id")
+        ))
+        if model_runs:
+            lines.append("The workflow produced model branches: read estimates with inspect_project_model_coefficients "
+                         "using run_ids " + json.dumps(model_runs[:16], ensure_ascii=False) + "."
+                         + (f" ({len(model_runs) - 16} further runs omitted; inspect completed operations.)" if len(model_runs) > 16 else ""))
+        lines.append("For inspect_operation_artifact, use the returned read_with scope and exact artifact_id. "
+                     "Do not remove run prefixes or replace the operation's owner_run_id with a model branch run. "
+                     "Entries for unavailable artifacts are not numerical evidence; use their stated reader where supplied.")
         lines.append("Results (the same public view inspect_operation_artifact serves; answer from these, no need to "
                      "read them again): " + json.dumps(facts["results"], ensure_ascii=False)[:6000])
     if facts.get("plan_steps_marked"):

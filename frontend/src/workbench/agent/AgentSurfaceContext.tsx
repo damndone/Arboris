@@ -362,7 +362,7 @@ export function AgentSurfaceProvider({
   const turnReadRevisionRef = useRef(0);
   const currentSessionRef = useRef(sessionId);
   currentSessionRef.current = sessionId;
-  const [sessionStatus, setSessionStatus] = useState("idle");
+  const [persistedSessionStatus, setSessionStatus] = useState("idle");
   // How full the next request is, as the server builds it (tool results and
   // standing instructions included, earlier summarized parts not).
   const [serverContext, setServerContext] = useState<AgentSession["context"] | null>(null);
@@ -380,6 +380,12 @@ export function AgentSurfaceProvider({
   const [lastEventType, setLastEventType] = useState<string | null>(null);
   const [liveResponseText, setLiveResponseText] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // Session metadata and replayed progress can outlive the runtime. Confirmed
+  // interrupted checkpoints take precedence, including over a late session poll.
+  // An explicit Resume still owns its live request while recovery is in flight.
+  const sessionStatus = !isSubmitting && durableTurns.length > 0
+    && durableTurns.every(turn => turn.status === "interrupted")
+    ? "interrupted" : persistedSessionStatus;
   const [activeTurnStartedAt, setActiveTurnStartedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [navigationLinks, setNavigationLinks] = useState<AgentNavigationRef[]>([]);
@@ -507,6 +513,7 @@ export function AgentSurfaceProvider({
     const result = await getAgentEvents(projectRoot, activeSessionId, afterSeq);
     if (activeScopeRef.current !== scope || !Array.isArray(result.events)) return;
     applyEvents(result.events);
+    return result.events.filter(event => event.seq > afterSeq);
   }, [applyEvents, projectRoot]);
   const refreshNavigation = useCallback(async (
     activeSessionId: string,
@@ -612,8 +619,10 @@ export function AgentSurfaceProvider({
     let timer: ReturnType<typeof setTimeout> | undefined;
     const poll = async () => {
       try {
-        await replayEvents(sessionId, eventCursor, sessionScope);
-        if (!isSubmitting) {
+        const events = await replayEvents(sessionId, eventCursorRef.current, sessionScope);
+        // Tool-end events refer to already durable messages. Show those actions
+        // while the model request is still open, using the same session read.
+        if (!isSubmitting || events?.some(event => event.event_type === "tool_execution_end")) {
           const result = await getAgentSession(projectRoot, sessionId);
           if (!cancelled && currentSessionRef.current === sessionId && activeScopeRef.current === sessionScope) {
             setMessages(result.messages);setProposals(result.proposals ?? []);setSessionStatus(result.status ?? "idle");
@@ -629,7 +638,7 @@ export function AgentSurfaceProvider({
       cancelled = true;
       if (timer !== undefined) clearTimeout(timer);
     };
-  }, [eventCursor, isSubmitting, replayEvents, sessionId, sessionScope, sessionStatus, projectRoot]);
+  }, [isSubmitting, replayEvents, sessionId, sessionScope, sessionStatus, projectRoot]);
 
   useEffect(() => {
     let cancelled = false;

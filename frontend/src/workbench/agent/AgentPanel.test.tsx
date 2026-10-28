@@ -1,7 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { AgentPanel } from "./AgentPanel";
+import { AgentPanel, toolStatusLine } from "./AgentPanel";
 import {
   AgentSurfaceContext,
   type AgentSurfaceContextValue,
@@ -44,6 +44,39 @@ function value(overrides: Partial<AgentSurfaceContextValue> = {}): AgentSurfaceC
     ...overrides,
   };
 }
+
+describe("toolStatusLine — public failure summaries", () => {
+  it("shows the first usable public tool error message with a bounded length", () => {
+    const line = toolStatusLine(JSON.stringify({ ok: false, error: "ToolVisibleError", error_details: [
+      { message: " " }, { message: `The requested result artifact is unavailable.\n${"x".repeat(500)}` }, { message: "SECOND_DETAIL" },
+    ] }), "inspect_model_result");
+    expect(line).toContain("inspect_model_result ✗ ToolVisibleError");
+    expect(line).toContain("The requested result artifact is unavailable.");
+    expect(line).not.toContain("SECOND_DETAIL");
+    expect(line).not.toContain("\n");
+    expect(line.length).toBeLessThanOrEqual(300);
+  });
+
+  it("reports a rejected plan save and its inner error even when the envelope is ok", () => {
+    const line = toolStatusLine(JSON.stringify({ ok: true, output: { saved: false, error: "Approval criteria cannot be changed after execution." } }), "update_plan");
+    expect(line).toContain("✗ not saved");
+    expect(line).toContain("Approval criteria cannot be changed after execution.");
+    expect(line).not.toContain("✓");
+  });
+
+  it("reports unavailable declared public result views without claiming success", () => {
+    for (const output of [
+      { available: false, reason: "ARMA_GARCH_PUBLIC_ARTIFACTS_UNAVAILABLE" },
+      { time_series_summary: { available: false, reason_code: "TIME_SERIES_MODEL_IDENTITY_CONFLICT" } },
+      { artifact_evidence: { available: false, reason: "This artifact type has no registered public Agent result view. Read model estimates with inspect_project_model_coefficients using run_ids [\"run-source\"]." } },
+    ]) {
+      const line = toolStatusLine(JSON.stringify({ ok: true, output }), "artifact_evidence" in output ? "inspect_operation_artifact" : "inspect_model_result");
+      expect(line).toContain("✗ result unavailable");
+      expect(line).toMatch(/ARMA_GARCH_PUBLIC_ARTIFACTS_UNAVAILABLE|TIME_SERIES_MODEL_IDENTITY_CONFLICT|inspect_project_model_coefficients using run_ids \["run-source"\]/);
+      expect(line).not.toContain("✓");
+    }
+  });
+});
 
 describe("AgentPanel — sandboxed program output", () => {
   const codeOperation = {
@@ -418,6 +451,39 @@ describe("AgentPanel", () => {
     expect(reasoning).toHaveTextContent("我会先核对模型和诊断证据。");
     expect(reasoning).toHaveTextContent("inspect_model_result ✓ ok");
     expect(reasoning).not.toContainElement(screen.getByText("模型结果已核对：系数为正。"));
+  });
+
+  it.each(["running", "interrupted", "completed"])("keeps the latest recorded actions visible while %s and retains an older error summary", sessionStatus => {
+    const openNavigation = vi.fn();
+    const resultLink: AgentNavigationRef = {
+      kind: "graph_node", id: "result-1", label: "Result model", relation: "result", available: true,
+      href: { view: "graph", run_id: "run-child", node_ref: "model:ols_1" },
+    };
+    render(<AgentSurfaceContext.Provider value={value({
+      sessionStatus, openNavigation,
+      messages: [
+        agentMessageFixture({ entry_id: "u0", role: "user", content: "Earlier task" }),
+        agentMessageFixture({ entry_id: "t0", role: "tool", name: "inspect_data", content: JSON.stringify({ ok: false, error: "missing_column" }) }),
+        agentMessageFixture({ entry_id: "a0", role: "assistant", content: "Earlier task stopped.", stop_reason: "stop" }),
+        agentMessageFixture({ entry_id: "u1", role: "user", content: "Current task" }),
+        agentMessageFixture({ entry_id: "t1", role: "tool", name: "calculate", content: JSON.stringify({ ok: true, output: { results: [{ label: "Difference", expression: "8 - 3", value: "5" }], raw: "LARGE_RAW_OUTPUT" } }), navigation: [resultLink] }),
+        agentMessageFixture({ entry_id: "t2", role: "tool", name: "inspect_result", content: JSON.stringify({ ok: false, error: "artifact_unavailable" }) }),
+        ...(sessionStatus === "completed" ? [agentMessageFixture({ entry_id: "a1", role: "assistant", content: "Difference is 5; the artifact was unavailable.", stop_reason: "stop" })] : []),
+      ],
+    })}><AgentPanel projectRoot="/proj" runId="run-a" compactHeader /></AgentSurfaceContext.Provider>);
+
+    const latest = screen.getByTestId("agent-reasoning-u1");
+    expect(latest).toHaveAttribute("open");
+    expect(latest).toHaveTextContent("calculate ✓ Difference: 8 - 3 = 5");
+    expect(latest).toHaveTextContent("inspect_result ✗ artifact_unavailable");
+    expect(latest.querySelector("summary")).toHaveTextContent(sessionStatus === "running" ? "in progress" : sessionStatus);
+    expect(latest).not.toHaveTextContent("LARGE_RAW_OUTPUT");
+    const previous = screen.getByTestId("agent-reasoning-u0");
+    expect(previous).not.toHaveAttribute("open");
+    expect(previous.querySelector("summary")).toHaveTextContent("inspect_data ✗ missing_column");
+    fireEvent.click(screen.getByRole("button", { name: "Open result model" }));
+    expect(openNavigation).toHaveBeenCalledWith(resultLink);
+    expect(screen.queryByText(/recent steps/)).not.toBeInTheDocument();
   });
 
   it("files a draft withdrawn by the numeric check under reasoning and says why", () => {

@@ -13,6 +13,7 @@ from ..operations import OperationRecord
 from ..bounds import _bounded_label, _bounded_labels, _bounded_numeric_fields, _public_positive_int, _public_stat_number
 from ..family_evidence import bounded_model_family_evidence as _bounded_model_family_evidence
 from ..operation_outcome import produced_run
+from .requests import _PROJECT_RUN_ID_RE
 
 def _read_manifest(run_root: Path) -> dict[str, Any]:
     try:
@@ -696,6 +697,48 @@ def _operation_artifact_ids(record: OperationRecord) -> list[str]:
     return list(dict.fromkeys(artifact_ids))
 
 
+def _operation_artifact_source(record: OperationRecord, artifact_id: str) -> tuple[str, str] | None:
+    """Bind an emitted qualified id to the same completed step's model branch.
+
+    A run prefix alone is not authority to read another run. Both the step's
+    emitted id and its persisted branch's local artifact list must agree.
+    """
+
+    if record.status != "completed" or artifact_id not in _operation_artifact_ids(record):
+        return None
+    state = record.outputs.get("workflow_state")
+    steps = state.get("steps") if isinstance(state, dict) else None
+    for step in steps.values() if isinstance(steps, dict) else ():
+        if (not isinstance(step, dict) or step.get("status") != "completed"
+                or artifact_id not in (step.get("artifact_ids") or ())):
+            continue
+        branches = step.get("model_branches")
+        for branch in branches if isinstance(branches, list) else ():
+            if not isinstance(branch, dict):
+                continue
+            run_id, local_ids = branch.get("run_id"), branch.get("artifact_ids")
+            if not isinstance(run_id, str) or not _PROJECT_RUN_ID_RE.fullmatch(run_id):
+                continue
+            for local_id in local_ids if isinstance(local_ids, list) else ():
+                if isinstance(local_id, str) and local_id and artifact_id == f"{run_id}:{local_id}":
+                    return run_id, local_id
+    return None
+
+
+def _operation_model_branches(step: dict[str, Any]) -> list[dict[str, str]]:
+    """Only the durable model ids needed by the existing coefficient reader."""
+
+    branches = step.get("model_branches")
+    return [
+        {key: branch[key] for key in ("branch_id", "run_id", "model_id")
+         if isinstance(branch.get(key), str) and len(branch[key]) <= 300}
+        for branch in (branches if isinstance(branches, list) else [])[:16]
+        if isinstance(branch, dict) and isinstance(branch.get("run_id"), str)
+        and _PROJECT_RUN_ID_RE.fullmatch(branch["run_id"])
+        and step.get("status") == "completed"
+    ]
+
+
 def _bounded_completed_operation(record: OperationRecord) -> dict[str, Any]:
     workflow_state = record.outputs.get("workflow_state")
     steps = workflow_state.get("steps") if isinstance(workflow_state, dict) else None
@@ -706,6 +749,7 @@ def _bounded_completed_operation(record: OperationRecord) -> dict[str, Any]:
                 continue
             artifact_ids = step.get("artifact_ids")
             row_counts = step.get("row_counts")
+            model_branches = _operation_model_branches(step)
             workflow_steps.append(
                 {
                     "step_id": step_id,
@@ -715,6 +759,7 @@ def _bounded_completed_operation(record: OperationRecord) -> dict[str, Any]:
                         for item in (artifact_ids if isinstance(artifact_ids, list) else [])
                         if isinstance(item, str) and item
                     ][:16],
+                    **({"model_branches": model_branches} if model_branches else {}),
                     "row_counts": {
                         str(key): value
                         for key, value in (row_counts.items() if isinstance(row_counts, dict) else ())

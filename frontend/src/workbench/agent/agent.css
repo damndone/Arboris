@@ -566,6 +566,13 @@
   border-top: 1px solid color-mix(in oklch, var(--separator) 62%, transparent);
 }
 
+.wb-agent-activity-summary {
+  display: block;
+  color: var(--label-secondary);
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+
 .wb-agent-withdrawn-draft {
   margin: 0 0 4px;
   font-size: 12px;

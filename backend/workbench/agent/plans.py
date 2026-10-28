@@ -196,7 +196,9 @@ def merge(previous: Plan | None, *, question: str, criteria: list[str], steps: t
             # unverified, never an implicit request to rerun the old operation.
             status = old.status
         elif step.operation_ids and status == "done" and not set(step.operation_ids) <= set(coverage):
-            raise PlanError(f"step {step.step_id} cannot be done without successful execution receipts; inspect or reconcile the original operations")
+            raise PlanError(f"step {step.step_id} cannot be done without successful execution receipts. "
+                            "Omit status or use pending when adding a step; bind existing verified results "
+                            "in completion_evidence. Do not rerun completed operations to create plan history.")
         elif human_revision and step.operation_ids and coverage and set(step.operation_ids) <= set(coverage):
             status = "done"
         preserved.append(replace(step, status=status, completed_operation_ids=coverage))

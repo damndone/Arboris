@@ -86,7 +86,13 @@ class FinishMixin:
         previous = payload.get("completion_check")
         if previous and previous["status"] == "partial":
             if result["status"] == "partial":
-                content = partial_notice(result, language)
+                # Preserve the explanatory draft only while its checked products
+                # are unchanged. Changed source/results need a fresh report, not
+                # a replay of findings grounded in an older evidence snapshot.
+                content = (publication(payload["content"], result, language,
+                                       request_text=getattr(self, "_user_text", ""))
+                           if result.get("verified_manifest_sha256") == previous.get("verified_manifest_sha256")
+                           else partial_notice(result, language))
             elif language == "zh":
                 content = "交付证据现已核验齐全。方法适用性、推断有效性和报告结论仍需分别审查。"
             else:

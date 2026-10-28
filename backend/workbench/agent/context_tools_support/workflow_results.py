@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import json
+from pathlib import Path
 from typing import Any
 from ..context_compiler import registered_artifact_suffix, resolve_registered_artifact
 from ..operations import OperationRecord, OperationRecordStore
@@ -18,8 +19,39 @@ from .summaries import (
     _bounded_completed_operation,
     _bounded_node,
     _operation_artifact_ids,
+    _operation_artifact_source,
+    _operation_model_branches,
     _public_operation_artifact_result,
+    _resolve_verified_registered_artifact,
 )
+
+
+def _resolve_operation_artifact(project_root: Path, record: OperationRecord, artifact_id: str) -> tuple[str, str, Any]:
+    """Preserve local reads; admit child reads only through the recorded branch."""
+
+    run_id = str(record.target.get("run_id") or "")
+    artifact = resolve_registered_artifact(project_root / "runs" / run_id, artifact_id)
+    if artifact is not None:
+        return run_id, artifact_id, artifact
+    source = _operation_artifact_source(record, artifact_id)
+    if source is None:
+        return run_id, artifact_id, None
+    source_run_id, registered_id = source
+    run_root = project_root / "runs" / source_run_id
+    # Genesis also emits datasets and figures. Do not load those files just
+    # to discover they cannot be projected as JSON evidence.
+    if registered_artifact_suffix(run_root, registered_id) != ".json":
+        return source_run_id, registered_id, None
+    artifact = resolve_registered_artifact(run_root, registered_id)
+    if artifact is not None:
+        verified = _resolve_verified_registered_artifact(run_root, artifact_id=registered_id, expected_type=artifact[0])
+        if verified is None:
+            artifact = None
+        else:
+            payload, sha256 = verified
+            artifact = artifact[0], sha256, payload
+    return source_run_id, registered_id, artifact
+
 
 def _notebook_source_runs_by_revision(
     records: list[dict[str, Any]],
@@ -224,18 +256,18 @@ class WorkflowResultsMixin:
                 "available in this Chain and node scope."
                 + self._scope_hint(request.operation_record_id, chain_id=chain_id, session_id=session_id)
             )
-        allowed_artifacts = set(_operation_artifact_ids(record))
+        declared_artifacts = _operation_artifact_ids(record)
+        allowed_artifacts = set(declared_artifacts)
         if request.artifact_id not in allowed_artifacts:
             raise ToolVisibleError(
                 "OPERATION_ARTIFACT_NOT_DECLARED: the artifact was not emitted "
-                "by this completed operation."
+                "by this completed operation. Do not remove a run prefix or guess a replacement. "
+                "Use an exact artifact_id returned by inspect_completed_operations. "
+                "Declared ids (bounded): " + json.dumps(declared_artifacts[:16], ensure_ascii=False)[:2400]
             )
-        artifact = resolve_registered_artifact(
-            self.project_root / "runs" / request.owner_run_id,
-            request.artifact_id,
-        )
+        source_run_id, registered_id, artifact = _resolve_operation_artifact(self.project_root, record, request.artifact_id)
         if artifact is None:
-            suffix = registered_artifact_suffix(self.project_root / "runs" / request.owner_run_id, request.artifact_id)
+            suffix = registered_artifact_suffix(self.project_root / "runs" / source_run_id, registered_id)
             if suffix not in {None, ".json"}:
                 raise ToolVisibleError(
                     f"OPERATION_ARTIFACT_UNAVAILABLE: this artifact is a {suffix} file (such as the workflow's "
@@ -244,7 +276,7 @@ class WorkflowResultsMixin:
                 )
             raise ToolVisibleError(
                 "OPERATION_ARTIFACT_UNAVAILABLE: the declared artifact is not "
-                "available from the active run."
+                "available from its recorded run and branch binding, or its registered content could not be verified."
             )
         artifact_type, artifact_sha256, payload = artifact
         public_result, omitted_sections = _public_operation_artifact_result(
@@ -266,12 +298,17 @@ class WorkflowResultsMixin:
                     "artifact_id": request.artifact_id,
                     "artifact_type": artifact_type,
                     "sha256": artifact_sha256,
+                    **({"source_run_id": source_run_id, "registered_artifact_id": registered_id}
+                       if (source_run_id, registered_id) != (request.owner_run_id, request.artifact_id) else {}),
                 },
                 "result": public_result,
                 "reason": (
                     None
                     if public_result is not None
-                    else "This artifact type has no registered public Agent result view."
+                    else ("This artifact type has no registered public Agent result view. Read model estimates with "
+                          "inspect_project_model_coefficients using run_ids " + json.dumps([source_run_id]) + "."
+                          if artifact_type == "model_result"
+                          else "This artifact type has no registered public Agent result view.")
                 ),
             },
             "omitted_sections": omitted_sections,
@@ -285,27 +322,42 @@ class WorkflowResultsMixin:
         answered in the turn that ran it.
         """
 
-        run_id = str((record.target or {}).get("run_id") or "")
         state = ((record.outputs or {}).get("workflow_state") or {}).get("steps") or {}
         steps = {item.get("step_id"): item for item in (record.changes or {}).get("steps") or () if isinstance(item, dict)}
         results: list[dict[str, Any]] = []
         for step_id, step_state in state.items():
+            model_branches = _operation_model_branches(step_state)
             entry: dict[str, Any] = {
                 "step_id": step_id,
                 "operation_id": (steps.get(step_id) or {}).get("operation_id"),
                 "status": step_state.get("status"),
+                "read_with": {
+                    "owner_run_id": record.target.get("run_id"),
+                    "op_node_id": record.target.get("node_ref"),
+                    "active_head_run_id": record.preconditions.get("active_head_run_id"),
+                    "operation_record_id": record.record_id,
+                },
+                **({"model_branches": model_branches} if model_branches else {}),
                 "artifacts": [],
             }
             for artifact_id in step_state.get("artifact_ids") or ():
-                artifact = resolve_registered_artifact(self.project_root / "runs" / run_id, str(artifact_id))
+                source_run_id, registered_id, artifact = _resolve_operation_artifact(self.project_root, record, str(artifact_id))
                 if artifact is None:
                     entry["artifacts"].append({"artifact_id": artifact_id, "available": False})
                     continue
-                artifact_type, _sha256, payload = artifact
+                artifact_type, sha256, payload = artifact
                 public_result, _omitted = _public_operation_artifact_result(artifact_type, payload)
-                item: dict[str, Any] = {"artifact_id": artifact_id, "artifact_type": artifact_type}
+                item: dict[str, Any] = {
+                    "artifact_id": artifact_id, "artifact_type": artifact_type,
+                    "evidence_ref": {"operation_record_id": record.record_id, "artifact_id": artifact_id,
+                                     "artifact_type": artifact_type, "sha256": sha256,
+                                     **({"source_run_id": source_run_id, "registered_artifact_id": registered_id}
+                                        if (source_run_id, registered_id) != (record.target.get("run_id"), artifact_id) else {})},
+                }
                 if public_result is None:
                     item["available"] = False
+                    if artifact_type == "model_result":
+                        item["reason"] = "Read model estimates with inspect_project_model_coefficients using the returned model_branches run_id."
                 elif len(json.dumps(public_result, ensure_ascii=False, default=str)) > max_chars:
                     item["available"] = False
                     item["reason"] = "too large to include; read it with inspect_operation_artifact"

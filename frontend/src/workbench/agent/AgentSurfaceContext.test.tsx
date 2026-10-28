@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentPanel } from "./AgentPanel";
+import { AgentColumnComposer } from "../../workspace/agent/AgentColumnComposer";
 import { AgentSurfaceProvider, useAgentSurface } from "./AgentSurfaceContext";
 import type { AgentMessage, AgentProposal } from "./agentTypes";
 import { agentCapabilitiesFixture, agentMessageFixture, agentProposalFixture, operationCapabilityFixture } from "../../apiFixtures";
@@ -319,6 +320,65 @@ describe("AgentSurfaceProvider", () => {
     fireEvent.click(resume);
     await waitFor(() => expect(mocks.resumeAgentTurn).toHaveBeenCalledWith("/proj","saved","original",expect.any(AbortSignal)));
     expect(mocks.continueAgentTurn).not.toHaveBeenCalled();
+  });
+
+  it.each(["panel", "column"] as const)("shows a restored interrupted turn instead of stale running progress in the %s", async surface => {
+    let finishStalePoll!: (value: ReturnType<typeof session>) => void;
+    const staleSession = { ...session("saved"), status: "running" };
+    mocks.getAgentSession.mockResolvedValueOnce(staleSession).mockReturnValue(new Promise(resolve => { finishStalePoll = resolve; }));
+    mocks.getAgentEvents.mockResolvedValue({ events: [{ seq: 1, event_type: "message_update", payload: { delta: "An interrupted draft" } }] });
+    mocks.getAgentTurnState.mockResolvedValue({ turns: [{ turn_id: "original", status: "interrupted", requires_reconcile: true }] });
+    render(<MemoryRouter initialEntries={["/?agent_session=saved"]}><AgentSurfaceProvider projectRoot="/proj" runId="run-a">
+      <AgentPanel projectRoot="/proj" runId="run-a" compactHeader={surface === "column"} composer={surface === "column" ? <AgentColumnComposer /> : undefined} />
+    </AgentSurfaceProvider></MemoryRouter>);
+
+    await screen.findByRole("button", { name: surface === "column" ? "Resume" : "Resume original turn" });
+    expect(screen.queryAllByRole("button", { name: "Stop Agent" })).toHaveLength(0);
+    expect(screen.queryByLabelText("Agent execution progress")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("agent-turn-progress")).not.toBeInTheDocument();
+    await act(async () => { finishStalePoll(staleSession); });
+    expect(screen.queryByRole("button", { name: "Stop Agent" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Agent execution progress")).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Ask Agent" }), { target: { value: "Do not replace the interrupted request" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send to Agent" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("An unfinished turn needs recovery.");
+    expect(mocks.sendAgentTurn).not.toHaveBeenCalled();
+    expect(mocks.continueAgentTurn).not.toHaveBeenCalled();
+    expect(mocks.resumeAgentTurn).not.toHaveBeenCalled();
+    mocks.resumeAgentTurn.mockReturnValue(new Promise(() => {}));
+    fireEvent.click(screen.getByRole("button", { name: surface === "column" ? "Resume" : "Resume original turn" }));
+    await waitFor(() => expect(mocks.resumeAgentTurn).toHaveBeenCalledWith("/proj", "saved", "original", expect.any(AbortSignal)));
+    expect(screen.getByRole("button", { name: "Stop Agent" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Agent execution progress")).toBeInTheDocument();
+  });
+
+  it.each([false, true])("hydrates recorded tool output during the local request without overwriting a later reply (late read: %s)", async lateRead => {
+    let finishTurn!: (result: unknown) => void;
+    let finishRead!: (result: ReturnType<typeof session>) => void;
+    const question = agentMessageFixture({ entry_id: "u1", role: "user", content: "Check the evidence" });
+    const recordedTool = agentMessageFixture({ entry_id: "t1", role: "tool", name: "inspect_model_result", content: JSON.stringify({ ok: true, output: { raw: "LARGE_RAW_OUTPUT" } }) });
+    const progress = { ...session("agent_chain_new", [question, recordedTool]), status: "running" };
+    mocks.getAgentEvents.mockImplementation(async () => ({ events: mocks.sendAgentTurn.mock.calls.length ? [{ seq: 1, event_type: "tool_execution_end", payload: { tool_id: "inspect_model_result", entry_id: "t1", ok: true } }] : [] }));
+    mocks.getAgentSession.mockImplementation(() => lateRead ? new Promise(resolve => { finishRead = resolve; }) : Promise.resolve(progress));
+    mocks.sendAgentTurn.mockReturnValue(new Promise(resolve => { finishTurn = resolve; }));
+    mount();
+    fireEvent.change(screen.getByRole("textbox", { name: "Ask Agent" }), { target: { value: "Check the evidence" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send to Agent" }));
+    await waitFor(() => expect(mocks.getAgentSession).toHaveBeenCalledWith("/proj", "agent_chain_new"));
+    if (!lateRead) {
+      expect(await screen.findByTestId("agent-message-tool")).toHaveTextContent("inspect_model_result ✓ ok");
+      expect(screen.getByTestId("agent-reasoning-u1")).toHaveAttribute("open");
+      expect(screen.getByRole("button", { name: "Stop Agent" })).toBeInTheDocument();
+      expect(screen.getByTestId("agent-message-tool")).not.toHaveTextContent("LARGE_RAW_OUTPUT");
+    }
+    const completed = session("agent_chain_new", [question, recordedTool, agentMessageFixture({ entry_id: "a1", role: "assistant", content: "Evidence checked.", stop_reason: "stop" })]);
+    await act(async () => { finishTurn({ session: completed, status: "idle" }); });
+    if (lateRead) await act(async () => { finishRead(progress); });
+    expect(await screen.findByText("Evidence checked.")).toBeInTheDocument();
+    expect(mocks.sendAgentTurn).toHaveBeenCalledTimes(1);
+    expect(mocks.continueAgentTurn).not.toHaveBeenCalled();
+    expect(mocks.resumeAgentTurn).not.toHaveBeenCalled();
   });
 
   it("loads the session plan and approves its exact visible version without continuing", async () => {

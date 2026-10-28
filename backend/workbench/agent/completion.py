@@ -571,23 +571,59 @@ def publication(content: str, result: dict, language: str, *, final=True, reques
     active = result['missing'] != ['completion_contract:select_playbooks_and_source']
     claim = claims_completion(content, request_text) or bool(active and _GENERIC_CLAIM.search(content))
     if (result['status'] == 'requirements_met'
-            or (not claim and (not final or result['missing'] == ['completion_contract:select_playbooks_and_source']))):
+            or (not claim and not _PARTIAL_NOTICE.search(content)
+                and (not final or result['missing'] == ['completion_contract:select_playbooks_and_source']))):
         return content
     notice = partial_notice(result, language)
-    # Preserve useful interim findings, but never republish a rejected claim; an
-    # earlier notice the answer repeats is replaced, not stacked (off3 round).
+    # Keep useful findings rather than replacing an entire answer because its
+    # closing sentence claimed completion. The remaining prose is still a draft,
+    # not newly certified evidence; final answers retain the numeric check below
+    # this publication boundary in the turn loop.
+    content = content.removeprefix(notice).strip()
     content = _PARTIAL_NOTICE.sub('', content).strip()
-    return notice if claim or not content else notice + '\n\n' + content
+    if claim:
+        sentences = re.split(r'(?<=[。！？])|(?<=[.!?])(?=\s|$)', content)
+        content = ''.join(sentence for sentence in sentences
+                          if not claims_completion(sentence, request_text)
+                          and not _GENERIC_CLAIM.search(sentence)).strip()
+    draft_heading = '阶段性说明（仍需核验）' if language == 'zh' else 'Interim findings (still require verification)'
+    content = content.removeprefix(draft_heading).strip()
+    return notice if not content else notice + '\n\n' + draft_heading + '\n\n' + content
 
 
-_PARTIAL_NOTICE = re.compile(r'(?:部分完成：以下必需证据尚未核验。|Partially complete: required evidence remains unverified\.)'
-                             r'[ \t]*(?:\n[ \t]*- [^\n]*)*\n*')
+_PARTIAL_BOUNDARIES = {
+    'zh': '当前仍为部分交付；阶段性说明与最终核验结论须分开阅读。',
+    'en': 'The full analysis is not complete; interim prose and final verification are separate.',
+}
+_PARTIAL_NOTICE = re.compile(
+    r'(?:部分完成：以下必需证据尚未核验。|Partially complete: required evidence remains unverified\.)'
+    r'(?:[\s\S]*?(?:' + '|'.join(re.escape(text) for text in _PARTIAL_BOUNDARIES.values())
+    + r')\n\n---\n*|[ \t]*(?:\n[ \t]*- [^\n]*)*\n*)')
 
 
 def partial_notice(result, language):
     heading = '部分完成：以下必需证据尚未核验。' if language == 'zh' else 'Partially complete: required evidence remains unverified.'
     missing = list(dict.fromkeys(_missing_label(item, language) for item in result['missing']))
-    return heading + '\n' + '\n'.join('- ' + item for item in missing[:32])
+    notice = heading + '\n' + '\n'.join('- ' + item for item in missing[:32])
+    # These are the completion check's actual registered artifacts, never model
+    # prose or a claim that merely having a file certifies the analysis.
+    refs = [f"{item['run_id']}/{item['artifact_id']}" for item in result.get('verified_artifacts', [])[:4]]
+    if refs:
+        title = '已核验的产物引用（不代表整项分析已通过）' if language == 'zh' else 'Verified artifact references (not whole-analysis certification)'
+        notice += '\n\n' + title + '\n' + '\n'.join('- ' + ref for ref in refs)
+    if language == 'zh':
+        advice = ('由 Agent 先保存与当前问题匹配的分析计划并绑定数据来源；已有结果保留，'
+                  '不要为补计划重复计算。然后绑定已执行结果，重新检查缺项。'
+                  if 'completion_contract:select_playbooks_and_source' in result['missing'] else
+                  '先补齐上列缺项，再重新核验；缺报告时应引用已有的已核验结果，避免重复拟合。'
+                  '若需要额外数据、权限或预算，明确列出并等待接管。')
+        return notice + '\n\n下一步建议\n' + advice + '\n\n' + _PARTIAL_BOUNDARIES['zh'] + '\n\n---'
+    advice = ('Save a plan matching the question and bind its dataset source. Keep existing results; '
+              'do not rerun computations just to create plan history. Bind the executed evidence and recheck.'
+              if 'completion_contract:select_playbooks_and_source' in result['missing'] else
+              'Address the missing evidence, then recheck. Compose missing reports from verified results rather '
+              'than refitting. State any additional data, permission or budget needed and pause for takeover.')
+    return notice + '\n\nRecommended next steps\n' + advice + '\n\n' + _PARTIAL_BOUNDARIES['en'] + '\n\n---'
 
 
 _DIAGNOSTIC_TYPES = frozenset({'model_diagnostic', 'lmm_analysis_evidence', 'analysis_completion_evidence'})
