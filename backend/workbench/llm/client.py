@@ -107,10 +107,21 @@ def deepseek_v4_request_config(config: LLMConfig) -> dict[str, Any]:
 STREAM_SILENCE_S = 30.0
 
 
+def provider_stream_wait_s(config: LLMConfig, *, default_s: float) -> float:
+    """Honor NVIDIA's configured queue wait at both streaming boundaries."""
+    if urlparse(config.base_url).hostname == "integrate.api.nvidia.com":
+        return config.timeout_s
+    return default_s
+
+
 def _stream_timeout(config: LLMConfig) -> httpx.Timeout:
     # Only silence after the connection is up is shortened: connecting can
     # legitimately be slow (a TLS handshake took 10-14 s in the same session).
-    return httpx.Timeout(config.timeout_s, read=min(config.timeout_s, STREAM_SILENCE_S))
+    # NVIDIA's free hosted models may queue before sending any response headers
+    # or tokens. Honor that provider's configured wait instead of silently
+    # replacing it with the short silence limit used by the other providers.
+    read = provider_stream_wait_s(config, default_s=min(config.timeout_s, STREAM_SILENCE_S))
+    return httpx.Timeout(config.timeout_s, read=read)
 
 
 def _positive_int(value: Any) -> int | None:

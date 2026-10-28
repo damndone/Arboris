@@ -1787,7 +1787,11 @@ def test_openai_adapter_abandons_a_no_progress_stream_and_sends_at_most_two_fres
     assert events[-1].error == "provider_no_progress"
 
 
-def test_openai_adapter_abort_event_interrupts_a_hung_provider_stream(monkeypatch) -> None:
+@pytest.mark.parametrize("base_url,override", [
+    ("https://api.example.com/v1", 1.0),
+    ("https://integrate.api.nvidia.com/v1", None),
+])
+def test_openai_adapter_abort_event_interrupts_a_hung_provider_stream(monkeypatch, base_url, override) -> None:
     started = asyncio.Event()
 
     async def fake_stream(*_args, **_kwargs):
@@ -1801,11 +1805,12 @@ def test_openai_adapter_abort_event_interrupts_a_hung_provider_stream(monkeypatc
         abort_event = asyncio.Event()
         adapter = OpenAICompatibleModelAdapter(
             LLMConfig(
-                base_url="https://api.example.com/v1",
+                base_url=base_url,
                 api_key=API_KEY,
                 model="test-model",
+                timeout_s=300.0,
             ),
-            idle_timeout_s=1.0,
+            **({"idle_timeout_s": override} if override is not None else {}),
         )
 
         async def collect():
@@ -2134,6 +2139,66 @@ def test_a_silent_stream_is_given_up_after_thirty_seconds_not_the_whole_timeout(
     assert timeout.write == 60.0
     short = LLMConfig(base_url="https://api.example.test", api_key=API_KEY, model="m", timeout_s=15.0)
     assert llm_client._stream_timeout(short).read == 15.0
+
+
+@pytest.mark.parametrize("seconds", [15.0, 300.0])
+def test_nvidia_stream_honors_the_configured_queue_wait(monkeypatch, seconds) -> None:
+    config = LLMConfig(base_url="https://integrate.api.nvidia.com/v1", api_key=API_KEY,
+                       model="nvidia/nemotron-3.5-super-vl-120b-a12b", timeout_s=seconds)
+    observed = []
+
+    def upstream(request):
+        observed.append(request.extensions["timeout"])
+        assert request.extensions["timeout"]["read"] == seconds
+        return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=(
+            'data: {"choices":[{"delta":{"content":"OK"},"finish_reason":null}]}\n\n'
+            'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'
+            'data: [DONE]\n\n'))
+
+    monkeypatch.setattr(llm_client, "_async_client_factory", lambda _: httpx.AsyncClient(transport=httpx.MockTransport(upstream)))
+
+    async def run():
+        return [event async for event in llm_client.async_stream_chat_completion(
+            [{"role": "user", "content": "Reply OK."}], config)]
+
+    events = asyncio.run(run())
+    assert len(observed) == 1
+    assert events[-1]["type"] == "done"
+
+
+@pytest.mark.parametrize("host,seconds,override,expected", [
+    ("integrate.api.nvidia.com", 300.0, None, 300.0),
+    ("integrate.api.nvidia.com", 15.0, None, 15.0),
+    ("integrate.api.nvidia.com", 300.0, 7.0, 7.0),
+    ("api.example.test", 300.0, None, 90.0),
+])
+def test_agent_queue_wait_matches_provider_policy(monkeypatch, host, seconds, override, expected):
+    from workbench.agent import model as agent_model
+
+    waits = []
+
+    async def upstream(*args, **kwargs):
+        yield {"type": "done", "finish_reason": "stop", "model": "test"}
+
+    original_next = agent_model._next_stream_item_or_signal
+
+    async def observe_next(stream, abort_event, timeout):
+        waits.append(timeout)
+        return await original_next(stream, abort_event, timeout)
+
+    monkeypatch.setattr(agent_model, "async_stream_chat_completion", upstream)
+    monkeypatch.setattr(agent_model, "_next_stream_item_or_signal", observe_next)
+    adapter = OpenAICompatibleModelAdapter(
+        LLMConfig(base_url=f"https://{host}/v1", api_key=API_KEY, model="test", timeout_s=seconds),
+        **({"idle_timeout_s": override} if override is not None else {}),
+    )
+
+    async def run():
+        return [event async for event in adapter.stream(
+            ModelRequest(messages=[{"role": "user", "content": "Hi"}]))]
+
+    assert asyncio.run(run())[-1].type == "done"
+    assert waits and set(waits) == {expected}
 
 
 def test_the_provider_connection_is_closed_when_the_answer_completes(monkeypatch) -> None:

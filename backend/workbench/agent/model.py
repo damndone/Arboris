@@ -15,6 +15,7 @@ from workbench.llm.client import (
     LLMUpstreamError,
     async_stream_chat_completion,
     deepseek_v4_request_config,
+    provider_stream_wait_s,
 )
 from workbench.llm.config import LLMConfig
 
@@ -273,8 +274,10 @@ class OpenAICompatibleModelAdapter:
     # and needed the person to say "continue".
     stall_retry_delays_s: tuple[float, ...] = (5.0, 15.0)
 
-    def __init__(self, config: LLMConfig, *, idle_timeout_s: float = 90.0) -> None:
+    def __init__(self, config: LLMConfig, *, idle_timeout_s: float | None = None) -> None:
         self.config = config
+        if idle_timeout_s is None:
+            idle_timeout_s = provider_stream_wait_s(config, default_s=90.0)
         if idle_timeout_s <= 0:
             raise ValueError("idle_timeout_s must be positive")
         self.idle_timeout_s = float(idle_timeout_s)
