@@ -217,9 +217,15 @@ def test_trace_lane_journals_then_deletes_each_run_and_gates_relative_time(lane,
     # worker. Real acceptance measurements retain the actual free-space gate.
     monkeypatch.setattr(shutil, 'disk_usage', lambda _: SimpleNamespace(free=10**12))
     original_prepare = lane.prepare_family
+    canonical_inputs = {}
     def temporary_prepare(case, out):
         assert out.is_relative_to(tmp_path), 'unit test must never register real benchmark inputs'
-        return original_prepare(case, out, rows=40)
+        manifest = original_prepare(case, out, rows=40)
+        payload = json.loads(manifest.read_text())
+        payload['source_stat']['device'] -= 100  # Same bytes after a volume remount.
+        manifest.write_text(json.dumps(payload))
+        canonical_inputs[manifest] = manifest.read_bytes()
+        return manifest
     monkeypatch.setattr(lane, 'prepare_family', temporary_prepare)
     monkeypatch.setattr(lane, 'idle_processes', lambda _: None)
     baseline = tmp_path / 'baseline'
@@ -266,6 +272,7 @@ def test_trace_lane_journals_then_deletes_each_run_and_gates_relative_time(lane,
     assert lane.ab_main(command) == expected
     assert calls == ['A']*5+list('AB'*5)
     assert not (out/'active').exists()
+    assert all(path.read_bytes() == raw for path, raw in canonical_inputs.items())
     report = json.loads((out/'ab-results.json').read_text())
     assert report['default_product_path'] is True
     assert report['time_acceptance_eligible'] is not traced

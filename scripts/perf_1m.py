@@ -469,12 +469,24 @@ def ab_main(argv):
     active = out/'active'
     def save():
         (out/'ab-results.json').write_text(json.dumps(report,indent=2))
+    (out/'inputs').mkdir()
     for case in args.cases:
-        manifest = prepare_family(case, (args.inputs or candidate/'local/perf-inputs').resolve()/case)
-        payload = json.loads(manifest.read_text())
+        canonical_manifest = prepare_family(case, (args.inputs or candidate/'local/perf-inputs').resolve()/case)
+        payload = json.loads(canonical_manifest.read_text())
+        # The canonical content digest was just verified by prepare_family.
+        # Device/inode identities belong to this measurement, not a prior
+        # filesystem mount. Keep the original registration immutable.
+        payload = {**payload, 'canonical_manifest': str(canonical_manifest),
+                   'canonical_manifest_sha256': source_digest(canonical_manifest),
+                   'origin_source_stat': payload['source_stat'],
+                   'source_stat': source_identity(Path(payload['source']))}
+        manifest = out/'inputs'/f'{case}.json'
+        with manifest.open('x') as stream:
+            json.dump(payload, stream, indent=2)
         records, calibration = {'A':[], 'B':[]}, []
         case_report = {'calibration':calibration, 'raw':records, 'input':payload}
         report['cases'][case] = case_report
+        save()
         def run(label):
             free = require_space(out, allow_low_space=args.allow_low_space_this_run)
             idle_processes(out)
