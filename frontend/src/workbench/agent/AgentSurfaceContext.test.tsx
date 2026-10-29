@@ -486,6 +486,30 @@ describe("AgentSurfaceProvider", () => {
     expect(mocks.continueAgentTurn).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["panel", "running"], ["column", "running"],
+    ["panel", "working"], ["column", "working"],
+    ["panel", "cancelling"], ["column", "cancelling"],
+  ] as const)("does not offer recovery while the restored %s turn is still %s", async (surface, status) => {
+    mocks.getAgentSession.mockResolvedValue({ ...session("saved"), status });
+    mocks.getAgentTurnState.mockResolvedValue({ turns: [{ turn_id: "original", status: "running", requires_reconcile: false }] });
+    function DurableState() {
+      const agent = useAgentSurface();
+      return <span data-testid="durable-state">{agent.durableTurns?.[0]?.status}</span>;
+    }
+    render(<MemoryRouter initialEntries={["/?agent_session=saved"]}><AgentSurfaceProvider projectRoot="/proj" runId="run-a">
+      <AgentPanel projectRoot="/proj" runId="run-a" compactHeader={surface === "column"} composer={surface === "column" ? <AgentColumnComposer /> : undefined} />
+      <DurableState />
+    </AgentSurfaceProvider></MemoryRouter>);
+    await waitFor(() => expect(screen.getByTestId("durable-state")).toHaveTextContent("running"));
+    expect(screen.getByRole("button", { name: "Stop Agent" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: /^Resume/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Previous turn unfinished|Unfinished turn:/)).not.toBeInTheDocument();
+    expect(mocks.resumeAgentTurn).not.toHaveBeenCalled();
+    expect(mocks.continueAgentTurn).not.toHaveBeenCalled();
+    expect(mocks.sendAgentTurn).not.toHaveBeenCalled();
+  });
+
   it.each(["panel", "column"] as const)("shows a restored interrupted turn instead of stale running progress in the %s", async surface => {
     let finishStalePoll!: (value: ReturnType<typeof session>) => void;
     const staleSession = { ...session("saved"), status: "running" };
@@ -977,11 +1001,18 @@ describe("AgentSurfaceProvider", () => {
     mocks.getAgentSession.mockResolvedValue({ ...session("saved"), status: "running" });
     mocks.getAgentTurnState.mockResolvedValue({ turns: [{ turn_id: "original-turn", status: "running", requires_reconcile: false }] });
     mocks.abortAgentTurn.mockRejectedValueOnce(new ApiError(500, "Cancellation service failed", "AGENT_ABORT_FAILED"));
-    render(<MemoryRouter initialEntries={["/?agent_session=saved"]}><AgentSurfaceProvider projectRoot="/proj" runId="run-a"><AgentPanel projectRoot="/proj" runId="run-a" /></AgentSurfaceProvider></MemoryRouter>);
+    function RecoveryState() {
+      const agent = useAgentSurface();
+      return <span data-testid="retained-recovery-state">{agent.durableTurns?.map(turn => `${turn.turn_id}:${turn.status}`).join(",")}</span>;
+    }
+    render(<MemoryRouter initialEntries={["/?agent_session=saved"]}><AgentSurfaceProvider projectRoot="/proj" runId="run-a">
+      <AgentPanel projectRoot="/proj" runId="run-a" /><RecoveryState />
+    </AgentSurfaceProvider></MemoryRouter>);
     fireEvent.click(await screen.findByRole("button", { name: "Stop Agent" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(/server may still be running/i);
-    expect(screen.getByRole("button", { name: "Resume original turn" })).toBeInTheDocument();
-    expect(screen.getByText(/Unfinished turn: running/)).toBeInTheDocument();
+    expect(screen.getByTestId("retained-recovery-state")).toHaveTextContent("original-turn:running");
+    expect(screen.queryByRole("button", { name: "Resume original turn" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Unfinished turn: running/)).not.toBeInTheDocument();
     expect(screen.queryByTestId("agent-turn-error")).not.toBeInTheDocument();
     expect(screen.getByRole("status")).not.toHaveTextContent("cancelled");
     expect(screen.getByRole("button", { name: "Stop Agent" })).toBeEnabled();

@@ -1285,6 +1285,8 @@
 
 /* A stopped turn: a callout in the flow, never drawn over the conversation. */
 .wb-agent-callout { flex: 0 0 auto; margin: 6px 12px; padding: 8px 10px; border: 1px solid color-mix(in oklch, var(--status-fails-fg) 30%, transparent); border-radius: 8px; background: color-mix(in oklch, var(--status-fails-fg) 7%, var(--bg-card)); color: var(--status-fails-fg); font-size: 12px; line-height: 1.4; }
+.wb-agent-stop-note { display: block; margin-top: 4px; }
+.wb-agent-stop-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 
 /* The full (non-column) panel header: mono, one line. */
 .wb-agent-panel__header { display: flex; align-items: center; gap: 10px; font-size: 11px; font-family: var(--font-mono, ui-monospace, monospace); }

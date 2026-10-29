@@ -387,6 +387,125 @@ describe("AgentPanel", () => {
     );
   });
 
+  it("guides an output-limited turn to its own receipts and exactly bound operation without continuing", () => {
+    const openNavigation = vi.fn().mockReturnValue(true);
+    const context = value({ sessionStatus: "failed", openNavigation, resumeTurn: vi.fn(), continueTurn: vi.fn(), messages: [
+      agentMessageFixture({ entry_id: "old-user", role: "user", content: "Earlier work" }),
+      agentMessageFixture({ entry_id: "old-tool", role: "tool", content: JSON.stringify({ ok: true, output: { operation: { record_id: "old-operation", status: "completed" } } }) }),
+      agentMessageFixture({ entry_id: "old-answer", role: "assistant", content: "Earlier work recorded.", stop_reason: "stop" }),
+      agentMessageFixture({ entry_id: "current-user", role: "user", content: "Finish this report" }),
+      agentMessageFixture({ entry_id: "current-tool", role: "tool", name: "run_operation", content: JSON.stringify({ ok: true, output: { operation: { record_id: "current-operation", status: "completed" } } }), navigation: [
+        { kind: "operation", id: "old-operation", label: "Earlier operation", relation: "audit", available: true, href: { view: "agent", operation_record_id: "old-operation" } },
+        { kind: "operation", id: "current-operation", label: "Current recorded operation", relation: "audit", available: true, href: { view: "agent", operation_record_id: "current-operation" } },
+      ] }),
+      // Actual terminal metadata from the v3 IV recording (source SHA256 e7623e540ddf26f5825a1ee1695d2b5d128aa781e10f08d7bdb94119fda6c84a).
+      agentMessageFixture({ entry_id: "6e5b49a69da34aa18da4010b86f21288", role: "assistant", content: "本次回复达到模型输出上限，没有写完，不能作为完整回答；其中的数字尚未核验。", stop_reason: "error", error: "provider_output_limit" }),
+    ] });
+    render(<AgentSurfaceContext.Provider value={context}><AgentPanel runId="run-a" projectRoot="/proj" /></AgentSurfaceContext.Provider>);
+    const callout = screen.getByTestId("agent-turn-error");
+    expect(callout).toHaveTextContent("The model reached its response limit before finishing");
+    const current = screen.getByTestId("agent-reasoning-current-user");
+    const old = screen.getByTestId("agent-reasoning-old-user");
+    const scroll = vi.fn();
+    Object.defineProperty(current, "scrollIntoView", { configurable: true, value: scroll });
+    fireEvent.click(current.querySelector("summary")!);
+    expect(current).not.toHaveAttribute("open");
+    fireEvent.click(within(callout).getByRole("button", { name: "Review recorded steps" }));
+    expect(current).toHaveAttribute("open");
+    expect(current.querySelector("summary")).toHaveFocus();
+    expect(scroll).toHaveBeenCalled();
+    expect(old).not.toHaveAttribute("open");
+    fireEvent.click(within(callout).getByRole("button", { name: "Open recorded operation" }));
+    expect(openNavigation).toHaveBeenCalledWith(context.messages[4].navigation[1]);
+    expect(screen.getByText("本次回复达到模型输出上限，没有写完，不能作为完整回答；其中的数字尚未核验。")).toBeVisible();
+    expect(context.sendPrompt).not.toHaveBeenCalled();
+    expect(context.resumeTurn).not.toHaveBeenCalled();
+    expect(context.continueTurn).not.toHaveBeenCalled();
+  });
+
+  it("offers the stopped reply when this turn has no receipts instead of linking historical work", () => {
+    const context = value({ sessionStatus: "failed", openNavigation: vi.fn(), messages: [
+      agentMessageFixture({ entry_id: "old-user", role: "user", content: "Earlier work" }),
+      agentMessageFixture({ entry_id: "old-tool", role: "tool", content: JSON.stringify({ ok: true, output: { operation: { record_id: "old-operation", status: "completed" } } }), navigation: [
+        { kind: "operation", id: "old-operation", label: "Earlier operation", relation: "audit", available: true, href: { view: "agent", operation_record_id: "old-operation" } },
+      ] }),
+      agentMessageFixture({ entry_id: "old-answer", role: "assistant", content: "Earlier work recorded.", stop_reason: "stop" }),
+      agentMessageFixture({ entry_id: "current-user", role: "user", content: "A new task" }),
+      agentMessageFixture({ entry_id: "current-error", role: "assistant", content: "The request timed out before a result was recorded.", stop_reason: "error", error: "agent_timeout" }),
+    ] });
+    render(<AgentSurfaceContext.Provider value={context}><AgentPanel runId="run-a" projectRoot="/proj" /></AgentSurfaceContext.Provider>);
+    const callout = screen.getByTestId("agent-turn-error");
+    expect(callout).toHaveTextContent("The time limit was reached before the request finished");
+    expect(callout).toHaveTextContent("No tool receipts are recorded in this turn");
+    expect(within(callout).queryByRole("button", { name: "Review recorded steps" })).not.toBeInTheDocument();
+    expect(within(callout).queryByRole("button", { name: "Open recorded operation" })).not.toBeInTheDocument();
+    const reply = document.querySelector<HTMLElement>('[data-entry-id="current-error"]')!;
+    const scroll = vi.fn();
+    Object.defineProperty(reply, "scrollIntoView", { configurable: true, value: scroll });
+    fireEvent.click(within(callout).getByRole("button", { name: "Review stopped reply" }));
+    expect(reply).toHaveFocus();
+    expect(scroll).toHaveBeenCalled();
+    expect(context.openNavigation).not.toHaveBeenCalled();
+    expect(context.sendPrompt).not.toHaveBeenCalled();
+  });
+
+  it("keeps unreadable stopped-turn receipts explicit and offers no unbound operation", () => {
+    render(<AgentSurfaceContext.Provider value={value({ sessionStatus: "failed", openNavigation: vi.fn(), messages: [
+      agentMessageFixture({ entry_id: "user", role: "user", content: "Finish the analysis" }),
+      agentMessageFixture({ entry_id: "broken-tool", role: "tool", name: "inspect_model_result", content: "Unreadable receipt body", navigation: [
+        { kind: "operation", id: "old-operation", label: "Unbound operation", relation: "audit", available: true, href: { view: "agent", operation_record_id: "old-operation" } },
+      ] }),
+      agentMessageFixture({ entry_id: "error", role: "assistant", content: "Stopped with work unfinished.", stop_reason: "error", error: "analysis_recovery_limit" }),
+    ] })}><AgentPanel runId="run-a" projectRoot="/proj" /></AgentSurfaceContext.Provider>);
+    const callout = screen.getByTestId("agent-turn-error");
+    expect(callout).toHaveTextContent("Some receipt details could not be read");
+    expect(screen.getByTestId("agent-message-tool")).toHaveTextContent("Unreadable receipt body");
+    expect(within(callout).getByRole("button", { name: "Review recorded steps" })).toBeEnabled();
+    expect(within(callout).queryByRole("button", { name: "Open recorded operation" })).not.toBeInTheDocument();
+  });
+
+  it("does not offer an unavailable recorded operation as a recovery result", () => {
+    render(<AgentSurfaceContext.Provider value={value({ sessionStatus: "failed", openNavigation: vi.fn(), messages: [
+      agentMessageFixture({ entry_id: "user", role: "user", content: "Finish the analysis" }),
+      agentMessageFixture({ entry_id: "tool", role: "tool", name: "run_operation", content: JSON.stringify({ ok: true, output: { operation: { record_id: "missing-operation", status: "completed" } } }), navigation: [
+        { kind: "operation", id: "missing-operation", label: "Missing operation", relation: "audit", available: false, reason: "The operation record is unavailable", href: { view: "agent", operation_record_id: "missing-operation" } },
+      ] }),
+      agentMessageFixture({ entry_id: "error", role: "assistant", content: "Stopped.", stop_reason: "error", error: "agent_timeout" }),
+    ] })}><AgentPanel runId="run-a" projectRoot="/proj" /></AgentSurfaceContext.Provider>);
+    expect(within(screen.getByTestId("agent-turn-error")).getByRole("button", { name: "Review recorded steps" })).toBeEnabled();
+    expect(within(screen.getByTestId("agent-turn-error")).queryByRole("button", { name: "Open recorded operation" })).not.toBeInTheDocument();
+  });
+
+  it("does not link an operation when the navigation target disagrees with this turn's receipt", () => {
+    render(<AgentSurfaceContext.Provider value={value({ sessionStatus: "failed", openNavigation: vi.fn(), messages: [
+      agentMessageFixture({ entry_id: "user", role: "user", content: "Finish the analysis" }),
+      agentMessageFixture({ entry_id: "tool", role: "tool", content: JSON.stringify({ ok: true, output: { operation: { record_id: "current-operation" } } }), navigation: [
+        { kind: "operation", id: "current-operation", label: "Mismatched operation", relation: "audit", available: true, href: { view: "agent", operation_record_id: "old-operation" } },
+      ] }),
+      agentMessageFixture({ entry_id: "error", role: "assistant", content: "Stopped.", stop_reason: "error", error: "agent_timeout" }),
+    ] })}><AgentPanel runId="run-a" projectRoot="/proj" /></AgentSurfaceContext.Provider>);
+    const callout = screen.getByTestId("agent-turn-error");
+    expect(within(callout).getByRole("button", { name: "Review recorded steps" })).toBeEnabled();
+    expect(within(callout).queryByRole("button", { name: "Open recorded operation" })).not.toBeInTheDocument();
+  });
+
+  it("keeps a failed viewing action visible without starting recovery or analysis", () => {
+    const context = value({ sessionStatus: "failed", openNavigation: vi.fn().mockReturnValue(false), resumeTurn: vi.fn(), continueTurn: vi.fn(), messages: [
+      agentMessageFixture({ entry_id: "user", role: "user", content: "Finish the analysis" }),
+      agentMessageFixture({ entry_id: "tool", role: "tool", content: JSON.stringify({ ok: true, output: { operation: { record_id: "current-operation" } } }), navigation: [
+        { kind: "operation", id: "current-operation", label: "Recorded operation", relation: "audit", available: true, href: { view: "agent", operation_record_id: "current-operation" } },
+      ] }),
+      agentMessageFixture({ entry_id: "error", role: "assistant", content: "Stopped.", stop_reason: "error", error: "agent_timeout" }),
+    ] });
+    render(<AgentSurfaceContext.Provider value={context}><AgentPanel runId="run-a" projectRoot="/proj" /></AgentSurfaceContext.Provider>);
+    const callout = screen.getByTestId("agent-turn-error");
+    fireEvent.click(within(callout).getByRole("button", { name: "Open recorded operation" }));
+    expect(within(callout).getByRole("alert")).toHaveTextContent("The recorded operation could not be opened");
+    expect(context.sendPrompt).not.toHaveBeenCalled();
+    expect(context.resumeTurn).not.toHaveBeenCalled();
+    expect(context.continueTurn).not.toHaveBeenCalled();
+  });
+
   it.each(["agent_timeout", "tool_runtime_error"])("retains completed work when reporting %s", error => {
     render(<AgentSurfaceContext.Provider value={value({messages: [
       agentMessageFixture({entry_id: "u1", role: "user", content: "Fit the model."}),

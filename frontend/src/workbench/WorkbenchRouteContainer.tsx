@@ -866,7 +866,6 @@ function ForestWorkbench({
           >
             <LineageBridge model={model}>
               <CompareProvider>
-                <AgentSurfaceProvider projectRoot={projectRoot} runId={shellRunId}>
                   <ReportWorkspaceProvider projectRoot={projectRoot}>
                     <WorkbenchShell
                       runId={shellRunId}
@@ -886,7 +885,6 @@ function ForestWorkbench({
                       onOpenSettings={() => setSettingsOpen(true)}
                     />
                   </ReportWorkspaceProvider>
-                </AgentSurfaceProvider>
               </CompareProvider>
             </LineageBridge>
           </DraftActionsProvider>
@@ -988,7 +986,6 @@ function LegacyGraphWorkbench({
   return (
     <WorkbenchStateProvider runId={runId} validNodeKeys={validNodeKeys}>
       <LineageBridge model={model}>
-        <AgentSurfaceProvider projectRoot={projectRoot} runId={runId}>
           <ReportWorkspaceProvider projectRoot={projectRoot}>
             <WorkbenchShell
               runId={runId}
@@ -996,7 +993,6 @@ function LegacyGraphWorkbench({
               onOpenSettings={onOpenSettings}
             />
           </ReportWorkspaceProvider>
-        </AgentSurfaceProvider>
       </LineageBridge>
     </WorkbenchStateProvider>
   );
@@ -1405,10 +1401,17 @@ function WorkbenchShell({
   const openAgentNavigation = useMemo(
     () => (ref: Parameters<typeof applyAgentNavigationRef>[1]) => {
       if (!ref.available) return false;
-      setNavigationParams(applyAgentNavigationRef(navigationParams, ref));
+      let destination = ref;
+      if (ref.href.view === "graph" && !ref.href.forest_node_key && ref.href.node_ref) {
+        const node = model.nodes.find(node => isHeadSetNode(node)
+          ? node.opNodeId === ref.href.node_ref && node.runs.includes(ref.href.run_id ?? runId)
+          : node.nodeKey === ref.href.node_ref && (!ref.href.run_id || ref.href.run_id === runId));
+        if (node) destination = { ...ref, href: { ...ref.href, forest_node_key: node.nodeKey } };
+      }
+      setNavigationParams(applyAgentNavigationRef(navigationParams, destination));
       return true;
     },
-    [navigationParams, setNavigationParams],
+    [model.nodes, navigationParams, runId, setNavigationParams],
   );
 
   // Selected-node lookup with the V1.5.0 cross-run leak guard
@@ -1680,6 +1683,7 @@ function WorkbenchShell({
 
   return (
       <AgentNavigationContext.Provider value={openAgentNavigation}>
+        <AgentSurfaceProvider projectRoot={projectRoot} runId={runId}>
         <WorkbenchWorkspace
           runId={runId}
           projectRoot={projectRoot}
@@ -1691,6 +1695,7 @@ function WorkbenchShell({
           onOpenSettings={onOpenSettings}
           overlays={overlays}
         />
+        </AgentSurfaceProvider>
       </AgentNavigationContext.Provider>
     );
 }

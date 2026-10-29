@@ -69,7 +69,7 @@ export function AgentColumnComposer() {
     if (!busy) void sendPrompt(prompt);
     else if (canQueue) void agent.queueTurnMessage?.(steer ? "steer" : "follow_up", prompt);
   };
-  const unfinished = !agent.isSubmitting ? agent.durableTurns ?? [] : [];
+  const unfinished = !busyNow ? agent.durableTurns ?? [] : [];
 
   return (
     <div className="ws-composer-wrap">

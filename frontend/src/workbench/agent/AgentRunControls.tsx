@@ -23,12 +23,12 @@ export function AgentRunControls() {
         if (delivery) void agent.queueTurnMessage?.(delivery,agent.prompt);
       }}>Send active-turn message</button>
     </>}
-    {!agent.isSubmitting && turns.map(turn => <div key={turn.turn_id}>
+    {!active && turns.map(turn => <div key={turn.turn_id}>
       <span>Unfinished turn: {turn.status}{turn.requires_reconcile ? " · reconciliation required" : ""}</span>
       <button onClick={() => void agent.resumeTurn?.(turn.turn_id)}>Resume original turn</button>
       <small>The server verifies whether the original owner is still running before recovery.</small>
     </div>)}
-    {!agent.isSubmitting && turns.length > 0 && agent.sessionId && <small>Resuming starts a model request.</small>}
+    {!active && turns.length > 0 && agent.sessionId && <small>Resuming starts a model request.</small>}
     {agent.queueMessageNotice && <span role="status">{agent.queueMessageNotice}</span>}
   </div>;
 }

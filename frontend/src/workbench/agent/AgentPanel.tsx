@@ -7,7 +7,7 @@ import { useAgentSurface } from "./AgentSurfaceContext";
 import { agentAuditExportUrl } from "./agentApi";
 import { AgentComposer } from "./AgentComposer";
 import { agentTurnActive } from "./AgentRunControls";
-import type { AgentMessage } from "./agentTypes";
+import type { AgentMessage, AgentNavigationRef } from "./agentTypes";
 import { AgentRowsTable, shownRows } from "./AgentRowsTable";
 import { AgentTargetRecovery } from "./AgentTargetRecovery";
 import { renderMarkdown } from "../../report/markdown";
@@ -79,6 +79,15 @@ function terminalFailureMessage(
     return "The Agent reached its step limit after creating a proposal that is still awaiting your review. The proposal will not execute automatically; confirm, revise, or decline it below.";
   }
   const retained = "Completed operations and results remain recorded. Review the steps and resolve unfinished work before continuing.";
+  if (error === "provider_output_limit") {
+    return "The model reached its response limit before finishing. The reply is incomplete. Completed operations and results remain recorded. Review the recorded work, then request the remaining report in smaller steps.";
+  }
+  if (error === "agent_timeout") {
+    return `The time limit was reached before the request finished. ${retained}`;
+  }
+  if (error === "analysis_recovery_limit") {
+    return "The Agent stopped after reaching its recovery limit. Completed operations and results remain recorded. Inspect the failed step and resolve its recorded cause before continuing.";
+  }
   if (error === "LLMUpstreamError" || error.startsWith("LLMUpstreamError:")) {
     return `The configured provider did not return a usable response. Check the selected model in Settings. ${retained}`;
   }
@@ -86,6 +95,30 @@ function terminalFailureMessage(
     return `The Agent tool runtime stopped unexpectedly. ${retained}`;
   }
   return `The Agent stopped before completing the request (${error}). ${retained}`;
+}
+
+/** A viewing shortcut must be bound by this turn's receipt, not session history. */
+function stoppedOperation(receipts: AgentMessage[]): { ref: AgentNavigationRef | null; unreadable: boolean } {
+  let ref: AgentNavigationRef | null = null;
+  let unreadable = false;
+  for (const receipt of receipts) {
+    let result: { output?: { operation?: { record_id?: unknown } } };
+    try {
+      result = JSON.parse(receipt.content);
+    } catch {
+      unreadable = true;
+      continue;
+    }
+    if (!result || typeof result !== "object" || Array.isArray(result)) {
+      unreadable = true;
+      continue;
+    }
+    const recordId = result.output?.operation?.record_id;
+    if (typeof recordId !== "string" || !recordId) continue;
+    const available = receipt.navigation.find(link => link.kind === "operation" && link.available && link.id === recordId && link.href.operation_record_id === recordId);
+    if (available) ref = available;
+  }
+  return { ref, unreadable };
 }
 
 function useElapsedSeconds(startedAt: number | null | undefined, active: boolean): number | null {
@@ -273,6 +306,9 @@ export function AgentPanel({
 }) {
   const agent = useAgentSurface();
   const transcriptRef = useRef<HTMLDivElement | null>(null);
+  const stoppedWorkRef = useRef<HTMLDetailsElement | null>(null);
+  const stoppedReplyRef = useRef<HTMLDivElement | null>(null);
+  const [reviewProblem, setReviewProblem] = useState<string | null>(null);
   const shouldFollowTranscriptRef = useRef(true);
   const hasMeasuredTranscriptRef = useRef(false);
   const turnActive = agentTurnActive(agent);
@@ -288,11 +324,17 @@ export function AgentPanel({
     (link) => link.kind === "operation" && typeof link.href.session_id === "string",
   )?.href.session_id;
   const turns = buildTurns(agent.messages);
+  const currentTurn = turns[turns.length - 1];
+  const stoppedReply = currentTurn ? [...currentTurn.responses].reverse().find(message => message.stop_reason === "error") : undefined;
+  const inspectCurrentTurn = Boolean(terminalFailure && (stoppedReply || agent.error));
+  const stoppedReceipts = inspectCurrentTurn ? currentTurn?.steps.filter(message => message.role === "tool") ?? [] : [];
+  const stoppedResult = stoppedOperation(stoppedReceipts);
   const lastActivityTurn = [...turns].reverse().find(turn => turn.steps.length > 0 || turn.drafts.length > 0);
   const pendingProposals = agent.proposals.filter((proposal) => proposal.status === "pending");
   const settledProposals = agent.proposals.filter((proposal) => proposal.status !== "pending");
   const receipts = receiptsByTurn(turns, settledProposals);
   const pinned = new Set((agent.chapters ?? []).map((chapter) => chapter.entry_id));
+  useEffect(() => { setReviewProblem(null); }, [agent.sessionId, currentTurn?.id, terminalFailure]);
   useLayoutEffect(() => {
     const transcript = transcriptRef.current;
     if (!transcript) return;
@@ -305,6 +347,21 @@ export function AgentPanel({
       transcript.scrollTop = transcript.scrollHeight;
     }
   }, [agent.activeToolCalls, agent.liveResponseText, agent.messages]);
+  const reviewStoppedContent = (kind: "steps" | "reply") => {
+    const target = kind === "steps" ? stoppedWorkRef.current : stoppedReplyRef.current;
+    if (!target) {
+      setReviewProblem("The recorded content could not be opened in this view. Reopen the saved conversation to inspect it.");
+      return;
+    }
+    setReviewProblem(null);
+    if (kind === "steps") {
+      stoppedWorkRef.current!.open = true;
+      stoppedWorkRef.current!.querySelector("summary")?.focus();
+    } else {
+      target.focus();
+    }
+    target.scrollIntoView({ block: "nearest" });
+  };
   const renderTranscriptMessage = (message: AgentMessage) => {
     const sourceRef = message.navigation?.find(
       (link) => link.kind === "graph_node" && link.available,
@@ -351,6 +408,8 @@ export function AgentPanel({
         data-testid={`agent-message-${message.role}`}
         data-role={message.role}
         data-entry-id={message.entry_id}
+        ref={inspectCurrentTurn && message.entry_id === stoppedReply?.entry_id ? stoppedReplyRef : undefined}
+        tabIndex={inspectCurrentTurn && message.entry_id === stoppedReply?.entry_id ? -1 : undefined}
         className={`wb-agent-terminal-line${message.role === "tool" ? " wb-agent-tool-receipt" : ""}`}
       >
         <span className="wb-agent-terminal-marker" title={roleLabel(message.role)}>
@@ -432,9 +491,22 @@ export function AgentPanel({
       {!compactHeader && <AgentUsagePanel events={agent.providerSteps ?? []} />}
       <AgentPlanPanel key={agent.sessionId ?? "new"} />
       {terminalFailure && (
-        <p data-testid="agent-turn-error" role="status" className="wb-agent-callout">
-          {terminalFailure}
-        </p>
+        <div data-testid="agent-turn-error" role="status" className="wb-agent-callout">
+          <span>{terminalFailure}</span>
+          {inspectCurrentTurn && stoppedReceipts.length === 0 && <small className="wb-agent-stop-note">No tool receipts are recorded in this turn.</small>}
+          {stoppedResult.unreadable && <small className="wb-agent-stop-note">Some receipt details could not be read. Review the recorded text before continuing.</small>}
+          {(stoppedReceipts.length > 0 || (inspectCurrentTurn && stoppedReply?.content.trim())) && <div className="wb-agent-stop-actions">
+            {stoppedReceipts.length > 0
+              ? <button type="button" className="wb-agent-message-link" onClick={() => reviewStoppedContent("steps")}>Review recorded steps</button>
+              : <button type="button" className="wb-agent-message-link" onClick={() => reviewStoppedContent("reply")}>Review stopped reply</button>}
+            {stoppedResult.ref && <button type="button" className="wb-agent-message-link" disabled={!agent.openNavigation}
+              title={!agent.openNavigation ? "Navigation is unavailable in this view" : stoppedResult.ref.label}
+              onClick={() => {
+                setReviewProblem(agent.openNavigation?.(stoppedResult.ref!) ? null : "The recorded operation could not be opened. Review its source link in the recorded steps.");
+              }}>Open recorded operation</button>}
+          </div>}
+          {reviewProblem && <small role="alert" className="wb-agent-stop-note">{reviewProblem}</small>}
+        </div>
       )}
       <div
         ref={transcriptRef}
@@ -482,7 +554,7 @@ export function AgentPanel({
             <div key={turn.id} className="wb-agent-turn">
               {turn.user && renderTranscriptMessage(turn.user)}
               {(turn.steps.length > 0 || turn.drafts.length > 0) && (
-                <details data-testid={`agent-reasoning-${turn.id}`} className="wb-agent-reasoning" open={turn === lastActivityTurn}>
+                <details ref={latest && inspectCurrentTurn ? stoppedWorkRef : undefined} data-testid={`agent-reasoning-${turn.id}`} className="wb-agent-reasoning" open={turn === lastActivityTurn}>
                   <summary>
                     <span>
                       {live ? `${turn.steps.length} recorded steps` : workSummary(turn.steps.length, turn.drafts.length)}
