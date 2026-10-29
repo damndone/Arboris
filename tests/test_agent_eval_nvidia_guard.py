@@ -17,6 +17,7 @@ BASE = 'https://integrate.api.nvidia.com/v1'
 MODEL = 'nvidia/nemotron-3-ultra-550b-a55b'
 BODY = {'model': MODEL, 'max_tokens': 8192}
 USAGE = {'prompt_tokens': 20, 'completion_tokens': 3}
+PARTIAL = b'data: {"choices":[{"delta":{"content":"partial public answer"},"finish_reason":null}]}\n\n'
 
 
 @pytest.fixture(autouse=True)
@@ -85,6 +86,54 @@ def test_overlapping_request_is_refused(tmp_path, monkeypatch):
     with pytest.raises(budget.BudgetStop, match='unsettled'):
         g.reserve(json.dumps(BODY).encode())
     assert g.state['requests'] == 1
+
+
+def test_explicit_incomplete_stream_skip_fails_only_task_without_retry_or_zero_settlement(tmp_path,monkeypatch):
+    from agent_eval.recorder import provider_tape
+    from workbench.agent.model import ModelRequest, OpenAICompatibleModelAdapter
+    from workbench.llm.config import LLMConfig
+    g,_=guard(tmp_path,monkeypatch,skip_incomplete_stream_task=True)
+    calls=[];events=[]
+    def handle(request):
+        calls.append(request.content)
+        return httpx.Response(200,headers={'content-type':'text/event-stream'},content=PARTIAL)
+    monkeypatch.setattr(httpx,'AsyncHTTPTransport',lambda:httpx.MockTransport(handle))
+    async def run():
+        with provider_tape(tmp_path/'tape.jsonl',budget=g):
+            adapter=OpenAICompatibleModelAdapter(LLMConfig(base_url=BASE,api_key='offline',model=MODEL,provider_id='nvidia-nemotron-free'))
+            async for event in adapter.stream(ModelRequest(messages=[{'role':'user','content':'offline partial task'}])):events.append(event)
+    with pytest.raises(budget.TaskStop,match='incomplete stream'):asyncio.run(run())
+    assert len(calls)==1 and all(e.type not in {'done','tool_call'} for e in events)
+    state=g.state
+    assert not state['stopped'] and state['requests']==1 and state['calls']==0 and not state['reservations']
+    assert len(state['accepted_unknown_requests'])==1 and state['charges']==[]
+    assert state['accepted_unknown_requests'][0]['retry_ticket'] is None
+    key=g.reserve(json.dumps({**BODY,'messages':[{'role':'user','content':'a different task'}]}).encode())
+    g.settle(key,USAGE)
+    assert g.state['requests']==2 and g.state['calls']==1
+
+
+@pytest.mark.parametrize('raw',[PARTIAL+b'data: [DONE]\n\n',
+    PARTIAL+b'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n',
+    PARTIAL+b'data: {"choices":[],"usage":{"credit":1}}\n\n',
+    PARTIAL+b'data: {"error":{"message":"failure"}}\n\n',
+    PARTIAL+b'data: invalid-json\n\n',
+    b'data: {"choices":[{"delta":{"tool_calls":[{}]},"finish_reason":null}]}\n\n'])
+def test_incomplete_skip_does_not_release_other_accounting_or_protocol_errors(tmp_path,monkeypatch,raw):
+    g,_=guard(tmp_path,monkeypatch,skip_incomplete_stream_task=True)
+    async def run():
+        transport=_RecordingTransport(_Tape(tmp_path/'tape.jsonl','record'),
+            httpx.MockTransport(lambda request:httpx.Response(200,headers={'content-type':'text/event-stream'},content=raw)),budget=g)
+        async with httpx.AsyncClient(transport=transport) as client:
+            await client.post(BASE+'/chat/completions',json=BODY)
+    with pytest.raises(budget.BudgetStop):asyncio.run(run())
+    assert g.stopped and len(g.state['reservations'])==1
+
+
+def test_incomplete_skip_policy_is_pinned_to_new_ledger(tmp_path,monkeypatch):
+    g,_=guard(tmp_path,monkeypatch,skip_incomplete_stream_task=True);before=g.path.read_bytes()
+    with pytest.raises(ValueError,match='incomplete-stream policy'):guard(tmp_path,monkeypatch)
+    assert g.path.read_bytes()==before
 
 
 @pytest.mark.parametrize('status', [201, 302, 400, 429, 500])
@@ -210,9 +259,18 @@ def test_cli_passes_explicit_storage_exception_to_guard(tmp_path, monkeypatch):
     monkeypatch.setattr(module, 'NvidiaFreeEndpointGuard', stopped_guard)
     monkeypatch.setattr(sys, 'argv', ['agent_eval_run.py', '--out', str(tmp_path / 'run'),
         '--mode', 'ask', '--nvidia-free-ledger', str(tmp_path / 'ledger.json'),
-        '--nvidia-free-round', 'dev8', '--allow-low-space-this-round'])
+        '--nvidia-free-round', 'dev8', '--allow-low-space-this-round', '--nvidia-skip-incomplete-stream-task'])
     assert module.main() == 86
     assert captured['allow_low_space_this_round'] is True
+    assert captured['skip_incomplete_stream_task'] is True
+
+
+def test_cli_incomplete_skip_requires_explicit_nvidia_endpoint(tmp_path,monkeypatch):
+    module=run_module()
+    monkeypatch.setattr(module,'load_llm_config',lambda:pytest.fail('invalid skip reached provider config'))
+    monkeypatch.setattr(sys,'argv',['agent_eval_run.py','--out',str(tmp_path/'run'),'--nvidia-skip-incomplete-stream-task'])
+    with pytest.raises(SystemExit) as exc:module.main()
+    assert exc.value.code==2
 
 
 @pytest.mark.parametrize('extra', [['--suite', 'heldout'], ['--transport', 'http']])

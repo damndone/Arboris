@@ -96,6 +96,8 @@ def main() -> int:
                         help="explicit v2 recovery policy: additionally permit ReadError before any response headers/body")
     parser.add_argument("--nvidia-recover-unanswered-protocol-error", action="store_true",
                         help="explicit v3 policy: additionally permit RemoteProtocolError before any response headers/body")
+    parser.add_argument("--nvidia-skip-incomplete-stream-task", action="store_true",
+                        help="explicit task-only failure for partial-output SSE EOF without finish/DONE/usage; never retry")
     parser.add_argument("--allow-low-space-this-round", action="store_true",
                         help="explicit user-authorized storage exception; never releases financial stops")
     args = parser.parse_args()
@@ -109,6 +111,8 @@ def main() -> int:
         parser.error("unanswered ReadError recovery requires --nvidia-overload-recovery-ledger with a new v2 ledger")
     if args.nvidia_recover_unanswered_protocol_error and not args.nvidia_recover_unanswered_read_error:
         parser.error("protocol recovery requires --nvidia-recover-unanswered-read-error with a new v3 ledger")
+    if args.nvidia_skip_incomplete_stream_task and args.nvidia_free_ledger is None:
+        parser.error("incomplete-stream task skip requires the explicit NVIDIA endpoint guard")
     if args.nvidia_free_round is not None:
         if args.transport != "headless" or args.mode not in {"ask", "auto"} or args.repeat != 1:
             parser.error("NVIDIA round requires headless Ask/Auto and repeat=1")
@@ -133,6 +137,7 @@ def main() -> int:
                 overload_recovery_ledger=args.nvidia_overload_recovery_ledger,
                 recover_unanswered_read_errors=args.nvidia_recover_unanswered_read_error,
                 recover_unanswered_protocol_errors=args.nvidia_recover_unanswered_protocol_error,
+                skip_incomplete_stream_task=args.nvidia_skip_incomplete_stream_task,
                 allow_low_space_this_round=args.allow_low_space_this_round)
         except ValueError as exc:
             parser.error(str(exc))
@@ -202,6 +207,7 @@ def main() -> int:
             "overload_recovery_ledger": str(args.nvidia_overload_recovery_ledger) if args.nvidia_overload_recovery_ledger is not None else None,
             "recover_unanswered_read_errors": args.nvidia_recover_unanswered_read_error,
             "recover_unanswered_protocol_errors": args.nvidia_recover_unanswered_protocol_error,
+            "skip_incomplete_stream_task": args.nvidia_skip_incomplete_stream_task,
             "overload_recovery_schema": budget.overload_recovery.schema if budget.overload_recovery is not None else None,
             "overload_recovery": ({"shared_retry_limit": 10, "per_request_retry_limit": 2,
                 "delays_s": [60, 120], "eligibility": "complete observed error-only SSE 503 plus DONE; no generated output"
@@ -271,13 +277,14 @@ def main() -> int:
                         progress_path=directory / "conversation-progress.json")
                 record["status"] = "ran"
             except TaskStop as exc:
-                # This task ended on repeated provider interruptions; the next task runs.
+                # An explicitly permitted interruption/incomplete reply ends only this task.
                 record["status"] = "task_stopped"
                 record["error"] = str(exc)
                 progress = directory / "conversation-progress.json"
                 if progress.exists():
                     record["conversation"] = json.loads(progress.read_text())
                     record["conversation"]["stop_reason"] = "provider_interruptions"
+                    record["conversation"]["completed_marker"] = False
             except BudgetStop as exc:
                 record["status"] = "round_budget_stopped"
                 record["error"] = str(exc)

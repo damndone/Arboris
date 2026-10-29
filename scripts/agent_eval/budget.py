@@ -429,7 +429,7 @@ class NvidiaFreeEndpointGuard(FreeRouteGuard):
 
     def __init__(self, path, *, provider_id, base_url, model, round_kind, overload_recovery_ledger=None,
                  recover_unanswered_read_errors=False, allow_low_space_this_round=False,
-                 recover_unanswered_protocol_errors=False):
+                 recover_unanswered_protocol_errors=False, skip_incomplete_stream_task=False):
         if (provider_id, base_url, model) != (NVIDIA_PROVIDER_ID, NVIDIA_BASE_URL, NVIDIA_MODEL):
             raise ValueError("NVIDIA evaluation requires the exact authorized provider, base URL and Ultra model")
         if round_kind not in {"dev8", "qrdata40"}:
@@ -444,6 +444,7 @@ class NvidiaFreeEndpointGuard(FreeRouteGuard):
         self.recover_unanswered_read_errors = recover_unanswered_read_errors
         self.recover_unanswered_protocol_errors = recover_unanswered_protocol_errors
         self.allow_low_space_this_round = allow_low_space_this_round
+        self.skip_incomplete_stream_task = skip_incomplete_stream_task
         self._retry_ticket = None
         if recover_unanswered_read_errors and overload_recovery_ledger is None:
             raise ValueError("unanswered ReadError recovery requires its explicit shared recovery ledger")
@@ -459,6 +460,9 @@ class NvidiaFreeEndpointGuard(FreeRouteGuard):
             if state.get("allow_low_space_this_round", False) != allow_low_space_this_round:
                 raise ValueError("NVIDIA ledger storage policy changed; use a separate round ledger")
             state["allow_low_space_this_round"] = allow_low_space_this_round
+            if state.get("skip_incomplete_stream_task", False) != skip_incomplete_stream_task:
+                raise ValueError("NVIDIA incomplete-stream policy changed; use a separate round ledger")
+            state["skip_incomplete_stream_task"] = skip_incomplete_stream_task
             expected = {"schema": "nvidia-free-endpoint/v1", "provider_id": provider_id,
                 "base_url": base_url, "model": model, "round_kind": round_kind,
                 "request_limit": self.request_limit, "output_token_limit": 32768,
@@ -481,6 +485,7 @@ class NvidiaFreeEndpointGuard(FreeRouteGuard):
             "request_limit": self.request_limit, "output_token_limit": 32768, "min_start_interval_s": 2,
             "requests": 0, "calls": 0, "last_start": None, "reservations": {}, "charges": [],
             "allow_low_space_this_round": self.allow_low_space_this_round,
+            "skip_incomplete_stream_task": self.skip_incomplete_stream_task,
             "prompt_tokens": 0, "completion_tokens": 0, "stopped": False, "reason": None,
             "billing_status": "unknown; free-listed endpoint is not billing certification"}
 
@@ -571,6 +576,43 @@ class NvidiaFreeEndpointGuard(FreeRouteGuard):
                 or error != {"message": "Service temporarily overloaded", "type": "service_unavailable", "code": 503}):
             return
         self._recover_unknown(raw, key, "user-authorized complete error-only SSE 503 recovery; usage and billing remain unknown")
+
+    def end_incomplete_stream_task(self, *, status, content_type, raw, key, task):
+        if not self.skip_incomplete_stream_task or status != 200 or "text/event-stream" not in content_type:
+            return
+        public_output = False
+        for line in raw.splitlines():
+            if not line.startswith(b"data:"):
+                continue
+            data = line[5:].strip()
+            if data == b"[DONE]":
+                return
+            try:
+                payload = json.loads(data)
+            except ValueError:
+                return
+            if not isinstance(payload, dict) or payload.get("usage") is not None or "error" in payload:
+                return
+            choices = payload.get("choices")
+            if not isinstance(choices, list):
+                return
+            for choice in choices:
+                if not isinstance(choice, dict) or choice.get("finish_reason") is not None:
+                    return
+                delta = choice.get("delta")
+                if not isinstance(delta, dict):
+                    return
+                content = delta.get("content")
+                public_output = public_output or isinstance(content, str) and bool(content.strip())
+        if not public_output:
+            return
+        reason = "NVIDIA incomplete stream: task failed; unknown usage retained; no retry"
+        with self._change() as state:
+            reservation = state["reservations"].pop(key)
+            state.setdefault("accepted_unknown_requests", []).append({"key": key, "reservation": reservation,
+                "request_sha256": reservation["request_sha256"], "raw_sha256": hashlib.sha256(raw).hexdigest(),
+                "reason": reason, "task": task, "retry_ticket": None})
+        raise TaskStop(reason)
 
     def recover_unanswered_transport_error(self, *, response, raw, sent, error, key):
         from httpx import ReadError, RemoteProtocolError

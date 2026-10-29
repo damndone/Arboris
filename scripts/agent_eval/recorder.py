@@ -174,6 +174,9 @@ class _RecordingTransport(httpx.AsyncBaseTransport):
             self.budget.recover_overload(response.status_code, raw, reservation)
         if hasattr(self.budget, "check_response"):
             self.budget.check_response(response.status_code, raw)
+        if hasattr(self.budget, "end_incomplete_stream_task"):
+            self.budget.end_incomplete_stream_task(status=response.status_code, content_type=content_type,
+                raw=raw, key=reservation, task=str(self.tape.path.parent))
         if usage is None and response.status_code >= 400 and hasattr(self.budget, "refused"):
             self.budget.refused(response.status_code, raw)
         if self.budget is not None:
