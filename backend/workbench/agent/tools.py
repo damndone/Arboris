@@ -487,6 +487,16 @@ def validation_details(schema: dict[str, Any], arguments: Any) -> list[dict[str,
     seen: set[tuple[str, str]] = set()
     errors = sorted(_specific_validation_errors(schema,arguments),
                     key=lambda pair:[str(p) for p in (*pair[1],*pair[0].absolute_path)])
+    if errors and isinstance(arguments, dict):
+        from .contract_help import workflow_step_hint
+
+        operation_id = arguments.get("operation_id")
+        hint = workflow_step_hint(operation_id)
+        if hint is not None and (allowed := _root_operation_ids(schema)) and operation_id not in allowed:
+            return [{"path": "operation_id", "constraint": "enum",
+                "message": f"{operation_id} is a workflow step. Read inspect_operation_contract with "
+                           f"operation_id=operation.multi_step and step_operation_ids={json.dumps([operation_id])}.",
+                "retry_hint": hint}]
     for error, prefix in errors:
         formatted = _format_validation_error(error, prefix=prefix)
         key = (formatted["path"], formatted["message"])
@@ -497,6 +507,20 @@ def validation_details(schema: dict[str, Any], arguments: Any) -> list[dict[str,
         if len(details) >= MAX_VALIDATION_ERRORS:
             break
     return details
+
+
+def _root_operation_ids(schema: dict[str, Any]) -> set[str]:
+    if not isinstance(schema, dict):
+        return set()
+    declaration = (schema.get("properties") or {}).get("operation_id") or {}
+    if not isinstance(declaration, dict):
+        declaration = {}
+    values = {value for value in declaration.get("enum", ()) if isinstance(value, str)}
+    if isinstance(declaration.get("const"), str):
+        values.add(declaration["const"])
+    for branch in [*schema.get("oneOf", []), *schema.get("anyOf", [])]:
+        values.update(_root_operation_ids(branch))
+    return values
 
 
 def _is_agent_input_fault(exc: BaseException) -> bool:
@@ -531,7 +555,20 @@ def _is_agent_input_fault(exc: BaseException) -> bool:
 def _with_help(message: str) -> str:
     from .contract_help import help_for
 
-    return message + help_for(message)
+    help_ = help_for(message)
+    if not help_:
+        return message
+    # A long offending value must not consume the actionable contract guidance.
+    return message[:MAX_VALIDATION_MESSAGE_CHARS] + help_[:MAX_VALIDATION_DETAIL_CHARS - MAX_VALIDATION_MESSAGE_CHARS]
+
+
+def _input_fault_detail(message: str) -> dict[str, Any]:
+    from .contract_help import retry_hint_for
+
+    detail: dict[str, Any] = {"message": _with_help(message)}
+    if (hint := retry_hint_for(message)) is not None:
+        detail["retry_hint"] = hint
+    return detail
 
 
 class ToolVisibleError(ValueError):
@@ -555,7 +592,7 @@ class ToolResult:
     ok: bool
     output: Any = None
     error: str | None = None
-    error_details: list[dict[str, str]] | None = None
+    error_details: list[dict[str, Any]] | None = None
     error_id: str | None = None
 
     def to_payload(self) -> dict[str, Any]:
@@ -866,7 +903,7 @@ class ToolRegistry:
                 tool_id=tool_id,
                 ok=False,
                 error=type(exc).__name__,
-                error_details=[{"message": _with_help(str(exc))}],
+                error_details=[_input_fault_detail(str(exc))],
             )
         except Exception as exc:
             # A refusal of the AGENT'S OWN submission is useless without its
@@ -892,7 +929,7 @@ class ToolRegistry:
                 ok=False,
                 error=type(exc).__name__,
                 error_details=(
-                    [{"message": _with_help(str(exc))}] if input_fault else None
+                    [_input_fault_detail(str(exc))] if input_fault else None
                 ),
                 error_id=error_id,
             )

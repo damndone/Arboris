@@ -1093,9 +1093,17 @@ def test_workflow_step_contract_is_rejected_before_direct_inspection(
     assert result.error_details is not None
     assert any(
         "model.joint_f_test" in detail["message"]
-        and "is not one of" in detail["message"]
+        and "is a workflow step" in detail["message"]
+        and detail["constraint"] == "enum"
         for detail in result.error_details
     )
+    assert result.error_details[0]["retry_hint"] == {
+        "tool_id": "inspect_operation_contract",
+        "arguments_patch": {
+            "operation_id": "operation.multi_step",
+            "step_operation_ids": ["model.joint_f_test"],
+        },
+    }
 
 
 def test_operation_contract_tool_only_advertises_top_level_operations(
