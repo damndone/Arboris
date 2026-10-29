@@ -89,7 +89,9 @@ def main() -> int:
     parser.add_argument("--nvidia-free-ledger", type=Path,
                         help="explicit NVIDIA Ultra free-listed endpoint opt-in; persist across modes; billing remains unknown")
     parser.add_argument("--nvidia-free-round", choices=("dev8", "qrdata40"),
-                        help="NVIDIA round request limit: dev8=240, qrdata40=1200; use separate ledgers")
+                        help="NVIDIA default round request limit: dev8=240, qrdata40=1200; use separate ledgers")
+    parser.add_argument("--nvidia-free-request-limit", type=int,
+                        help="explicit positive NVIDIA round request cap; must match the persistent ledger")
     parser.add_argument("--nvidia-overload-recovery-ledger", type=Path,
                         help="explicit 503-only recovery opt-in; same durable 10-retry ledger for dev8 and QRData40")
     parser.add_argument("--nvidia-recover-unanswered-read-error", action="store_true",
@@ -98,6 +100,8 @@ def main() -> int:
                         help="explicit v3 policy: additionally permit RemoteProtocolError before any response headers/body")
     parser.add_argument("--nvidia-recover-complete-http-500", action="store_true",
                         help="explicit v4 policy: additionally permit the observed complete error-only HTTP500 JSON")
+    parser.add_argument("--nvidia-recover-complete-http-429", action="store_true",
+                        help="explicit v5 policy: additionally permit the observed complete error-only HTTP429 JSON")
     parser.add_argument("--nvidia-shared-serial-ledger", type=Path,
                         help="explicit shared serial HTTP lease/stop/start ledger for overlapping task processes")
     parser.add_argument("--nvidia-skip-incomplete-stream-task", action="store_true",
@@ -109,6 +113,11 @@ def main() -> int:
         parser.error("choose one CNY budget, Magpie free route, or NVIDIA free endpoint guard")
     if (args.nvidia_free_ledger is None) != (args.nvidia_free_round is None):
         parser.error("NVIDIA opt-in requires both --nvidia-free-ledger and --nvidia-free-round")
+    if args.nvidia_free_request_limit is not None:
+        if args.nvidia_free_ledger is None:
+            parser.error("NVIDIA request limit requires the explicit NVIDIA endpoint guard")
+        if args.nvidia_free_request_limit <= 0:
+            parser.error("NVIDIA request limit must be a positive integer")
     if args.nvidia_overload_recovery_ledger is not None and args.nvidia_free_ledger is None:
         parser.error("NVIDIA overload recovery requires the explicit NVIDIA endpoint guard")
     if args.nvidia_recover_unanswered_read_error and args.nvidia_overload_recovery_ledger is None:
@@ -117,6 +126,8 @@ def main() -> int:
         parser.error("protocol recovery requires --nvidia-recover-unanswered-read-error with a new v3 ledger")
     if args.nvidia_recover_complete_http_500 and not args.nvidia_recover_unanswered_protocol_error:
         parser.error("complete HTTP500 recovery requires the explicit v3 policies with a new v4 ledger")
+    if args.nvidia_recover_complete_http_429 and not args.nvidia_recover_complete_http_500:
+        parser.error("complete HTTP429 recovery requires the explicit HTTP500 v4 policy with a new v5 ledger")
     if args.nvidia_shared_serial_ledger is not None and args.nvidia_free_ledger is None:
         parser.error("shared serial scheduling requires the explicit NVIDIA endpoint guard")
     if args.nvidia_skip_incomplete_stream_task and args.nvidia_free_ledger is None:
@@ -142,10 +153,12 @@ def main() -> int:
         try:
             budget = NvidiaFreeEndpointGuard(args.nvidia_free_ledger, provider_id=config.provider_id,
                 base_url=config.base_url, model=config.model, round_kind=args.nvidia_free_round,
+                request_limit=args.nvidia_free_request_limit,
                 overload_recovery_ledger=args.nvidia_overload_recovery_ledger,
                 recover_unanswered_read_errors=args.nvidia_recover_unanswered_read_error,
                 recover_unanswered_protocol_errors=args.nvidia_recover_unanswered_protocol_error,
                 recover_complete_http_500_errors=args.nvidia_recover_complete_http_500,
+                recover_complete_http_429_errors=args.nvidia_recover_complete_http_429,
                 shared_serial_ledger=args.nvidia_shared_serial_ledger,
                 skip_incomplete_stream_task=args.nvidia_skip_incomplete_stream_task,
                 allow_low_space_this_round=args.allow_low_space_this_round)
@@ -218,6 +231,7 @@ def main() -> int:
             "recover_unanswered_read_errors": args.nvidia_recover_unanswered_read_error,
             "recover_unanswered_protocol_errors": args.nvidia_recover_unanswered_protocol_error,
             "recover_complete_http_500_errors": args.nvidia_recover_complete_http_500,
+            "recover_complete_http_429_errors": args.nvidia_recover_complete_http_429,
             "shared_serial_ledger": str(args.nvidia_shared_serial_ledger) if args.nvidia_shared_serial_ledger is not None else None,
             "max_http_inflight": 1,
             "queue_wait_counts_toward_task_wall": True,
@@ -227,7 +241,8 @@ def main() -> int:
                 "delays_s": [60, 120], "eligibility": "complete observed error-only SSE 503 plus DONE; no generated output"
                     + ("; or ReadError before any response headers or body" if args.nvidia_recover_unanswered_read_error else "")
                     + ("; or RemoteProtocolError before any response headers or body" if args.nvidia_recover_unanswered_protocol_error else "")
-                    + ("; or the observed complete error-only HTTP500 JSON" if args.nvidia_recover_complete_http_500 else "")}
+                    + ("; or the observed complete error-only HTTP500 JSON" if args.nvidia_recover_complete_http_500 else "")
+                    + ("; or the observed complete error-only HTTP429 JSON" if args.nvidia_recover_complete_http_429 else "")}
                 if args.nvidia_overload_recovery_ledger is not None else None),
             "fallback": "forbidden; actual request URL and model checked"} if args.nvidia_free_ledger is not None else None),
         "provider": {key: getattr(config, key, None) for key in ("provider_id", "base_url", "model", "data_location")},

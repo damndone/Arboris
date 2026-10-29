@@ -33,12 +33,14 @@ def guard(tmp_path, monkeypatch, **kw):
         base_url=BASE, model=MODEL, round_kind='dev8', **kw), now
 
 
-def test_nvidia_guard_is_explicit_and_pins_entire_route(tmp_path):
+@pytest.mark.parametrize('request_limit', [None, 480])
+def test_nvidia_guard_is_explicit_and_pins_entire_route(tmp_path, request_limit):
     cls = getattr(budget, 'NvidiaFreeEndpointGuard', None)
     assert cls is not None, 'missing independent NVIDIA endpoint guard'
     for field, value in [('provider_id', 'magpie-workbuddy-ai'), ('base_url', BASE + '/wrong'),
                          ('model', 'nvidia/nemotron-super'), ('round_kind', 'heldout')]:
-        args = dict(provider_id='nvidia-nemotron-free', base_url=BASE, model=MODEL, round_kind='dev8')
+        args = dict(provider_id='nvidia-nemotron-free', base_url=BASE, model=MODEL, round_kind='dev8',
+                    request_limit=request_limit)
         args[field] = value
         with pytest.raises(ValueError):
             cls(tmp_path / field, **args)
@@ -58,6 +60,73 @@ def test_durable_request_limit_counts_reservations_and_restart(tmp_path, monkeyp
     assert again.state['requests'] == 240 and again.stopped
     assert again.state['billing_status'] == 'unknown; free-listed endpoint is not billing certification'
     assert all('credit' not in item['usage'] for item in again.state['charges'])
+
+
+def test_explicit_request_limit_survives_restart_and_caps_total_at_480(tmp_path, monkeypatch):
+    g, now = guard(tmp_path, monkeypatch, request_limit=480)
+    starts = []
+    for _ in range(241):
+        key = g.reserve(json.dumps(BODY).encode())
+        starts.append(now[0])
+        g.settle(key, USAGE)
+    assert g.state['requests'] == g.state['calls'] == 241
+    g, now = guard(tmp_path, monkeypatch, request_limit=480)
+    assert g.state['requests'] == g.state['calls'] == 241
+    for _ in range(239):
+        key = g.reserve(json.dumps(BODY).encode())
+        starts.append(now[0])
+        g.settle(key, USAGE)
+    with pytest.raises(budget.BudgetStop, match='request limit'):
+        g.reserve(json.dumps(BODY).encode())
+    assert g.state['request_limit'] == g.state['requests'] == g.state['calls'] == 480
+    assert len(g.state['charges']) == 480 and not g.state['reservations']
+    assert min(b - a for a, b in zip(starts, starts[1:])) >= 2
+
+
+@pytest.mark.parametrize('request_limit', [0, -1, True, False, 1.5, '480'])
+def test_explicit_request_limit_requires_a_positive_integer(tmp_path, monkeypatch, request_limit):
+    with pytest.raises(ValueError, match='request limit.*positive integer'):
+        guard(tmp_path, monkeypatch, request_limit=request_limit)
+    assert not (tmp_path / 'ledger.json').exists()
+
+
+@pytest.mark.parametrize('reopened_limit', [None, 240, 479])
+def test_explicit_request_limit_must_match_persisted_ledger(tmp_path, monkeypatch, reopened_limit):
+    g, _ = guard(tmp_path, monkeypatch, request_limit=480)
+    key = g.reserve(json.dumps(BODY).encode())
+    g.settle(key, USAGE)
+    original = g.path.read_bytes()
+    with pytest.raises(ValueError, match='ledger configuration changed'):
+        guard(tmp_path, monkeypatch, request_limit=reopened_limit)
+    assert g.path.read_bytes() == original
+    again, _ = guard(tmp_path, monkeypatch, request_limit=480)
+    assert again.state['requests'] == again.state['calls'] == 1
+
+
+@pytest.mark.parametrize('request_limit,persisted_limit', [(480, 480.0), (1, True)])
+def test_persisted_request_limit_requires_integer_even_when_equal(tmp_path, monkeypatch, request_limit, persisted_limit):
+    g, _ = guard(tmp_path, monkeypatch, request_limit=request_limit)
+    state = g.state
+    state['request_limit'] = persisted_limit
+    g.path.write_text(json.dumps(state))
+    original = g.path.read_bytes()
+    with pytest.raises(ValueError, match='ledger configuration changed'):
+        guard(tmp_path, monkeypatch, request_limit=request_limit)
+    assert g.path.read_bytes() == original
+
+
+def test_custom_request_limit_keeps_unknown_usage_stop_on_restart(tmp_path, monkeypatch):
+    g, _ = guard(tmp_path, monkeypatch, request_limit=480)
+    key = g.reserve(json.dumps(BODY).encode())
+    with pytest.raises(budget.BudgetStop):
+        g.settle(key, None)
+    original = g.path.read_bytes()
+    again, _ = guard(tmp_path, monkeypatch, request_limit=480)
+    assert again.stopped and again.state['requests'] == 1
+    assert key in again.state['reservations'] and again.state['charges'] == []
+    with pytest.raises(budget.BudgetStop):
+        again.reserve(json.dumps(BODY).encode())
+    assert again.path.read_bytes() == original
 
 
 @pytest.mark.parametrize('body', [{}, {'model': 'wrong', 'max_tokens': 1},
@@ -205,7 +274,8 @@ def run_module():
     return module
 
 
-def test_cli_builds_nvidia_guard_before_task_setup_and_keeps_billing_unknown(tmp_path, monkeypatch):
+@pytest.mark.parametrize('request_limit', [None, 480])
+def test_cli_builds_nvidia_guard_before_task_setup_and_keeps_billing_unknown(tmp_path, monkeypatch, request_limit):
     module = run_module()
     config = SimpleNamespace(provider_id='nvidia-nemotron-free', base_url=BASE, model=MODEL,
         is_configured=lambda: True)
@@ -215,13 +285,41 @@ def test_cli_builds_nvidia_guard_before_task_setup_and_keeps_billing_unknown(tmp
     monkeypatch.setattr(module, '_seed', lambda *a: pytest.fail('must stop before setup'))
     monkeypatch.setattr(sys, 'argv', ['agent_eval_run.py', '--out', str(tmp_path / 'run'),
         '--tasks', 'iv_weak.goal', '--mode', 'ask', '--nvidia-free-ledger', str(tmp_path / 'ledger.json'),
-        '--nvidia-free-round', 'dev8'])
+        '--nvidia-free-round', 'dev8',
+        *([] if request_limit is None else ['--nvidia-free-request-limit', str(request_limit)])])
     assert module.main() == 86
     state = json.loads((tmp_path / 'ledger.json').read_text())
-    assert state['request_limit'] == 240 and state['requests'] == 0
+    assert state['request_limit'] == (240 if request_limit is None else request_limit) and state['requests'] == 0
     meta = json.loads((tmp_path / 'run/run_meta.json').read_text())
+    assert meta['nvidia_free_endpoint']['request_limit'] == state['request_limit']
     assert meta['nvidia_free_endpoint']['billing_status'].startswith('unknown')
     assert meta['nvidia_free_endpoint']['default_output_limit'] == 'provider_default_unverified'
+
+
+@pytest.mark.parametrize('extra', [[], ['--free-route-ledger', 'offline-magpie.json'],
+                                 ['--round-budget-cny', '1']])
+def test_cli_custom_limit_requires_explicit_nvidia_endpoint_before_config(tmp_path, monkeypatch, capsys, extra):
+    module = run_module()
+    monkeypatch.setattr(module, 'load_llm_config', lambda: pytest.fail('invalid limit reached provider config'))
+    monkeypatch.setattr(sys, 'argv', ['agent_eval_run.py', '--out', str(tmp_path / 'run'),
+        '--nvidia-free-request-limit', '480', *extra])
+    with pytest.raises(SystemExit) as exc:
+        module.main()
+    assert exc.value.code == 2
+    assert 'request limit requires the explicit NVIDIA endpoint guard' in capsys.readouterr().err
+
+
+@pytest.mark.parametrize('request_limit', ['0', '-1', '1.5'])
+def test_cli_custom_limit_rejects_bad_values_before_config(tmp_path, monkeypatch, request_limit):
+    module = run_module()
+    monkeypatch.setattr(module, 'load_llm_config', lambda: pytest.fail('invalid limit reached provider config'))
+    monkeypatch.setattr(sys, 'argv', ['agent_eval_run.py', '--out', str(tmp_path / 'run'), '--mode', 'ask',
+        '--nvidia-free-ledger', str(tmp_path / 'ledger.json'), '--nvidia-free-round', 'dev8',
+        '--nvidia-free-request-limit', request_limit])
+    with pytest.raises(SystemExit) as exc:
+        module.main()
+    assert exc.value.code == 2
+    assert not (tmp_path / 'ledger.json').exists()
 
 
 def test_each_reservation_checks_storage_without_releasing_unknown_usage(tmp_path, monkeypatch):

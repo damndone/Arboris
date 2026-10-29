@@ -312,15 +312,18 @@ class NvidiaOverloadRecovery(FreeRouteGuard):
     _change = RoundBudget._change
 
     def __init__(self, path, *, unanswered_read_errors=False, unanswered_protocol_errors=False,
-                 complete_http_500_errors=False):
+                 complete_http_500_errors=False, complete_http_429_errors=False):
         self.unanswered_read_errors = unanswered_read_errors
         self.unanswered_protocol_errors = unanswered_protocol_errors
         self.complete_http_500_errors = complete_http_500_errors
+        self.complete_http_429_errors = complete_http_429_errors
         if unanswered_protocol_errors and not unanswered_read_errors:
             raise ValueError("protocol recovery requires the explicit unanswered-read recovery policy")
         if complete_http_500_errors and not unanswered_protocol_errors:
             raise ValueError("complete HTTP500 recovery requires the explicit v3 recovery policies")
-        self.schema = "nvidia-overload-recovery/v4" if complete_http_500_errors else "nvidia-overload-recovery/v3" if unanswered_protocol_errors else "nvidia-overload-recovery/v2" if unanswered_read_errors else "nvidia-overload-recovery/v1"
+        if complete_http_429_errors and not complete_http_500_errors:
+            raise ValueError("complete HTTP429 recovery requires the explicit HTTP500 v4 recovery policy")
+        self.schema = "nvidia-overload-recovery/v5" if complete_http_429_errors else "nvidia-overload-recovery/v4" if complete_http_500_errors else "nvidia-overload-recovery/v3" if unanswered_protocol_errors else "nvidia-overload-recovery/v2" if unanswered_read_errors else "nvidia-overload-recovery/v1"
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.lock = FileLock(str(self.path) + ".lock")
@@ -334,6 +337,8 @@ class NvidiaOverloadRecovery(FreeRouteGuard):
                 expected["unanswered_protocol_errors"] = True
             if complete_http_500_errors:
                 expected["complete_http_500_errors"] = True
+            if complete_http_429_errors:
+                expected["complete_http_429_errors"] = True
             if any(state.get(key) != value for key, value in expected.items()):
                 raise ValueError("NVIDIA shared overload recovery configuration changed")
 
@@ -348,7 +353,8 @@ class NvidiaOverloadRecovery(FreeRouteGuard):
             "stopped": False, "reason": None,
             **({"unanswered_read_errors": True} if self.unanswered_read_errors else {}),
             **({"unanswered_protocol_errors": True} if self.unanswered_protocol_errors else {}),
-            **({"complete_http_500_errors": True} if self.complete_http_500_errors else {})}
+            **({"complete_http_500_errors": True} if self.complete_http_500_errors else {}),
+            **({"complete_http_429_errors": True} if self.complete_http_429_errors else {})}
 
     def record_manual_restart(self, *, source_path, reason):
         """Charge the explicitly approved task restart once, without settling any request."""
@@ -437,22 +443,26 @@ class NvidiaFreeEndpointGuard(FreeRouteGuard):
     def __init__(self, path, *, provider_id, base_url, model, round_kind, overload_recovery_ledger=None,
                  recover_unanswered_read_errors=False, allow_low_space_this_round=False,
                  recover_unanswered_protocol_errors=False, skip_incomplete_stream_task=False,
-                 recover_complete_http_500_errors=False, shared_serial_ledger=None):
+                 recover_complete_http_500_errors=False, shared_serial_ledger=None, request_limit=None,
+                 recover_complete_http_429_errors=False):
         if (provider_id, base_url, model) != (NVIDIA_PROVIDER_ID, NVIDIA_BASE_URL, NVIDIA_MODEL):
             raise ValueError("NVIDIA evaluation requires the exact authorized provider, base URL and Ultra model")
         if round_kind not in {"dev8", "qrdata40"}:
             raise ValueError("NVIDIA evaluation supports only dev8 or qrdata40")
+        if request_limit is not None and (type(request_limit) is not int or request_limit <= 0):
+            raise ValueError("NVIDIA request limit must be a positive integer")
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.lock = FileLock(str(self.path) + ".lock")
         self._identity = (provider_id, base_url)
         self.round_kind = round_kind
-        self.request_limit = 240 if round_kind == "dev8" else 1200
+        self.request_limit = request_limit if request_limit is not None else (240 if round_kind == "dev8" else 1200)
         self.overload_recovery = None
         self.serial_coordinator = None
         self.recover_unanswered_read_errors = recover_unanswered_read_errors
         self.recover_unanswered_protocol_errors = recover_unanswered_protocol_errors
         self.recover_complete_http_500_errors = recover_complete_http_500_errors
+        self.recover_complete_http_429_errors = recover_complete_http_429_errors
         self.allow_low_space_this_round = allow_low_space_this_round
         self.skip_incomplete_stream_task = skip_incomplete_stream_task
         self._retry_ticket = None
@@ -462,13 +472,16 @@ class NvidiaFreeEndpointGuard(FreeRouteGuard):
             raise ValueError("protocol recovery requires the explicit unanswered-read recovery policy")
         if recover_complete_http_500_errors and not recover_unanswered_protocol_errors:
             raise ValueError("complete HTTP500 recovery requires the explicit v3 recovery policies")
+        if recover_complete_http_429_errors and not recover_complete_http_500_errors:
+            raise ValueError("complete HTTP429 recovery requires the explicit HTTP500 v4 recovery policy")
         if overload_recovery_ledger is not None:
             if self.path.resolve() == Path(overload_recovery_ledger).resolve():
                 raise ValueError("NVIDIA request and recovery ledgers must be separate")
             self.overload_recovery = NvidiaOverloadRecovery(overload_recovery_ledger,
                 unanswered_read_errors=recover_unanswered_read_errors,
                 unanswered_protocol_errors=recover_unanswered_protocol_errors,
-                complete_http_500_errors=recover_complete_http_500_errors)
+                complete_http_500_errors=recover_complete_http_500_errors,
+                complete_http_429_errors=recover_complete_http_429_errors)
         with self._change() as state:
             if state.get("allow_low_space_this_round", False) != allow_low_space_this_round:
                 raise ValueError("NVIDIA ledger storage policy changed; use a separate round ledger")
@@ -480,7 +493,8 @@ class NvidiaFreeEndpointGuard(FreeRouteGuard):
                 "base_url": base_url, "model": model, "round_kind": round_kind,
                 "request_limit": self.request_limit, "output_token_limit": 32768,
                 "min_start_interval_s": 2}
-            if any(state.get(key) != value for key, value in expected.items()):
+            if (type(state.get("request_limit")) is not int
+                    or any(state.get(key) != value for key, value in expected.items())):
                 raise ValueError("NVIDIA ledger configuration changed; use a separate round ledger")
             recovery_path = str(Path(overload_recovery_ledger).resolve()) if overload_recovery_ledger is not None else None
             bound_path = state.get("overload_recovery_ledger")
@@ -632,21 +646,31 @@ class NvidiaFreeEndpointGuard(FreeRouteGuard):
 
     def recover_complete_http_error(self, status, raw, key):
         """Called only after recorder read the complete body, never on interruption."""
-        if not self.recover_complete_http_500_errors or self.overload_recovery is None or status != 500:
+        if self.overload_recovery is None or not (
+                status == 500 and self.recover_complete_http_500_errors
+                or status == 429 and self.recover_complete_http_429_errors):
             return
         try:
             payload = json.loads(raw)
         except (ValueError, TypeError):
             return
-        if payload != {"error": {"message": "Failed to generate completions",
-                "type": "Internal Server Error", "code": 500}}:
-            return
-        # bool/float equality must not turn an unobserved envelope into the
-        # approved integer-coded provider failure.
-        if type(payload["error"]["code"]) is not int:
-            return
+        if status == 500:
+            if payload != {"error": {"message": "Failed to generate completions",
+                    "type": "Internal Server Error", "code": 500}}:
+                return
+            # bool/float equality must not turn an unobserved envelope into the
+            # approved integer-coded provider failure.
+            if type(payload["error"]["code"]) is not int:
+                return
+        else:
+            if payload != {"status": 429, "title": "Too Many Requests"} or type(payload["status"]) is not int:
+                return
+            # Preserve duplicate fields when counting: json.loads' default
+            # last-value behavior must not hide an unobserved error envelope.
+            if len(json.loads(raw, object_pairs_hook=list)) != 2:
+                return
         self._recover_unknown(raw, key,
-            "user-authorized complete error-only HTTP 500 recovery; usage and billing remain unknown")
+            f"user-authorized complete error-only HTTP {status} recovery; usage and billing remain unknown")
 
     def recover_overload(self, status, raw, key):
         if self.overload_recovery is None or status != 200:
