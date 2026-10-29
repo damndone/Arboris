@@ -8,7 +8,9 @@ import pytest
 from jsonschema import Draft202012Validator
 
 from workbench.agent.operations import OperationRegistry
-from workbench.agent.tools import MAX_VALIDATION_DETAIL_CHARS, ToolDefinition, ToolRegistry
+from workbench.agent.tools import (
+    MAX_VALIDATION_DETAIL_CHARS, MAX_VALIDATION_MESSAGE_CHARS, ToolDefinition, ToolRegistry,
+)
 from workbench.agent.toolsets import build_chain_tool_registry
 
 
@@ -147,6 +149,51 @@ def test_run_operation_description_names_the_outer_evidence_position():
     description = next(d["description"] for d in registry.descriptors() if d["tool_id"] == "run_operation")
     assert all(field in description for field in ("evidence_refs", "expected_effect", "risks", "changes"))
     assert "top-level" in description and "inspected" in description
+    assert "changes must be a JSON object" in description
+    assert "never a JSON-encoded string" in description
+
+
+@pytest.mark.parametrize("text", ["{\"steps\": [", "{\"steps\": [" + " " * 5000],
+    ids=["malformed", "oversized-malformed"])
+def test_malformed_changes_string_names_the_callers_type_error_without_a_repaired_proposal(text):
+    registry, _, calls = _registry()
+    arguments = _request()
+    arguments["changes"] = text
+    original = copy.deepcopy(arguments)
+
+    refused = _execute(registry, arguments)
+
+    assert not refused.ok and refused.error == "invalid_tool_arguments" and not calls
+    detail = next(d for d in refused.error_details if d["path"] == "changes")
+    assert detail["constraint"] == "type"
+    assert detail["expected_type"] == "object" and detail["actual_type"] == "string"
+    assert "caller supplied the string" in detail["message"]
+    assert "operation was not executed" in detail["message"]
+    assert "server did not convert an object to string" in detail["message"]
+    assert "arguments.changes" in detail["message"]
+    assert "inspect_operation_contract" in detail["message"]
+    assert len(detail["message"]) <= MAX_VALIDATION_MESSAGE_CHARS
+    assert len(json.dumps(detail)) < MAX_VALIDATION_DETAIL_CHARS
+    assert not any("example_arguments" in d or "example_arguments_patch" in d
+        for d in refused.error_details)
+    assert arguments == original
+
+
+@pytest.mark.parametrize("tool_id,changes,normalize", [
+    ("inspect_x", "{\"steps\": [", None),
+    ("run_operation", [], None),
+    ("run_operation", {}, lambda arguments: {**arguments, "changes": "{\"steps\": ["}),
+], ids=["other-tool", "other-type", "not-supplied-as-string"])
+def test_changes_string_attribution_requires_the_callers_string_and_matching_contract(tool_id, changes, normalize):
+    registry = ToolRegistry()
+    calls = []
+    registry.register(ToolDefinition(tool_id=tool_id, version="v1", side_effect="none",
+        input_schema={"type": "object", "properties": {"changes": {"type": "object"}}},
+        handler=lambda arguments, context: calls.append(arguments), normalize=normalize))
+    refused = asyncio.run(registry.execute({"tool_call_id": "replay", "tool_id": tool_id,
+        "arguments": {"changes": changes}}, session_id="session"))
+    assert not refused.ok and refused.error == "invalid_tool_arguments" and not calls
+    assert not any("caller supplied the string" in d["message"] for d in refused.error_details)
 
 
 def test_boolean_changes_schema_keeps_ordinary_required_field_feedback():

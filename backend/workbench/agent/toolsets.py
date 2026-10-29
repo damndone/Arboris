@@ -88,7 +88,8 @@ def build_chain_tool_registry(
         description=(
             "Run one typed operation under the current permissions, or return its reviewable proposal. "
             "Required top-level fields: operation_id, target, preconditions, changes, evidence_refs, "
-            "expected_effect, risks. Put operation inputs inside changes; keep evidence_refs, expected_effect "
+            "expected_effect, risks. changes must be a JSON object, never a JSON-encoded string. "
+            "Put operation inputs inside changes; keep evidence_refs, expected_effect "
             "and risks alongside changes, never inside it. evidence_refs names inspected source evidence; "
             "use the bound target and preconditions, and never invent references."
         )

@@ -785,6 +785,8 @@ class ToolRegistry:
         tool_id = str(tool_call.get("tool_id", ""))
         call_id = str(tool_call.get("tool_call_id", ""))
         arguments = tool_call.get("arguments") or {}
+        caller_supplied_changes_string = (tool_id == "run_operation" and isinstance(arguments, dict)
+                                          and isinstance(arguments.get("changes"), str))
         if isinstance(arguments, dict):
             arguments = _split_leaked_markers(arguments)
         arguments = _drop_unused_read_identity(definition, arguments)
@@ -794,6 +796,15 @@ class ToolRegistry:
             arguments = _wrap_single_strings(definition, arguments)
         details = validation_details(definition.input_schema, arguments)
         if details:
+            if caller_supplied_changes_string:
+                for detail in details:
+                    if (detail.get("path") == "changes" and detail.get("expected_type") == "object"
+                            and detail.get("actual_type") == "string"):
+                        detail["message"] = (
+                            "changes: expected object, got string. The caller supplied the string; the operation was not executed. "
+                            "The server did not convert an object to string. Put a JSON object at arguments.changes; "
+                            "inspect_operation_contract lists fields."
+                        )
             envelope = _operation_envelope_example(definition.input_schema, arguments)
             if envelope is not None:
                 example, patch = envelope
