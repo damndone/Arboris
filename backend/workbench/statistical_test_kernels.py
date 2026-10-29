@@ -140,10 +140,12 @@ class _GroupSummary:
 
     __slots__ = ("values", "n", "total", "_variance")
 
-    def __init__(self, values: list[float]) -> None:
+    def __init__(self, values: list[float] | np.ndarray) -> None:
         self.values = values
         self.n = len(values)
-        self.total = sum(values)
+        # Stream Python floats in the original order, preserving builtin sum's
+        # compensated reduction without retaining a boxed observation list.
+        self.total = sum(map(float, values)) if isinstance(values, np.ndarray) else sum(values)
         self._variance: float | None = None
 
     @property
@@ -171,7 +173,9 @@ def _cohens_d_from(left: _GroupSummary, right: _GroupSummary) -> dict[str, Any]:
 def _group_sums_of_squares(groups: Mapping[str, Sequence[float]], name: str) -> tuple[float, float, int, int]:
     """Between- and within-group sums of squares, each group's mean computed once."""
 
-    arrays = {str(key): np.asarray(_finite_values(values, label=f"group {key}"), dtype=float) for key, values in groups.items()}
+    # The previous list round-trip made C-contiguous arrays. Keep that reduction
+    # order for strided/Fortran inputs while reusing already contiguous buffers.
+    arrays = {str(key): np.ascontiguousarray(_finite_array(values, label=f"group {key}")) for key, values in groups.items()}
     if len(arrays) < 2:
         raise ValueError(f"{name} requires at least two groups")
     total_n = sum(array.size for array in arrays.values())

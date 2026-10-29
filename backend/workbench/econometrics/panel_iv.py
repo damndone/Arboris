@@ -170,7 +170,7 @@ def run_panel_ols(
         time = "_panel_time"
         data[time] = range(len(data))
     index_cols.append(time)
-    data = data.set_index(index_cols)
+    data = data.set_index(index_cols, drop=False)
 
     terms = ["1", *[_linearmodels_term(column) for column in x]]
     if index_cols[0] != "_panel_entity":

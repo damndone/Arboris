@@ -191,14 +191,14 @@ def _finite_groups(
     group: str,
     *,
     check_cancel: Callable[[], None] | None = None,
-) -> tuple[list[str], list[list[float]]] | None:
+) -> tuple[list[str], list[np.ndarray]] | None:
     pair = _pairwise(frame, [outcome, group])
     group_series = _as_series(pair, group)
     if group_series is None:
         return None
     labels = sorted(group_series.dropna().unique().tolist(), key=str)
     valid_labels: list[str] = []
-    arrays: list[list[float]] = []
+    arrays: list[np.ndarray] = []
     for label in labels:
         if check_cancel is not None:
             check_cancel()
@@ -207,7 +207,7 @@ def _finite_groups(
         ).dropna().to_numpy(dtype=float)
         if len(values) >= 2 and bool(np.isfinite(values).all()):
             valid_labels.append(str(label))
-            arrays.append(values.tolist())
+            arrays.append(values)
     if len(arrays) < 2:
         return None
     return valid_labels, arrays
@@ -264,7 +264,7 @@ def _effect_evidence(
 
 
 def _safe_variance_evidence(
-    grouped: tuple[list[str], list[list[float]]],
+    grouped: tuple[list[str], list[np.ndarray]],
     outcome: str,
     group: str,
 ) -> list[dict[str, Any]]:
