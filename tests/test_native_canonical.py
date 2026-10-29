@@ -1,4 +1,4 @@
-"""Opt-in byte/error differential tests for the unconnected native pilot.
+"""Byte/error differential tests against the explicit Python reference path.
 
 Build with ``.venv/bin/python native/canonical_numbers/build.py``; then run
 ``NATIVE_CANONICAL_REQUIRED=1 PYTHONPATH=backend:local/native-canonical
@@ -18,7 +18,18 @@ import sys
 
 import pytest
 
-from workbench.canonical import CanonicalJSONError, canonical_json_v1
+from workbench import canonical
+from workbench.canonical import CanonicalJSONError
+
+
+def canonical_json_v1(value):
+    # Keep the differential oracle independent of the connected native path.
+    saved = canonical._native_encode_numbers
+    canonical._native_encode_numbers = lambda values: None
+    try:
+        return canonical.canonical_json_v1(value)
+    finally:
+        canonical._native_encode_numbers = saved
 
 
 def test_required_pilot_is_available():

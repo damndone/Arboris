@@ -1,9 +1,10 @@
-// Independent canonical-v1 numeric-list pilot; never imported by product code.
+// Canonical-v1 numeric-list kernel used by workbench.canonical.
 // Keep Python's repr, arbitrary-precision str, and dictionary equality/hash.
 // std::to_chars/iostream floating formatting cannot establish byte equivalence.
 // No input buffer/list copy: the GIL stays held while exact list/tuple items are
 // read. Memory: O(distinct values) Python dictionary/text cache plus O(JSON bytes)
-// native assembly and the returned Python Unicode copy. This is not zero-copy,
+// final Python Unicode. Assembly writes directly into that result; no whole-output
+// std::string or result copy is allocated. This is not zero-copy,
 // streaming, a cancellable worker, or an end-to-end performance result.
 // Do not call Python signal handlers inside the loops: they could resize the
 // borrowed list while its fixed count/items are being read. The synchronous
@@ -13,6 +14,7 @@
 #include <Python.h>
 
 #include <cmath>
+#include <cstring>
 #include <memory>
 #include <new>
 #include <stdexcept>
@@ -109,7 +111,10 @@ static PyObject* encode_impl(PyObject* module, PyObject* values) {
         if (PyErr_Occurred()) return nullptr;
         if (!std::isfinite(number)) return nonfinite_error(module);
     }
-    std::string output("[");
+    // Retain the original dict equality/cache order (including equal int/float
+    // keys), but allocate the final ASCII Unicode exactly once. This avoids the
+    // pilot's whole std::string output + Unicode copy at peak residency.
+    Py_ssize_t total = 2;
     for (Py_ssize_t index = 0; index < count; ++index) {
         PyObject* item = item_at(index);
         PyObject* encoded = PyDict_GetItemWithError(cache.get(), item);
@@ -119,17 +124,25 @@ static PyObject* encode_impl(PyObject* module, PyObject* values) {
             if (!fresh || PyDict_SetItem(cache.get(), item, fresh.get()) < 0) return nullptr;
             encoded = fresh.get();  // cache owns a reference after insertion.
         }
-        Py_ssize_t length;
-        const char* text = PyUnicode_AsUTF8AndSize(encoded, &length);
-        if (!text) return nullptr;
-        if (index) output.push_back(',');
-        output.append(text, static_cast<size_t>(length));
+        const Py_ssize_t length = PyUnicode_GET_LENGTH(encoded);
+        const Py_ssize_t separator = index != 0;
+        if (length > PY_SSIZE_T_MAX - total - separator) return PyErr_NoMemory();
+        total += length + separator;
     }
-    output.push_back(']');
-    if (output.size() > static_cast<size_t>(PY_SSIZE_T_MAX)) {
-        return PyErr_NoMemory();
+    Owned output(PyUnicode_New(total, 127));
+    if (!output) return nullptr;
+    Py_UCS1* destination = PyUnicode_1BYTE_DATA(output.get());
+    *destination++ = '[';
+    for (Py_ssize_t index = 0; index < count; ++index) {
+        PyObject* encoded = PyDict_GetItemWithError(cache.get(), item_at(index));
+        if (!encoded) return nullptr;
+        const Py_ssize_t length = PyUnicode_GET_LENGTH(encoded);
+        if (index) *destination++ = ',';
+        std::memcpy(destination, PyUnicode_1BYTE_DATA(encoded), static_cast<size_t>(length));
+        destination += length;
     }
-    return PyUnicode_FromStringAndSize(output.data(), static_cast<Py_ssize_t>(output.size()));
+    *destination = ']';
+    return output.release();
 }
 
 static PyObject* encode_numbers(PyObject* module, PyObject* values) {
@@ -150,13 +163,14 @@ static PyMethodDef methods[] = {
 
 static PyModuleDef definition = {
     PyModuleDef_HEAD_INIT, "_canonical_numbers",
-    "Independent opt-in native canonical numeric-sequence pilot.",
+    "Canonical-v1 exact numeric-sequence encoding kernel.",
     -1, methods, nullptr, nullptr, nullptr, nullptr
 };
 
 PyMODINIT_FUNC PyInit__canonical_numbers() {
     Owned module(PyModule_Create(&definition));
     if (!module) return nullptr;
+    if (PyModule_AddIntConstant(module.get(), "ABI_VERSION", 1) < 0) return nullptr;
     Owned canonical(PyImport_ImportModule("workbench.canonical"));
     if (!canonical) return nullptr;
     Owned error(PyObject_GetAttrString(canonical.get(), "CanonicalJSONError"));

@@ -10,6 +10,9 @@ from collections.abc import Mapping
 from decimal import Decimal
 from typing import Any
 
+from .native_canonical import encode_numbers as _native_encode_numbers
+from .native_canonical import MEASURED_MIN_ITEMS, small_sequence_reference
+
 
 class CanonicalJSONError(ValueError):
     """Raised when a value cannot be represented by canonical JSON v1."""
@@ -77,6 +80,12 @@ def _encode_json(value: Any) -> str:
         if value and _plain_string_list(value):
             return '["' + '","'.join(value) + '"]'
         if _numeric_list(value):
+            if len(value) >= MEASURED_MIN_ITEMS:
+                native = _native_encode_numbers(value)
+                if native is not None:
+                    return native
+            else:
+                small_sequence_reference()
             return "[" + ",".join(_encode_numbers(value)) + "]"
         return "[" + ",".join(_encode_json(item) for item in value) + "]"
     if isinstance(value, dict):

@@ -1,10 +1,11 @@
-"""Build the opt-in CPython C++ pilot with the existing interpreter/toolchain.
+"""Build the canonical-v1 CPython C++ kernel with the existing interpreter/toolchain.
 
     .venv/bin/python native/canonical_numbers/build.py
     NATIVE_CANONICAL_REQUIRED=1 PYTHONPATH=backend:local/native-canonical \\
       .venv/bin/python -m pytest tests/test_native_canonical.py -q
 
-No package installation, download, default-path integration, or measurement.
+No package installation, download, or measurement. Product auto-detection uses
+the default local/native-canonical output directory.
 Output is restricted to local/ or the system temporary directory. The extension
 is specific to this interpreter ABI/platform; rebuild after changing Python.
 """

@@ -7,8 +7,10 @@ import asyncio
 import contextvars
 import json
 import re
+from collections import OrderedDict
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from threading import RLock
 from typing import Any, Awaitable, Callable, Protocol
 
 from jsonschema import Draft202012Validator
@@ -21,6 +23,47 @@ from ..analysis_loop.lifecycle import AnalysisLoopSelectionError
 # not a leak, but an unbounded blob would be.
 MAX_VALIDATION_ERRORS = 5
 MAX_VALIDATION_MESSAGE_CHARS = 240
+
+# Schema admission is expensive and registries are rebuilt on each user turn.
+# Cache only successful checks of immutable content keys, never mutable schema
+# objects or their identities. Argument validation still runs on every call.
+_SCHEMA_CHECK_CACHE: OrderedDict[tuple, None] = OrderedDict()
+_SCHEMA_CHECK_LOCK = RLock()
+_UNCACHEABLE_SCHEMA = object()
+
+
+def _schema_check_key(value):
+    kind = type(value)
+    if kind in {str, int, float, bool, type(None)}:
+        return kind, value
+    if kind is dict and all(type(key) is str for key in value):
+        items = tuple((key, _schema_check_key(item)) for key, item in sorted(value.items()))
+        return _UNCACHEABLE_SCHEMA if any(item is _UNCACHEABLE_SCHEMA for _, item in items) else (dict, items)
+    if kind is list:
+        items = tuple(_schema_check_key(item) for item in value)
+        return _UNCACHEABLE_SCHEMA if any(item is _UNCACHEABLE_SCHEMA for item in items) else (list, items)
+    return _UNCACHEABLE_SCHEMA
+
+
+def _check_tool_schema(schema):
+    try:
+        key = _schema_check_key(schema)
+    except RecursionError:
+        key = _UNCACHEABLE_SCHEMA
+    if key is not _UNCACHEABLE_SCHEMA:
+        with _SCHEMA_CHECK_LOCK:
+            if key in _SCHEMA_CHECK_CACHE:
+                _SCHEMA_CHECK_CACHE.move_to_end(key)
+                return
+    # Keep the original validator and exception path; invalid checks never
+    # enter the cache. A schema changed during checking is also not cached.
+    Draft202012Validator.check_schema(schema)
+    if key is not _UNCACHEABLE_SCHEMA and _schema_check_key(schema) == key:
+        with _SCHEMA_CHECK_LOCK:
+            _SCHEMA_CHECK_CACHE[key] = None
+            _SCHEMA_CHECK_CACHE.move_to_end(key)
+            if len(_SCHEMA_CHECK_CACHE) > 128:
+                _SCHEMA_CHECK_CACHE.popitem(last=False)
 
 
 def _json_size(value: Any) -> int:
@@ -600,7 +643,7 @@ class ToolRegistry:
     def register(self, definition: ToolDefinition) -> None:
         if definition.tool_id in self._definitions:
             raise ValueError(f"tool already registered: {definition.tool_id}")
-        Draft202012Validator.check_schema(definition.input_schema)
+        _check_tool_schema(definition.input_schema)
         self._definitions[definition.tool_id] = definition
 
     def descriptors(self) -> list[dict[str, Any]]:
