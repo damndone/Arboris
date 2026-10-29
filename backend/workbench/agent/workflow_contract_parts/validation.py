@@ -122,6 +122,21 @@ def validate_model_genesis_spec(spec: Mapping[str, Any]) -> ModelFamilyContract:
     from ...model_terms import ModelTermError, validate_branch_terms
 
     contract = model_family_contract(spec.get("model_family"))
+    branches = spec.get("branches")
+    if not isinstance(branches, list) or not branches:
+        raise OperationValidationError("model.genesis step requires a non-empty branches list")
+    for branch in branches:
+        if not isinstance(branch, Mapping):
+            raise OperationValidationError("each model branch must be an object")
+        # Diagnose misplaced family fields before reporting a missing step value.
+        # A branch override must never be ignored in favour of the step's value.
+        stray = sorted(key for key in ("model_family", *MODEL_FAMILY_SPEC_FIELDS) if key in branch
+                       and branch[key] != spec.get(key))
+        if stray:
+            raise OperationValidationError(
+                f"model branch {branch.get('branch_id')} sets {', '.join(stray)}, which apply to the whole "
+                "model.genesis step; put shared values on step.spec, and fit different values as their own "
+                "model.genesis step")
     validate_family_options(spec, contract)
     _validate_multiple_imputations(spec, contract.family)
     _validate_by_group(spec, contract.family)
@@ -184,24 +199,9 @@ def validate_model_genesis_spec(spec: Mapping[str, Any]) -> ModelFamilyContract:
             contract.missing_required_fields_message
             or "model.genesis is missing a family-required field"
         )
-    branches = spec.get("branches")
-    if not isinstance(branches, list) or not branches:
-        raise OperationValidationError("model.genesis step requires a non-empty branches list")
     seen: set[str] = set()
     specifications: dict[str, str] = {}
     for branch in branches:
-        if not isinstance(branch, Mapping):
-            raise OperationValidationError("each model branch must be an object")
-        # Family and panel effects are step-level: a branch naming another family or panel
-        # columns was silently fitted as the step's model (free-route no-thinking round,
-        # panel_fe: 'pooled_ols', 'firm_fe' and 'random_effects' all ran as one two-way fit).
-        stray = [key for key in ("model_family", "entity_col", "time_col") if key in branch
-                 and branch[key] != spec.get(key)]
-        if stray:
-            raise OperationValidationError(
-                f"model branch {branch.get('branch_id')} sets {', '.join(stray)}, which apply to the whole "
-                "model.genesis step; fit a different family or different panel effects as its own "
-                "model.genesis step")
         branch_id = branch.get("branch_id")
         if not isinstance(branch_id, str) or not branch_id.strip():
             raise OperationValidationError("each model branch requires a branch_id")
@@ -312,11 +312,16 @@ def _validate_step_spec(operation_id: str, spec: Mapping[str, Any]) -> None:
     allowed = contract.allowed if contract is not None else frozenset()
     unknown = sorted(set(spec) - allowed - {"source_artifact_fingerprint"})
     if unknown:
+        guidance = (
+            ". Read inspect_operation_contract with operation_id=operation.multi_step and "
+            f"step_operation_ids={json.dumps([operation_id])} for its registered spec and nested field_schemas."
+        ) if contract is not None else ""
         raise OperationValidationError(
             f"{operation_id} spec contains unsupported field(s): "
             + ", ".join(unknown)
             + ". Supported fields: "
             + ", ".join(sorted(allowed))
+            + guidance
         )
     if contract is not None:
         missing = sorted(

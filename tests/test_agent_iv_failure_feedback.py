@@ -178,6 +178,97 @@ def test_reference_guidance_does_not_accept_unknown_producers_or_branches(refere
         _compile(_model_workflow_steps(reference))
 
 
+def test_branch_instrument_refusal_explains_step_ownership_before_missing_global_fields():
+    from workbench.contracts.common.errors import OperationValidationError
+
+    steps = [{"step_id": "fit", "operation_id": "model.genesis", "spec": {
+        "model_family": "iv_2sls", "iv_endog": ["endogenous"],
+        "branches": [
+            {"branch_id": "first", "outcome": "outcome", "predictors": ["control"],
+             "iv_instruments": ["instrument_a"]},
+            {"branch_id": "second", "outcome": "outcome", "predictors": ["control"],
+             "iv_instruments": ["instrument_b"]},
+        ],
+    }}]
+    original = copy.deepcopy(steps)
+
+    with pytest.raises(OperationValidationError) as refused:
+        _compile(steps)
+
+    message = str(refused.value)
+    assert "iv_instruments" in message and "whole model.genesis step" in message
+    assert "step.spec" in message and "own model.genesis step" in message
+    assert steps == original
+
+
+def test_a_branch_cannot_override_a_global_family_field():
+    from workbench.contracts.common.errors import OperationValidationError
+
+    steps = _model_workflow_steps("step:fit:main_branch")[:1]
+    steps[0]["spec"]["branches"][0]["iv_instruments"] = ["other_instrument"]
+    original = copy.deepcopy(steps)
+
+    with pytest.raises(OperationValidationError, match="iv_instruments.*whole model.genesis step"):
+        _compile(steps)
+
+    assert steps == original
+
+
+def test_different_instrument_sets_compile_as_independent_model_steps():
+    first = _model_workflow_steps("step:fit:main_branch")[0]
+    second = copy.deepcopy(first)
+    second["step_id"] = "fit_other"
+    second["spec"]["iv_instruments"] = ["other_instrument"]
+    steps = [first, second]
+    original = copy.deepcopy(steps)
+
+    compiled = _compile(steps)
+
+    assert len(compiled.steps) == 2
+    assert [step.spec["iv_instruments"] for step in compiled.steps] == [["instrument"], ["other_instrument"]]
+    assert steps == original
+
+
+def test_unknown_pack_field_points_to_its_registered_workflow_contract(context_tools):
+    registry, _ = context_tools
+    compiled = []
+
+    def compile_only(arguments, context):
+        draft = _compile(arguments["steps"])
+        compiled.append(draft)
+        return {"status": "compiled"}
+
+    registry.register(ToolDefinition(tool_id="compile_workflow", version="v1", side_effect="none",
+                                     input_schema={"type": "object"}, handler=compile_only))
+    operation_id = "iv.weak_instruments"
+    steps = [{"step_id": "check", "operation_id": operation_id,
+              "spec": {"model_ref": "completed_model"}}]
+    original = copy.deepcopy(steps)
+
+    refused = _execute(registry, "compile_workflow", {"steps": steps})
+
+    assert not refused.ok and not compiled
+    message = refused.error_details[0]["message"]
+    assert "unsupported field(s): model_ref" in message
+    assert "inspect_operation_contract" in message and "operation.multi_step" in message
+    assert f"step_operation_ids={json.dumps([operation_id])}" in message
+    assert steps == original
+
+    contract = _inspect(registry, "operation.multi_step", steps=[operation_id])
+    published = contract["step_vocabulary"]["step_operations"][operation_id]
+    assert "model_ref" not in published["fields"]
+    assert {"outcome", "exog", "endog", "instruments"} == set(
+        published["field_schemas"]["column_bindings"]["required"])
+    steps[0]["spec"] = {
+        "input_mode": published["field_enums"]["input_mode"][0],
+        "column_bindings": {"outcome": "outcome", "exog": ["control"],
+                            "endog": ["endogenous"], "instruments": ["instrument"]},
+        "options": {},
+    }
+    corrected = _execute(registry, "compile_workflow", {"steps": steps}, call_id="explicit-bindings")
+    assert corrected.ok and len(compiled) == 1
+
+
 def test_absent_completion_contract_returns_an_actionable_plan_repair(tmp_path):
     from tests.test_read_only_analysis import _Fixture
 
