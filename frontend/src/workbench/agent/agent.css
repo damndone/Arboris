@@ -500,11 +500,20 @@
 }
 
 .wb-agent-terminal-line {
-  display: flex;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 8px;
+  row-gap: 4px;
+  min-width: 0;
   overflow-wrap: anywhere;
   margin: 0;
   padding: 1px 0;
+}
+
+/* References and actions must not compete with the message for inline space. */
+.wb-agent-terminal-line > :not(.wb-agent-terminal-marker) {
+  grid-column: 2;
+  min-width: 0;
 }
 
 .wb-agent-turn + .wb-agent-turn {
@@ -561,6 +570,7 @@
 
 .wb-agent-reasoning-content {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 2px;
   padding: 6px 9px 8px;
   border-top: 1px solid color-mix(in oklch, var(--separator) 62%, transparent);
@@ -594,8 +604,17 @@
 }
 
 .wb-agent-terminal-markdown {
-  flex: 1;
   min-width: 0;
+}
+
+.wb-agent-terminal-markdown pre,
+.wb-agent-terminal-markdown table {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.wb-agent-terminal-markdown table {
+  display: block;
 }
 
 .wb-agent-terminal-markdown p:first-child,
@@ -620,7 +639,8 @@
 }
 
 .wb-agent-terminal-marker {
-  flex: 0 0 auto;
+  grid-column: 1;
+  grid-row: 1;
   user-select: none;
   color: var(--label-tertiary);
 }
@@ -631,11 +651,9 @@
 
 .wb-agent-message-links {
   display: inline-flex;
-  flex: 0 1 auto;
   flex-wrap: wrap;
   gap: 3px;
   min-width: 0;
-  margin-left: 4px;
 }
 
 .wb-agent-message-link {
@@ -906,17 +924,12 @@
 
 /* v1.9.0 — message actions and time under each message (user review 3):
    quiet until the message is hovered or focused, like Claude's. */
-.wb-agent-terminal-line:has(> .agt-actions) {
-  flex-wrap: wrap;
-}
-
 .agt-actions {
   display: flex;
-  flex-basis: 100%;
   align-items: center;
   gap: 2px;
   min-height: 24px;
-  padding-left: 20px;
+  padding-left: 0;
   color: var(--label-tertiary);
   font-size: var(--text-caption);
   opacity: 0;

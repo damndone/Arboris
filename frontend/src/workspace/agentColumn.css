@@ -67,16 +67,17 @@
 }
 
 .ws-agent__content .wb-agent-terminal-line {
-  display: flex;
+  grid-template-columns: minmax(0, 1fr);
   margin: 0 0 var(--space-3);
   padding: 0;
 }
 
-.ws-agent__content .wb-agent-terminal-line[data-role="user"] {
-  justify-content: flex-end;
+.ws-agent__content .wb-agent-terminal-line > :not(.wb-agent-terminal-marker) {
+  grid-column: 1;
 }
 
 .ws-agent__content .wb-agent-terminal-line[data-role="user"] .wb-agent-terminal-content {
+  justify-self: end;
   max-width: 85%;
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-xl);
