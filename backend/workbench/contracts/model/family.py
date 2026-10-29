@@ -708,6 +708,8 @@ MODEL_FAMILY_CONTRACTS: dict[str, ModelFamilyContract] = {
         allows_categorical_terms=False,
         context_spec_fields=("entity_col", "time_col"),
         column_spec_fields=("entity_col", "time_col"),
+        model_options_fields=("cluster",),
+        model_options_column_fields=("cluster",),
     ),
     "iv_2sls": ModelFamilyContract(
         family="iv_2sls",
