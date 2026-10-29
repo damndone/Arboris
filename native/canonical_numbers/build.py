@@ -13,6 +13,7 @@ is specific to this interpreter ABI/platform; rebuild after changing Python.
 from __future__ import annotations
 
 import argparse
+import hashlib
 from pathlib import Path
 import shlex
 import subprocess
@@ -37,6 +38,7 @@ def main() -> None:
         parser.error("this interpreter does not supply LDCXXSHARED")
     command = shlex.split(linker) + [
         "-std=c++17", "-O3", "-Wall", "-Wextra", "-Werror", "-fPIC",
+        '-DANALYSIS_SAMPLE_SOURCE_SHA256="' + hashlib.sha256(source.read_bytes()).hexdigest() + '"',
         "-I" + sysconfig.get_path("include"), str(source), "-o", str(output),
     ]
     print(shlex.join(command), flush=True)

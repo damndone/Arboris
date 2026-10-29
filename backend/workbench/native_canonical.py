@@ -7,6 +7,7 @@ selects the reference encoder; a broken or incompatible binary raises.
 from __future__ import annotations
 
 from functools import lru_cache
+import hashlib
 import importlib.util
 import logging
 from pathlib import Path
@@ -72,3 +73,28 @@ def encode_numbers(values: list | tuple) -> str | None:
     """Return native canonical JSON, or None for the explicit reference path."""
     module, _, _ = _load()
     return None if module is None else module.encode_numbers(values)
+
+
+def encode_analysis_sample_v1(row_set, row_order) -> bytes | None:
+    """Explicit, unaccepted sample candidate; no measured size cutoff exists.
+
+    Only missing builds or unsupported input shapes return None. Present old,
+    incompatible or broken builds and computation failures propagate. The
+    default analysis_sample_fingerprint does not enter this optional path.
+    """
+    module, _, _ = _load()
+    if module is None:
+        return None
+    version = getattr(module, 'ANALYSIS_SAMPLE_ABI_VERSION', None)
+    if type(version) is not int or version != 1:
+        raise RuntimeError('native canonical sample ABI mismatch; rebuild with this interpreter')
+    source = Path(__file__).resolve().parents[2] / 'native/canonical_numbers/canonical_numbers.cpp'
+    if getattr(module, 'ANALYSIS_SAMPLE_SOURCE_SHA256', None) != hashlib.sha256(source.read_bytes()).hexdigest():
+        raise RuntimeError('native canonical sample source digest mismatch; rebuild current source')
+    encode = getattr(module, 'encode_analysis_sample_v1', None)
+    if not callable(encode):
+        raise RuntimeError('native canonical sample entry point missing; rebuild current source')
+    result = encode(row_set, row_order)
+    if result is not None and type(result) is not bytes:
+        raise RuntimeError('native canonical sample returned an invalid byte result')
+    return result

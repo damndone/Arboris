@@ -68,6 +68,21 @@ def analysis_sample_fingerprint(
     )
 
 
+def analysis_sample_fingerprint_native(row_set: Any, row_order: Any) -> str:
+    """Explicit decimal-ID candidate; default selection remains the reference.
+
+    No sample size has performance acceptance for this encoder yet. Missing
+    optional builds and unsupported shapes retain the existing Python/error
+    semantics; present incompatible builds and computation errors propagate.
+    """
+    from ..native_canonical import encode_analysis_sample_v1
+
+    encoded = encode_analysis_sample_v1(row_set, row_order)
+    if encoded is None:
+        return analysis_sample_fingerprint(row_set, row_order)
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def point_estimation_fingerprint(
     *,
     y: Any,

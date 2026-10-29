@@ -13,12 +13,18 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <memory>
 #include <new>
 #include <stdexcept>
 #include <string>
+#include <vector>
+
+#ifndef ANALYSIS_SAMPLE_SOURCE_SHA256
+#define ANALYSIS_SAMPLE_SOURCE_SHA256 ""
+#endif
 
 struct Decref {
     void operator()(PyObject* value) const { Py_XDECREF(value); }
@@ -155,9 +161,113 @@ static PyObject* encode_numbers(PyObject* module, PyObject* values) {
     }
 }
 
+static PyObject* sequence_item(PyObject* values, Py_ssize_t index) {
+    return PyList_CheckExact(values) ? PyList_GET_ITEM(values, index) : PyTuple_GET_ITEM(values, index);
+}
+
+static Py_ssize_t sequence_size(PyObject* values) {
+    return PyList_CheckExact(values) ? PyList_GET_SIZE(values) : PyTuple_GET_SIZE(values);
+}
+
+static bool add_size(Py_ssize_t& total, Py_ssize_t size) {
+    if (size > PY_SSIZE_T_MAX - total) {
+        PyErr_NoMemory();
+        return false;
+    }
+    total += size;
+    return true;
+}
+
+static bool decimal_sequence_size(PyObject* values, Py_ssize_t& size) {
+    const Py_ssize_t count = sequence_size(values);
+    for (Py_ssize_t index = 0; index < count; ++index) {
+        PyObject* item = sequence_item(values, index);
+        if (!PyUnicode_CheckExact(item) || !PyUnicode_IS_ASCII(item)) return false;
+        const Py_ssize_t length = PyUnicode_GET_LENGTH(item);
+        if (!length) return false;
+        const Py_UCS1* data = PyUnicode_1BYTE_DATA(item);
+        for (Py_ssize_t offset = 0; offset < length; ++offset) {
+            if (data[offset] < '0' || data[offset] > '9') return false;
+        }
+        if (!add_size(size, length) || !add_size(size, 2) || (index && !add_size(size, 1))) return false;
+    }
+    return true;
+}
+
+static PyObject* analysis_sample_impl(PyObject* row_set, PyObject* row_order) {
+    if ((!PyList_CheckExact(row_set) && !PyTuple_CheckExact(row_set)) ||
+        (!PyList_CheckExact(row_order) && !PyTuple_CheckExact(row_order))) Py_RETURN_NONE;
+    Py_ssize_t set_size = 0, order_size = 0;
+    if (!decimal_sequence_size(row_set, set_size) ||
+        (row_set != row_order && !decimal_sequence_size(row_order, order_size))) {
+        if (PyErr_Occurred()) return nullptr;
+        Py_RETURN_NONE;
+    }
+    if (row_set == row_order) order_size = set_size;
+    static constexpr char prefix[] = "{\"fingerprint_type\":\"analysis_sample_v1\",\"value\":{\"row_order\":[";
+    static constexpr char middle[] = "],\"row_set\":[";
+    static constexpr char suffix[] = "]}}";
+    Py_ssize_t total = sizeof(prefix) - 1 + sizeof(middle) - 1 + sizeof(suffix) - 1;
+    if (!add_size(total, order_size) || !add_size(total, set_size)) return nullptr;
+
+    // The arguments own the exact outer containers and their immutable strings.
+    // Keep the GIL throughout. After validation there are no Python callbacks,
+    // signal checks, or GC-tracked allocations: vector storage uses the C++
+    // allocator and the final PyBytes is untracked. A GC finalizer therefore
+    // cannot resize a borrowed input list during these reads. No GIL release or
+    // bounded cancellation-latency claim is made for this explicit candidate.
+    std::vector<PyObject*> sorted;
+    const Py_ssize_t count = sequence_size(row_set);
+    sorted.reserve(static_cast<size_t>(count));
+    for (Py_ssize_t index = 0; index < count; ++index) sorted.push_back(sequence_item(row_set, index));
+    std::sort(sorted.begin(), sorted.end(), [](PyObject* left, PyObject* right) {
+        const Py_ssize_t a = PyUnicode_GET_LENGTH(left), b = PyUnicode_GET_LENGTH(right);
+        const int comparison = std::memcmp(PyUnicode_1BYTE_DATA(left), PyUnicode_1BYTE_DATA(right),
+                                           static_cast<size_t>(std::min(a, b)));
+        return comparison < 0 || (comparison == 0 && a < b);
+    });
+    Owned output(PyBytes_FromStringAndSize(nullptr, total));
+    if (!output) return nullptr;
+    char* destination = PyBytes_AS_STRING(output.get());
+    const auto literal = [&destination](const char* data, size_t length) {
+        std::memcpy(destination, data, length);
+        destination += length;
+    };
+    const auto item = [&destination](PyObject* value, bool separator) {
+        if (separator) *destination++ = ',';
+        *destination++ = '"';
+        const Py_ssize_t length = PyUnicode_GET_LENGTH(value);
+        std::memcpy(destination, PyUnicode_1BYTE_DATA(value), static_cast<size_t>(length));
+        destination += length;
+        *destination++ = '"';
+    };
+    literal(prefix, sizeof(prefix) - 1);
+    const Py_ssize_t order_count = sequence_size(row_order);
+    for (Py_ssize_t index = 0; index < order_count; ++index) item(sequence_item(row_order, index), index != 0);
+    literal(middle, sizeof(middle) - 1);
+    for (size_t index = 0; index < sorted.size(); ++index) item(sorted[index], index != 0);
+    literal(suffix, sizeof(suffix) - 1);
+    return output.release();
+}
+
+static PyObject* encode_analysis_sample_v1(PyObject*, PyObject* arguments) {
+    PyObject* row_set;
+    PyObject* row_order;
+    if (!PyArg_ParseTuple(arguments, "OO:encode_analysis_sample_v1", &row_set, &row_order)) return nullptr;
+    try {
+        return analysis_sample_impl(row_set, row_order);
+    } catch (const std::bad_alloc&) {
+        return PyErr_NoMemory();
+    } catch (const std::length_error&) {
+        return PyErr_NoMemory();
+    }
+}
+
 static PyMethodDef methods[] = {
     {"encode_numbers", encode_numbers, METH_O,
      "Encode exact int/float list/tuple using the existing canonical-v1 bytes."},
+    {"encode_analysis_sample_v1", encode_analysis_sample_v1, METH_VARARGS,
+     "Explicit unmeasured analysis_sample_v1 bytes for exact decimal-string sequences, else None."},
     {nullptr, nullptr, 0, nullptr}
 };
 
@@ -171,6 +281,8 @@ PyMODINIT_FUNC PyInit__canonical_numbers() {
     Owned module(PyModule_Create(&definition));
     if (!module) return nullptr;
     if (PyModule_AddIntConstant(module.get(), "ABI_VERSION", 1) < 0) return nullptr;
+    if (PyModule_AddIntConstant(module.get(), "ANALYSIS_SAMPLE_ABI_VERSION", 1) < 0) return nullptr;
+    if (PyModule_AddStringConstant(module.get(), "ANALYSIS_SAMPLE_SOURCE_SHA256", ANALYSIS_SAMPLE_SOURCE_SHA256) < 0) return nullptr;
     Owned canonical(PyImport_ImportModule("workbench.canonical"));
     if (!canonical) return nullptr;
     Owned error(PyObject_GetAttrString(canonical.get(), "CanonicalJSONError"));

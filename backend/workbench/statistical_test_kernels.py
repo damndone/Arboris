@@ -209,16 +209,20 @@ def omega_squared(groups: Mapping[str, Sequence[float]]) -> dict[str, Any]:
 
 
 def posthoc_anova(groups: Mapping[str, Sequence[float]], *, correction: str) -> dict[str, Any]:
-    arrays = {str(name): _finite_values(values, label=f"group {name}") for name, values in groups.items()}
+    # The old list round-trip made contiguous float64 groups. Keep that
+    # reduction order for strided inputs without boxing each observation.
+    arrays = {str(name): np.ascontiguousarray(_finite_array(values, label=f"group {name}"))
+              for name, values in groups.items()}
     if len(arrays) < 2:
         raise ValueError("posthoc_anova requires at least two groups")
     if correction not in {"tukey", "bonferroni"}:
         raise ValueError("correction must be tukey or bonferroni")
-    labels = [name for name, values in arrays.items() for _ in values]
-    values = [value for group in arrays.values() for value in group]
+    sizes = tuple(map(len, arrays.values()))
     statistic, p_value = stats.f_oneway(*arrays.values())
     comparisons: list[dict[str, Any]] = []
     if correction == "tukey":
+        values = np.concatenate(tuple(arrays.values()))
+        labels = np.repeat(np.asarray(tuple(arrays)), sizes)
         tukey = statsmodels_pairwise_tukey(values, labels)
         for row in tukey:
             comparisons.append(row)
@@ -239,7 +243,7 @@ def posthoc_anova(groups: Mapping[str, Sequence[float]], *, correction: str) -> 
     result = _evidence_result(
         test_id="anova_posthoc",
         test_type="anova_posthoc",
-        nobs=len(values),
+        nobs=sum(sizes),
         statistic=statistic,
         p_value=p_value,
         effect_size=eta_squared(arrays),

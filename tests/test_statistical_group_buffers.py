@@ -137,3 +137,103 @@ def test_group_owner_cancellation_remains_the_original_error():
     with pytest.raises(ValueError) as caught:
         evidence._finite_groups(frame, 'x', 'g', check_cancel=check)
     assert caught.value is error
+
+
+def _legacy_posthoc_anova(groups, *, correction):
+    """Pre-buffer post-hoc route, retaining its library calls and observation order."""
+    from itertools import combinations
+
+    arrays = {str(name): kernels._finite_values(values, label=f'group {name}') for name, values in groups.items()}
+    if len(arrays) < 2:
+        raise ValueError('posthoc_anova requires at least two groups')
+    if correction not in {'tukey', 'bonferroni'}:
+        raise ValueError('correction must be tukey or bonferroni')
+    labels = [name for name, values in arrays.items() for _ in values]
+    values = [value for group in arrays.values() for value in group]
+    statistic, p_value = kernels.stats.f_oneway(*arrays.values())
+    comparisons = []
+    if correction == 'tukey':
+        comparisons.extend(kernels.statsmodels_pairwise_tukey(values, labels))
+    else:
+        pairs = list(combinations(arrays, 2))
+        for left_name, right_name in pairs:
+            pair_stat, pair_p = kernels.stats.ttest_ind(arrays[left_name], arrays[right_name], equal_var=False)
+            comparisons.append({'group1': left_name, 'group2': right_name,
+                'statistic': kernels._safe_float(pair_stat), 'p_value': min(1., float(pair_p) * len(pairs)),
+                'correction': 'bonferroni', 'effect_size': kernels.cohens_d(arrays[left_name], arrays[right_name])})
+    result = kernels._evidence_result(test_id='anova_posthoc', test_type='anova_posthoc', nobs=len(values),
+        statistic=statistic, p_value=p_value, effect_size=kernels.eta_squared(arrays),
+        assumptions=['independent observations', 'approximately normal residuals', 'homogeneous variance'])
+    result.update({'correction': correction, 'family': 'all_group_pairs', 'comparisons': comparisons})
+    return result
+
+
+def _posthoc_groups(variant):
+    first = np.array([1., 2., 5., 3., 2., 7., 4., 6.])
+    second = np.array([9., 2., 1., 4., 6., 5., 8., 3.])
+    third = np.array([3., 4., 3., 6., 5., 7., 8., 9.])
+    if variant == 'strided-unicode':
+        return {'β': first[::-2], '长短标签' * 12: second[::2], 'a': third[::-2]}
+    if variant == 'str-collision':
+        # The later string key replaces the integer key's data, retaining its first position.
+        return {7: first, 'tail': second, '7': third[::-2], '较长的组名': first[::2]}
+    if variant == 'constant':
+        return {'b': np.ones(4), 'a': np.full(4, 2.), 'c': np.full(4, 3.)}
+    return {'b': first, 'a': second, 'c': third}
+
+
+def _posthoc_outcome(function, groups, correction):
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter('always')
+        try:
+            result = ('returned', bits(function(groups, correction=correction)))
+        except ValueError as error:
+            result = ('rejected', type(error), str(error))
+    return result, [(warning.category, str(warning.message)) for warning in caught]
+
+
+@pytest.mark.parametrize('variant', ['ordinary', 'strided-unicode', 'str-collision'])
+def test_tukey_receives_contiguous_buffers_with_the_legacy_label_dtype_and_group_order(variant, monkeypatch):
+    groups = _posthoc_groups(variant)
+    original = {key: values.copy() for key, values in groups.items()}
+    legacy = {str(key): np.asarray(values, dtype=float).tolist() for key, values in groups.items()}
+    expected_values = np.asarray([value for values in legacy.values() for value in values])
+    expected_labels = np.asarray([key for key, values in legacy.items() for _ in values])
+    delegate = kernels.statsmodels_pairwise_tukey
+    observed = []
+
+    def capture(values, labels):
+        assert isinstance(values, np.ndarray) and isinstance(labels, np.ndarray)
+        assert values.flags.c_contiguous and labels.flags.c_contiguous
+        assert values.dtype == expected_values.dtype and labels.dtype == expected_labels.dtype
+        assert values.tobytes() == expected_values.tobytes()
+        assert labels.tobytes() == expected_labels.tobytes()
+        observed.append((values.size, labels.size))
+        return delegate(values, labels)
+
+    monkeypatch.setattr(kernels, 'statsmodels_pairwise_tukey', capture)
+    kernels.posthoc_anova(groups, correction='tukey')
+    assert observed == [(expected_values.size, expected_labels.size)]
+    for key, values in groups.items():
+        assert values.dtype == original[key].dtype and values.tobytes() == original[key].tobytes()
+
+
+@pytest.mark.parametrize('variant', ['ordinary', 'strided-unicode', 'str-collision', 'constant'])
+@pytest.mark.parametrize('correction', ['tukey', 'bonferroni'])
+def test_posthoc_buffer_results_and_warnings_are_bit_identical_to_the_list_route(variant, correction):
+    groups = _posthoc_groups(variant)
+    assert _posthoc_outcome(kernels.posthoc_anova, groups, correction) == _posthoc_outcome(
+        _legacy_posthoc_anova, groups, correction)
+
+
+def test_bonferroni_does_not_build_a_flat_observation_or_label_buffer(monkeypatch):
+    class NoFlatBuffers:
+        def __getattr__(self, name):
+            if name in {'concatenate', 'repeat'}:
+                pytest.fail('Bonferroni does not need a full observation or label buffer')
+            return getattr(np, name)
+
+    groups = _posthoc_groups('strided-unicode')
+    expected = _posthoc_outcome(_legacy_posthoc_anova, groups, 'bonferroni')
+    monkeypatch.setattr(kernels, 'np', NoFlatBuffers())
+    assert _posthoc_outcome(kernels.posthoc_anova, groups, 'bonferroni') == expected
