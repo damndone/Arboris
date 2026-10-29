@@ -21,6 +21,11 @@ _SOURCE = _ROOT / 'native/ar_exact/ar_exact.cpp'
 _BINARY = _ROOT / 'local/native-ar' / ('_ar_exact' + sysconfig.get_config_var('EXT_SUFFIX'))
 _MOMENTS_SOURCE = _SOURCE.with_name('ar_moments.cpp')
 _MOMENTS_BINARY = _BINARY.with_name('_ar_moments_exact' + sysconfig.get_config_var('EXT_SUFFIX'))
+_MOMENTS_MIN_ROWS = 1_000_000
+
+
+class _MomentsNotBuilt(RuntimeError):
+    """Only a genuinely absent optional build permits the old exact path."""
 
 
 def _load_kernel(binary, *, module_name='_ar_exact', error_prefix='native_ar'):
@@ -40,20 +45,55 @@ def _load_kernel(binary, *, module_name='_ar_exact', error_prefix='native_ar'):
 _kernel = _load_kernel(_BINARY)
 
 
-def engine_status(*inputs):
+def _row_status():
     if _kernel is None:
         return {'engine': 'python_exact_reference', 'engine_reason': 'native_ar_not_built'}
     if type(_kernel.ABI_VERSION) is not int or _kernel.ABI_VERSION != 2:
         raise RuntimeError('native_ar_abi_mismatch')
     if _kernel.SOURCE_SHA256 != hashlib.sha256(_SOURCE.read_bytes()).hexdigest():
         raise RuntimeError('native_ar_source_digest_mismatch_rebuild_required')
+    return {'engine': 'native_cpp_exact', 'engine_algorithm': 'row_exact',
+            'engine_abi': 2, 'engine_source_sha256': _kernel.SOURCE_SHA256}
+
+
+def _moments_shape(views):
+    if len(views) != 4:
+        return False
+    y, x, z, w = views
+    if y.ndim not in (1, 2) or (y.ndim == 2 and y.shape[1] != 1):
+        return False
+    n = y.shape[0]
+    return (n >= _MOMENTS_MIN_ROWS and x.shape == (n, 1) and z.ndim == w.ndim == 2
+            and z.shape[0] == w.shape[0] == n and 1 <= z.shape[1] <= 4
+            and z.shape[1] + w.shape[1] <= 4)
+
+
+def engine_status(*inputs):
+    """Select exact arithmetic; no inputs describes the row primitives.
+
+    Large samples within p<=4 use moments. The general cost rule is broader
+    than the fixed-input 1M p4/q2 performance proof; no other shape is thereby
+    performance-certified. Buffer metadata is inspected without scanning or
+    copying the caller's observations. Existing broken builds always fail.
+    """
+    row = _row_status()
     try:
-        compatible = all(memoryview(array).format in {'d', '=d', '@d'} for array in inputs)
+        views = tuple(memoryview(array) for array in inputs)
     except TypeError:
-        compatible = False  # Old callers may pass y as a Python sequence.
-    if not compatible:
-        return {'engine': 'python_exact_reference', 'engine_reason': 'native_ar_requires_native_binary64_buffers'}
-    return {'engine': 'native_cpp_exact', 'engine_abi': 2, 'engine_source_sha256': _kernel.SOURCE_SHA256}
+        views = None  # Old callers may pass y as a Python sequence.
+    if views is None or any(view.itemsize != 8 or view.format not in {'d', '=d', '@d'} for view in views):
+        return (row if _kernel is None else
+                {'engine': 'python_exact_reference', 'engine_reason': 'native_ar_requires_native_binary64_buffers'})
+    if _moments_shape(views):
+        try:
+            kernel = _moments_kernel()
+        except _MomentsNotBuilt:
+            return row | {'moments_reason': 'native_ar_moments_not_built'}
+        return {'engine': 'native_cpp_exact', 'engine_algorithm': 'moments',
+                'engine_abi': kernel.ABI_VERSION, 'engine_source_sha256': kernel.SOURCE_SHA256,
+                'performance_evidence_scope': 'fixed_input_1m_p4_q2_component',
+                'other_shapes_performance_certified': False}
+    return row
 
 
 def sufficient_statistics(y, x, z, w):
@@ -69,6 +109,9 @@ def covariance_polynomial(y, x, z, w, scale, a, d, u, v):
 
 
 def robust_polynomials(y, x, z, w, critical):
+    check_cancellation()
+    if engine_status(y, x, z, w).get('engine_algorithm') == 'moments':
+        return robust_polynomials_moments(y, x, z, w, critical)
     from .checks.ar_confidence import _inverse_integer, _robust_polynomial_determinants
     scale, gram, cross_y, cross_x = sufficient_statistics(y, x, z, w)
     check_cancellation()
@@ -94,11 +137,11 @@ def _validate_moments_kernel(kernel):
 
 @lru_cache(maxsize=1)
 def _moments_kernel():
-    # The explicit path alone loads this optional extension. Validate its
+    # Only selected/explicit moments load this optional extension. Validate its
     # immutable deployed source/ABI once, without scanning observation arrays.
     kernel = _load_kernel(_MOMENTS_BINARY, module_name='_ar_moments_exact', error_prefix='native_ar_moments')
     if kernel is None:
-        raise RuntimeError('native_ar_moments_not_built_run_native/ar_exact/build.py_--engine_moments')
+        raise _MomentsNotBuilt('native_ar_moments_not_built_run_native/ar_exact/build.py_--engine_moments')
     _validate_moments_kernel(kernel)
     return kernel
 
@@ -141,13 +184,14 @@ def _moments_components(raw, q):
 
 
 def robust_polynomials_moments(y, x, z, w, critical):
-    """Explicit opt-in exact AR, p<=4; current default selection is unchanged.
+    """Explicit exact moments, p<=4, also used by selected large exact calls.
 
     Missing/stale/broken builds and unsupported inputs fail. Callers retain
     their original binary64 arrays and execution-owned no-writer contract;
     only bounded private native blocks are copied. The existing cancellation
     scope covers native accumulation, matrix contractions and determinants.
-    This implementation has no accepted timing/resource claim yet.
+    Component timing/resources were accepted on one fixed 1M p4/q2 input.
+    Other shapes and full workflow/cancellation latency remain unaccepted.
     """
     from .checks.ar_confidence import _robust_polynomial_determinants
     check_cancellation()
