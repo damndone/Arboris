@@ -188,8 +188,8 @@ class _RecordingTransport(httpx.AsyncBaseTransport):
             "content_type": response.headers.get("content-type", "") if response is not None else "", "request_sha256": digest,
             "request": json.loads(body), "request_bytes": len(body), "response_raw": raw.decode("utf-8", "replace"),
             "usage": None, "transport_error": type(exc).__name__, "budget_reservation": reservation, "sent": sent})
-        if hasattr(self.budget, "recover_unanswered_read_error"):
-            self.budget.recover_unanswered_read_error(response=response, raw=raw, sent=sent, error=exc, key=reservation)
+        if hasattr(self.budget, "recover_unanswered_transport_error"):
+            self.budget.recover_unanswered_transport_error(response=response, raw=raw, sent=sent, error=exc, key=reservation)
         if response is not None and hasattr(self.budget, "recover_overload"):
             self.budget.recover_overload(response.status_code, raw, reservation)
         if response is not None and hasattr(self.budget, "check_response"):

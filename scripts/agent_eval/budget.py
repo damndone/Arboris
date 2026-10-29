@@ -311,9 +311,12 @@ class NvidiaOverloadRecovery(FreeRouteGuard):
 
     _change = RoundBudget._change
 
-    def __init__(self, path, *, unanswered_read_errors=False):
+    def __init__(self, path, *, unanswered_read_errors=False, unanswered_protocol_errors=False):
         self.unanswered_read_errors = unanswered_read_errors
-        self.schema = "nvidia-overload-recovery/v2" if unanswered_read_errors else "nvidia-overload-recovery/v1"
+        self.unanswered_protocol_errors = unanswered_protocol_errors
+        if unanswered_protocol_errors and not unanswered_read_errors:
+            raise ValueError("protocol recovery requires the explicit unanswered-read recovery policy")
+        self.schema = "nvidia-overload-recovery/v3" if unanswered_protocol_errors else "nvidia-overload-recovery/v2" if unanswered_read_errors else "nvidia-overload-recovery/v1"
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.lock = FileLock(str(self.path) + ".lock")
@@ -323,6 +326,8 @@ class NvidiaOverloadRecovery(FreeRouteGuard):
                 "per_request_retry_limit": 2, "delays_s": [60, 120]}
             if unanswered_read_errors:
                 expected["unanswered_read_errors"] = True
+            if unanswered_protocol_errors:
+                expected["unanswered_protocol_errors"] = True
             if any(state.get(key) != value for key, value in expected.items()):
                 raise ValueError("NVIDIA shared overload recovery configuration changed")
 
@@ -335,7 +340,8 @@ class NvidiaOverloadRecovery(FreeRouteGuard):
             "per_request_retry_limit": 2, "delays_s": [60, 120], "retries": 0,
             "request_retries": {}, "tickets": {}, "pending": None, "manual_restarts": {},
             "stopped": False, "reason": None,
-            **({"unanswered_read_errors": True} if self.unanswered_read_errors else {})}
+            **({"unanswered_read_errors": True} if self.unanswered_read_errors else {}),
+            **({"unanswered_protocol_errors": True} if self.unanswered_protocol_errors else {})}
 
     def record_manual_restart(self, *, source_path, reason):
         """Charge the explicitly approved task restart once, without settling any request."""
@@ -422,7 +428,8 @@ class NvidiaFreeEndpointGuard(FreeRouteGuard):
     _change = RoundBudget._change
 
     def __init__(self, path, *, provider_id, base_url, model, round_kind, overload_recovery_ledger=None,
-                 recover_unanswered_read_errors=False, allow_low_space_this_round=False):
+                 recover_unanswered_read_errors=False, allow_low_space_this_round=False,
+                 recover_unanswered_protocol_errors=False):
         if (provider_id, base_url, model) != (NVIDIA_PROVIDER_ID, NVIDIA_BASE_URL, NVIDIA_MODEL):
             raise ValueError("NVIDIA evaluation requires the exact authorized provider, base URL and Ultra model")
         if round_kind not in {"dev8", "qrdata40"}:
@@ -435,15 +442,19 @@ class NvidiaFreeEndpointGuard(FreeRouteGuard):
         self.request_limit = 240 if round_kind == "dev8" else 1200
         self.overload_recovery = None
         self.recover_unanswered_read_errors = recover_unanswered_read_errors
+        self.recover_unanswered_protocol_errors = recover_unanswered_protocol_errors
         self.allow_low_space_this_round = allow_low_space_this_round
         self._retry_ticket = None
         if recover_unanswered_read_errors and overload_recovery_ledger is None:
             raise ValueError("unanswered ReadError recovery requires its explicit shared recovery ledger")
+        if recover_unanswered_protocol_errors and not recover_unanswered_read_errors:
+            raise ValueError("protocol recovery requires the explicit unanswered-read recovery policy")
         if overload_recovery_ledger is not None:
             if self.path.resolve() == Path(overload_recovery_ledger).resolve():
                 raise ValueError("NVIDIA request and recovery ledgers must be separate")
             self.overload_recovery = NvidiaOverloadRecovery(overload_recovery_ledger,
-                unanswered_read_errors=recover_unanswered_read_errors)
+                unanswered_read_errors=recover_unanswered_read_errors,
+                unanswered_protocol_errors=recover_unanswered_protocol_errors)
         with self._change() as state:
             if state.get("allow_low_space_this_round", False) != allow_low_space_this_round:
                 raise ValueError("NVIDIA ledger storage policy changed; use a separate round ledger")
@@ -561,12 +572,15 @@ class NvidiaFreeEndpointGuard(FreeRouteGuard):
             return
         self._recover_unknown(raw, key, "user-authorized complete error-only SSE 503 recovery; usage and billing remain unknown")
 
-    def recover_unanswered_read_error(self, *, response, raw, sent, error, key):
-        from httpx import ReadError
+    def recover_unanswered_transport_error(self, *, response, raw, sent, error, key):
+        from httpx import ReadError, RemoteProtocolError
         if (not self.recover_unanswered_read_errors or self.overload_recovery is None
-                or response is not None or raw or not sent or not isinstance(error, ReadError)):
+                or response is not None or raw or not sent):
             return
-        self._recover_unknown(raw, key, "user-authorized unanswered ReadError recovery; usage and billing remain unknown")
+        if not (isinstance(error, ReadError)
+                or self.recover_unanswered_protocol_errors and isinstance(error, RemoteProtocolError)):
+            return
+        self._recover_unknown(raw, key, f"user-authorized unanswered {type(error).__name__} recovery; usage and billing remain unknown")
 
     def _recover_unknown(self, raw, key, reason):
         state = self.state

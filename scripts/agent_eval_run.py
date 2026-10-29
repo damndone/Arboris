@@ -94,6 +94,8 @@ def main() -> int:
                         help="explicit 503-only recovery opt-in; same durable 10-retry ledger for dev8 and QRData40")
     parser.add_argument("--nvidia-recover-unanswered-read-error", action="store_true",
                         help="explicit v2 recovery policy: additionally permit ReadError before any response headers/body")
+    parser.add_argument("--nvidia-recover-unanswered-protocol-error", action="store_true",
+                        help="explicit v3 policy: additionally permit RemoteProtocolError before any response headers/body")
     parser.add_argument("--allow-low-space-this-round", action="store_true",
                         help="explicit user-authorized storage exception; never releases financial stops")
     args = parser.parse_args()
@@ -105,6 +107,8 @@ def main() -> int:
         parser.error("NVIDIA overload recovery requires the explicit NVIDIA endpoint guard")
     if args.nvidia_recover_unanswered_read_error and args.nvidia_overload_recovery_ledger is None:
         parser.error("unanswered ReadError recovery requires --nvidia-overload-recovery-ledger with a new v2 ledger")
+    if args.nvidia_recover_unanswered_protocol_error and not args.nvidia_recover_unanswered_read_error:
+        parser.error("protocol recovery requires --nvidia-recover-unanswered-read-error with a new v3 ledger")
     if args.nvidia_free_round is not None:
         if args.transport != "headless" or args.mode not in {"ask", "auto"} or args.repeat != 1:
             parser.error("NVIDIA round requires headless Ask/Auto and repeat=1")
@@ -128,6 +132,7 @@ def main() -> int:
                 base_url=config.base_url, model=config.model, round_kind=args.nvidia_free_round,
                 overload_recovery_ledger=args.nvidia_overload_recovery_ledger,
                 recover_unanswered_read_errors=args.nvidia_recover_unanswered_read_error,
+                recover_unanswered_protocol_errors=args.nvidia_recover_unanswered_protocol_error,
                 allow_low_space_this_round=args.allow_low_space_this_round)
         except ValueError as exc:
             parser.error(str(exc))
@@ -196,10 +201,12 @@ def main() -> int:
             "explicit_output_token_limit": 32768, "per_task_wall_s": args.max_wall_s,
             "overload_recovery_ledger": str(args.nvidia_overload_recovery_ledger) if args.nvidia_overload_recovery_ledger is not None else None,
             "recover_unanswered_read_errors": args.nvidia_recover_unanswered_read_error,
+            "recover_unanswered_protocol_errors": args.nvidia_recover_unanswered_protocol_error,
             "overload_recovery_schema": budget.overload_recovery.schema if budget.overload_recovery is not None else None,
             "overload_recovery": ({"shared_retry_limit": 10, "per_request_retry_limit": 2,
                 "delays_s": [60, 120], "eligibility": "complete observed error-only SSE 503 plus DONE; no generated output"
-                    + ("; or ReadError before any response headers or body" if args.nvidia_recover_unanswered_read_error else "")}
+                    + ("; or ReadError before any response headers or body" if args.nvidia_recover_unanswered_read_error else "")
+                    + ("; or RemoteProtocolError before any response headers or body" if args.nvidia_recover_unanswered_protocol_error else "")}
                 if args.nvidia_overload_recovery_ledger is not None else None),
             "fallback": "forbidden; actual request URL and model checked"} if args.nvidia_free_ledger is not None else None),
         "provider": {key: getattr(config, key, None) for key in ("provider_id", "base_url", "model", "data_location")},

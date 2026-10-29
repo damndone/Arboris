@@ -17,9 +17,11 @@ OVERLOAD = b'data: {"error":{"message":"Service temporarily overloaded","type":"
 SUCCESS = ('data: ' + json.dumps({'choices': [{'delta': {'content': 'offline done'}, 'finish_reason': 'stop'}], 'usage': USAGE}) + '\n\ndata: [DONE]\n\n').encode()
 
 
-def setup_recovery(tmp_path, monkeypatch, responses, *, closed=None, unanswered_reads=False, pool_closed=None):
+def setup_recovery(tmp_path, monkeypatch, responses, *, closed=None, unanswered_reads=False, pool_closed=None, unanswered_protocols=False):
     assert hasattr(budget, 'NvidiaOverloadRecovery'), 'missing opt-in bounded overload recovery'
-    options = {'recover_unanswered_read_errors': True} if unanswered_reads else {}
+    options = {'recover_unanswered_read_errors': True} if unanswered_reads or unanswered_protocols else {}
+    if unanswered_protocols:
+        options['recover_unanswered_protocol_errors'] = True
     g, now = guard(tmp_path, monkeypatch, overload_recovery_ledger=tmp_path / 'recovery.json', **options)
     calls, waits = [], []
     async def wait(seconds):
@@ -141,8 +143,8 @@ def test_recovery_ledger_binding_cannot_change_on_restart(tmp_path, monkeypatch)
         guard(tmp_path, monkeypatch)
 
 
-@pytest.mark.parametrize('unanswered_reads', [False, True])
-def test_recovery_cli_requires_nvidia_opt_in_and_records_shared_ledger(tmp_path, monkeypatch, unanswered_reads):
+@pytest.mark.parametrize('unanswered_reads,unanswered_protocols', [(False,False),(True,False),(True,True)])
+def test_recovery_cli_requires_nvidia_opt_in_and_records_shared_ledger(tmp_path, monkeypatch, unanswered_reads, unanswered_protocols):
     import sys
     from types import SimpleNamespace
     from tests.test_agent_eval_nvidia_guard import run_module
@@ -161,15 +163,28 @@ def test_recovery_cli_requires_nvidia_opt_in_and_records_shared_ledger(tmp_path,
         '--mode', 'ask', '--nvidia-free-round', 'dev8', '--nvidia-free-ledger', str(tmp_path / 'dev.json'),
         '--nvidia-overload-recovery-ledger', str(tmp_path / 'shared.json')])
     if unanswered_reads: sys.argv.append('--nvidia-recover-unanswered-read-error')
+    if unanswered_protocols: sys.argv.append('--nvidia-recover-unanswered-protocol-error')
     assert module.main() == 86
     meta = json.loads((tmp_path / 'out/run_meta.json').read_text())['nvidia_free_endpoint']
     assert meta['recover_unanswered_read_errors'] is unanswered_reads
-    assert meta['overload_recovery_schema'] == ('nvidia-overload-recovery/v2' if unanswered_reads else 'nvidia-overload-recovery/v1')
+    assert meta['recover_unanswered_protocol_errors'] is unanswered_protocols
+    assert meta['overload_recovery_schema'] == ('nvidia-overload-recovery/v3' if unanswered_protocols else 'nvidia-overload-recovery/v2' if unanswered_reads else 'nvidia-overload-recovery/v1')
     assert meta['overload_recovery_ledger'] == str(tmp_path / 'shared.json')
     eligibility = 'complete observed error-only SSE 503 plus DONE; no generated output'
     if unanswered_reads: eligibility += '; or ReadError before any response headers or body'
+    if unanswered_protocols: eligibility += '; or RemoteProtocolError before any response headers or body'
     assert meta['overload_recovery'] == {'shared_retry_limit': 10, 'per_request_retry_limit': 2,
         'delays_s': [60, 120], 'eligibility': eligibility}
+
+
+def test_protocol_recovery_cli_requires_explicit_read_policy(tmp_path,monkeypatch):
+    import sys
+    from tests.test_agent_eval_nvidia_guard import run_module
+    module=run_module()
+    monkeypatch.setattr(module,'load_llm_config',lambda:pytest.fail('invalid policy reached provider config'))
+    monkeypatch.setattr(sys,'argv',['agent_eval_run.py','--out',str(tmp_path/'out'),'--nvidia-recover-unanswered-protocol-error'])
+    with pytest.raises(SystemExit) as rejected:module.main()
+    assert rejected.value.code==2
 
 
 def test_read_error_before_headers_stops_without_spending_overload_recovery(tmp_path, monkeypatch):
@@ -263,3 +278,57 @@ def test_recovery_policy_versions_cannot_silently_upgrade_or_downgrade(tmp_path)
     new=tmp_path/'v2.json';budget.NvidiaOverloadRecovery(new,unanswered_read_errors=True);before=new.read_bytes()
     with pytest.raises(ValueError): budget.NvidiaOverloadRecovery(new)
     assert new.read_bytes()==before
+
+
+def test_v3_unanswered_protocol_disconnect_preserves_payload_usage_and_shared_budget(tmp_path, monkeypatch):
+    closed=[]
+    g,calls,waits,_=setup_recovery(tmp_path,monkeypatch,
+        [httpx.RemoteProtocolError('Server disconnected without sending a response.'),SUCCESS],
+        unanswered_protocols=True,pool_closed=closed)
+    events=asyncio.run(run(g,tmp_path))
+    assert events[-1].type=='done' and len(calls)==2 and len(set(calls))==1
+    assert waits==[60] and len(closed)==2
+    assert g.state['calls']==1 and g.state['requests']==2 and not g.state['reservations']
+    unknown=g.state['accepted_unknown_requests']
+    assert len(unknown)==1 and 'RemoteProtocolError' in unknown[0]['reason']
+    restored=budget.NvidiaOverloadRecovery(tmp_path/'recovery.json',unanswered_read_errors=True,unanswered_protocol_errors=True)
+    assert restored.state['schema']=='nvidia-overload-recovery/v3' and restored.state['retries']==1
+
+
+def test_v2_does_not_implicitly_recover_protocol_disconnect(tmp_path,monkeypatch):
+    g,calls,waits,_=setup_recovery(tmp_path,monkeypatch,
+        [httpx.RemoteProtocolError('Server disconnected without sending a response.')],unanswered_reads=True)
+    with pytest.raises(budget.BudgetStop):asyncio.run(run(g,tmp_path))
+    assert len(calls)==1 and waits==[] and g.stopped
+
+
+@pytest.mark.parametrize('partial_body',[False,True])
+def test_v3_protocol_error_after_headers_never_recovers(tmp_path,monkeypatch,partial_body):
+    g,calls,waits,_=setup_recovery(tmp_path,monkeypatch,[],unanswered_protocols=True)
+    class Stream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            if partial_body:yield b'data: {"choices":[{"delta":{"content":"partial"}}]}\n\n'
+            raise httpx.RemoteProtocolError('peer closed')
+    def handle(request):
+        calls.append(request.content)
+        return httpx.Response(200,headers={'content-type':'text/event-stream'},stream=Stream())
+    monkeypatch.setattr(httpx,'AsyncHTTPTransport',lambda:httpx.MockTransport(handle))
+    with pytest.raises(budget.BudgetStop):asyncio.run(run(g,tmp_path))
+    assert len(calls)==1 and waits==[] and g.overload_recovery.state['retries']==0
+
+
+def test_v3_mixed_errors_share_two_retry_limit(tmp_path,monkeypatch):
+    g,calls,waits,_=setup_recovery(tmp_path,monkeypatch,
+        [OVERLOAD,httpx.ReadError('unanswered'),httpx.RemoteProtocolError('unanswered')],unanswered_protocols=True)
+    with pytest.raises(budget.BudgetStop,match='per-request'):asyncio.run(run(g,tmp_path))
+    assert len(calls)==3 and waits==[60,120] and g.overload_recovery.state['retries']==2
+    assert len(g.state['accepted_unknown_requests'])==2 and len(g.state['reservations'])==1
+
+
+def test_v3_policy_cannot_upgrade_or_downgrade_existing_ledgers(tmp_path):
+    path=tmp_path/'recovery.json';budget.NvidiaOverloadRecovery(path,unanswered_read_errors=True);before=path.read_bytes()
+    with pytest.raises(ValueError):budget.NvidiaOverloadRecovery(path,unanswered_read_errors=True,unanswered_protocol_errors=True)
+    assert path.read_bytes()==before
+    path=tmp_path/'v3.json';budget.NvidiaOverloadRecovery(path,unanswered_read_errors=True,unanswered_protocol_errors=True);before=path.read_bytes()
+    with pytest.raises(ValueError):budget.NvidiaOverloadRecovery(path,unanswered_read_errors=True)
+    assert path.read_bytes()==before
