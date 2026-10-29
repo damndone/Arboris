@@ -711,6 +711,30 @@
   font: 10px/1.35 var(--font-sans, system-ui, sans-serif);
 }
 
+.wb-agent-tool-details {
+  min-width: 0;
+  margin-top: 4px;
+}
+
+.wb-agent-tool-details > summary {
+  color: var(--label-tertiary);
+  font-size: var(--text-caption);
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.wb-agent-tool-details > summary:focus-visible {
+  outline: 2px solid var(--tint);
+  border-radius: 3px;
+}
+
+.wb-agent-tool-details > .wb-agent-message-links {
+  display: flex;
+  width: 100%;
+  max-width: 100%;
+  margin-top: 6px;
+}
+
 .wb-agent-message-link:hover:not(:disabled) {
   border-color: color-mix(in oklch, var(--tint) 40%, var(--separator));
   color: var(--tint);
@@ -988,6 +1012,10 @@
   opacity: 1;
 }
 
+.wb-agent-tool-details[open] > .agt-actions {
+  opacity: 1;
+}
+
 .agt-actions time {
   margin-right: 4px;
   font-variant-numeric: tabular-nums;
@@ -1094,6 +1122,12 @@
 .agt-working__time {
   color: var(--label-tertiary);
   font-variant-numeric: tabular-nums;
+}
+
+.agt-working__label {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .agt-working__steps {

@@ -15,6 +15,7 @@ import "./agent.css";
 import { formatPValue } from "../../format/numbers";
 import { AgentApprovalBar } from "./AgentApprovalBar";
 import { AgentProposalReceipt, receiptsByTurn } from "./AgentProposalReceipt";
+import { activeToolActivityLabel } from "./toolActivity";
 
 function roleMarker(role: string): string {
   if (role === "user") return "❯";
@@ -303,7 +304,7 @@ export function AgentPanel({
     if (shouldFollowTranscriptRef.current) {
       transcript.scrollTop = transcript.scrollHeight;
     }
-  }, [agent.liveResponseText, agent.messages]);
+  }, [agent.activeToolCalls, agent.liveResponseText, agent.messages]);
   const renderTranscriptMessage = (message: AgentMessage) => {
     const sourceRef = message.navigation?.find(
       (link) => link.kind === "graph_node" && link.available,
@@ -321,7 +322,29 @@ export function AgentPanel({
         ↗ {link.label}
       </button>
     ));
-    const denseReferences = (references?.length ?? 0) > 3;
+    const denseReferences = message.role !== "tool" && (references?.length ?? 0) > 3;
+    const messageNavigation = message.navigation && message.navigation.length > 0 && (
+      <div className="wb-agent-message-links" aria-label="Message navigation links">
+        {denseReferences ? references?.slice(0, 2) : references}
+        {denseReferences && <details className="wb-agent-message-references">
+          <summary>{references!.length - 2} more references</summary>
+          <div className="wb-agent-message-links">{references?.slice(2)}</div>
+        </details>}
+      </div>
+    );
+    const messageActions = (sourceRef || (message.role !== "tool" && message.stop_reason !== "revised" && message.stop_reason !== "tool_calls")) && (
+      <MessageActions
+        message={message}
+        pinned={pinned.has(message.entry_id)}
+        busy={turnActive}
+        onRewind={agent.rewindTo}
+        onFork={agent.forkConversation}
+        onForkContext={sourceRef ? (entryId) => { void agent.forkFromMessage?.(entryId, sourceRef); } : undefined}
+        forkContextDisabledReason={sourceRef ? !sourceRef.available ? sourceRef.reason ?? "The source node is unavailable" : !agent.forkFromMessage ? "Forking is unavailable in this view" : !sourceRef.href.run_id || !sourceRef.href.node_ref ? "The source node reference is incomplete" : undefined : undefined}
+        onPin={agent.pinChapter}
+        onUnpin={agent.unpinChapter}
+      />
+    );
     return (
       <div
         key={message.entry_id}
@@ -334,10 +357,17 @@ export function AgentPanel({
           {roleMarker(message.role)}
         </span>
         {message.role === "tool" ? (
-          <span className="wb-agent-terminal-content">
-            <small className="wb-agent-tool-receipt__label">Tool receipt</small>
-            {toolStatusLine(message.content, message.name)}
-          </span>
+          <div className="wb-agent-terminal-content">
+            <span className="wb-agent-tool-receipt__status">
+              <small className="wb-agent-tool-receipt__label">Tool receipt</small>
+              {toolStatusLine(message.content, message.name)}
+            </span>
+            {(messageNavigation || messageActions) && <details className="wb-agent-tool-details">
+              <summary>Sources and actions{references?.length ? ` · ${references.length} ${references.length === 1 ? "reference" : "references"}` : ""}</summary>
+              {messageNavigation}
+              {messageActions}
+            </details>}
+          </div>
         ) : message.role === "assistant" ? (
           <div className="wb-agent-terminal-content wb-agent-terminal-markdown">
             {message.stop_reason === "revised" && (
@@ -352,28 +382,7 @@ export function AgentPanel({
             {message.content}
           </span>
         )}
-        {message.navigation && message.navigation.length > 0 && (
-          <div className="wb-agent-message-links" aria-label="Message navigation links">
-            {denseReferences ? references?.slice(0, 2) : references}
-            {denseReferences && <details className="wb-agent-message-references">
-              <summary>{references!.length - 2} more references</summary>
-              <div className="wb-agent-message-links">{references?.slice(2)}</div>
-            </details>}
-          </div>
-        )}
-        {(sourceRef || (message.role !== "tool" && message.stop_reason !== "revised" && message.stop_reason !== "tool_calls")) && (
-          <MessageActions
-            message={message}
-            pinned={pinned.has(message.entry_id)}
-            busy={turnActive}
-            onRewind={agent.rewindTo}
-            onFork={agent.forkConversation}
-            onForkContext={sourceRef ? (entryId) => { void agent.forkFromMessage?.(entryId, sourceRef); } : undefined}
-            forkContextDisabledReason={sourceRef ? !sourceRef.available ? sourceRef.reason ?? "The source node is unavailable" : !agent.forkFromMessage ? "Forking is unavailable in this view" : !sourceRef.href.run_id || !sourceRef.href.node_ref ? "The source node reference is incomplete" : undefined : undefined}
-            onPin={agent.pinChapter}
-            onUnpin={agent.unpinChapter}
-          />
-        )}
+        {message.role !== "tool" && <>{messageNavigation}{messageActions}</>}
       </div>
     );
   };
@@ -514,7 +523,7 @@ export function AgentPanel({
               aria-live="polite"
             >
               <span className="agt-working__dot" aria-hidden="true" />
-              <span>{observableActivity(agent.lastEventType)}</span>
+              <span className="agt-working__label">{activeToolActivityLabel(agent.activeToolCalls) ?? observableActivity(agent.lastEventType)}</span>
               <span className="agt-working__time">{elapsedSeconds === null ? "Elapsed time unavailable" : `${elapsedSeconds} s`}</span>
             </div>
             {agent.liveResponseText && (

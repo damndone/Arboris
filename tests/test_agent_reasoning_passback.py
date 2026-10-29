@@ -44,9 +44,10 @@ def test_the_adapter_reports_the_reasoning_privately_with_its_source(monkeypatch
         {"type": "done", "finish_reason": "stop"},
     ])
     events = _events(OpenAICompatibleModelAdapter(CONFIG), ModelRequest(messages=[{"role": "user", "content": "go"}]))
-    assert [e.type for e in events] == ["text_delta", "reasoning", "done"]
-    assert events[1].delta == "Check the residuals first."
-    assert events[1].reasoning_source == SOURCE
+    assert [e.type for e in events] == ["activity", "text_delta", "reasoning", "done"]
+    assert events[0].delta == "" and events[0].reasoning_source is None
+    assert events[2].delta == "Check the residuals first."
+    assert events[2].reasoning_source == SOURCE
 
 
 def test_a_retried_attempt_keeps_only_the_successful_attempts_reasoning(monkeypatch):

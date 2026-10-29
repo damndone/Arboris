@@ -36,6 +36,9 @@ class ContextSnapshot:
     source_entry_ids: list[str]
 
 
+_CONTEXT_PAYLOAD_TYPES = frozenset({"message", "custom_message", "compaction"})
+
+
 class ContextBuilder:
     """Build model messages from a resolved branch without hidden truncation."""
 
@@ -53,7 +56,8 @@ class ContextBuilder:
         messages: list[dict[str, Any]] = []
         source_entry_ids: list[str] = []
         shown_proposals: dict[str, dict[str, Any]] = {}
-        branch = self.repository.get_branch(session_id, leaf_entry_id=leaf_entry_id)
+        branch = self.repository.get_branch(session_id, leaf_entry_id=leaf_entry_id,
+                                            payload_entry_types=_CONTEXT_PAYLOAD_TYPES)
         projected = _project(branch)
         # A proposal's audit record is stored before the run_operation result that
         # carries the same proposal, and sent after it; note those results first, or

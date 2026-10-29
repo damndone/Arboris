@@ -29,6 +29,16 @@ def json_bytes(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
 
 
+def _work_directory_bytes(tree: Path) -> int:
+    total = 0
+    for path in tree.rglob("*"):
+        if path.is_symlink():
+            raise ValueError("symlink in pipeline work directory")
+        if path.is_file():
+            total += path.stat().st_size
+    return total
+
+
 def verify_source_snapshot(tree: Path, expected_sha256: str | None = None):
     """Verify the entire registered source tree, including lazy dependencies."""
     tree = tree.resolve()
@@ -58,7 +68,25 @@ def verify_source_snapshot(tree: Path, expected_sha256: str | None = None):
         raw = path.read_bytes()
         if sha(raw) != item["sha256"] or ("bytes" in item and len(raw) != item["bytes"]):
             raise ValueError("frozen source file digest changed: " + relative)
-    return {"manifest_sha256":checksum,"files":len(expected)}
+    runtime_files = registration.get("runtime_files", [])
+    seen = set(expected)
+    for item in runtime_files:
+        relative = Path(item["path"])
+        path = tree / relative
+        if relative.is_absolute() or ".." in relative.parts or not path.resolve().is_relative_to(tree):
+            raise ValueError("frozen runtime path outside source tree")
+        if str(relative) in seen:
+            raise ValueError("duplicate frozen runtime path")
+        seen.add(str(relative))
+        current = path
+        while current != tree:
+            if current.is_symlink():
+                raise ValueError("symlink in frozen runtime path")
+            current = current.parent
+        raw = path.read_bytes()
+        if sha(raw) != item["sha256"] or ("bytes" in item and len(raw) != item["bytes"]):
+            raise ValueError("frozen runtime file digest changed: " + str(relative))
+    return {"manifest_sha256":checksum,"files":len(expected),"runtime_files":len(runtime_files)}
 
 
 def prepare(args):
@@ -241,6 +269,7 @@ def worker(args):
         verify_source_snapshot(source_tree, source_snapshot["manifest_sha256"])
     if any(sha(Path(path).read_bytes()) != value for path,value in source_sha256.items()):
         raise ValueError("pipeline source changed during replay")
+    work_dir_bytes = _work_directory_bytes(args.work_dir)
     finished = perf_counter()
     summary = {"schema_version": 1, "scope": "offline_local_pipeline_replay", "default_product_path": False,
         "instrumented": bool(profile), "source_snapshot":source_snapshot, "source_tree": str(source_tree), "source_sha256": source_sha256, "python_version": sys.version,
@@ -259,6 +288,8 @@ def worker(args):
                              else {"engine": "not_invoked", "reason": "no_canonical_v1_numeric_call"}),
         "native_kernel_contribution": "not inferred; no canonical-v1 call added to this replay",
         "rss_bytes": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * (1 if sys.platform == "darwin" else 1024),
+        "work_dir_bytes": work_dir_bytes,
+        "storage_scope": "complete worker work directory; controls and retention outside it excluded",
         "work_dir": str(args.work_dir.resolve())}
     if profile:
         stats = pstats.Stats(profile)

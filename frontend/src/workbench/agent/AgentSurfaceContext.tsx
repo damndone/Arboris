@@ -59,6 +59,7 @@ import type {
 } from "./agentTypes";
 import type { ForestViewModel } from "../../lineage/api/graphViewTypes";
 import { groupPendingProposals } from "./proposalGroups";
+import { updateActiveToolCalls, type ActiveToolCall } from "./toolActivity";
 
 /** Terminal operation-record states — reconcile polling stops here. */
 const TERMINAL_OPERATION_STATUSES = new Set([
@@ -263,6 +264,7 @@ export interface AgentSurfaceContextValue {
   activeOperation: AgentOperationStatus | null;
   eventCursor: number;
   lastEventType: string | null;
+  activeToolCalls?: ActiveToolCall[];
   liveResponseText: string;
   activeTurnStartedAt?: number | null;
   capabilityCatalog?: AgentCapabilityCatalog | null;
@@ -378,6 +380,7 @@ export function AgentSurfaceProvider({
   const [eventCursor, setEventCursor] = useState(0);
   const [providerSteps, setProviderSteps] = useState<AgentEvent[]>([]);
   const [lastEventType, setLastEventType] = useState<string | null>(null);
+  const [activeToolCalls, setActiveToolCalls] = useState<ActiveToolCall[]>([]);
   const [liveResponseText, setLiveResponseText] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   // Session metadata and replayed progress can outlive the runtime. Confirmed
@@ -487,6 +490,7 @@ export function AgentSurfaceProvider({
     const observations = unseen.filter(event => event.event_type === "provider_step");
     if (observations.length) setProviderSteps(current => [...current, ...observations]);
     eventCursorRef.current = latest.seq;
+    setActiveToolCalls(current => updateActiveToolCalls(current, unseen));
     for (const event of unseen) {
       if (event.event_type === "turn_start") {
         const commandId = event.command_id ?? null;
@@ -576,6 +580,7 @@ export function AgentSurfaceProvider({
     setProviderSteps([]);
     eventCursorRef.current = 0;
     setLastEventType(null);
+    setActiveToolCalls([]);
     setLiveResponseText("");
     const restored = restoredSessionRef.current;
     const stored = restored ?? linkedSessionId ?? readConversation(storageKey);
@@ -935,6 +940,7 @@ export function AgentSurfaceProvider({
     setActiveTurnStartedAt(Date.now());
     setError(null);
     setLiveResponseText("");
+    setActiveToolCalls([]);
     const controller = new AbortController();
     activeTurnControllerRef.current = controller;
     activeTurnSessionIdRef.current = null;
@@ -1375,6 +1381,7 @@ export function AgentSurfaceProvider({
     activeOperation,
     eventCursor,providerSteps,
     lastEventType,
+    activeToolCalls,
     liveResponseText,
     activeTurnStartedAt,
     capabilityCatalog,
@@ -1422,6 +1429,7 @@ export function AgentSurfaceProvider({
     navigation,
     eventCursor,providerSteps,
     lastEventType,
+    activeToolCalls,
     liveResponseText,
     activeTurnStartedAt,
     capabilityCatalog,

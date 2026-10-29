@@ -115,7 +115,7 @@ def test_future_driver_keeps_one_active_tree_and_retires_every_observation(tmp_p
         (work / "state.json").write_text('{"result":"stable"}\n')
         launches.append(str(work))
         return SimpleNamespace(returncode=0,stdout=json.dumps({
-            "seconds":.1,"local_pipeline_seconds":.05,"rss_bytes":1000,
+            "seconds":.1,"local_pipeline_seconds":.05,"rss_bytes":1000,"work_dir_bytes":1000,
             "manifest_sha256":checksum,"result_sha256":"1"*64,"stage_seconds":{"context_build":.03}}),stderr="")
     monkeypatch.setattr(benchmark.subprocess,"run",worker)
     monkeypatch.setattr(benchmark,"host_idle_snapshot",lambda:{"processes_checked":1,"competing":[]})

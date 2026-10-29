@@ -56,11 +56,38 @@ describe("AgentComposer", () => {
   it.each([
     ["tool_execution_start", "Executing tool"],
     ["tool_execution_end", "Tool receipt recorded"],
+    ["message_progress", "Processing the model response"],
   ])("keeps compact %s activity distinct", (lastEventType, expected) => {
     render(<AgentSurfaceContext.Provider value={value({ sessionStatus: "running", lastEventType })}>
       <AgentComposer variant="compact" />
     </AgentSurfaceContext.Provider>);
     expect(screen.getByRole("button", { name: "View Agent activity" })).toHaveTextContent(expected);
+  });
+
+  it("names unfinished parallel tools in the compact activity after another receipt arrives", () => {
+    render(<AgentSurfaceContext.Provider value={value({ sessionStatus: "running", lastEventType: "tool_execution_end",
+      activeToolCalls: [
+        { session_id: "saved", command_id: "command", tool_call_id: "schema", tool_id: "inspect_data_schema" },
+        { session_id: "saved", command_id: "command", tool_call_id: "result", tool_id: "inspect_result_summary" },
+      ],
+    })}>
+      <AgentComposer variant="compact" />
+    </AgentSurfaceContext.Provider>);
+    const activity = screen.getByRole("button", { name: "View Agent activity" });
+    expect(activity).toHaveTextContent("Executing 2 tools");
+    expect(activity).toHaveTextContent("inspect data schema");
+    expect(activity).toHaveTextContent("inspect result summary");
+    expect(activity).not.toHaveTextContent("Tool receipt recorded");
+  });
+
+  it("keeps the full long tool activity accessible when the compact row is truncated", () => {
+    const toolId = `inspect_${"longlabel".repeat(16)}`;
+    render(<AgentSurfaceContext.Provider value={value({ sessionStatus: "running", lastEventType: "tool_execution_start",
+      activeToolCalls: [{ session_id: "saved", command_id: "command", tool_call_id: "long", tool_id: toolId }],
+    })}>
+      <AgentComposer variant="compact" />
+    </AgentSurfaceContext.Provider>);
+    expect(screen.getByRole("button", { name: "View Agent activity" })).toHaveAttribute("title", expect.stringContaining(toolId.replace(/_/g, " ")));
   });
 
   it("does not invent elapsed time for externally started compact activity", () => {

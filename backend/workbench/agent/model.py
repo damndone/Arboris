@@ -360,6 +360,7 @@ class OpenAICompatibleModelAdapter:
                         yield ModelStreamEvent.from_error(request.request_id, "aborted")
                         return
             received_event = False
+            reported_activity = False
             public_progress = False
             meaningful_deadline = (asyncio.get_running_loop().time() + self.idle_timeout_s
                                    if is_nvidia_ultra(self.config) else None)
@@ -430,6 +431,12 @@ class OpenAICompatibleModelAdapter:
                         # user-visible Agent content. If that is the *only*
                         # progress before a disconnect, a single retry is safe:
                         # no public answer or typed tool call has been emitted.
+                        if not reported_activity and (item.get("meaningful") is True
+                                or isinstance(item.get("reasoning"), str) and item["reasoning"].strip()):
+                            # Only the fact of receipt is public. The provider's
+                            # reasoning stays in its private buffer below.
+                            yield ModelStreamEvent(type="activity", request_id=request.request_id)
+                            reported_activity = True
                         received_event = True
                         if item.get("public") is True:
                             public_progress = True

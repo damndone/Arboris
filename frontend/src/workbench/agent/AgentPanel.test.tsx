@@ -1,6 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
 import { AgentPanel, toolStatusLine } from "./AgentPanel";
 import {
   AgentSurfaceContext,
@@ -44,6 +45,108 @@ function value(overrides: Partial<AgentSurfaceContextValue> = {}): AgentSurfaceC
     ...overrides,
   };
 }
+
+// Public leverage replay, session projection SHA256 de0cd02b0bc64e4f8dd3fbb541be100d1c746ebcb1cd889a7d4c5ee4c7fe3388.
+const recordedToolNavigation: AgentNavigationRef[] = [
+  {
+    "kind": "proposal",
+    "id": "proposal_2006a1c0fcfe4b7ab4f874b8769b08d7",
+    "label": "Proposal proposal_2006a1c0fcfe4b7ab4f874b8769b08d7",
+    "relation": "audit",
+    "available": true,
+    "href": {
+      "view": "agent",
+      "session_id": "agent_chain_a4dc89f57c224a2cbdfb01add1941870",
+      "proposal_id": "proposal_2006a1c0fcfe4b7ab4f874b8769b08d7"
+    }
+  },
+  {
+    "kind": "graph_node",
+    "id": "216323ff831a20e1a096ee3060b4e137fa8b6f88999e691de995a98538c338ef::model:ols_1",
+    "label": "Source model:ols_1",
+    "relation": "source",
+    "available": true,
+    "href": {
+      "view": "graph",
+      "run_id": "20261029_040736_004116_47b20a4f",
+      "node_ref": "model:ols_1",
+      "forest_node_key": "216323ff831a20e1a096ee3060b4e137fa8b6f88999e691de995a98538c338ef::model:ols_1",
+      "node_hash": "216323ff831a20e1a096ee3060b4e137fa8b6f88999e691de995a98538c338ef"
+    }
+  },
+  {
+    "kind": "run",
+    "id": "20261029_040913_735959_317312a4",
+    "label": "Child run 20261029_040913_735959_317312a4",
+    "relation": "child",
+    "available": true,
+    "href": {
+      "view": "graph",
+      "run_id": "20261029_040913_735959_317312a4",
+      "session_id": "session_chain_8c8cf6f0bc28e9982f56c71b3cb2c197"
+    }
+  },
+  {
+    "kind": "fork",
+    "id": "fork_8c8cf6f0bc28e9982f56c71b3cb2c197",
+    "label": "Fork fork_8c8cf6f0bc28e9982f56c71b3cb2c197",
+    "relation": "child",
+    "available": true,
+    "href": {
+      "view": "graph",
+      "fork_id": "fork_8c8cf6f0bc28e9982f56c71b3cb2c197",
+      "run_id": "20261029_040913_735959_317312a4"
+    }
+  },
+  {
+    "kind": "chain",
+    "id": "chain_8c8cf6f0bc28e9982f56c71b3cb2c197",
+    "label": "Chain chain_8c8cf6f0bc28e9982f56c71b3cb2c197",
+    "relation": "child",
+    "available": true,
+    "href": {
+      "view": "agent",
+      "chain_id": "chain_8c8cf6f0bc28e9982f56c71b3cb2c197",
+      "session_id": "session_chain_8c8cf6f0bc28e9982f56c71b3cb2c197"
+    }
+  },
+  {
+    "kind": "agent_session",
+    "id": "session_chain_8c8cf6f0bc28e9982f56c71b3cb2c197",
+    "label": "Agent session_chain_8c8cf6f0bc28e9982f56c71b3cb2c197",
+    "relation": "child",
+    "available": true,
+    "href": {
+      "view": "agent",
+      "session_id": "session_chain_8c8cf6f0bc28e9982f56c71b3cb2c197"
+    }
+  },
+  {
+    "kind": "operation",
+    "id": "oprec_0e2f4a619720bce2f6906dbf",
+    "label": "model.rerun · completed",
+    "relation": "audit",
+    "available": true,
+    "href": {
+      "view": "agent",
+      "session_id": "agent_chain_a4dc89f57c224a2cbdfb01add1941870",
+      "operation_record_id": "oprec_0e2f4a619720bce2f6906dbf"
+    }
+  },
+  {
+    "kind": "diff",
+    "id": "oprec_0e2f4a619720bce2f6906dbf",
+    "label": "Diff · input_diff.v1",
+    "relation": "result",
+    "available": true,
+    "href": {
+      "view": "agent",
+      "session_id": "agent_chain_a4dc89f57c224a2cbdfb01add1941870",
+      "operation_record_id": "oprec_0e2f4a619720bce2f6906dbf",
+      "diff": "1"
+    }
+  }
+];
 
 describe("toolStatusLine — public failure summaries", () => {
   it("shows the first usable public tool error message with a bounded length", () => {
@@ -191,6 +294,36 @@ describe("AgentPanel", () => {
       <AgentPanel runId="run-a" projectRoot="/proj" />
     </AgentSurfaceContext.Provider>);
     expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent(expected);
+  });
+
+  it("follows a growing public tool activity only while the reader stays at the transcript bottom", () => {
+    const first = { session_id: "saved", command_id: "command", tool_call_id: "first", tool_id: "inspect_node_context" };
+    const second = { ...first, tool_call_id: "second", tool_id: "inspect_data_schema" };
+    const context = value({ sessionStatus: "running", activeToolCalls: [first] });
+    const view = render(<AgentSurfaceContext.Provider value={context}><AgentPanel runId="run-a" projectRoot="/proj" /></AgentSurfaceContext.Provider>);
+    const transcript = screen.getByRole("log", { name: /Agent transcript/ });
+    Object.defineProperties(transcript, { clientHeight: { configurable: true, value: 100 }, scrollHeight: { configurable: true, value: 500 } });
+    transcript.scrollTop = 400;
+    fireEvent.scroll(transcript);
+    Object.defineProperty(transcript, "scrollHeight", { configurable: true, value: 620 });
+    view.rerender(<AgentSurfaceContext.Provider value={{ ...context, activeToolCalls: [first, second] }}><AgentPanel runId="run-a" projectRoot="/proj" /></AgentSurfaceContext.Provider>);
+    expect(transcript.scrollTop).toBe(620);
+
+    transcript.scrollTop = 180;
+    fireEvent.scroll(transcript);
+    Object.defineProperty(transcript, "scrollHeight", { configurable: true, value: 740 });
+    view.rerender(<AgentSurfaceContext.Provider value={{ ...context, activeToolCalls: [second] }}><AgentPanel runId="run-a" projectRoot="/proj" /></AgentSurfaceContext.Provider>);
+    expect(transcript.scrollTop).toBe(180);
+  });
+
+  it("retains an entire long public tool label in the working row", () => {
+    const toolId = `inspect_${"longlabel".repeat(16)}`;
+    render(<AgentSurfaceContext.Provider value={value({ sessionStatus: "running", lastEventType: "tool_execution_start",
+      activeToolCalls: [{ session_id: "saved", command_id: "command", tool_call_id: "long", tool_id: toolId }],
+    })}>
+      <AgentPanel runId="run-a" projectRoot="/proj" />
+    </AgentSurfaceContext.Provider>);
+    expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent(toolId.replace(/_/g, " "));
   });
 
   it("keeps a previous turn's terminal failure visible after a follow-up is recorded", () => {
@@ -642,6 +775,87 @@ describe("AgentPanel", () => {
     );
   });
 
+  it("keeps a recorded tool row compact while preserving its eight references and both fork actions on disclosure", () => {
+    const openNavigation = vi.fn();
+    const forkConversation = vi.fn();
+    const forkFromMessage = vi.fn();
+    render(<AgentSurfaceContext.Provider value={value({ openNavigation, forkConversation, forkFromMessage, messages: [
+      agentMessageFixture({ entry_id: "tool-recorded", role: "tool", name: "inspect_completed_operations", content: '{"ok":true}', navigation: recordedToolNavigation }),
+    ] })}>
+      <AgentPanel runId="run-a" projectRoot="/proj" />
+    </AgentSurfaceContext.Provider>);
+    const tool = screen.getByTestId("agent-message-tool");
+    const summary = within(tool).getByText("Sources and actions · 8 references");
+    const details = summary.closest("details");
+    expect(details).not.toHaveAttribute("open");
+    expect(tool).toHaveTextContent("inspect_completed_operations ✓ ok");
+    expect(within(tool).getByRole("toolbar", { name: "Message actions", hidden: true })).not.toBeVisible();
+    expect(tool.querySelectorAll(".wb-agent-message-link")).toHaveLength(8);
+    tool.querySelectorAll(".wb-agent-message-link").forEach(link => expect(link).not.toBeVisible());
+
+    fireEvent.click(summary);
+    expect(details).toHaveAttribute("open");
+    expect(within(tool).getByRole("toolbar", { name: "Message actions" })).toBeVisible();
+    tool.querySelectorAll(".wb-agent-message-link").forEach(link => expect(link).toBeVisible());
+    fireEvent.click(within(tool).getByRole("button", { name: "Open source model:ols_1" }));
+    expect(openNavigation).toHaveBeenCalledWith(recordedToolNavigation[1]);
+    fireEvent.click(within(tool).getByRole("button", { name: "Fork from here" }));
+    expect(forkConversation).toHaveBeenCalledWith("tool-recorded");
+    fireEvent.click(within(tool).getByRole("button", { name: "Fork from Agent message tool-recorded" }));
+    expect(forkFromMessage).toHaveBeenCalledWith("tool-recorded", recordedToolNavigation[1]);
+  });
+
+  it("shows a disclosed tool toolbar without hover or focus while ordinary message actions stay quiet", () => {
+    const style = document.createElement("style");
+    style.textContent = readFileSync("src/workbench/agent/agent.css", "utf8");
+    document.head.append(style);
+    try {
+      render(<AgentSurfaceContext.Provider value={value({ forkConversation: vi.fn(), messages: [
+        agentMessageFixture({ entry_id: "tool-styled", role: "tool", name: "inspect_completed_operations", content: '{"ok":true}', navigation: recordedToolNavigation }),
+        agentMessageFixture({ entry_id: "answer-styled", role: "assistant", content: "The receipt is recorded.", stop_reason: "stop", navigation: recordedToolNavigation }),
+      ] })}>
+        <AgentPanel runId="run-a" projectRoot="/proj" />
+      </AgentSurfaceContext.Provider>);
+      const tool = screen.getByTestId("agent-message-tool");
+      const toolbar = within(tool).getByRole("toolbar", { name: "Message actions", hidden: true });
+      const ordinaryToolbar = within(screen.getByTestId("agent-message-assistant")).getByRole("toolbar", { name: "Message actions", hidden: true });
+      expect(toolbar).not.toBeVisible();
+      expect(getComputedStyle(ordinaryToolbar).opacity).toBe("0");
+
+      fireEvent.click(within(tool).getByText("Sources and actions · 8 references"));
+      expect(toolbar.parentElement).toHaveAttribute("open");
+      expect(toolbar.contains(document.activeElement)).toBe(false);
+      expect(getComputedStyle(toolbar).opacity).toBe("1");
+      expect(toolbar).toBeVisible();
+      expect(getComputedStyle(ordinaryToolbar).opacity).toBe("0");
+      const toolLinks = tool.querySelector<HTMLElement>(".wb-agent-tool-details > .wb-agent-message-links")!;
+      const toolLinksStyle = getComputedStyle(toolLinks);
+      expect(toolLinksStyle.display).toBe("flex");
+      expect(toolLinksStyle.width).toBe("100%");
+      expect(toolLinksStyle.maxWidth).toBe("100%");
+      expect(toolLinksStyle.flexWrap).toBe("wrap");
+      expect(["hidden", "clip"]).not.toContain(toolLinksStyle.overflowX);
+      expect(toolLinks.querySelectorAll(".wb-agent-message-link")).toHaveLength(8);
+      toolLinks.querySelectorAll(".wb-agent-message-link").forEach(link => expect(link).toBeVisible());
+      const ordinaryLinks = screen.getByTestId("agent-message-assistant").querySelector<HTMLElement>(":scope > .wb-agent-message-links")!;
+      expect(getComputedStyle(ordinaryLinks).display).toBe("inline-flex");
+    } finally {
+      style.remove();
+    }
+  });
+
+  it("keeps a failed receipt's public explanation visible with its controls collapsed", () => {
+    render(<AgentSurfaceContext.Provider value={value({ messages: [
+      agentMessageFixture({ entry_id: "failed-tool", role: "tool", name: "inspect_model_result", navigation: recordedToolNavigation,
+        content: JSON.stringify({ ok: false, error: "RESULT_UNAVAILABLE", error_details: [{ message: "The recorded artifact is missing." }] }) }),
+    ] })}>
+      <AgentPanel runId="run-a" projectRoot="/proj" />
+    </AgentSurfaceContext.Provider>);
+    const tool = screen.getByTestId("agent-message-tool");
+    expect(within(tool).getByText(/inspect_model_result ✗ RESULT_UNAVAILABLE.*The recorded artifact is missing/)).toBeVisible();
+    expect(within(tool).getByText("Sources and actions · 8 references").closest("details")).not.toHaveAttribute("open");
+  });
+
   it("keeps a tool's context fork in its message actions with the source binding", () => {
     const forkFromMessage = vi.fn();
     const source: AgentNavigationRef = {
@@ -655,6 +869,7 @@ describe("AgentPanel", () => {
     </AgentSurfaceContext.Provider>);
     const tool = screen.getByTestId("agent-message-tool");
     expect(tool).toHaveTextContent("Tool receipt");
+    fireEvent.click(within(tool).getByText("Sources and actions · 1 reference"));
     const fork = within(tool).getByRole("button", { name: "Fork from Agent message t1" });
     expect(within(tool).getByRole("toolbar", { name: "Message actions" })).toContainElement(fork);
     fireEvent.click(fork);
@@ -670,6 +885,7 @@ describe("AgentPanel", () => {
     })] })}>
       <AgentPanel runId="run-a" projectRoot="/proj" />
     </AgentSurfaceContext.Provider>);
+    fireEvent.click(screen.getByText("Sources and actions · 1 reference"));
     const fork = screen.getByRole("button", { name: "Fork from Agent message t1" });
     expect(fork).toBeDisabled();
     expect(fork).toHaveAttribute("title", "The source node is no longer available");

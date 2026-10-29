@@ -58,7 +58,7 @@ def main():
     args.out.mkdir(parents=True)
     source_trees = {"baseline":args.baseline_source.resolve(), "candidate":args.candidate_source.resolve()}
     worker = ROOT / "scripts/perf_agent_pipeline.py"
-    files = [worker, Path(__file__).resolve(), ROOT / "scripts/perf_evidence.py"]
+    files = [worker, Path(__file__).resolve(), ROOT / "scripts/perf_evidence.py", Path(sys.executable).resolve()]
     files.extend(tree / "backend/workbench" / module for tree in source_trees.values() for module in MODULES)
     sources = {str(path):digest(path) for path in files}
     snapshot_manifests = {}
@@ -66,7 +66,7 @@ def main():
         snapshot_manifests[role] = verify_source_snapshot(tree)["manifest_sha256"]
     if digest(args.fixture / "manifest.json") != args.sha256:
         raise ValueError("frozen pipeline input manifest changed")
-    manifest = {"schema_version":1, "scope":"offline_local_pipeline_replay_cache_only",
+    manifest = {"schema_version":1, "scope":"offline_local_pipeline_replay",
         "source_sha256":sources, "snapshot_manifest_sha256":snapshot_manifests,
         "fixture_manifest_sha256":args.sha256, "source_trees":{key:str(value) for key,value in source_trees.items()},
         "worker_environment":"inherited unchanged; --source-tree selects default imported code",
@@ -75,7 +75,8 @@ def main():
         "noise_limit":.05,"regression_limit":1.05, "native_kernel_speedup_claim":False,
         "retention":"one active/work tree; per-file SHA journal then one representative per source lane and verified removal",
         "host_idle":"ps before and after every worker; failures retained without claiming host idleness",
-        "source_validation":"full registered file set/SHA+manifest digest before/after every worker in parent and worker; pyc excluded"}
+        "source_validation":"full backend/runtime registrations plus shared driver/worker/helper/interpreter SHA before/after every worker; pyc excluded",
+        "storage_metric":"work_dir_bytes; complete worker work directory, controls/retention outside excluded"}
     (args.out / "source-manifest.json").write_text(json.dumps(manifest,sort_keys=True,indent=2)+"\n")
     manifest_sha = digest(args.out / "source-manifest.json")
     sequence = [("calibration",i,"baseline") for i in range(5)]
@@ -108,12 +109,16 @@ def main():
             row["process_seconds"] = perf_counter()-started
             row["returncode"] = result.returncode
             row.update(json.loads(result.stdout) if not result.returncode else {"stdout":result.stdout,"stderr":result.stderr})
+            if any(digest(path) != checksum for path,checksum in sources.items()):
+                raise ValueError("pipeline A/B source changed during measurement")
             for role,tree in source_trees.items():
                 verify_source_snapshot(tree,snapshot_manifests[role])
             row["processes_after"] = host_idle_snapshot()
             (active / "processes-after.json").write_text(json.dumps(row["processes_after"],sort_keys=True)+"\n")
             if result.returncode:
                 raise RuntimeError("offline pipeline worker failed")
+            if type(row.get("work_dir_bytes")) is not int or row["work_dir_bytes"] <= 0:
+                raise ValueError("offline pipeline worker reported missing or invalid storage bytes")
             row["status"] = "completed"
         except BaseException as error:
             row["error"] = type(error).__name__ + ": " + str(error)
@@ -131,7 +136,7 @@ def main():
     calibration = [row for row in rows if row["phase"] == "calibration"]
     baseline = [row for row in rows if row["engine_role"] == "baseline"]
     paired = [row for row in rows if row["phase"] == "pair"]
-    metrics = ("seconds","process_seconds","local_pipeline_seconds","rss_bytes")
+    metrics = ("seconds","process_seconds","local_pipeline_seconds","rss_bytes","work_dir_bytes")
     def noise(data,key):
         return statistics.stdev(row[key] for row in data)/statistics.median(row[key] for row in data)
     noises = {key:max(noise(calibration,key),noise(baseline,key)) for key in metrics}
@@ -149,7 +154,8 @@ def main():
               "stage_seconds_median":stage_medians,"result_sha256":sorted(results),"native_kernel_speedup_claim":False}
     (args.out / "report.json").write_text(json.dumps(report,sort_keys=True,indent=2)+"\n")
     print(json.dumps(report,sort_keys=True))
+    return 0 if not failures else 2
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

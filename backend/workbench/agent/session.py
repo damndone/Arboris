@@ -11,7 +11,7 @@ import hashlib
 import json
 import os
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from collections import OrderedDict
 from pathlib import Path
@@ -140,6 +140,35 @@ class SessionHasBranchesError(ValueError):
         self.branches = branches
 
 
+@dataclass(frozen=True)
+class _EntryHeader:
+    """Validated immutable envelope facts; no parsed payload is retained."""
+
+    entry_id: str
+    session_id: str
+    entry_type: str
+    parent_ref: EntryRef | None
+    created_at: str
+    schema_version: str
+    idempotency: tuple[str, str, str] | None
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> "_EntryHeader":
+        entry = SessionTreeEntry.from_dict(value)
+        identity = entry.idempotency
+        return cls(entry.entry_id, entry.session_id, entry.entry_type, entry.parent_ref,
+                   entry.created_at, entry.schema_version,
+                   (identity["key"], identity["stage"], identity["payload_sha256"]) if identity else None)
+
+    def to_entry(self) -> SessionTreeEntry:
+        identity = self.idempotency
+        return SessionTreeEntry(entry_id=self.entry_id, session_id=self.session_id,
+            entry_type=self.entry_type, payload={}, parent_ref=self.parent_ref,
+            created_at=self.created_at, schema_version=self.schema_version,
+            idempotency={"key": identity[0], "stage": identity[1], "payload_sha256": identity[2]}
+                if identity else None)
+
+
 @dataclass
 class _LogIndex:
     """One version of a session log: its lines and where each entry is.
@@ -161,6 +190,10 @@ class _LogIndex:
     #: Per strict reader: how many leading lines it has already validated.
     #: The lines of one index never change, so a check is done once per line.
     checked: dict[str, int]
+    #: Only envelope fields, captured during the existing first JSON decode.
+    #: A header is validated lazily, once, when a reader requests it. None
+    #: preserves the full parser for legacy/non-object payload shapes.
+    headers: list[dict[str, Any] | _EntryHeader | None] = field(default_factory=list)
 
 
 #: Parsed-log indexes shared by every repository in the process (routes build a
@@ -183,6 +216,9 @@ def _index_line(index: _LogIndex, line: str) -> None:
     index.meta.append((str(value["entry_type"]), value.get("parent_ref"),
                        str(identity["key"]) if identity is not None else None))
     payload = value.get("payload")
+    index.headers.append({key: value[key] for key in (
+        "entry_id", "session_id", "entry_type", "parent_ref", "created_at", "schema_version", "idempotency")
+        if key in value} if isinstance(payload, dict) else None)
     if value["entry_type"] == "tool_receipt" and isinstance(payload, dict):
         index.receipts.setdefault(str(payload.get("invocation_id")), []).append(position)
 
@@ -208,9 +244,11 @@ def _log_index(path: Path) -> _LogIndex:
         raise KeyError(f"unknown session: {path.stem}") from exc
     if (cached is not None and (not cached.data or cached.data.endswith(b"\n"))
             and data.startswith(cached.data)):
+        with _LOG_INDEX_LOCK:
+            headers = list(cached.headers)
         index = _LogIndex(identity, data, list(cached.lines), {k: list(v) for k, v in cached.by_id.items()},
                           {k: list(v) for k, v in cached.by_key.items()}, list(cached.meta),
-                          {k: list(v) for k, v in cached.receipts.items()}, dict(cached.checked))
+                          {k: list(v) for k, v in cached.receipts.items()}, dict(cached.checked), headers)
         tail = data[len(cached.data):]
     else:
         index = _LogIndex(identity, data, [], {}, {}, [], {}, {})
@@ -228,6 +266,17 @@ def _log_index(path: Path) -> _LogIndex:
 
 def _entry_at(index: _LogIndex, position: int) -> "SessionTreeEntry":
     return SessionTreeEntry.from_dict(json.loads(index.lines[position]))
+
+
+def _entry_header_at(index: _LogIndex, position: int) -> SessionTreeEntry:
+    with _LOG_INDEX_LOCK:
+        header = index.headers[position]
+        if isinstance(header, dict):
+            # Use the same constructor/identity validation as a full read.
+            # Invalid headers never become an empty successful entry.
+            header = _EntryHeader.from_dict(header)
+            index.headers[position] = header
+    return header.to_entry() if header is not None else _entry_at(index, position)
 
 
 class JsonlSessionRepository:
@@ -605,11 +654,18 @@ class JsonlSessionRepository:
         session_id: str,
         *,
         leaf_entry_id: str | None = None,
+        payload_entry_types: frozenset[str] | None = None,
     ) -> list[SessionTreeEntry]:
-        """Return the resolved branch without copying ancestor entries."""
+        """Return the resolved branch without copying ancestor entries.
+
+        By default every payload is materialized as before. An explicit payload
+        selection retains every branch position and envelope, with fresh empty
+        payloads for other types; compaction anchors still resolve identically.
+        """
 
         with self._lock:
-            return [_entry_at(index, position)
+            return [(_entry_at(index, position) if payload_entry_types is None
+                     or index.meta[position][0] in payload_entry_types else _entry_header_at(index, position))
                     for index, position in self._branch_positions(session_id, leaf_entry_id)]
 
     def count_on_branch(self, session_id: str, *, entry_type: str, key: str) -> int:

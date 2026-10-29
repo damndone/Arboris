@@ -2454,9 +2454,9 @@ def test_ultra_length_reports_actual_usage_without_assembling_a_tool(monkeypatch
         adapter = OpenAICompatibleModelAdapter(config)
         return [event async for event in adapter.stream(ModelRequest(messages=[{"role": "user", "content": "offline"}]))]
     events = asyncio.run(scenario())
-    assert [event.type for event in events] == ["done"]
-    assert events[0].finish_reason == "length"
-    assert events[0].usage == {"prompt_tokens": 5, "completion_tokens": 8192}
+    assert [event.type for event in events if event.type != "activity"] == ["done"]
+    assert events[-1].finish_reason == "length"
+    assert events[-1].usage == {"prompt_tokens": 5, "completion_tokens": 8192}
 
 
 @pytest.mark.parametrize("arguments", ['{"value":', '{"value":"original"}'])
@@ -2482,8 +2482,8 @@ def test_ultra_length_client_adapter_and_actual_core_stop_after_one_request(tmp_
                 if entry.entry_type == "message" and entry.payload.get("role") == "assistant"]
     assert len(requests) == 1 and not (tmp_path / "effects.txt").exists()
     assert messages[-1]["stop_reason"] == "error" and messages[-1]["error"] == "provider_output_limit"
-    assert [event.type for event in observed] == ["done"]
-    assert observed[0].finish_reason == "length" and observed[0].usage == usage
+    assert [event.type for event in observed if event.type != "activity"] == ["done"]
+    assert observed[-1].finish_reason == "length" and observed[-1].usage == usage
 
 
 @pytest.mark.parametrize("model,expected", [("nvidia/nemotron-3-ultra-550b-a55b", "error"), ("other-model", "done")])
@@ -2549,5 +2549,6 @@ def test_ultra_tool_code_whitespace_is_preserved_and_invalid_prefix_never_retrie
         request = ModelRequest(messages=[{"role": "user", "content": "offline"}])
         return ([e async for e in adapter.stream(request)], [e async for e in adapter.stream(request)])
     valid, invalid = asyncio.run(scenario())
-    assert valid[0].tool_call["arguments"] == expected and valid[-1].type == "done"
-    assert len(attempts) == 2 and [e.type for e in invalid] == ["error"]
+    calls = [event for event in valid if event.type == "tool_call_delta"]
+    assert len(calls) == 1 and calls[0].tool_call["arguments"] == expected and valid[-1].type == "done"
+    assert len(attempts) == 2 and [e.type for e in invalid if e.type != "activity"] == ["error"]

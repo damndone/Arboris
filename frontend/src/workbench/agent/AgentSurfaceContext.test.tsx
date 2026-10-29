@@ -3,9 +3,10 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentPanel } from "./AgentPanel";
+import { AgentComposer } from "./AgentComposer";
 import { AgentColumnComposer } from "../../workspace/agent/AgentColumnComposer";
 import { AgentSurfaceProvider, useAgentSurface } from "./AgentSurfaceContext";
-import type { AgentMessage, AgentProposal } from "./agentTypes";
+import type { AgentEvent, AgentMessage, AgentProposal } from "./agentTypes";
 import { agentCapabilitiesFixture, agentMessageFixture, agentProposalFixture, operationCapabilityFixture } from "../../apiFixtures";
 import { ApiError } from "../../api";
 
@@ -108,6 +109,68 @@ const config = {
   context_window_tokens: 32000,
   supports_1m: false,
 };
+
+// Recorded public panel events, source SHA256 57740f6f70ab86042fc78cd728ba9275c17788398b1b7876c9b41cb0fcdc50a9.
+const recordedParallelTools: AgentEvent[] = [
+  {
+    "command_id": "e297b5d9819548f9ab9721f4b6842cd1",
+    "created_at": "2026-10-22T15:13:57.328833+00:00",
+    "event_id": "336fa03c63624a3ba14c28c925e94b00",
+    "event_type": "tool_execution_start",
+    "payload": {
+      "tool_call_id": "call_00_SXfJctHbpUGm7nHHDOi92645",
+      "tool_id": "inspect_node_context"
+    },
+    "schema_version": "agent.event.v1",
+    "seq": 7,
+    "session_id": "agent_chain_f1913f9cdc864d56822cdbc22910bfb2"
+  },
+  {
+    "command_id": "e297b5d9819548f9ab9721f4b6842cd1",
+    "created_at": "2026-10-22T15:13:57.333332+00:00",
+    "event_id": "1aae4d903e79403db08760d2a2ba9e77",
+    "event_type": "tool_execution_start",
+    "payload": {
+      "tool_call_id": "call_01_4K6COsLkiRfe2McsPNkr4520",
+      "tool_id": "inspect_data_schema"
+    },
+    "schema_version": "agent.event.v1",
+    "seq": 8,
+    "session_id": "agent_chain_f1913f9cdc864d56822cdbc22910bfb2"
+  },
+  {
+    "command_id": "e297b5d9819548f9ab9721f4b6842cd1",
+    "created_at": "2026-10-22T15:13:57.345274+00:00",
+    "event_id": "724531c7b414435db6edc3d7c5fa356b",
+    "event_type": "tool_execution_end",
+    "payload": {
+      "entry_id": "336315f1a6984dd7956bcb2cd69e2d62",
+      "error": null,
+      "ok": true,
+      "tool_call_id": "call_00_SXfJctHbpUGm7nHHDOi92645",
+      "tool_id": "inspect_node_context"
+    },
+    "schema_version": "agent.event.v1",
+    "seq": 9,
+    "session_id": "agent_chain_f1913f9cdc864d56822cdbc22910bfb2"
+  },
+  {
+    "command_id": "e297b5d9819548f9ab9721f4b6842cd1",
+    "created_at": "2026-10-22T15:13:57.349445+00:00",
+    "event_id": "f38ae0fe61fb48c6b8580501d2bc8e4a",
+    "event_type": "tool_execution_end",
+    "payload": {
+      "entry_id": "7248ab9ed16b4dc4b83ab6bc1fd07c7b",
+      "error": null,
+      "ok": true,
+      "tool_call_id": "call_01_4K6COsLkiRfe2McsPNkr4520",
+      "tool_id": "inspect_data_schema"
+    },
+    "schema_version": "agent.event.v1",
+    "seq": 10,
+    "session_id": "agent_chain_f1913f9cdc864d56822cdbc22910bfb2"
+  }
+];
 
 const pendingProposal: AgentProposal = agentProposalFixture({
   record_type: "revision" as const,
@@ -288,6 +351,94 @@ describe("AgentSurfaceProvider", () => {
     view.rerender(<MemoryRouter><AgentSurfaceProvider projectRoot="/proj" runId="run-b"><AgentPanel projectRoot="/proj" runId="run-b" /></AgentSurfaceProvider></MemoryRouter>);
     await waitFor(()=>expect(mocks.getAgentPlan).toHaveBeenCalledWith("/proj","other"));
     expect(screen.queryByTestId("agent-usage")).not.toBeInTheDocument();
+  });
+
+  it("keeps the unfinished parallel inspection visible when a recorded receipt completes its sibling", async () => {
+    const saved = recordedParallelTools[0].session_id;
+    localStorage.setItem("workbench:agent-session:/proj:run-a:project%3Arun-a%3Anone", saved);
+    mocks.getAgentSession.mockResolvedValue({ ...session(saved), status: "running" });
+    let events = recordedParallelTools.slice(0, 2);
+    mocks.getAgentEvents.mockImplementation(async () => ({ events }));
+    mount();
+
+    await waitFor(() => expect(screen.getByTestId("agent-event-cursor")).toHaveTextContent("events #8"));
+    expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent("Executing 2 tools");
+    expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent("inspect node context");
+    expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent("inspect data schema");
+
+    events = recordedParallelTools.slice(0, 3);
+    await waitFor(() => expect(screen.getByTestId("agent-event-cursor")).toHaveTextContent("events #9"));
+    expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent("Executing tool");
+    expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent("inspect data schema");
+    expect(screen.getByTestId("agent-execution-trace")).not.toHaveTextContent("inspect node context");
+
+    events = recordedParallelTools;
+    await waitFor(() => expect(screen.getByTestId("agent-event-cursor")).toHaveTextContent("events #10"));
+    expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent("Tool receipt recorded");
+    expect(screen.getByTestId("agent-execution-trace")).not.toHaveTextContent("inspect data schema");
+    expect(mocks.sendAgentTurn).not.toHaveBeenCalled();
+    expect(mocks.resumeAgentTurn).not.toHaveBeenCalled();
+    expect(mocks.confirmAgentProposal).not.toHaveBeenCalled();
+  });
+
+  it("does not let another command's receipt or a usage observation clear running tool identities", async () => {
+    const saved = recordedParallelTools[0].session_id;
+    localStorage.setItem("workbench:agent-session:/proj:run-a:project%3Arun-a%3Anone", saved);
+    mocks.getAgentSession.mockResolvedValue({ ...session(saved), status: "running" });
+    mocks.getAgentEvents.mockResolvedValue({ events: [
+      ...recordedParallelTools.slice(0, 2),
+      { ...recordedParallelTools[2], command_id: "another-command" },
+      { ...recordedParallelTools[3], event_type: "provider_step", payload: {} },
+    ] });
+    mount();
+    await waitFor(() => expect(screen.getByTestId("agent-event-cursor")).toHaveTextContent("events #10"));
+    expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent("Executing 2 tools");
+    expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent("inspect node context");
+    expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent("inspect data schema");
+  });
+
+  it("keeps old command completions from ending a reused call id in the next command", async () => {
+    const start = recordedParallelTools[0];
+    localStorage.setItem("workbench:agent-session:/proj:run-a:project%3Arun-a%3Anone", start.session_id);
+    mocks.getAgentSession.mockResolvedValue({ ...session(start.session_id), status: "running" });
+    mocks.getAgentEvents.mockResolvedValue({ events: [
+      start,
+      { ...start, seq: 8, event_type: "turn_start", command_id: "next-command", payload: {} },
+      { ...start, seq: 9, command_id: "next-command", payload: { ...start.payload, tool_id: "inspect_result_summary" } },
+      { ...recordedParallelTools[2], seq: 10 },
+    ] });
+    mount();
+    await waitFor(() => expect(screen.getByTestId("agent-event-cursor")).toHaveTextContent("events #10"));
+    expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent("inspect result summary");
+    expect(screen.getByTestId("agent-execution-trace")).not.toHaveTextContent("inspect node context");
+  });
+
+  it.each(["turn_end", "error", "aborted"])("clears the working tool on the matching %s boundary without asserting success", async eventType => {
+    const start = recordedParallelTools[0];
+    localStorage.setItem("workbench:agent-session:/proj:run-a:project%3Arun-a%3Anone", start.session_id);
+    mocks.getAgentSession.mockResolvedValue({ ...session(start.session_id), status: "running" });
+    let events: AgentEvent[] = [start];
+    mocks.getAgentEvents.mockImplementation(async () => ({ events }));
+    mount();
+    await waitFor(() => expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent("inspect node context"));
+    events = [start, { ...start, seq: 8, event_type: eventType, payload: {} }];
+    await waitFor(() => expect(screen.getByTestId("agent-event-cursor")).toHaveTextContent("events #8"));
+    expect(screen.getByTestId("agent-execution-trace")).not.toHaveTextContent("inspect node context");
+    expect(screen.getByTestId("agent-execution-trace")).not.toHaveTextContent("completed");
+  });
+
+  it("clears running tool presentation when the conversation scope changes", async () => {
+    const start = recordedParallelTools[0];
+    localStorage.setItem("workbench:agent-session:/proj:run-a:project%3Arun-a%3Anone", start.session_id);
+    localStorage.setItem("workbench:agent-session:/proj:run-b:project%3Arun-b%3Anone", "other");
+    mocks.getAgentSession.mockImplementation(async (_root, id) => ({ ...session(id), status: "running" }));
+    mocks.getAgentEvents.mockImplementation(async (_root, id) => ({ events: id === start.session_id ? [start] : [] }));
+    const view = mount();
+    await waitFor(() => expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent("inspect node context"));
+    view.rerender(<MemoryRouter><AgentSurfaceProvider projectRoot="/proj" runId="run-b"><AgentPanel projectRoot="/proj" runId="run-b" /></AgentSurfaceProvider></MemoryRouter>);
+    await waitFor(() => expect(mocks.getAgentPlan).toHaveBeenCalledWith("/proj", "other"));
+    expect(screen.getByTestId("agent-execution-trace")).not.toHaveTextContent("inspect node context");
+    expect(mocks.sendAgentTurn).not.toHaveBeenCalled();
   });
 
   it("does not replace a live tool activity with a provider usage observation", async () => {
@@ -781,25 +932,45 @@ describe("AgentSurfaceProvider", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  it("restores the server turn start instead of restarting elapsed time on later messages", async () => {
+  it("restores the server turn start and reports pending validation without publishing a draft", async () => {
     const now = Date.now();
     const clock = vi.spyOn(Date, "now").mockReturnValue(now);
     mocks.getAgentSession.mockResolvedValue({ ...session("saved"), status: "running" });
     mocks.getAgentTurnState.mockResolvedValue({ turns: [{ turn_id: "external", status: "running", requires_reconcile: false }] });
-    mocks.getAgentEvents.mockResolvedValue({ events: [
+    let events: AgentEvent[] = [
       { seq: 1, event_type: "turn_start", command_id: "external-command", created_at: new Date(now - 42_000).toISOString(), payload: {} },
       { seq: 2, event_type: "turn_end", command_id: "external-command", created_at: new Date(now - 5_000).toISOString(), payload: { stop_reason: "tool_calls" } },
       { seq: 3, event_type: "turn_start", command_id: "external-command", created_at: new Date(now - 4_000).toISOString(), payload: {} },
       { seq: 4, event_type: "turn_end", command_id: "external-command", created_at: new Date(now - 3_000).toISOString(), payload: { stop_reason: "revised" } },
       { seq: 5, event_type: "turn_start", command_id: "external-command", created_at: new Date(now - 2_000).toISOString(), payload: {} },
-      { seq: 6, event_type: "message_start", command_id: "external-command", created_at: new Date(now).toISOString(), payload: {} },
-    ] });
-    render(<MemoryRouter initialEntries={["/?agent_session=saved"]}><AgentSurfaceProvider projectRoot="/proj" runId="run-a"><AgentPanel projectRoot="/proj" runId="run-a" /></AgentSurfaceProvider></MemoryRouter>);
-    await waitFor(() => expect(screen.getByLabelText("Agent execution progress")).toHaveTextContent("42 s"));
-    expect(screen.getByLabelText("Agent execution progress")).toHaveTextContent("Waiting for model output");
-    expect(mocks.sendAgentTurn).not.toHaveBeenCalled();
-    expect(mocks.continueAgentTurn).not.toHaveBeenCalled();
-    clock.mockRestore();
+      { seq: 6, event_type: "message_start", command_id: "external-command", created_at: new Date(now).toISOString(), payload: { request_id: "public-request" } },
+    ].map(event => ({ ...event, schema_version: "agent.event.v1", session_id: "saved", event_id: `clock-${event.seq}` }));
+    mocks.getAgentEvents.mockImplementation(async () => ({ events }));
+    try {
+      render(<MemoryRouter initialEntries={["/?agent_session=saved"]}><AgentSurfaceProvider projectRoot="/proj" runId="run-a">
+        <AgentPanel projectRoot="/proj" runId="run-a" composer={<AgentComposer variant="compact" />} />
+      </AgentSurfaceProvider></MemoryRouter>);
+      await waitFor(() => expect(screen.getByLabelText("Agent execution progress")).toHaveTextContent("42 s"));
+      expect(screen.getByLabelText("Agent execution progress")).toHaveTextContent("Waiting for model output");
+      expect(screen.getByRole("button", { name: "View Agent activity" })).toHaveTextContent("42s · Waiting for model output");
+
+      events = [...events,
+        { ...events[5], event_id: "validation-progress", seq: 7, event_type: "message_progress", payload: { request_id: "public-request", stage: "receiving", validation_pending: true } },
+        { ...events[5], event_id: "usage-observation", seq: 8, event_type: "provider_step", payload: {} },
+      ];
+      await waitFor(() => expect(screen.getByTestId("agent-event-cursor")).toHaveTextContent("events #8"));
+      expect(screen.getByLabelText("Agent execution progress")).toHaveTextContent("Processing the model response");
+      expect(screen.getByLabelText("Agent execution progress")).toHaveTextContent("42 s");
+      expect(screen.getByRole("button", { name: "View Agent activity" })).toHaveTextContent("42s · Processing the model response");
+      expect(screen.queryByText("Waiting for model output")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("agent-live-response")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("agent-message-assistant")).not.toBeInTheDocument();
+      expect(screen.getByRole("log", { name: /Agent transcript/ })).not.toHaveTextContent(/public-request|validation_pending|reasoning_content/);
+      expect(mocks.sendAgentTurn).not.toHaveBeenCalled();
+      expect(mocks.continueAgentTurn).not.toHaveBeenCalled();
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   it("retains a restored durable turn after a failed stop instead of replacing it", async () => {

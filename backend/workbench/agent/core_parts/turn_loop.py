@@ -121,6 +121,7 @@ class TurnLoopMixin:
         )
         self._active_message_started = True
         chunks: list[str] = []
+        output_started = False
         reasoning: ModelStreamEvent | None = None
         tool_calls: dict[str, dict[str, Any]] = {}
         finish_reason = "stop"
@@ -139,6 +140,14 @@ class TurnLoopMixin:
                     if self._abort_requested:
                         finish_reason = "aborted"
                         break
+                    if (not output_started and event.type in {"text_delta", "activity"}
+                            and (event.type == "activity" or event.delta.strip())):
+                        output_started = True
+                        if self.completion_check is not None or event.type == "activity":
+                            self.events.emit(self.session_id, "message_progress", {
+                                "request_id": request.request_id, "stage": "receiving",
+                                "validation_pending": self.completion_check is not None,
+                            }, command_id=command_id)
                     if event.type == "text_delta":
                         chunks.append(event.delta)
                         if self.completion_check is None:

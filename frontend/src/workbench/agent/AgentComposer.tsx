@@ -4,6 +4,7 @@ import { useAgentSurfaceOptional } from "./AgentSurfaceContext";
 import { AgentCapabilityPopover } from "./AgentCapabilityPopover";
 import { ContextUsageRing } from "./ContextUsageRing";
 import { useAgentSlashCommands } from "./useAgentSlashCommands";
+import { activeToolActivityLabel } from "./toolActivity";
 import "./agent.css";
 
 export function AgentComposer({
@@ -84,7 +85,7 @@ function CompactAgentComposer({
   };
 
   const activityText = isActive
-    ? `Working · ${elapsedSeconds === null ? "time unavailable" : `${elapsedSeconds}s`} · ${compactActivityLabel(agent.lastEventType)}`
+    ? `Working · ${elapsedSeconds === null ? "time unavailable" : `${elapsedSeconds}s`} · ${activeToolActivityLabel(agent.activeToolCalls) ?? compactActivityLabel(agent.lastEventType)}`
     : `${compactTurn?.stopped || agent.error ? "Stopped" : "Processed"} · ${elapsedSeconds === null ? "time unavailable" : `${elapsedSeconds}s`}`;
 
   return (
@@ -94,6 +95,7 @@ function CompactAgentComposer({
           type="button"
           className="wb-agent-compact-activity"
           aria-label="View Agent activity"
+          title={activityText}
           onClick={onExpand}
         >
           <span>{activityText}</span>

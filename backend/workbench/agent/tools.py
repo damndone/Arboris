@@ -280,6 +280,13 @@ def _format_validation_error(error, *, prefix=()) -> dict[str, Any]:
     }
     if error.validator == "additionalProperties":
         formatted.update(_unexpected_field_help(error))
+    if error.validator == "required" and isinstance(error.instance, dict):
+        required = error.validator_value
+        if isinstance(required, list) and len(required) <= MAX_ALLOWED_PROPERTIES:
+            missing = [key for key in required if key not in error.instance]
+            formatted.update(required_fields=required, missing_fields=missing,
+                required_paths=[".".join(map(str, ("arguments", *prefix, *error.absolute_path, key)))
+                                for key in missing])
     return formatted
 
 
@@ -404,6 +411,49 @@ def _operation_change_example(schema, arguments):
     if example == arguments or not Draft202012Validator(schema).is_valid(example):
         return None
     return example
+
+
+def _operation_envelope_example(schema, arguments):
+    """Suggest moving supplied envelope fields out of changes, never new values.
+
+    Keep this separate from normalization: the original call remains refused.
+    A compact JSON Patch can explain the correction even when the whole
+    request exceeds the feedback budget. Conflicting copies and unknown
+    operation inputs cannot be removed to manufacture a valid request.
+    """
+    if not isinstance(arguments, dict) or not isinstance(arguments.get("changes"), dict):
+        return None
+    branch = _discriminated_branch(schema, arguments) or schema
+    properties = branch.get("properties") or {}
+    contract = properties.get("changes") or {}
+    if not isinstance(contract, dict) or contract.get("additionalProperties") is not False:
+        return None
+    misplaced = sorted(set(arguments["changes"]) - set(contract.get("properties") or {}))
+    required = set(branch.get("required") or ())
+    if not misplaced or any(key not in required or key not in properties or key == "changes" for key in misplaced):
+        return None
+    example = {**arguments, "changes": dict(arguments["changes"])}
+    patch = []
+    try:
+        for key in misplaced:
+            value = example["changes"].pop(key)
+            # No missing evidence is inferred, including an empty default.
+            if key == "evidence_refs" and not value:
+                return None
+            pointer = key.replace("~", "~0").replace("/", "~1")
+            if key in example:
+                if json.dumps(example[key], sort_keys=True, allow_nan=False) != json.dumps(value, sort_keys=True, allow_nan=False):
+                    return None
+                patch.append({"op": "remove", "path": f"/changes/{pointer}"})
+            else:
+                example[key] = value
+                patch.append({"op": "move", "from": f"/changes/{pointer}", "path": f"/{pointer}"})
+        json.dumps(example, allow_nan=False)
+    except (TypeError, ValueError, RecursionError):
+        return None
+    if not Draft202012Validator(schema).is_valid(example):
+        return None
+    return example, patch
 
 
 def _specific_validation_errors(schema, arguments, prefix=()):
@@ -744,10 +794,18 @@ class ToolRegistry:
             arguments = _wrap_single_strings(definition, arguments)
         details = validation_details(definition.input_schema, arguments)
         if details:
-            example = _operation_change_example(definition.input_schema, arguments)
+            envelope = _operation_envelope_example(definition.input_schema, arguments)
+            if envelope is not None:
+                example, patch = envelope
+                illustrated = {**details[0], "example_arguments_patch": patch,
+                    "example_scope": "Schema-only format suggestion; not executed. Correct the arguments and resubmit. Normal source, method preflight and approval still apply."}
+                if len(json.dumps(illustrated, allow_nan=False)) < MAX_VALIDATION_DETAIL_CHARS:
+                    details[0] = illustrated
+            else:
+                example = _operation_change_example(definition.input_schema, arguments)
             if example is not None:
                 illustrated = {**details[0], "example_arguments": example,
-                    "example_scope": "Schema-only format suggestion; not executed. Normal source, method preflight and approval still apply."}
+                    "example_scope": "Schema-only format suggestion; not executed. Correct the arguments and resubmit. Normal source, method preflight and approval still apply."}
                 if len(json.dumps(illustrated, allow_nan=False)) < MAX_VALIDATION_DETAIL_CHARS:
                     details[0] = illustrated
             return ToolResult(

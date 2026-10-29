@@ -85,7 +85,13 @@ def build_chain_tool_registry(
     registry.register(ToolDefinition(
         tool_id="run_operation", version="v1", input_schema=proposal_tool_schema(), max_output_budget=24_000,
         side_effect="proposal", scope_requirements=("chain",), handler=run_operation, normalize=normalize_target,
-        description="Run one typed operation under the current permissions, or return its reviewable proposal."
+        description=(
+            "Run one typed operation under the current permissions, or return its reviewable proposal. "
+            "Required top-level fields: operation_id, target, preconditions, changes, evidence_refs, "
+            "expected_effect, risks. Put operation inputs inside changes; keep evidence_refs, expected_effect "
+            "and risks alongside changes, never inside it. evidence_refs names inspected source evidence; "
+            "use the bound target and preconditions, and never invent references."
+        )
     ))
     registry.register(ToolDefinition(
         tool_id="plan_analysis", version="v1", side_effect="proposal", scope_requirements=("chain",),
