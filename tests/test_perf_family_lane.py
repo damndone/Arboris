@@ -209,8 +209,9 @@ def test_trace_memory_noise_does_not_claim_native_rss_is_stable(lane):
 @pytest.mark.parametrize('traced', [False, True])
 @pytest.mark.parametrize('rss_jump', [False, True])
 @pytest.mark.parametrize('case', ['panel', 'ols'])
+@pytest.mark.parametrize('comparison', ['v190', 'pre-native'])
 def test_trace_lane_journals_then_deletes_each_run_and_gates_relative_time(lane, tmp_path, monkeypatch,
-                                                                       candidate_seconds, expected_exit, baseline_seconds, traced, rss_jump, case):
+                                                                       candidate_seconds, expected_exit, baseline_seconds, traced, rss_jump, case, comparison):
     import shutil
     import subprocess
     # Protocol unit test: mock the machine resource boundary along with the
@@ -228,6 +229,7 @@ def test_trace_lane_journals_then_deletes_each_run_and_gates_relative_time(lane,
         return manifest
     monkeypatch.setattr(lane, 'prepare_family', temporary_prepare)
     monkeypatch.setattr(lane, 'idle_processes', lambda _: None)
+    monkeypatch.setattr(lane, 'product_sources', lambda _: {})
     baseline = tmp_path / 'baseline'
     baseline.mkdir()
     def git(command, cwd=None, text=False):
@@ -235,7 +237,9 @@ def test_trace_lane_journals_then_deletes_each_run_and_gates_relative_time(lane,
             return b''
         if command[1] == 'ls-files':
             return ''
-        return 'baseline' if cwd == baseline or command[-1] == 'v1.9.0^{commit}' else 'candidate'
+        if command[-1] == 'v1.9.0^{commit}':
+            return 'baseline' if comparison == 'v190' else 'v190'
+        return 'baseline' if cwd == baseline else 'candidate'
     monkeypatch.setattr(subprocess, 'check_output', git)
     calls = []
     def worker(command, **kwargs):
@@ -267,6 +271,8 @@ def test_trace_lane_journals_then_deletes_each_run_and_gates_relative_time(lane,
                '--inputs', str(tmp_path/'inputs'), '--cases', case]
     if traced:
         command.append('--trace-memory')
+    if comparison == 'pre-native':
+        command.extend(['--attribution-baseline-sha', 'baseline'])
     # Traced time is diagnostic; only the uninstrumented lane certifies time.
     expected = 0 if traced else (1 if rss_jump or case == 'ols' else expected_exit)
     assert lane.ab_main(command) == expected
@@ -275,6 +281,7 @@ def test_trace_lane_journals_then_deletes_each_run_and_gates_relative_time(lane,
     assert all(path.read_bytes() == raw for path, raw in canonical_inputs.items())
     report = json.loads((out/'ab-results.json').read_text())
     assert report['default_product_path'] is True
+    assert report['comparison_kind'] == ('v1.9.0_regression' if comparison == 'v190' else 'pre_native_attribution')
     assert report['time_acceptance_eligible'] is not traced
     keys = {'tracemalloc_peak_bytes', 'run_bytes'} if traced else {'seconds', 'run_bytes'}
     if not rss_jump:
@@ -283,6 +290,28 @@ def test_trace_lane_journals_then_deletes_each_run_and_gates_relative_time(lane,
     if case == 'ols' and not traced:
         assert report['cases'][case]['absolute_seconds_cap'] == 8.0
         assert 'seconds' in report['cases'][case]['failed']
+
+
+@pytest.mark.parametrize('explicit', [None, 'wrong-sha'])
+def test_non_v190_baseline_cannot_pass_without_its_exact_attribution_pin(lane, tmp_path, monkeypatch, explicit):
+    import subprocess
+    baseline = tmp_path/'baseline'
+    baseline.mkdir()
+    monkeypatch.setattr(lane, 'idle_processes', lambda _: None)
+    monkeypatch.setattr(lane, 'product_sources', lambda _: {})
+    def git(command, cwd=None, text=False):
+        if command[1] == 'diff':
+            return b''
+        if command[-1] == 'v1.9.0^{commit}':
+            return 'v190-sha'
+        return 'pre-native-sha' if cwd == baseline else 'candidate'
+    monkeypatch.setattr(subprocess, 'check_output', git)
+    monkeypatch.setattr(lane, 'prepare_family', lambda *args: pytest.fail('wrong baseline reached input preparation'))
+    args = ['--ab', '--baseline-repo', str(baseline), '--out', str(tmp_path/'out'), '--cases', 'ols']
+    if explicit:
+        args.extend(['--attribution-baseline-sha', explicit])
+    with pytest.raises(SystemExit, match='Baseline'):
+        lane.ab_main(args)
 
 
 def test_traced_stage_memory_difference_is_reported_separately_from_rss(lane):

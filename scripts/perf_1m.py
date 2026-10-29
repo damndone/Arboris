@@ -435,6 +435,8 @@ def ab_main(argv):
     parser.add_argument('--trace-memory', action='store_true', help='Same-run allocation tracing; memory lane only, no absolute time acceptance')
     parser.add_argument('--allow-low-space-this-run', action='store_true',
                         help='explicit user exception for this native AB; all numerical/resource gates remain')
+    parser.add_argument('--attribution-baseline-sha',
+                        help='explicit exact pre-native baseline SHA; labels attribution separately from the v1.9.0 regression gate')
     args = parser.parse_args(argv)
     out = args.out.resolve()
     require_space(out, allow_low_space=args.allow_low_space_this_run)
@@ -446,13 +448,19 @@ def ab_main(argv):
     revisions = {name: subprocess.check_output(['git','rev-parse','HEAD'], cwd=repo, text=True).strip()
                  for name,repo in [('baseline',baseline),('candidate',candidate)]}
     sources = {name: product_sources(repo) for name, repo in [('baseline', baseline), ('candidate', candidate)]}
-    if revisions['baseline'] != subprocess.check_output(['git','rev-parse','v1.9.0^{commit}'], cwd=candidate,text=True).strip():
-        raise SystemExit('Baseline must be exact v1.9.0')
+    v190_sha = subprocess.check_output(['git','rev-parse','v1.9.0^{commit}'], cwd=candidate,text=True).strip()
+    expected_baseline = args.attribution_baseline_sha or v190_sha
+    if revisions['baseline'] != expected_baseline:
+        raise SystemExit('Baseline must match the exact attribution SHA' if args.attribution_baseline_sha else 'Baseline must be exact v1.9.0')
+    comparison_kind = 'pre_native_attribution' if args.attribution_baseline_sha else 'v1.9.0_regression'
     difference = subprocess.check_output(['git','diff','--binary','HEAD'], cwd=candidate)
     (out/'candidate.patch').write_bytes(difference)
     shared_sources = {str(path): source_digest(path) for path in
                       (Path(__file__).resolve(), Path(__file__).with_name('perf_evidence.py').resolve())}
-    report = {'measurement_version': 4, 'candidate_diff_sha256': hashlib.sha256(difference).hexdigest(),
+    report = {'measurement_version': 4, 'comparison_kind':comparison_kind,
+              'v1.9.0_regression_gate':not bool(args.attribution_baseline_sha),
+              'expected_baseline_sha':expected_baseline, 'v1.9.0_sha':v190_sha,
+              'candidate_diff_sha256': hashlib.sha256(difference).hexdigest(),
               'driver_sha256': source_digest(Path(__file__)),
               'thread_environment': {key: os.environ.get(key) for key in ('OMP_NUM_THREADS','OPENBLAS_NUM_THREADS','VECLIB_MAXIMUM_THREADS','MKL_NUM_THREADS','PYTHONHASHSEED')},
               'revisions': revisions, 'order': [f'{lane}{i}' for i in range(1,6) for lane in 'AB'],
@@ -460,6 +468,7 @@ def ab_main(argv):
               'trace_memory':args.trace_memory, 'time_acceptance_eligible':not args.trace_memory,
               'default_product_path':True, 'worker_environment':'inherited unchanged',
               'inputs_policy':'one_fixed_CSV_per_case; product snapshots/uploads written normally',
+              'numeric_comparison_scope':'primary model coefficient/SE/test/fit fields; changed kernels require their separate producer differentials',
               'retention':'one_active_tree; durable_verified_JSONL_then_removal; one_archive_per_case_release',
               'minimum_free_bytes':MIN_FREE_BYTES, 'allow_low_space_this_run':args.allow_low_space_this_run,
               'source_sha256':sources, 'shared_source_sha256':shared_sources, 'cases':{}}
@@ -532,7 +541,8 @@ def ab_main(argv):
                          returncode=result.returncode,label=label,host_overlap=overlap)
             retention = finalize_active(active,ledger=ledger,record_id=f'{case}-{label}',metadata=value,
                                         archive_dir=out.parent/'representatives',
-                                        version='v1.9.0' if lane=='baseline' else 'v1.9.1',case=case)
+                                        version=(('pre-native-'+expected_baseline[:12] if args.attribution_baseline_sha else 'v1.9.0')
+                                                 if lane=='baseline' else 'v1.9.1'),case=case)
             value['retention'] = retention
             if result.returncode or overlap:
                 case_report.setdefault('failed_runs',[]).append(value)
@@ -580,7 +590,7 @@ def ab_main(argv):
                            memory_metric=('rss_and_tracemalloc' if args.trace_memory else 'rss') if 'rss_bytes' in accepted else ('tracemalloc_due_to_native_rss_noise' if args.trace_memory else 'unaccepted_rss_noise'))
         save()
         failed.extend(f'{case}:{key}' for key in misses)
-    print(('DEFAULT PATH MEMORY CHECKS PASS; traced time is diagnostic' if args.trace_memory else 'DEFAULT PATH CHECKS PASS') if not failed else 'FAIL '+', '.join(failed),flush=True)
+    print(comparison_kind+': '+(('DEFAULT PATH MEMORY CHECKS PASS; traced time is diagnostic' if args.trace_memory else 'DEFAULT PATH CHECKS PASS') if not failed else 'FAIL '+', '.join(failed)),flush=True)
     return int(bool(failed))
 
 
