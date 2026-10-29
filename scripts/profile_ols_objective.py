@@ -17,6 +17,7 @@ import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 from perf_evidence import digest, finalize_active, require_space
+from perf_1m import idle_processes, product_sources
 from workbench.orchestrator import run_workflow
 from workbench.projects import create_project
 
@@ -25,13 +26,20 @@ def main():
     root = Path.cwd()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--out', type=Path, required=True, help='Fresh evidence directory; existing evidence is never overwritten')
-    area = parser.parse_args().out.resolve()
-    require_space(root)
+    parser.add_argument('--allow-low-space-this-run', action='store_true', help='explicit native profiling storage exception')
+    args = parser.parse_args()
+    area = args.out.resolve()
+    require_space(root, allow_low_space=args.allow_low_space_this_run)
     manifest = json.loads((root / "local/perf-inputs/ols/source.json").read_text())
     source = Path(manifest["source"])
     if digest(source) != manifest["sha256"]:
         raise ValueError("fixed input checksum changed")
     area.mkdir(parents=True, exist_ok=False)
+    (area/'preflight').mkdir()
+    idle_processes(area/'preflight')
+    sources = product_sources(root)
+    shared = {str(path): digest(path) for path in (Path(__file__).resolve(),
+              Path(__file__).with_name('perf_1m.py').resolve(), Path(__file__).with_name('perf_evidence.py').resolve())}
     active = area / "active"
     active.mkdir(exist_ok=False)
     project = create_project(active, "benchmark")
@@ -43,6 +51,10 @@ def main():
     finally:
         profiler.disable()
     elapsed = time.perf_counter() - started
+    source_unchanged = (sources == product_sources(root)
+                        and all(digest(Path(path)) == expected for path, expected in shared.items()))
+    (area/'postflight').mkdir()
+    idle_processes(area/'postflight')
     profiler.dump_stats(str(area / "workflow.pstats"))
     stats = pstats.Stats(profiler)
     entries = [{"file": key[0], "line": key[1], "name": key[2], "primitive_calls": value[0],
@@ -53,14 +65,17 @@ def main():
         "case": "ols", "status": result["status"], "elapsed_s": elapsed,
         "ru_maxrss": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
         "tracemalloc_peak": None, "measurement": "diagnostic_cProfile_not_gate",
+        "allow_low_space_this_run": args.allow_low_space_this_run,
+        "source_sha256": sources, "shared_source_sha256": shared, "source_unchanged": source_unchanged,
         "input_source": str(source), "input_sha256": manifest["sha256"],
         "run_root": str(project.root / "runs" / result["run_id"])}
     (area / "profile.json").write_text(json.dumps({"metadata": metadata, "functions": entries}, indent=2))
     retention = finalize_active(active, ledger=area / "runs.jsonl", record_id="ols-objective-profile",
-        metadata=metadata, archive_dir=root / "local/perf-evidence/representatives",
+        metadata=metadata, archive_dir=area / 'representatives',
         version="v1.9.1", case="ols")
     print(json.dumps({"metadata": metadata, "retention": retention}, indent=2))
+    return 0 if result['status'] == 'completed' and source_unchanged else 1
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

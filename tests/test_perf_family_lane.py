@@ -127,6 +127,37 @@ def test_shared_driver_and_retention_helper_are_frozen_across_both_lanes(lane, t
     assert (out/'active/partial').read_text() == 'retain the interrupted evidence'
 
 
+def test_profile_explicit_waiver_retains_source_identity_without_changing_workflow(lane, tmp_path, monkeypatch):
+    import shutil
+    import subprocess
+    import sys
+    path = Path(__file__).parents[1]/'scripts/profile_ols_objective.py'
+    spec = importlib.util.spec_from_file_location('ols_profile', path)
+    profile = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(profile)
+    lane.prepare_family('ols', tmp_path/'local/perf-inputs/ols', rows=40)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(shutil, 'disk_usage', lambda _: SimpleNamespace(free=2_000_000_000))
+    monkeypatch.setattr(profile, 'idle_processes', lambda _: None, raising=False)
+    monkeypatch.setattr(subprocess, 'check_output', lambda *args, **kwargs: 'candidate')
+    def workflow(root, sources, **kwargs):
+        assert 'allow_low_space' not in kwargs
+        assert kwargs['model_type'] == 'ols'
+        model = root/'runs/r1/model_results'
+        model.mkdir(parents=True)
+        (model/'ols_1.json').write_text('{"coefficients":{"x":{"estimate":1.0}}}')
+        return {'status': 'completed', 'run_id': 'r1'}
+    monkeypatch.setattr(profile, 'run_workflow', workflow)
+    monkeypatch.setattr(sys, 'argv', ['profile_ols_objective.py', '--out', str(tmp_path/'profile'),
+                                    '--allow-low-space-this-run'])
+    profile.main()
+    metadata = json.loads((tmp_path/'profile/profile.json').read_text())['metadata']
+    assert metadata['allow_low_space_this_run'] is True
+    assert str(path.resolve()) in metadata['shared_source_sha256']
+    assert metadata['measurement'] == 'diagnostic_cProfile_not_gate'
+    assert not (tmp_path/'profile/active').exists()
+
+
 def test_noise_uses_all_baseline_repeats_and_all_resource_metrics(lane):
     runs = [dict(seconds=t, rss_bytes=100, run_bytes=200) for t in (10, 10, 10, 10, 11.2)]
     noise = lane.baseline_noise(runs)

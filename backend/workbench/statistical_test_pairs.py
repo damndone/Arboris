@@ -7,6 +7,7 @@ import pandas as pd
 from scipy import stats
 from statsmodels.stats.multitest import multipletests
 
+from . import native_kendall
 from .statistical_test_values import CATEGORY_MAX_UNIQUE, _safe_float
 from .statistical_test_kernels import _welch_t_statistics
 
@@ -98,10 +99,16 @@ def _rank_correlations(frame: pd.DataFrame, left: str, right: str) -> list[dict[
         "warnings": warning_codes,
         "source_id": f"statistical_tests.rank_correlations.spearman.{left}.{right}",
     })
+    kendall_warning_codes = list(warning_codes)
     if constant_input:
         statistic, p_value = None, None
+        computation = {"engine": "not-computed", "reason": "constant-input"}
     else:
-        statistic, p_value = stats.kendalltau(pair[left], pair[right])
+        outcome = native_kendall.evaluate(pair[left].to_numpy(copy=False), pair[right].to_numpy(copy=False))
+        statistic, p_value = outcome.statistic, outcome.pvalue
+        computation = {"engine": outcome.engine, "reason": outcome.reason}
+        if outcome.reason == "public-integer-promotion":
+            kendall_warning_codes.append("KENDALL_PUBLIC_INTEGER_PROMOTION")
     rows.append({
         "test_id": f"kendall_correlation:{left}:{right}",
         "test_type": "kendall_correlation",
@@ -110,8 +117,9 @@ def _rank_correlations(frame: pd.DataFrame, left: str, right: str) -> list[dict[
         "statistic": _safe_float(statistic),
         "p_value": _safe_float(p_value),
         "effect": {"tau": _safe_float(statistic)},
-        "warnings": warning_codes,
+        "warnings": kendall_warning_codes,
         "source_id": f"statistical_tests.rank_correlations.kendall.{left}.{right}",
+        "computation": computation,
     })
     return rows
 
