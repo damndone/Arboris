@@ -64,7 +64,9 @@ class StatisticalTestsStage:
             lineage_parent=str(ctx.data.artifact_id or "cleaned_dataset"),
             paired_columns=paired_columns,
             reference_means=reference_means,
-        ))
+            check_cancel=env.checkpoint,
+        ), drain_on_cancel=True)
+        env.checkpoint()
         write_statistical_test_artifacts(run_root, statistical_tests)
         statistical_test_summaries = summarize_statistical_tests(
             statistical_tests, y=normalized_y

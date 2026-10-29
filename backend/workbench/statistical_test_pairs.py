@@ -7,7 +7,7 @@ import pandas as pd
 from scipy import stats
 from statsmodels.stats.multitest import multipletests
 
-from . import native_kendall
+from . import native_kendall, native_math
 from .statistical_test_values import CATEGORY_MAX_UNIQUE, _safe_float
 from .statistical_test_kernels import _welch_t_statistics
 
@@ -74,7 +74,9 @@ def _pearson(frame: pd.DataFrame, left: str, right: str) -> dict[str, Any] | Non
     }
 
 
-def _rank_correlations(frame: pd.DataFrame, left: str, right: str) -> list[dict[str, Any]]:
+def _rank_correlations(frame: pd.DataFrame, left: str, right: str, *, check_cancel=None) -> list[dict[str, Any]]:
+    if check_cancel is not None:
+        check_cancel()
     pair = _pairwise(frame, [left, right])
     if len(pair) < 3:
         return []
@@ -86,8 +88,14 @@ def _rank_correlations(frame: pd.DataFrame, left: str, right: str) -> list[dict[
         warning_codes = []
     if constant_input:
         statistic, p_value = None, None
+        spearman_computation = {"engine": "not-computed", "reason": "constant-input"}
     else:
-        statistic, p_value = stats.spearmanr(pair[left], pair[right])
+        spearman_outcome = native_math.evaluate_spearman(
+            pair[left].to_numpy(copy=False), pair[right].to_numpy(copy=False),
+            check_cancel=check_cancel,
+        )
+        statistic, p_value = spearman_outcome.statistic, spearman_outcome.pvalue
+        spearman_computation = {"engine": spearman_outcome.engine, "reason": spearman_outcome.reason}
     rows.append({
         "test_id": f"spearman_correlation:{left}:{right}",
         "test_type": "spearman_correlation",
@@ -98,7 +106,10 @@ def _rank_correlations(frame: pd.DataFrame, left: str, right: str) -> list[dict[
         "effect": {"rho": _safe_float(statistic)},
         "warnings": warning_codes,
         "source_id": f"statistical_tests.rank_correlations.spearman.{left}.{right}",
+        "computation": spearman_computation,
     })
+    if check_cancel is not None:
+        check_cancel()
     kendall_warning_codes = list(warning_codes)
     if constant_input:
         statistic, p_value = None, None
@@ -121,6 +132,8 @@ def _rank_correlations(frame: pd.DataFrame, left: str, right: str) -> list[dict[
         "source_id": f"statistical_tests.rank_correlations.kendall.{left}.{right}",
         "computation": computation,
     })
+    if check_cancel is not None:
+        check_cancel()
     return rows
 
 

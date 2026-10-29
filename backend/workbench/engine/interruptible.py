@@ -14,6 +14,7 @@ an abandoned worker can still finish after the run has stopped.
 from __future__ import annotations
 
 import contextvars
+import logging
 import threading
 from collections.abc import Callable
 from typing import Any, TypeVar
@@ -24,7 +25,13 @@ T = TypeVar("T")
 POLL_S = 0.1
 
 
-def run_interruptible(env: Any, call: Callable[[], T]) -> T:
+def run_interruptible(env: Any, call: Callable[[], T], *, drain_on_cancel: bool = False) -> T:
+    """Run pure work; statistics explicitly owns/drains its cooperative worker.
+
+    The default remains discard-on-cancel for existing callers. An owned caller
+    must pass this same env.checkpoint into its computation; no second stop
+    source is created here, and no single uninterruptible kernel is bounded.
+    """
     checkpoint = getattr(env, "checkpoint", None)
     if getattr(env, "stop_reason", None) is None or checkpoint is None:
         return call()  # nothing could stop this run; no thread needed
@@ -37,11 +44,29 @@ def run_interruptible(env: Any, call: Callable[[], T]) -> T:
         except BaseException as exc:  # handed back to the waiting run
             box["error"] = exc
 
-    worker = threading.Thread(target=work, name="workbench-interruptible", daemon=True)
+    worker = threading.Thread(target=work, name="workbench-interruptible", daemon=not drain_on_cancel)
     worker.start()
-    while worker.is_alive():
-        checkpoint()  # raises RunInterruptionRequested on cancel or timeout
-        worker.join(POLL_S)
+    try:
+        while worker.is_alive():
+            checkpoint()  # raises RunInterruptionRequested on cancel or timeout
+            worker.join(POLL_S)
+    except BaseException as owner_error:
+        if drain_on_cancel:
+            worker.join()  # retain original owner exception after actual drain
+            from .context import RunInterruptionRequested
+
+            error = box.get("error")
+            expected_cancel = (isinstance(owner_error, RunInterruptionRequested)
+                               and isinstance(error, RunInterruptionRequested)
+                               and owner_error.reason == error.reason)
+            if error is not None and not expected_cancel:
+                logging.getLogger(__name__).error(
+                    "Owned statistics worker failed while draining an owner interruption",
+                    exc_info=(type(error), error, error.__traceback__),
+                )
+        raise
     if "error" in box:
         raise box["error"]
+    if drain_on_cancel:
+        checkpoint()  # finished pure work cannot bypass cancellation at publish
     return box["value"]

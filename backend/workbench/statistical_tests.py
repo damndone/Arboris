@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from itertools import combinations
 from pathlib import Path
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 import pandas as pd
@@ -117,7 +117,10 @@ def run_statistical_tests(
     lineage_parent: str | None = None,
     reference_means: Mapping[str, float] | None = None,
     paired_columns: Sequence[tuple[str, str]] | None = None,
+    check_cancel: Callable[[], None] | None = None,
 ) -> dict[str, dict[str, Any]]:
+    if check_cancel is not None:
+        check_cancel()
     columns = [column for column in analysis_columns if column in frame.columns]
     results: dict[str, dict[str, Any]] = {
         name: {
@@ -141,19 +144,27 @@ def run_statistical_tests(
     ]
 
     for left, right in combinations(numeric, 2):
+        if check_cancel is not None:
+            check_cancel()
         row = _pearson(frame, left, right)
         if row is not None:
             results["correlations"]["results"].append(row)
-        for rank_row in _rank_correlations(frame, left, right):
+        rank_rows = (_rank_correlations(frame, left, right, check_cancel=check_cancel)
+                     if check_cancel is not None else _rank_correlations(frame, left, right))
+        for rank_row in rank_rows:
             results["rank_correlations"]["results"].append(rank_row)
 
     for outcome in numeric:
         for group in binary:
             if outcome == group:
                 continue
+            if check_cancel is not None:
+                check_cancel()
             row = _welch_t_test(frame, outcome, group)
             if row is not None:
                 results["t_tests"]["results"].append(row)
+            if check_cancel is not None:
+                check_cancel()
             row = _mann_whitney_u(frame, outcome, group)
             if row is not None:
                 results["nonparametric"]["results"].append(row)
@@ -162,23 +173,33 @@ def run_statistical_tests(
         for group in multi:
             if outcome == group:
                 continue
+            if check_cancel is not None:
+                check_cancel()
             row = _anova(frame, outcome, group)
             if row is not None:
                 results["anova"]["results"].append(row)
+            if check_cancel is not None:
+                check_cancel()
             row = _kruskal_wallis(frame, outcome, group)
             if row is not None:
                 results["nonparametric"]["results"].append(row)
 
     for left, right in combinations(categorical, 2):
+        if check_cancel is not None:
+            check_cancel()
         row = _chi_square(frame, left, right)
         if row is not None:
             results["chi_square"]["results"].append(row)
+        if check_cancel is not None:
+            check_cancel()
         row = _fisher_exact(frame, left, right)
         if row is not None:
             results["fisher_exact"]["results"].append(row)
 
     # Keep the historical eight-family FDR scope stable. The new evidence
     # packet is assembled only after this correction pass.
+    if check_cancel is not None:
+        check_cancel()
     _apply_multiple_testing_correction(results)
     advanced = _build_advanced_evidence_results(
         frame,
@@ -186,7 +207,10 @@ def run_statistical_tests(
         categorical=binary + [column for column in multi if column not in binary],
         reference_means=reference_means,
         paired_columns=paired_columns,
+        check_cancel=check_cancel,
     )
+    if check_cancel is not None:
+        check_cancel()
     evidence_payload = _statistics_evidence_payload(
         advanced,
         dataset_sha256=dataset_sha256,
@@ -202,6 +226,8 @@ def run_statistical_tests(
     if not advanced:
         evidence_payload["correction_method"] = "not_applicable"
     results["evidence"] = evidence_payload
+    if check_cancel is not None:
+        check_cancel()
     return results
 
 

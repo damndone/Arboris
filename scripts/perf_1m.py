@@ -374,7 +374,7 @@ def product_sources(repo):
     """Freeze untracked native/product code too; a Git patch alone misses it."""
     paths = [path for directory in ('backend', 'native') for path in (repo/directory).rglob('*')
              if path.is_file() and path.suffix in {'.py', '.cpp', '.h', '.hpp'}]
-    paths.extend(path for name in ('native-ar', 'native-kendall', 'native-canonical')
+    paths.extend(path for name in ('native-ar', 'native-kendall', 'native-canonical', 'native-spearman-ranks')
                  for path in (repo/'local'/name).glob('*.so') if path.is_file())
     return {str(path.relative_to(repo)): source_digest(path) for path in sorted(paths)}
 

@@ -82,10 +82,16 @@ def test_source_inventory_captures_untracked_product_and_native_binaries(lane, t
     source.write_text('NEW = True\n')
     (tmp_path/'native/ar_exact/ar_exact.cpp').write_text('// exact kernel\n')
     (tmp_path/'local/native-ar/_ar_exact.test.so').write_bytes(b'binary')
+    (tmp_path/'local/native-spearman-ranks').mkdir(parents=True)
+    spearman = tmp_path/'local/native-spearman-ranks/_spearman_rank.test.so'
+    spearman.write_bytes(b'spearman binary')
     (tmp_path/'local/native-ar/old-report.json').write_text('not an executable')
     rows = lane.product_sources(tmp_path)
     assert set(rows) == {'backend/workbench/new_untracked.py', 'native/ar_exact/ar_exact.cpp',
-                         'local/native-ar/_ar_exact.test.so'}
+                         'local/native-ar/_ar_exact.test.so',
+                         'local/native-spearman-ranks/_spearman_rank.test.so'}
+    spearman.write_bytes(b'rebuilt spearman binary')
+    assert lane.product_sources(tmp_path)[str(spearman.relative_to(tmp_path))] != rows[str(spearman.relative_to(tmp_path))]
     original = rows['backend/workbench/new_untracked.py']
     source.write_text('NEW = False\n')
     assert lane.product_sources(tmp_path)['backend/workbench/new_untracked.py'] != original

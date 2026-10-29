@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from itertools import combinations
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 import numpy as np
 import pandas as pd
@@ -53,10 +53,13 @@ def _build_advanced_evidence_results(
     categorical: Sequence[str],
     reference_means: Mapping[str, float] | None,
     paired_columns: Sequence[tuple[str, str]] | None,
+    check_cancel: Callable[[], None] | None = None,
 ) -> list[dict[str, Any]]:
     evidence: list[dict[str, Any]] = []
     if paired_columns is not None:
         for pair in paired_columns:
+            if check_cancel is not None:
+                check_cancel()
             if (
                 not isinstance(pair, (tuple, list))
                 or len(pair) != 2
@@ -76,13 +79,17 @@ def _build_advanced_evidence_results(
         for group in categorical:
             if group == outcome:
                 continue
-            grouped = _finite_groups(frame, outcome, group)
+            if check_cancel is not None:
+                check_cancel()
+            grouped = _finite_groups(frame, outcome, group, check_cancel=check_cancel)
             if grouped is None:
                 continue
             labels, arrays = grouped
             group_map = dict(zip(labels, arrays, strict=True))
             summaries = [_GroupSummary(values) for values in arrays]
             for left_index, right_index in combinations(range(len(arrays)), 2):
+                if check_cancel is not None:
+                    check_cancel()
                 try:
                     evidence.append(
                         _cohens_d_evidence(
@@ -97,6 +104,8 @@ def _build_advanced_evidence_results(
                     )
                 except ValueError:
                     continue
+            if check_cancel is not None:
+                check_cancel()
             if len(arrays) >= 3:
                 try:
                     posthoc = posthoc_anova(group_map, correction="tukey")
@@ -125,9 +134,13 @@ def _build_advanced_evidence_results(
                 except ValueError:
                     # Degenerate groups are not evidence; retain old families.
                     pass
+            if check_cancel is not None:
+                check_cancel()
             evidence.extend(_safe_variance_evidence(grouped, outcome, group))
 
     for column, population_mean in (reference_means or {}).items():
+        if check_cancel is not None:
+            check_cancel()
         if column not in numeric:
             continue
         observations = pd.to_numeric(frame[column], errors="coerce").dropna().tolist()
@@ -140,6 +153,8 @@ def _build_advanced_evidence_results(
         evidence.append(result)
 
     for pair in paired_columns or ():
+        if check_cancel is not None:
+            check_cancel()
         if not isinstance(pair, (tuple, list)) or len(pair) != 2:
             continue
         left, right = pair
@@ -156,6 +171,8 @@ def _build_advanced_evidence_results(
             ("paired_t_test", paired_t_test),
             ("wilcoxon_signed_rank", wilcoxon_signed_rank),
         ):
+            if check_cancel is not None:
+                check_cancel()
             try:
                 result = test_fn(left_values, right_values)
             except (TypeError, ValueError):
@@ -163,6 +180,8 @@ def _build_advanced_evidence_results(
             result["test_id"] = f"{test_name}:{left}:{right}"
             result["source_id"] = f"statistical_tests.evidence.{test_name}.{left}.{right}"
             evidence.append(result)
+    if check_cancel is not None:
+        check_cancel()
     return evidence
 
 
@@ -170,6 +189,8 @@ def _finite_groups(
     frame: pd.DataFrame,
     outcome: str,
     group: str,
+    *,
+    check_cancel: Callable[[], None] | None = None,
 ) -> tuple[list[str], list[list[float]]] | None:
     pair = _pairwise(frame, [outcome, group])
     group_series = _as_series(pair, group)
@@ -179,6 +200,8 @@ def _finite_groups(
     valid_labels: list[str] = []
     arrays: list[list[float]] = []
     for label in labels:
+        if check_cancel is not None:
+            check_cancel()
         values = pd.to_numeric(
             pair.loc[group_series == label, outcome], errors="coerce"
         ).dropna().to_numpy(dtype=float)
