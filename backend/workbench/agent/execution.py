@@ -9,7 +9,7 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from threading import RLock
+from threading import Event, RLock
 from typing import Any, Protocol
 
 import fcntl
@@ -255,15 +255,41 @@ class WorkbenchOperationLifecycle:
         self.risk_authorization_store = risk_authorization_store
 
     async def execute(self, record_id: str) -> OperationRecord:
+        record = self.operation_store.get(record_id)
+        has_ar = record.operation_id == 'operation.multi_step' and any(
+            step.get('operation_id') == 'iv.ar_confidence' for step in record.changes.get('steps', []))
+        if has_ar:
+            # Reuse this operation's caller cancellation and owned lifetime.
+            # The math layer only receives a check; it imports no Agent state.
+            from ..checks.ar_cancellation import cancellation_scope
+            requested = Event()
+            reason = []
+
+            def request_cancel(error):
+                if not requested.is_set():
+                    reason.append(error)
+                    requested.set()
+
+            def check_cancel():
+                if requested.is_set():
+                    raise reason[0]
+
+            with cancellation_scope(check_cancel):
+                return await self._execute_draining(record_id, request_cancel=request_cancel)
+        return await self._execute_draining(record_id)
+
+    async def _execute_draining(self, record_id, *, request_cancel=None):
         # Cancelling an await on to_thread does not stop its native worker.
         # Keep the whole effect/commit/lease lifetime owned until it drains,
         # rather than cancelling the handler and releasing a still-live lease.
-        # This defers caller cancellation; it is not native run cancellation
-        # or a substitute for process-restart reconciliation.
+        # Exact AR additionally observes the same cancellation in its native
+        # and root-certification loops. Other effects retain drain semantics.
         owned = asyncio.create_task(self._execute_owned(record_id))
         try:
             return await asyncio.shield(owned)
-        except asyncio.CancelledError:
+        except asyncio.CancelledError as error:
+            if request_cancel is not None:
+                request_cancel(error)
             while not owned.done():
                 try:
                     await asyncio.shield(owned)
@@ -475,6 +501,17 @@ class WorkbenchOperationLifecycle:
                 if inspect.isawaitable(published):
                     await published
             return self._after_operation(terminal, key=key)
+        except asyncio.CancelledError as exc:
+            cancelled = self.operation_store.append_status(
+                record.record_id, 'cancelled', execution=record.execution,
+                error={'type': type(exc).__name__, 'message': str(exc)},
+                effect_status='failed', projection_status='complete')
+            publish_state = getattr(handler, 'publish_state', None)
+            if publish_state is not None:
+                published = publish_state(cancelled, phase='cancelled')
+                if inspect.isawaitable(published):
+                    await published
+            raise
         except (InjectedOperationCrash, OperationClaimConflict):
             raise
         except Exception as exc:

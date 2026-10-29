@@ -123,7 +123,8 @@ class OrchestrationWorkflows:
             if child.status in {"completed", "failed", "stale", "cancelled"}:
                 continue
             status = step_state.status
-            terminal_status = "completed" if status == "completed" else "failed"
+            terminal_status = status if status in {'completed', 'cancelled'} else 'failed'
+            not_executed = status == 'cancelled' and step_state.error == 'workflow_cancelled_before_execution'
             self.operation_store.append_status(
                 child.record_id,
                 terminal_status,
@@ -137,6 +138,7 @@ class OrchestrationWorkflows:
                     "workflow_step_status": status,
                     "artifact_ids": list(step_state.artifact_ids),
                     "row_counts": dict(step_state.row_counts),
+                    **({'execution_status': 'not_executed'} if not_executed else {}),
                 },
                 verification={
                     "passed": status == "completed",
@@ -144,7 +146,8 @@ class OrchestrationWorkflows:
                     "workflow_confirmation": confirmation_id,
                 },
                 error=(
-                    {"type": "WorkflowStepFailed", "message": step_state.error}
+                    {"type": 'WorkflowStepCancelled' if status == 'cancelled' else 'WorkflowStepFailed',
+                     "message": step_state.error}
                     if status != "completed"
                     else None
                 ),

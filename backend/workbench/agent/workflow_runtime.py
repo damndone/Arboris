@@ -409,13 +409,16 @@ def build_workflow_step_executor(
                 raw_source_frame=source_frame,
             )
         if dispatcher_key == 'workbench.agent.workflow_runtime.iv_ar':
+            from ..checks.ar_cancellation import check_cancellation
             from .postestimation_steps import _resolve_model_binding, _load_kernel
             from ..services.iv_ar import compute_ar
+            check_cancellation()
             model_root, model_id = _resolve_model_binding(root, str(draft.target['run_id']), step, 'model_ref', previous)
             _load_kernel(model_root, model_id)
             result = compute_ar(model_root, model_id, {
                 'run_id': str(lineage.get('run_id', draft.target['run_id'])),
                 'artifact_id': lineage['artifact_id'], 'sha256': lineage['sha256']}, step_frame)
+            check_cancellation()
             return _persist_model_post_estimation_result(root, draft, step, artifact_type='post_estimation',
                 result=result, model_run_id=model_root.name, model_artifact_id=model_id, lineage=lineage)
         if dispatcher_key == "workbench.agent.workflow_runtime.postestimation":

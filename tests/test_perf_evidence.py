@@ -141,6 +141,13 @@ def test_five_gb_floor_accepts_the_authorized_boundary(evidence, tmp_path, monke
     assert evidence.require_space(tmp_path) == 5_000_000_000
 
 
+def test_explicit_single_run_storage_exception_does_not_change_default_floor(evidence,tmp_path,monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.setattr(evidence.shutil,'disk_usage',lambda _:SimpleNamespace(free=2_000_000_000))
+    assert evidence.require_space(tmp_path,allow_low_space=True)==2_000_000_000
+    with pytest.raises(SystemExit,match='5 GB'):evidence.require_space(tmp_path)
+
+
 def test_active_run_is_removed_only_after_verified_journal(evidence, tmp_path):
     active = tmp_path/'active'
     run = active/'benchmark/runs/r1'

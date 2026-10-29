@@ -11,6 +11,7 @@ import json
 import numpy as np
 
 from ..canonical import sha256_canonical
+from ..checks.ar_cancellation import check_cancellation
 from ..checks.context import build_context
 from ..checks.iv_checks import first_stage_strength, FIRST_STAGE_STRENGTH
 from ..engine.iv_diagnostics import iv_point_definition
@@ -27,6 +28,7 @@ def _refuse(message):
 
 def compute_ar(run_root, model_id, expected_source, target_frame):
     """Return a supplement bound to the original result, sample and design."""
+    check_cancellation()
     if model_id != 'iv_2sls_1':
         _refuse('AR is offered here only for a completed native iv_2sls model.')
     primary_raw = _bound_bytes(run_root, run_root/'model_results'/f'{model_id}.json')
@@ -73,6 +75,7 @@ def compute_ar(run_root, model_id, expected_source, target_frame):
     covariance = completion['diagnostics']['iv']['weak_instruments']['covariance']
     _, fitted = run_iv_2sls(frame, y=identity['y_variable'], exog=identity['x_variables'],
         endog=endog, instruments=instruments, model_id=model_id, covariance=covariance)
+    check_cancellation()
     point = sha256_canonical(iv_point_definition(fitted.model))
     sample = sample_metadata(np.flatnonzero(fitted.model.notnull), len(frame))
     if (point != completion['point_estimation_fingerprint']
@@ -81,6 +84,7 @@ def compute_ar(run_root, model_id, expected_source, target_frame):
     context = build_context(model_id=model_id, model_type='iv_2sls', fitted=fitted,
                             kernel=None, nobs=primary['nobs'])
     outcome = first_stage_strength(context, FIRST_STAGE_STRENGTH, compute_ar=True)
+    check_cancellation()
     return {'contract': 'iv-ar.evidence.v1', 'model_id': model_id, 'model_run_id': run_root.name,
         'model_sha256': hashlib.sha256(primary_raw).hexdigest(),
         'completion_sha256': hashlib.sha256(completion_raw).hexdigest(),

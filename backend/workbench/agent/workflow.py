@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import asyncio
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -401,6 +402,20 @@ class WorkflowExecutor:
                 completed_results[step.step_id] = result
                 state = self._persist_state(store, draft, states, "running")
                 self._log_transition(log, draft, step, completed, states)
+            except asyncio.CancelledError as exc:
+                cancelled = WorkflowStepState(step_id=step.step_id, fingerprint=step.fingerprint,
+                    status='cancelled', error=str(exc))
+                states[step.step_id] = cancelled
+                for following in draft.steps:
+                    if states[following.step_id].status == 'pending':
+                        not_executed = WorkflowStepState(step_id=following.step_id,
+                            fingerprint=following.fingerprint, status='cancelled',
+                            error='workflow_cancelled_before_execution')
+                        states[following.step_id] = not_executed
+                        self._log_transition(log, draft, following, not_executed, states)
+                self._persist_state(store, draft, states, 'cancelled')
+                self._log_transition(log, draft, step, cancelled, states)
+                raise
             except Exception as exc:
                 failed = WorkflowStepState(
                     step_id=step.step_id,

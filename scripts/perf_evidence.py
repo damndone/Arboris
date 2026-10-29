@@ -302,11 +302,11 @@ def migrate_legacy(parent, destination):
     return report
 
 
-def require_space(path):
+def require_space(path, *, allow_low_space=False):
     while not path.exists():
         path = path.parent
     free = shutil.disk_usage(path).free
-    if free < MIN_FREE_BYTES:
+    if free < MIN_FREE_BYTES and not allow_low_space:
         raise SystemExit(f'Only {free/1e9:.3f} GB free; {MIN_FREE_BYTES/1e9:g} GB minimum. Measurement not started.')
     return free
 

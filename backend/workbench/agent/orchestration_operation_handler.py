@@ -8,7 +8,7 @@ from .chains import RerunExecutor
 from .execution import ChainExecutionLease, OperationEffect, execution_key
 from .operations import OperationRecord
 from .proposals import ProposalStaleError
-from .workflow import execute_workflow
+from .workflow import execute_workflow, WorkflowStateStore
 from .orchestration_audit import (_workflow_failure_message)
 
 _DATA_CHILD_NODE_OPERATIONS = frozenset(
@@ -18,6 +18,15 @@ _DATA_CHILD_NODE_OPERATIONS = frozenset(
 
 class _OrchestratorOperationHandler:
     """Provide only operation-specific hooks to the shared lifecycle."""
+
+    async def _run_workflow(self, record, draft):
+        try:
+            return await asyncio.to_thread(execute_workflow, self.project_root, draft)
+        except asyncio.CancelledError:
+            state = WorkflowStateStore(self.project_root, draft.workflow_id).current()
+            if state is not None:
+                self.orchestrator._persist_workflow_step_audit(record, draft, state)
+            raise
 
     def validate_session(self, record):
         from .analysis_history import require_active_session
@@ -205,11 +214,7 @@ class _OrchestratorOperationHandler:
                 record,
                 project_root=self.project_root,
             )
-            state = await asyncio.to_thread(
-                execute_workflow,
-                self.project_root,
-                draft,
-            )
+            state = await self._run_workflow(record, draft)
             self.orchestrator._persist_workflow_step_audit(record, draft, state)
             if state.status != "completed":
                 raise ValueError(_workflow_failure_message(state))
@@ -276,11 +281,7 @@ class _OrchestratorOperationHandler:
                 record,
                 project_root=self.project_root,
             )
-            state = await asyncio.to_thread(
-                execute_workflow,
-                self.project_root,
-                draft,
-            )
+            state = await self._run_workflow(record, draft)
             self.orchestrator._persist_workflow_step_audit(record, draft, state)
             if state.status != "completed":
                 raise ValueError(_workflow_failure_message(state))
@@ -333,6 +334,12 @@ class _OrchestratorOperationHandler:
                 payload,
                 command_id=record.command_id,
             )
+            return
+        if phase == 'cancelled':
+            self.orchestrator._append_operation_result(self._result_session_id(record), record,
+                outputs=record.outputs, status='cancelled', error=record.error)
+            self.orchestrator.events.emit(record.agent_session_id, 'operation_cancelled', payload,
+                command_id=record.command_id)
             return
         if phase == "completed":
             if record.operation_id == "graph.fork":

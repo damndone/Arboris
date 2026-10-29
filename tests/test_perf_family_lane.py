@@ -8,7 +8,11 @@ import pytest
 
 
 @pytest.fixture
-def lane():
+def lane(monkeypatch):
+    import shutil
+    # Unit/40-row functional fixtures do not measure the host. The actual
+    # storage boundary has separate tests and remains enabled in AB workers.
+    monkeypatch.setattr(shutil, 'disk_usage', lambda _: SimpleNamespace(free=10**12))
     path = Path(__file__).parents[1] / 'scripts/perf_1m.py'
     spec = importlib.util.spec_from_file_location('perf_lane', path)
     module = importlib.util.module_from_spec(spec)
@@ -48,6 +52,79 @@ def test_worker_only_runs_workflow_on_registered_input(lane, tmp_path, monkeypat
     assert metrics['measurement_scope'] == 'fresh_worker_default_product_path'
     assert metrics['tracemalloc_peak_bytes'] is None
     assert metrics['run_bytes'] > 0
+
+
+def test_low_space_worker_exception_is_explicit_and_does_not_patch_product(lane, tmp_path, monkeypatch):
+    manifest = lane.prepare_family('panel', tmp_path / 'input', rows=40)
+    checks = []
+    monkeypatch.setattr(lane, 'require_space', lambda path, **kwargs: checks.append(kwargs))
+    project = tmp_path / 'project'
+    project.mkdir()
+    monkeypatch.setattr(lane, 'create_project', lambda *_: SimpleNamespace(root=project))
+    def workflow(root, sources, **kwargs):
+        assert 'allow_low_space' not in kwargs
+        assert sources == [Path(json.loads(manifest.read_text())['source'])]
+        model = root / 'runs/r1/model_results'
+        model.mkdir(parents=True)
+        (model / 'panel_ols_1.json').write_text('{"nobs":40}')
+        return {'status': 'completed', 'run_id': 'r1'}
+    monkeypatch.setattr(lane, 'run_workflow', workflow)
+    assert lane.family_run('panel', tmp_path/'active', manifest=manifest, allow_low_space=True) == 0
+    assert checks == [{'allow_low_space': True}]
+    assert json.loads((tmp_path/'active/metrics.json').read_text())['allow_low_space_this_run'] is True
+
+
+def test_source_inventory_captures_untracked_product_and_native_binaries(lane, tmp_path):
+    (tmp_path/'backend/workbench').mkdir(parents=True)
+    (tmp_path/'native/ar_exact').mkdir(parents=True)
+    (tmp_path/'local/native-ar').mkdir(parents=True)
+    source = tmp_path/'backend/workbench/new_untracked.py'
+    source.write_text('NEW = True\n')
+    (tmp_path/'native/ar_exact/ar_exact.cpp').write_text('// exact kernel\n')
+    (tmp_path/'local/native-ar/_ar_exact.test.so').write_bytes(b'binary')
+    (tmp_path/'local/native-ar/old-report.json').write_text('not an executable')
+    rows = lane.product_sources(tmp_path)
+    assert set(rows) == {'backend/workbench/new_untracked.py', 'native/ar_exact/ar_exact.cpp',
+                         'local/native-ar/_ar_exact.test.so'}
+    original = rows['backend/workbench/new_untracked.py']
+    source.write_text('NEW = False\n')
+    assert lane.product_sources(tmp_path)['backend/workbench/new_untracked.py'] != original
+
+
+@pytest.mark.parametrize('changed_name', ['perf_1m.py', 'perf_evidence.py'])
+def test_shared_driver_and_retention_helper_are_frozen_across_both_lanes(lane, tmp_path, monkeypatch, changed_name):
+    import subprocess
+    baseline = tmp_path/'baseline'
+    baseline.mkdir()
+    prepare = lane.prepare_family
+    monkeypatch.setattr(lane, 'prepare_family', lambda case, out: prepare(case, out, rows=40))
+    monkeypatch.setattr(lane, 'idle_processes', lambda _: None)
+    monkeypatch.setattr(lane, 'product_sources', lambda _: {})
+    monkeypatch.setattr(subprocess, 'check_output', lambda cmd, cwd=None, text=False:
+                        b'' if cmd[1] == 'diff' else
+                        'baseline' if cwd == baseline or cmd[-1] == 'v1.9.0^{commit}' else 'candidate')
+    digest = lane.source_digest
+    changed = False
+    def source_digest(path):
+        return '0'*64 if changed and path.name == changed_name else digest(path)
+    monkeypatch.setattr(lane, 'source_digest', source_digest)
+    out = tmp_path/'measured'
+    def worker(*args, **kwargs):
+        nonlocal changed
+        (out/'active').mkdir()
+        (out/'active/partial').write_text('retain the interrupted evidence')
+        run = out/'active/benchmark'
+        run.mkdir()
+        (out/'active/metrics.json').write_text(json.dumps({'seconds': 1., 'rss_bytes': 1000,
+            'run_bytes': 1, 'ru_maxrss': 1000, 'run_root': str(run), 'tracemalloc_peak_bytes': None,
+            'input_sha256': 'a'*64, 'numeric_signature': {'coefficient': '0x1p0'}}))
+        changed = True
+        return SimpleNamespace(returncode=0)
+    monkeypatch.setattr(subprocess, 'run', worker)
+    with pytest.raises(SystemExit, match='Shared measurement source changed'):
+        lane.ab_main(['--ab', '--baseline-repo', str(baseline), '--out', str(out),
+                      '--inputs', str(tmp_path/'inputs'), '--cases', 'panel'])
+    assert (out/'active/partial').read_text() == 'retain the interrupted evidence'
 
 
 def test_noise_uses_all_baseline_repeats_and_all_resource_metrics(lane):
@@ -100,8 +177,9 @@ def test_trace_memory_noise_does_not_claim_native_rss_is_stable(lane):
 @pytest.mark.parametrize('candidate_seconds,expected_exit,baseline_seconds', [(10.1, 0, 10.), (10000., 1, 10.), (14., 1, 14.)])
 @pytest.mark.parametrize('traced', [False, True])
 @pytest.mark.parametrize('rss_jump', [False, True])
+@pytest.mark.parametrize('case', ['panel', 'ols'])
 def test_trace_lane_journals_then_deletes_each_run_and_gates_relative_time(lane, tmp_path, monkeypatch,
-                                                                       candidate_seconds, expected_exit, baseline_seconds, traced, rss_jump):
+                                                                       candidate_seconds, expected_exit, baseline_seconds, traced, rss_jump, case):
     import shutil
     import subprocess
     # Protocol unit test: mock the machine resource boundary along with the
@@ -149,11 +227,12 @@ def test_trace_lane_journals_then_deletes_each_run_and_gates_relative_time(lane,
     monkeypatch.setattr(subprocess, 'run', worker)
     out = tmp_path / 'measured'
     command = ['--ab', '--baseline-repo', str(baseline), '--out', str(out),
-               '--inputs', str(tmp_path/'inputs'), '--cases', 'panel']
+               '--inputs', str(tmp_path/'inputs'), '--cases', case]
     if traced:
         command.append('--trace-memory')
     # Traced time is diagnostic; only the uninstrumented lane certifies time.
-    assert lane.ab_main(command) == (0 if traced else (1 if rss_jump else expected_exit))
+    expected = 0 if traced else (1 if rss_jump or case == 'ols' else expected_exit)
+    assert lane.ab_main(command) == expected
     assert calls == ['A']*5+list('AB'*5)
     assert not (out/'active').exists()
     report = json.loads((out/'ab-results.json').read_text())
@@ -162,7 +241,10 @@ def test_trace_lane_journals_then_deletes_each_run_and_gates_relative_time(lane,
     keys = {'tracemalloc_peak_bytes', 'run_bytes'} if traced else {'seconds', 'run_bytes'}
     if not rss_jump:
         keys.add('rss_bytes')
-    assert set(report['cases']['panel']['budgets']) == keys
+    assert set(report['cases'][case]['budgets']) == keys
+    if case == 'ols' and not traced:
+        assert report['cases'][case]['absolute_seconds_cap'] == 8.0
+        assert 'seconds' in report['cases'][case]['failed']
 
 
 def test_traced_stage_memory_difference_is_reported_separately_from_rss(lane):

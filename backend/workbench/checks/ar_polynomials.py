@@ -10,6 +10,8 @@ from fractions import Fraction as Q
 from functools import reduce
 from math import gcd, lcm
 
+from .ar_cancellation import current_check
+
 
 def trim(p):
     p = list(p)
@@ -49,7 +51,10 @@ def evaluate(p, x):
 def divide(p, q):
     p = [Q(x) for x in trim(p)]
     quotient = [Q(0)] * max(1, len(p)-len(q)+1)
+    check = current_check()
     while p != [0] and len(p) >= len(q):
+        if check is not None:
+            check()
         shift = len(p)-len(q)
         c = p[-1]/q[-1]
         quotient[shift] = c
@@ -64,7 +69,10 @@ def derivative(p):
 
 
 def polynomial_gcd(p, q):
+    check = current_check()
     while q != [0]:
+        if check is not None:
+            check()
         p, q = q, primitive(divide(p, q)[1])
     return primitive(p)
 
@@ -78,7 +86,10 @@ def sturm(p):
     sequence = [p]
     if len(p) > 1:
         sequence.append(primitive(derivative(p)))
+    check = current_check()
     while len(sequence[-1]) > 1:
+        if check is not None:
+            check()
         remainder = divide(sequence[-2], sequence[-1])[1]
         sequence.append(primitive([-x for x in remainder]))
     return sequence
@@ -97,7 +108,10 @@ def isolate(p):
     bound = 2 + max(abs(c)//abs(p[-1]) for c in p[:-1])
     todo = [(Q(-bound), Q(bound))]
     roots = []
+    check = current_check()
     while todo:
+        if check is not None:
+            check()
         lo, hi = todo.pop()
         count = variations(sequence, lo)-variations(sequence, hi)
         if count == 0:
@@ -108,6 +122,8 @@ def isolate(p):
         mid = (lo+hi)/2
         # Keep endpoints away from exact roots, including dyadic roots.
         while evaluate(p, mid) == 0:
+            if check is not None:
+                check()
             mid = (lo+mid)/2
         todo.extend([(mid, hi), (lo, mid)])
     return sorted(roots), bound

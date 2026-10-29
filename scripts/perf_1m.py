@@ -31,11 +31,12 @@ from workbench.orchestrator import run_workflow  # noqa: E402
 from workbench.projects import create_project  # noqa: E402
 
 ROWS = 1_000_000
+OLS_SECONDS_CAP = 8.0
 
 # Seconds. Interactive reads must feel instant; one-off heavy work may take a
 # while but must stay bounded.
 BUDGETS = {
-    "ingest + OLS run": 24.37 * 1.05,
+    "ingest + OLS run": OLS_SECONDS_CAP,
     "data view: first page (cold)": 10.0,
     "data view: next page (warm)": 1.0,
     "data view: sorted page": 3.0,
@@ -313,7 +314,7 @@ def compare_stages(baseline, candidate):
     return differences
 
 
-def family_run(case, out, *, manifest, trace_memory=False):
+def family_run(case, out, *, manifest, trace_memory=False, allow_low_space=False):
     import json
     import resource
     import platform
@@ -323,7 +324,7 @@ def family_run(case, out, *, manifest, trace_memory=False):
     source, kwargs, n = Path(payload['source']), payload['kwargs'], payload['rows']
     if case != payload['case']:
         raise ValueError('manifest_case_mismatch')
-    require_space(out.parent)
+    require_space(out.parent, allow_low_space=allow_low_space)
     out.mkdir(parents=True, exist_ok=False)
     if trace_memory:
         import tracemalloc
@@ -353,6 +354,7 @@ def family_run(case, out, *, manifest, trace_memory=False):
                                            'r_squared', 'r_squared_adj', 'df_model',
                                            'df_resid', 'covariance') if k in packet})
     result = {'case': case, 'rows': n, 'status': outcome['status'], 'seconds': elapsed,
+              'allow_low_space_this_run': allow_low_space,
               'input_sha256': payload['sha256'], 'measurement_scope': 'fresh_worker_default_product_path', 'default_product_path': True,
               'input_io': 'unmodified_product_writes', 'timing_instrumentation': 'tracemalloc' if trace_memory else 'none',
               'time_acceptance_eligible': not trace_memory,
@@ -366,6 +368,15 @@ def family_run(case, out, *, manifest, trace_memory=False):
 
 
 RESOURCE_METRICS = ('seconds', 'rss_bytes', 'run_bytes')
+
+
+def product_sources(repo):
+    """Freeze untracked native/product code too; a Git patch alone misses it."""
+    paths = [path for directory in ('backend', 'native') for path in (repo/directory).rglob('*')
+             if path.is_file() and path.suffix in {'.py', '.cpp', '.h', '.hpp'}]
+    paths.extend(path for name in ('native-ar', 'native-kendall', 'native-canonical')
+                 for path in (repo/'local'/name).glob('*.so') if path.is_file())
+    return {str(path.relative_to(repo)): source_digest(path) for path in sorted(paths)}
 
 
 def baseline_noise(runs, *, metrics=RESOURCE_METRICS):
@@ -422,9 +433,11 @@ def ab_main(argv):
     parser.add_argument('--inputs', type=Path)
     parser.add_argument('--cases', nargs='+', choices=list(FAMILY_ROWS), default=list(FAMILY_ROWS))
     parser.add_argument('--trace-memory', action='store_true', help='Same-run allocation tracing; memory lane only, no absolute time acceptance')
+    parser.add_argument('--allow-low-space-this-run', action='store_true',
+                        help='explicit user exception for this native AB; all numerical/resource gates remain')
     args = parser.parse_args(argv)
     out = args.out.resolve()
-    require_space(out)
+    require_space(out, allow_low_space=args.allow_low_space_this_run)
     out.mkdir(parents=True, exist_ok=True)
     candidate, baseline = Path.cwd(), args.baseline_repo.resolve()
     if (out/'ab-results.json').exists() or (out/'active').exists():
@@ -432,10 +445,13 @@ def ab_main(argv):
     idle_processes(out)
     revisions = {name: subprocess.check_output(['git','rev-parse','HEAD'], cwd=repo, text=True).strip()
                  for name,repo in [('baseline',baseline),('candidate',candidate)]}
+    sources = {name: product_sources(repo) for name, repo in [('baseline', baseline), ('candidate', candidate)]}
     if revisions['baseline'] != subprocess.check_output(['git','rev-parse','v1.9.0^{commit}'], cwd=candidate,text=True).strip():
         raise SystemExit('Baseline must be exact v1.9.0')
     difference = subprocess.check_output(['git','diff','--binary','HEAD'], cwd=candidate)
     (out/'candidate.patch').write_bytes(difference)
+    shared_sources = {str(path): source_digest(path) for path in
+                      (Path(__file__).resolve(), Path(__file__).with_name('perf_evidence.py').resolve())}
     report = {'measurement_version': 4, 'candidate_diff_sha256': hashlib.sha256(difference).hexdigest(),
               'driver_sha256': source_digest(Path(__file__)),
               'thread_environment': {key: os.environ.get(key) for key in ('OMP_NUM_THREADS','OPENBLAS_NUM_THREADS','VECLIB_MAXIMUM_THREADS','MKL_NUM_THREADS','PYTHONHASHSEED')},
@@ -445,7 +461,8 @@ def ab_main(argv):
               'default_product_path':True, 'worker_environment':'inherited unchanged',
               'inputs_policy':'one_fixed_CSV_per_case; product snapshots/uploads written normally',
               'retention':'one_active_tree; durable_verified_JSONL_then_removal; one_archive_per_case_release',
-              'minimum_free_bytes':MIN_FREE_BYTES, 'cases':{}}
+              'minimum_free_bytes':MIN_FREE_BYTES, 'allow_low_space_this_run':args.allow_low_space_this_run,
+              'source_sha256':sources, 'shared_source_sha256':shared_sources, 'cases':{}}
     failed = []
     driver = Path(__file__).resolve()
     ledger = out/'measurements.jsonl'
@@ -459,8 +476,10 @@ def ab_main(argv):
         case_report = {'calibration':calibration, 'raw':records, 'input':payload}
         report['cases'][case] = case_report
         def run(label):
-            free = require_space(out)
+            free = require_space(out, allow_low_space=args.allow_low_space_this_run)
             idle_processes(out)
+            if any(source_digest(Path(path)) != digest for path, digest in shared_sources.items()):
+                raise SystemExit('Shared measurement source changed before worker')
             if active.exists():
                 raise SystemExit('Unrecorded active tree exists; refusing a second run')
             lane = 'baseline' if label.startswith('A') else 'candidate'
@@ -468,11 +487,15 @@ def ab_main(argv):
             commit = subprocess.check_output(['git','rev-parse','HEAD'],cwd=repo,text=True).strip()
             if commit != revisions[lane]:
                 raise SystemExit('Repository changed during measurement')
+            if product_sources(repo) != sources[lane]:
+                raise SystemExit('Product/native source or binary changed during measurement')
             registered_source(payload)
             command = [str(candidate/'.venv/bin/python'), str(driver), '--case',case,
                        '--out',str(active),'--manifest',str(manifest)]
             if args.trace_memory:
                 command.append('--trace-memory')
+            if args.allow_low_space_this_run:
+                command.append('--allow-low-space-this-run')
             with (out/f'{case}-{label}.log').open('w') as log:
                 result = subprocess.run(command,cwd=repo,stdout=log,stderr=subprocess.STDOUT)
             overlap = None
@@ -481,6 +504,10 @@ def ab_main(argv):
             except SystemExit as error:
                 overlap = str(error)
             registered_source(payload)
+            if any(source_digest(Path(path)) != digest for path, digest in shared_sources.items()):
+                raise SystemExit('Shared measurement source changed during worker; retain active evidence')
+            if product_sources(repo) != sources[lane]:
+                raise SystemExit('Product/native source or binary changed during worker; retain active evidence')
             metrics = active/'metrics.json'
             if metrics.exists():
                 value = json.loads(metrics.read_text())
@@ -525,7 +552,7 @@ def ab_main(argv):
         medians = {lane:{key:statistics.median(r[key] for r in runs) for key in keys} for lane,runs in records.items()}
         accepted = noise_keys+(('rss_bytes',) if case_report['native_rss_noise'] < .05 else ())
         budgets = {key:medians['A'][key]*1.05 for key in accepted}
-        absolute_cap = None if args.trace_memory else {'panel':12.2,'iv':15.1}.get(case)
+        absolute_cap = None if args.trace_memory else {'ols':OLS_SECONDS_CAP,'panel':12.2,'iv':15.1}.get(case)
         if absolute_cap is not None:
             budgets['seconds'] = min(budgets['seconds'],absolute_cap)
         misses = [key for key,limit in budgets.items() if medians['B'][key]>limit]
@@ -554,9 +581,10 @@ def main():
         parser.add_argument('--out', type=Path, required=True)
         parser.add_argument('--manifest', type=Path, required=True)
         parser.add_argument('--trace-memory', action='store_true')
+        parser.add_argument('--allow-low-space-this-run', action='store_true')
         args = parser.parse_args()
         return family_run(args.case, args.out.resolve(), manifest=args.manifest,
-                          trace_memory=args.trace_memory)
+                          trace_memory=args.trace_memory, allow_low_space=args.allow_low_space_this_run)
     return interactive_main()
 
 

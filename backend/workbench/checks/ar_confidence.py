@@ -16,13 +16,35 @@ import numpy as np
 from scipy import stats
 
 from .ar_polynomials import add, certify_set, mul
+from .ar_cancellation import check_cancellation, current_check
+
+
+class _RankDeficientAuxiliaryDesign(ValueError):
+    """Distinguish mathematical rank failure from an owner's callback error."""
+
+
+def _checked_rows(rows):
+    """Keep the reference iteration unchanged when no owner check is bound."""
+    check = current_check()
+    if check is None:
+        return rows
+
+    def checked():
+        for i, row in enumerate(rows):
+            if i % 256 == 0:
+                check()
+            yield row
+    return checked()
 
 
 def determinant(matrix):
     """Subset expansion, O(k^2 2^k), with integer polynomial coefficients."""
     n = len(matrix)
     states = {0: [1]}
+    check = current_check()
     for i in range(n):
+        if check is not None:
+            check()
         following = {}
         for mask, value in states.items():
             for j in range(n):
@@ -39,13 +61,18 @@ def determinant(matrix):
 def _inverse_integer(gram):
     n = len(gram)
     rows = [[Q(c) for c in row] + [Q(i == j) for j in range(n)] for i, row in enumerate(gram)]
+    check = current_check()
     # A full-rank Gram is positive definite: no pivot exchange is required.
     for j in range(n):
+        if check is not None:
+            check()
         pivot = rows[j][j]
         if pivot == 0:
-            raise ValueError('rank_deficient_auxiliary_design')
+            raise _RankDeficientAuxiliaryDesign('rank_deficient_auxiliary_design')
         rows[j] = [v/pivot for v in rows[j]]
         for i in range(n):
+            if check is not None:
+                check()
             if i != j:
                 factor = rows[i][j]
                 rows[i] = [a-factor*b for a, b in zip(rows[i], rows[j])]
@@ -56,40 +83,45 @@ def _inverse_integer(gram):
 
 def _integer_data(y, x, z, w):
     data = np.column_stack([y, x, w, z])
-    ratios = [[float(v).as_integer_ratio() for v in row] for row in data]
-    scale = max(d for row in ratios for _, d in row)
-    rows = [[v*(scale//d) for v, d in row] for row in ratios]
-    return [row[0] for row in rows], [row[1] for row in rows], [row[2:] for row in rows]
+    ratios = [[float(v).as_integer_ratio() for v in row] for row in _checked_rows(data)]
+    scale = max(d for row in _checked_rows(ratios) for _, d in row)
+    rows = [[v*(scale//d) for v, d in row] for row in _checked_rows(ratios)]
+    return ([row[0] for row in _checked_rows(rows)], [row[1] for row in _checked_rows(rows)],
+            [row[2:] for row in _checked_rows(rows)])
 
 
 def _projection(y, x, r):
     p = len(r[0])
     if p == 0:
         return [], [], [], 1, y, x
-    gram = [[sum(row[i]*row[j] for row in r) for j in range(p)] for i in range(p)]
+    gram = [[sum(row[i]*row[j] for row in _checked_rows(r)) for j in range(p)] for i in range(p)]
     a, d = _inverse_integer(gram)
-    cross_y = [sum(row[j]*v for row, v in zip(r, y)) for j in range(p)]
-    cross_x = [sum(row[j]*v for row, v in zip(r, x)) for j in range(p)]
+    cross_y = [sum(row[j]*v for row, v in _checked_rows(zip(r, y))) for j in range(p)]
+    cross_x = [sum(row[j]*v for row, v in _checked_rows(zip(r, x))) for j in range(p)]
     u = [sum(v*c for v, c in zip(row, cross_y)) for row in a]
     v = [sum(t*c for t, c in zip(row, cross_x)) for row in a]
-    e = [d*yy-sum(t*c for t, c in zip(row, u)) for row, yy in zip(r, y)]
-    f = [d*xx-sum(t*c for t, c in zip(row, v)) for row, xx in zip(r, x)]
+    e = [d*yy-sum(t*c for t, c in zip(row, u)) for row, yy in _checked_rows(zip(r, y))]
+    f = [d*xx-sum(t*c for t, c in zip(row, v)) for row, xx in _checked_rows(zip(r, x))]
     return a, u, v, d, e, f
 
 
-def robust_polynomials(y, x, z, w, critical):
+def robust_polynomials_reference(y, x, z, w, critical):
     yy, xx, r = _integer_data(y, x, z, w)
     q = z.shape[1]
     a, u, v, d, ee, ff = _projection(yy, xx, r)
     m = [[[0, 0, 0] for _ in range(q)] for _ in range(q)]
-    for row, e, f in zip(r, ee, ff):
+    for row, e, f in _checked_rows(zip(r, ee, ff)):
         k = [sum(t*c for t, c in zip(aa, row)) for aa in a[-q:]]
         residual_square = [e*e, -2*e*f, f*f]
         for i in range(q):
             for j in range(q):
                 for power in range(3):
                     m[i][j][power] += k[i]*k[j]*residual_square[power]
-    c = [[uu, -vv] for uu, vv in zip(u[-q:], v[-q:])]
+    return _robust_polynomial_determinants(m, u[-q:], v[-q:], d, critical)
+
+
+def _robust_polynomial_determinants(m, u, v, d, critical):
+    c = [[uu, -vv] for uu, vv in zip(u, v)]
     bordered = [[*row, c[i]] for i, row in enumerate(m)] + [[*c, [0]]]
     det = determinant(m)
     border = determinant(bordered)
@@ -99,7 +131,15 @@ def robust_polynomials(y, x, z, w, critical):
     return numerator, [critical.denominator*t for t in det]
 
 
+def robust_polynomials(y, x, z, w, critical):
+    from ..native_ar import engine_status, robust_polynomials as native_polynomials
+    if engine_status(y, x, z, w)['engine'] == 'native_cpp_exact':
+        return native_polynomials(y, x, z, w, critical)
+    return robust_polynomials_reference(y, x, z, w, critical)
+
+
 def robust_set(y, x, z, w, alpha=.05):
+    check_cancellation()
     q = z.shape[1]
     method = {'method': 'robust_hc0', 'reference_distribution': f'chi2({q})',
               'inference_scope': 'asymptotic_iid_observations_unweighted_single_endogenous',
@@ -113,11 +153,12 @@ def robust_set(y, x, z, w, alpha=.05):
         result = verified_set(y, x, z, w, critical)
         computation = {'path': 'verified_numpy', 'certification_target': 'original_binary64_observations'}
     except VerificationUncertain as uncertainty:
+        from ..native_ar import engine_status
         computation = {'path': 'exact_fallback', 'fallback_reason': str(uncertainty),
-                       'certification_target': 'original_binary64_observations'}
+                       'certification_target': 'original_binary64_observations', **engine_status(y, x, z, w)}
         try:
             numerator, denominator = robust_polynomials(y, x, z, w, critical)
-        except ValueError as exc:
+        except _RankDeficientAuxiliaryDesign as exc:
             return method | {'kind': 'unavailable', 'reason': str(exc), 'computation': computation}
         result = certify_set(numerator, denominator)
     return method | {'critical_value': critical, 'critical_binary64_ratio': str(Q(critical)),
