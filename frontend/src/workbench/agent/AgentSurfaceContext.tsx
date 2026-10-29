@@ -20,7 +20,7 @@ import { useForest } from "../ForestContext";
 import { useWorkbench } from "../WorkbenchStateProvider";
 import { useAgentNavigationOptional } from "./agentNavigation";
 import {
-  approveAgentPlan, getAgentPlan, patchAgentPlan, getAgentTurnState, continueAgentTurn, resumeAgentTurn, queueAgentTurnMessage,
+  approveAgentPlan, getAgentPlan, getAgentPlanVerification, patchAgentPlan, getAgentTurnState, continueAgentTurn, resumeAgentTurn, queueAgentTurnMessage,
   abortAgentTurn,
   createAgentSession,
   createAgentForkProposal,
@@ -42,7 +42,7 @@ import {
   sendAgentTurn,
 } from "./agentApi";
 import type {
-  AgentPlan, AgentPlanPatch, AgentPlanVersion, AgentDurableTurn,
+  AgentPlan, AgentPlanPatch, AgentPlanVersion, AgentPlanVerification, AgentDurableTurn,
   AgentChapter,
   AgentSession,
   AgentContextPacket,
@@ -196,6 +196,10 @@ export interface AgentSurfaceContextValue {
   planVersions?: AgentPlanVersion[];
   planBusy?: boolean;
   planError?: string | null;
+  planVerification?: AgentPlanVerification | null;
+  planVerificationBusy?: boolean;
+  planVerificationError?: string | null;
+  verifyPlan?: () => Promise<void>;
   refreshPlan?: () => Promise<void>;
   savePlan?: (draft: AgentPlanPatch) => Promise<void>;
   approvePlan?: (version: number) => Promise<void>;
@@ -364,11 +368,19 @@ export function AgentSurfaceProvider({
   const [planVersions, setPlanVersions] = useState<AgentPlanVersion[]>([]);
   const [planBusy, setPlanBusy] = useState(false);
   const [planError, setPlanError] = useState<string|null>(null);
+  const [planVerification, setPlanVerification] = useState<AgentPlanVerification | null>(null);
+  const [planVerificationBusy, setPlanVerificationBusy] = useState(false);
+  const [planVerificationError, setPlanVerificationError] = useState<string | null>(null);
+  const planVerificationRevision = useRef(0);
   const [durableTurns, setDurableTurns] = useState<AgentDurableTurn[]>([]);
   const [queueMessageBusy, setQueueMessageBusy] = useState(false);
   const [queueMessageNotice, setQueueMessageNotice] = useState<string|null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   useEffect(() => { setPlanViewRequest(0); }, [sessionId]);
+  useEffect(() => {
+    planVerificationRevision.current += 1;
+    setPlanVerification(null);setPlanVerificationBusy(false);setPlanVerificationError(null);
+  }, [sessionId, plan?.plan_id, plan?.version]);
   const planReadRevisionRef = useRef(0);
   const turnReadRevisionRef = useRef(0);
   const currentSessionRef = useRef(sessionId);
@@ -569,6 +581,7 @@ export function AgentSurfaceProvider({
     planReadRevisionRef.current += 1;turnReadRevisionRef.current += 1;
     setSessionId(null);
     setExecutionMode("ask");latestPlanRef.current=null;setPlan(null);setPlanVersions([]);setPlanError(null);setPlanBusy(false);
+    setPlanVerification(null);setPlanVerificationBusy(false);setPlanVerificationError(null);
     setDurableTurns([]);setQueueMessageNotice(null);setQueueMessageBusy(false);
     setMessages([]);
     setServerContext(null);
@@ -824,6 +837,26 @@ export function AgentSurfaceProvider({
       if (activeScopeRef.current === scope && currentSessionRef.current === sessionId && revision === planReadRevisionRef.current) setPlanError(reason instanceof Error ? reason.message : "Could not load plan.");
     }
   }, [projectRoot,sessionId,sessionScope]);
+  const verifyPlan = useCallback(async () => {
+    if (!sessionId || !latestPlanRef.current || planVerificationBusy) return;
+    const scope = sessionScope;
+    const revision = ++planVerificationRevision.current;
+    setPlanVerification(null);setPlanVerificationError(null);setPlanVerificationBusy(true);
+    try {
+      const result = await getAgentPlanVerification(projectRoot, sessionId);
+      if (activeScopeRef.current !== scope || currentSessionRef.current !== sessionId || revision !== planVerificationRevision.current) return;
+      if (latestPlanRef.current?.plan_id !== result.plan_id || latestPlanRef.current.version !== result.plan_version) {
+        setPlanVerificationError("The plan changed. Reload it and check the current deliverables.");
+        return;
+      }
+      setPlanVerification(result);
+    } catch (reason) {
+      if (activeScopeRef.current === scope && currentSessionRef.current === sessionId && revision === planVerificationRevision.current)
+        setPlanVerificationError(reason instanceof Error ? reason.message : "Could not verify registered deliverables.");
+    } finally {
+      if (activeScopeRef.current === scope && currentSessionRef.current === sessionId && revision === planVerificationRevision.current) setPlanVerificationBusy(false);
+    }
+  }, [projectRoot,sessionId,sessionScope,planVerificationBusy]);
   const refreshTurnState = useCallback(async () => {
     if (!sessionId || activeScopeRef.current !== sessionScope) return;
     const scope = sessionScope;
@@ -1346,6 +1379,7 @@ export function AgentSurfaceProvider({
 
   const value = useMemo<AgentSurfaceContextValue>(() => ({
     executionMode,setExecutionMode,showPlan,planViewRequest,plan,planVersions,planBusy,planError,refreshPlan,savePlan,approvePlan,approveAndRunPlan,
+    planVerification,planVerificationBusy,planVerificationError,verifyPlan,
     durableTurns,continueTurn,resumeTurn,queueTurnMessage,queueMessageBusy,queueMessageNotice,
     messages,
     prompt,
@@ -1396,6 +1430,7 @@ export function AgentSurfaceProvider({
     capabilityCatalog,
   }), [
     executionMode,showPlan,planViewRequest,plan,planVersions,planBusy,planError,refreshPlan,savePlan,approvePlan,approveAndRunPlan,
+    planVerification,planVerificationBusy,planVerificationError,verifyPlan,
     durableTurns,continueTurn,resumeTurn,queueTurnMessage,queueMessageBusy,queueMessageNotice,
     activeOperation,
     contextPercent,

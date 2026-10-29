@@ -354,6 +354,9 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 export function getAgentPlan(projectRoot: string, sessionId: string): Promise<ResponseOf<"/agent/sessions/{session_id}/plan", "get">> {
   return request(agentPath(projectRoot, sessionPath(sessionId, "/plan")));
 }
+export function getAgentPlanVerification(projectRoot: string, sessionId: string): Promise<ResponseOf<"/agent/sessions/{session_id}/plan/verification", "get">> {
+  return request(agentPath(projectRoot, sessionPath(sessionId, "/plan/verification")));
+}
 export function patchAgentPlan(projectRoot: string, sessionId: string, body: RequestOf<"/agent/sessions/{session_id}/plan", "patch">): Promise<ResponseOf<"/agent/sessions/{session_id}/plan", "patch">> {
   return request(agentPath(projectRoot, sessionPath(sessionId, "/plan")), {method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
 }

@@ -193,11 +193,14 @@ def test_human_criteria_edit_gets_fresh_review_instead_of_old_blocking_reuse(rev
         {'question': before.question, 'criteria': ['Describe association only; do not claim causality']})['plan']
     control.approve(revised['version'])
     assert store.current('session-a').task_requirements == before.task_requirements
+    # A legacy full-analysis plan is now partial until its deliverables have
+    # typed evidence. An explicit review remains available without certifying it.
+    assert delivery_check(project, store.current('session-a'))['status'] == 'partial'
     class Adapter:
         calls = 0
         async def stream(self, request):
             self.calls += 1
-            content = 'Analysis complete.' if self.calls == 1 else json.dumps({'verdict': 'no_issues_found', 'findings': []})
+            content = json.dumps({'verdict': 'no_issues_found', 'findings': []})
             yield ModelStreamEvent.text_delta(request.request_id, content)
             yield ModelStreamEvent.done(request.request_id)
     adapter = Adapter()
@@ -207,13 +210,15 @@ def test_human_criteria_edit_gets_fresh_review_instead_of_old_blocking_reuse(rev
     core.research_review_context = lambda candidate: build_context(project, store.current('session-a'),
         mode='auto', candidate=candidate, config=SimpleNamespace(provider_id='offline', data_location='remote'))
     core.phase_restorer = lambda checkpoint: restore_phase(core, checkpoint)
-    asyncio.run(core.prompt('Continue.', budget={'max_steps': 3, 'timeout_s': 30}))
+    asyncio.run(core.prompt('/review', budget={'max_steps': 1, 'timeout_s': 30}))
     results = [entry.payload for entry in repo.get_branch('session-a') if entry.entry_type == 'research_review_result']
-    assert adapter.calls == 2
+    assert adapter.calls == 1
     assert len(results) == 2
-    assert results[-1]['verdict'] == 'no_issues_found'
+    assert results[-1]['verdict'] == 'unverified'
+    assert results[-1]['reason'] == 'delivery_requirements_still_partial'
     assert not results[-1].get('reused_from_review_id')
-    assert results[-1]['manifest_sha256'] == old_result['manifest_sha256']
+    assert results[-1]['review_plan_basis_sha256'] != old_result['review_plan_basis_sha256']
+    assert delivery_check(project, store.current('session-a'))['status'] == 'partial'
 
 
 @pytest.mark.parametrize('reviewed', ['cross_run'], indirect=True)

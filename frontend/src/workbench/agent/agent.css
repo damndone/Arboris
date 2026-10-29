@@ -1240,6 +1240,10 @@
 .wb-agent-plan__actions, .wb-agent-run-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .wb-agent-plan__note, .wb-agent-plan small, .wb-agent-plan__detail { color: var(--label-secondary); }
 .wb-agent-plan__note { margin-top: 2px; font-size: 11px; }
+.wb-agent-plan__verification { min-width: 0; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--separator); }
+.wb-agent-plan__verification p { margin: 4px 0; }
+.wb-agent-plan__verification li { overflow-wrap: anywhere; }
+.wb-agent-plan__spec { box-sizing: border-box; max-width: 100%; max-height: 160px; overflow: auto; padding: 6px; font-size: 11px; background: var(--bg-card-2); border-radius: 4px; }
 .wb-agent-plan ul { margin: 4px 0 6px; padding-left: 16px; color: var(--label-secondary); }
 .wb-agent-plan ul li { margin: 2px 0; }
 .wb-agent-plan > p { margin: 6px 12px; }

@@ -16,6 +16,7 @@ from .context_compiler import read_completion_artifact, read_completion_dataset_
 from .completion_sensitivity import INFLUENCE_DISCLOSURE, MAX_OPTIONS, SENSITIVITY_NEXT_STEP, influence_option, specification_options
 from .completion_profiles import NATIVE_COMPANIONS, companion_model, native_diagnostics, native_findings, verified_iv_ar, with_iv_ar
 from .completion_targets import TARGET_SCHEMA, computed_result, matches_target, requested_targets
+from .plan_criteria import REQUIREMENTS_SCHEMA, PROOFS_SCHEMA
 
 VERSION = 'analysis-completion/v1'
 PLAYBOOKS = {
@@ -36,6 +37,7 @@ _REF = {'type': 'object', 'required': ['run_id', 'artifact_id'], 'properties': {
     'artifact_id': {'type': 'string', 'minLength': 1, 'maxLength': 200}}, 'additionalProperties': False}
 CONTRACT_SCHEMA = {'type': 'object', 'required': ['playbooks', 'source'], 'properties': {
     'scope': {'type': 'string', 'enum': ['analysis', 'question']},
+    'requirements': REQUIREMENTS_SCHEMA,
     'target': TARGET_SCHEMA,
     'playbooks': {'type': 'array', 'maxItems': 8, 'uniqueItems': True,
                  'items': {'type': 'string', 'enum': list(PLAYBOOKS)}},
@@ -54,6 +56,7 @@ AGENT_CONTRACT_SCHEMA = {**CONTRACT_SCHEMA, 'properties': {**CONTRACT_SCHEMA['pr
 INSPECT_SCHEMA = {"type": "object", "properties": {"source": {**_REF, "properties": {
     **_REF["properties"], "sha256": {"type": "string", "maxLength": 128}}}}, "additionalProperties": False}
 EVIDENCE_SCHEMA = {'type': 'object', 'properties': {
+    'requirements': PROOFS_SCHEMA,
     **{key: {'type': 'array', 'maxItems': 24, 'items': _REF} for key in ('models', 'diagnostics', 'sensitivity', 'results')},
     'report': _REF}, 'additionalProperties': False}
 
@@ -231,6 +234,13 @@ def _source_bound(products, source, ref):
     return source is not None and any(item.sha256 == source.sha256 for item in products.ancestors(ref))
 
 
+def report_missing_sources(products, report_ref, selected_refs):
+    """Shared provenance coverage for playbooks and approved report requirements."""
+    ancestors = products.ancestors(report_ref)
+    return [ref for ref in selected_refs if (value := products.load(ref)) is None
+            or not any(item.sha256 == value.sha256 for item in ancestors)]
+
+
 def _registered_alias_replacement(products, source, ref):
     """Suggest a unique verified model identity; never rewrite submitted refs."""
     if not isinstance(ref, dict) or not isinstance(ref.get('run_id'), str):
@@ -313,14 +323,14 @@ def source_receipt(project_root, ref):
     return {'run_id': ref['run_id'], 'artifact_id': ref['artifact_id'], 'sha256': value.sha256}
 
 
-def evaluate(project_root, contract, evidence, *, suggest=False, options=False):
+def evaluate(project_root, contract, evidence, *, suggest=False, options=False, _products=None):
     """Recheck actual products on every final answer, including after restart.
 
     Missing or unsupported evidence stays partial. There is no model-call path,
     no result creation, and no permission decision inside this read-only gate.
     """
     missing = []
-    products = _Products(project_root)
+    products = _products if _products is not None else _Products(project_root)
     evidence = evidence or {}
     if not contract:
         return _result(['completion_contract:select_playbooks_and_source'], products)
@@ -432,10 +442,8 @@ def evaluate(project_root, contract, evidence, *, suggest=False, options=False):
         if suggest:
             repairs.append({'reason': 'unregistered_or_empty_report',
                 'action': 'Use an exact registered report reference from the catalog or completed-operation receipt, including its actual format suffix. Never invent or append an ID. Compose a report if no verified report covers the required results.'})
-    elif not bound(report_ref) or not all(
-        artifact and any(a.sha256 == artifact.sha256 for a in products.ancestors(report_ref))
-        for _, artifact in groups['models'] + groups['diagnostics'] + groups['sensitivity'] + groups['results']
-    ):
+    elif not bound(report_ref) or report_missing_sources(products, report_ref,
+            [ref for ref, _ in groups['models'] + groups['diagnostics'] + groups['sensitivity'] + groups['results']]):
         missing.append('report:result_sources')
         if suggest:
             repairs.append({'reason': 'report_does_not_cover_selected_evidence',
@@ -553,6 +561,12 @@ def claims_completion(content, request_text=None):
 def _missing_label(code, language):
     family, _, requirement = code.partition(':')
     special = {
+        'plan:approved_criteria_unverified': (
+            'The approved criteria or expected outputs are not fully verified. Keep existing findings; '
+            'bind the original confirmed requests and registered artifacts, or retain partial completion for human takeover. '
+            'Do not rerun completed work or remove commitments to obtain a pass.',
+            '已批准的判据或预期产物尚未全部核验。保留已有结果，绑定原始已确认请求和注册产物；'
+            '无法核验时保持部分完成并交由用户接管，不要重复执行或删去承诺来取得通过。'),
         'task_requirements:unverified': (
             'The original user task requirements are unverified. Restore the user-message evidence or explicitly revise the plan as a person before certifying completion.',
             '原始用户任务要求尚未核验。需恢复真实用户消息证据，或由用户明确修订计划后才能确认完成。'),
@@ -755,7 +769,7 @@ _DIAGNOSTIC_TYPES = frozenset({'model_diagnostic', 'lmm_analysis_evidence', 'ana
 DERIVE_RUN_LIMIT = 12
 
 
-def derive_evidence(project_root, contract, evidence):
+def derive_evidence(project_root, contract, evidence, *, _products=None):
     """Normalize the Agent's evidence and bind, from this source's own products, what it left out.
 
     In the paid v1.9.1 round (candidate-small-20261021) every Ask task stalled
@@ -780,7 +794,7 @@ def derive_evidence(project_root, contract, evidence):
     notes = {'bound_by_workbench': [], 'dropped': [], 'primary_candidates': {}}
     if not contract or contract.get('scope') == 'question':
         return given, notes
-    products = _Products(project_root)
+    products = _products if _products is not None else _Products(project_root)
     source = products.load(contract['source'])
     if source is None or source.sha256 != contract['source'].get('sha256'):
         return given, notes
@@ -906,9 +920,7 @@ def derive_evidence(project_root, contract, evidence):
     selected = [products.load(ref) for ref in selected_refs]
 
     def uncovered(ref):
-        ancestors = products.ancestors(ref)
-        return [plain(selected_ref) for selected_ref, value in zip(selected_refs, selected)
-                if value is None or not any(a.sha256 == value.sha256 for a in ancestors)]
+        return report_missing_sources(products, ref, selected_refs)
 
     # A named report counts only if it covers the selected results; otherwise it is returned
     # with what it lacks and the ready-made compose_report below. Accepting any usable report

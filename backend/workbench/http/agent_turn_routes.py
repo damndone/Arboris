@@ -8,7 +8,7 @@ from ..agent.compaction import CompactionPolicy
 from ..agent.core import AgentCore
 from ..agent.plan_control import PlanControl, PlanControlError
 from .agent_plan_requests import AgentPlanApproveRequest, AgentPlanPatchRequest
-from .responses.agent import AgentPlanResponse, AgentPlanMutationResponse, AgentTurnStateResponse
+from .responses.agent import AgentPlanResponse, AgentPlanMutationResponse, AgentPlanVerificationResponse, AgentTurnStateResponse
 from ..agent.runtime_adapter import runtime_config_identity
 from ..agent.operations import OperationRegistry
 from ..agent.orchestrator import WorkbenchOrchestrator
@@ -53,6 +53,22 @@ def get_agent_plan(session_id: str, project_root: str) -> AgentPlanResponse:
     root = _project_root(project_root)
     repository, _events, _metadata = _get_session(root, session_id)
     return PlanControl(root, repository, session_id).view()
+
+
+@router.get("/agent/sessions/{session_id}/plan/verification")
+def verify_agent_plan(session_id: str, project_root: str) -> AgentPlanVerificationResponse:
+    """Check registered deliverables on demand; never execute operations or call a model."""
+    from ..agent.delivery import delivery_check
+    root = _project_root(project_root)
+    repository, _events, _metadata = _get_session(root, session_id)
+    plan = PlanControl(root, repository, session_id).store.current(session_id)
+    if plan is None:
+        raise WorkbenchAPIError(status_code=404, code="AGENT_PLAN_NOT_FOUND",
+                                message="This conversation has no plan.")
+    check = delivery_check(root, plan)
+    return {"plan_id": plan.plan_id, "plan_version": plan.version,
+            "status": check["status"], "playbook_status": check["playbook_status"],
+            "criteria_verification": check["criteria_verification"]}
 
 
 def _plan_control_error(error: PlanControlError) -> WorkbenchAPIError:

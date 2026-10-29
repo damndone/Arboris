@@ -137,18 +137,10 @@ def _computed_summary(payload):
 
 
 def build_context(root, plan, *, mode, candidate, config):
-    from .completion import derive_evidence, evaluate
     from .completion_targets import computed_result
-    from .task_requirements import enforce
-    from .delivery import review_plan_basis_sha256
+    from .delivery import delivery_state
     # The reviewer judges the evidence the completion gate judged.
-    evidence, _bound = derive_evidence(root, plan.completion if plan else None, plan.completion_evidence if plan else None)
-    check = evaluate(root, plan.completion if plan else None, evidence)
-    if plan is not None:
-        check = enforce(check, plan.task_requirements)
-    check['review_plan_basis_sha256'] = review_plan_basis_sha256(
-        question=plan.question if plan else '', criteria=plan.criteria if plan else (),
-        completion=plan.completion if plan else None)
+    check, evidence = delivery_state(root, plan)
     policy = load_policy(root)
     permitted = config is not None and 'model_result' in policy.allowed_classes(
         provider_id=config.provider_id, locality=config.data_location)

@@ -4,11 +4,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from ..canonical import sha256_canonical
-from .completion import evaluate, source_receipt
+from .completion import source_receipt
 from .session import JsonlSessionRepository
 from .plans import PlanStore
 from .task_requirements import RequirementBinder, signature
-from .delivery import review_plan_basis_sha256
+from .delivery import delivery_check, review_plan_basis_sha256
 from .workflow import WorkflowExecutionError
 
 
@@ -31,12 +31,13 @@ def collect_review(root, target, options):
     if source is None or packet.get('source') != source:
         raise WorkflowExecutionError('research review source does not match the report source')
     inputs = intent.get('verification_inputs')
-    current = evaluate(root, inputs['contract'], inputs['evidence']) if inputs else None
+    current = None
     requirements = None
     current_basis = None
     if inputs and 'task_requirements' in inputs:
         current_plan = PlanStore(repository.root).current(options['session_id'])
         if current_plan is not None:
+            current = delivery_check(root, current_plan)
             requirements = RequirementBinder(repository).bind(options['session_id'], current_plan.task_requirements)
             current_basis = review_plan_basis_sha256(question=current_plan.question,
                 criteria=current_plan.criteria, completion=current_plan.completion)

@@ -169,12 +169,21 @@ def merge(previous: Plan | None, *, question: str, criteria: list[str], steps: t
           human_revision: bool = False) -> Plan:
     """The next version: new steps after approval are exploratory; widening the plan needs approval again."""
 
+    completion_changed = False
     if previous is not None and previous.completion is not None:
         if completion is not None and completion != previous.completion:
-            raise PlanError("completion requirements and source cannot be changed by an Agent plan revision")
-        completion = previous.completion
+            from .plan_criteria import definition_addition
+            if not definition_addition(previous.completion, completion):
+                raise PlanError("completion source and existing requirements cannot be changed by an Agent plan revision; request a human revision")
+            completion_changed = True
+        completion = completion if completion is not None else previous.completion
         if completion_evidence is None:
             completion_evidence = previous.completion_evidence
+    from .plan_criteria import validate_definitions
+    try:
+        validate_definitions(completion, criteria, steps)
+    except ValueError as exc:
+        raise PlanError(str(exc)) from exc
     old_steps = {step.step_id: step for step in previous.steps} if previous else {}
     incoming_ids = {step.step_id for step in steps}
     if not human_revision:
@@ -234,9 +243,11 @@ def merge(previous: Plan | None, *, question: str, criteria: list[str], steps: t
                    for step in steps)
     dependency_changed = any(step.step_id in old_steps and set(step.depends_on) != set(old_steps[step.step_id].depends_on)
                              for step in steps)
-    widened = dependency_changed or (set(allowed) - set(previous.allowed_classes)) or question.strip() != previous.question.strip() or \
+    outputs_changed = {(s.step_id, s.expected_outputs) for s in steps if s.expected_outputs} != {
+        (s.step_id, s.expected_outputs) for s in previous.steps if s.expected_outputs}
+    widened = completion_changed or outputs_changed or dependency_changed or (set(allowed) - set(previous.allowed_classes)) or question.strip() != previous.question.strip() or \
         tuple(criteria) != previous.criteria or _bigger(budget, previous.budget)
-    status = "needs_approval" if previous.status in {"approved", "needs_approval"} and widened else previous.status
+    status = "needs_approval" if previous.status in {"approved", "needs_approval", "completed"} and widened else previous.status
     return replace(previous, version=previous.version + 1, status=status, completion=completion,
                    completion_evidence=completion_evidence, question=question, criteria=tuple(criteria),
                    steps=marked, allowed_classes=tuple(allowed) if allowed_classes is not None else tuple(sorted(set(allowed) | set(previous.allowed_classes)))

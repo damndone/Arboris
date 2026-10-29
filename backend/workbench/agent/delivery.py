@@ -12,7 +12,8 @@ from typing import Any
 
 #: What an operation result carries of the check: enough to act on, not the evidence catalog.
 DIGEST_FIELDS = ("status", "missing", "next_step", "compose_report", "sensitivity_options", "primary_candidates",
-                 "dropped_references", "disclosures", "verified_artifacts", "scientific_validity")
+                 "dropped_references", "disclosures", "verified_artifacts", "scientific_validity",
+                 "playbook_status", "criteria_verification")
 
 
 def review_plan_basis_sha256(*, question, criteria, completion):
@@ -22,14 +23,31 @@ def review_plan_basis_sha256(*, question, criteria, completion):
 
 
 def delivery_check(project_root, plan, *, suggest=False):
-    from .completion import derive_evidence, evaluate
-    from .task_requirements import enforce
+    return delivery_state(project_root, plan, suggest=suggest)[0]
 
+
+def delivery_state(project_root, plan, *, suggest=False):
+    """The check and its selected references share one bounded product cache."""
+    from .completion import _Products, derive_evidence, evaluate
+    from .task_requirements import enforce
+    from .plan_criteria import verify
+    from ..canonical import sha256_canonical
+
+    products = _Products(project_root)
     evidence, bound = derive_evidence(project_root, plan.completion if plan else None,
-                                      plan.completion_evidence if plan else None)
-    result = evaluate(project_root, plan.completion if plan else None, evidence, suggest=suggest, options=True)
+                                      plan.completion_evidence if plan else None, _products=products)
+    result = evaluate(project_root, plan.completion if plan else None, evidence, suggest=suggest, options=True, _products=products)
     if plan is not None:
         result = enforce(result, plan.task_requirements)
+    result['playbook_status'] = result['status']
+    checked = verify(project_root, plan, products, evidence)
+    result['criteria_verification'] = checked
+    if checked['status'] == 'partial':
+        result['status'] = 'partial'
+        result['missing'] = list(dict.fromkeys([*result['missing'], 'plan:approved_criteria_unverified']))
+    result['verified_manifest_sha256'] = sha256_canonical({
+        'products': result['verified_manifest_sha256'],
+        'criteria': {key: value for key, value in checked.items() if key != 'plan_version'}})
     result['review_plan_basis_sha256'] = review_plan_basis_sha256(
         question=plan.question if plan else '', criteria=plan.criteria if plan else (),
         completion=plan.completion if plan else None)
@@ -75,7 +93,11 @@ def delivery_check(project_root, plan, *, suggest=False):
             result['recovery_action'] = 'inspect_and_repair'
             from ..canonical import sha256_canonical
             result['recovery_question_sha256'] = sha256_canonical(plan.question)
-    return result
+    if checked['status'] == 'partial':
+        result['next_step'] = ('Approved criteria or expected outputs remain unverified. Inspect criteria_verification; '
+            'bind existing producer records and registered artifacts without rerunning. Missing machine definitions '
+            'need a visible plan revision and approval; unsupported claims remain partial for human takeover.')
+    return result, evidence
 
 
 def delivery_digest(check: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -95,6 +117,18 @@ def delivery_lines(digest: dict[str, Any] | None) -> list[str]:
              + (f"; missing: {', '.join(digest['missing'][:8])}" if digest.get("missing") else "") + "."]
     if digest.get("next_step"):
         lines.append("Next step: " + str(digest["next_step"]))
+    checked = digest.get('criteria_verification')
+    if checked:
+        rows = checked['requirements']
+        unbound = checked['unbound_slots']
+        summary = {'status': checked['status'], 'basis_sha256': checked['basis_sha256'],
+            'requirements': [{'id': row['id'][:120], 'status': row['status'], 'reason': row['reason'][:240]}
+                             for row in rows[:6]],
+            'unbound_slots': [{k: v[:100] if isinstance(v, str) else v for k, v in slot.items()} for slot in unbound[:8]],
+            'omitted_requirements': max(0, len(rows)-6), 'omitted_unbound_slots': max(0, len(unbound)-8)}
+        lines.append('Approved deliverables: ' + json.dumps(summary, ensure_ascii=False))
+        lines.append('Use inspect_analysis_completion for the complete bounded requirement/proof report; '
+                     'reuse registered evidence. Success flags and free-text claims are not proof.')
     if digest.get("verified_artifacts"):
         lines.append("Verified artifact references (integrity only, not scientific certification): "
                      + json.dumps(digest["verified_artifacts"][:8], ensure_ascii=False)[:3000])

@@ -52,9 +52,6 @@ ActivityEventItem = view_of(AgentActivityEventItem, "ActivityEventItem", kind=Li
 IntentDecisionView = view_of(AnalysisLoopDecision, "IntentDecisionView", omit=("packets",))
 AgentPlanStepView = view_of(PlanStep, "AgentPlanStepView", permission_class=str,
                           completed_operation_ids=NotRequired[list[str]])
-AgentAnalysisPlan = view_of(Plan, "AgentAnalysisPlan", steps=list[AgentPlanStepView],
-                           completion=NotRequired[dict[str, Any]], completion_evidence=NotRequired[dict[str, Any]],
-                           task_requirements=NotRequired[dict[str, Any]])
 AgentTurnRecord = view_of(TurnRecord, "AgentTurnRecord")
 
 
@@ -71,6 +68,74 @@ class AgentPlanResponse(TypedDict):
 
 class AgentPlanMutationResponse(TypedDict):
     plan: AgentAnalysisPlan
+
+
+class PlanCriterionTextSlot(TypedDict):
+    criterion_index: int
+
+
+class PlanOutputSlot(TypedDict):
+    step_id: str
+    output_index: int
+
+
+PlanCriterionSlot = PlanCriterionTextSlot | PlanOutputSlot
+
+
+class PlanRequirementOperation(TypedDict):
+    step_id: str
+    operation_id: str
+    spec: dict[str, Any]
+
+
+class PlanRequirementDefinition(TypedDict):
+    id: str
+    covers: list[PlanCriterionSlot]
+    operation: PlanRequirementOperation
+    allow_not_applicable: NotRequired[bool]
+
+
+class PlanCompletionView(TypedDict, total=False):
+    scope: str
+    playbooks: list[str]
+    source: dict[str, Any]
+    target: dict[str, Any]
+    requirements: list[PlanRequirementDefinition]
+
+
+AgentAnalysisPlan = view_of(Plan, "AgentAnalysisPlan", steps=list[AgentPlanStepView],
+                           completion=NotRequired[PlanCompletionView], completion_evidence=NotRequired[dict[str, Any]],
+                           task_requirements=NotRequired[dict[str, Any]])
+
+
+class PlanVerifiedArtifact(TypedDict):
+    run_id: str
+    artifact_id: str
+    sha256: NotRequired[str]
+
+
+class PlanRequirementVerification(TypedDict):
+    id: str
+    status: str
+    reason: str
+    verified_artifacts: list[PlanVerifiedArtifact]
+
+
+class PlanCriteriaVerification(TypedDict):
+    plan_id: str
+    plan_version: int
+    basis_sha256: str
+    status: str
+    requirements: list[PlanRequirementVerification]
+    unbound_slots: list[PlanCriterionSlot]
+
+
+class AgentPlanVerificationResponse(TypedDict):
+    plan_id: str
+    plan_version: int
+    status: str
+    playbook_status: str
+    criteria_verification: PlanCriteriaVerification
 
 
 class AgentTurnStateResponse(TypedDict):

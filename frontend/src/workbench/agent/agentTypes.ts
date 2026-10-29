@@ -29,5 +29,7 @@ export type AgentContextPacket = Record<string, unknown>;
 
 export type AgentPlan = NonNullable<Schema<"AgentPlanResponse">["plan"]>;
 export type AgentPlanVersion = Schema<"AgentPlanResponse">["versions"][number];
+export type AgentPlanVerification = Schema<"AgentPlanVerificationResponse">;
+export type AgentPlanRequirement = Schema<"PlanRequirementDefinition">;
 export type AgentPlanPatch = Schema<"AgentPlanPatchRequest">;
 export type AgentDurableTurn = Schema<"AgentTurnStateResponse">["turns"][number];

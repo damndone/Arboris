@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
   rewindAgentSession: vi.fn(),
   setAgentFocus: vi.fn(),
   getAgentPlan: vi.fn(),
+  getAgentPlanVerification: vi.fn(),
+  forkAgentSession: vi.fn(),
   patchAgentPlan: vi.fn(),
   approveAgentPlan: vi.fn(),
   getAgentTurnState: vi.fn(),
@@ -44,6 +46,8 @@ const mocks = vi.hoisted(() => ({
 vi.mock("./agentApi", () => ({
   rewindAgentSession: mocks.rewindAgentSession,
   getAgentPlan: mocks.getAgentPlan,
+  getAgentPlanVerification: mocks.getAgentPlanVerification,
+  forkAgentSession: mocks.forkAgentSession,
   patchAgentPlan: mocks.patchAgentPlan,
   approveAgentPlan: mocks.approveAgentPlan,
   getAgentTurnState: mocks.getAgentTurnState,
@@ -689,6 +693,66 @@ describe("AgentSurfaceProvider", () => {
     fireEvent.click(screen.getByRole("button",{name:"Approve plan v4"}));
     await waitFor(() => expect(mocks.approveAgentPlan).toHaveBeenCalledWith("/proj","saved",4));
     expect(mocks.continueAgentTurn).not.toHaveBeenCalled();
+    expect(mocks.sendAgentTurn).not.toHaveBeenCalled();
+  });
+
+  it("checks registered deliverables on demand without a Provider request", async () => {
+    const plan={plan_id:"p",version:4,status:"draft",question:"Verify this analysis",criteria:["Report uncertainty"],steps:[],approved_version:null};
+    mocks.getAgentSession.mockResolvedValue(session("saved"));
+    mocks.getAgentPlan.mockResolvedValue({plan,versions:[]});
+    mocks.getAgentPlanVerification.mockResolvedValue({plan_id:"p",plan_version:4,status:"partial",playbook_status:"requirements_met",
+      criteria_verification:{plan_id:"p",plan_version:4,basis_sha256:"a".repeat(64),status:"partial",requirements:[],unbound_slots:[{criterion_index:0}]}});
+    render(<MemoryRouter initialEntries={["/?agent_session=saved"]}><AgentSurfaceProvider projectRoot="/proj" runId="run-a"><AgentPanel projectRoot="/proj" runId="run-a" /></AgentSurfaceProvider></MemoryRouter>);
+    await screen.findByText("Verify this analysis");
+    expect(mocks.getAgentPlanVerification).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button",{name:"Check deliverables"}));
+    await screen.findByText(/Not bound: Report uncertainty/);
+    expect(mocks.getAgentPlanVerification).toHaveBeenCalledWith("/proj","saved");
+    expect(mocks.sendAgentTurn).not.toHaveBeenCalled();
+    expect(mocks.continueAgentTurn).not.toHaveBeenCalled();
+  });
+
+  it("does not show a late verification as evidence for a revised plan", async () => {
+    const plan={plan_id:"p",version:4,status:"draft",question:"Verification before revision",criteria:[],steps:[],approved_version:null};
+    let finish!: (value: unknown) => void;
+    mocks.getAgentSession.mockResolvedValue(session("saved"));
+    mocks.getAgentPlan.mockResolvedValue({plan,versions:[]});
+    mocks.getAgentPlanVerification.mockReturnValue(new Promise(resolve => {finish=resolve;}));
+    render(<MemoryRouter initialEntries={["/?agent_session=saved"]}><AgentSurfaceProvider projectRoot="/proj" runId="run-a"><AgentPanel projectRoot="/proj" runId="run-a" /></AgentSurfaceProvider></MemoryRouter>);
+    await screen.findByText("Verification before revision");
+    fireEvent.click(screen.getByRole("button",{name:"Check deliverables"}));
+    await waitFor(() => expect(mocks.getAgentPlanVerification).toHaveBeenCalledTimes(1));
+    mocks.getAgentPlan.mockResolvedValue({plan:{...plan,version:5,question:"Revised analysis"},versions:[]});
+    fireEvent.click(screen.getByRole("button",{name:"Reload current plan"}));
+    await screen.findByText("Revised analysis");
+    await act(async () => {finish({plan_id:"p",plan_version:4,status:"requirements_met",playbook_status:"requirements_met",
+      criteria_verification:{plan_id:"p",plan_version:4,basis_sha256:"a".repeat(64),status:"requirements_met",requirements:[],unbound_slots:[]}});});
+    expect(screen.getByText("Not checked for this plan version.")).toBeInTheDocument();
+    expect(screen.queryByText("Delivery requirements met")).not.toBeInTheDocument();
+    expect(mocks.sendAgentTurn).not.toHaveBeenCalled();
+  });
+
+  it("releases a pending verification when forking and ignores its late result", async () => {
+    const plan={plan_id:"p",version:4,status:"draft",question:"Original plan",criteria:[],steps:[],approved_version:null};
+    let finish!: (value: unknown) => void;
+    mocks.getAgentSession.mockResolvedValue(session("saved"));
+    mocks.getAgentPlan.mockImplementation(async (_root: string, id: string) => ({plan:{...plan,question:id === "saved" ? "Original plan" : "Forked plan"},versions:[]}));
+    mocks.getAgentPlanVerification.mockReturnValue(new Promise(resolve => {finish=resolve;}));
+    mocks.forkAgentSession.mockResolvedValue({session:session("forked")});
+    function ForkControl() {
+      const agent = useAgentSurface();
+      return <button onClick={() => void agent.forkConversation?.("entry")}>Fork test conversation</button>;
+    }
+    render(<MemoryRouter initialEntries={["/?agent_session=saved"]}><AgentSurfaceProvider projectRoot="/proj" runId="run-a"><AgentPanel projectRoot="/proj" runId="run-a" /><ForkControl /></AgentSurfaceProvider></MemoryRouter>);
+    await screen.findByText("Original plan");
+    fireEvent.click(screen.getByRole("button",{name:"Check deliverables"}));
+    await waitFor(() => expect(mocks.getAgentPlanVerification).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button",{name:"Fork test conversation"}));
+    await screen.findByText("Forked plan");
+    expect(screen.getByRole("button",{name:"Check deliverables"})).toBeEnabled();
+    await act(async () => {finish({plan_id:"p",plan_version:4,status:"requirements_met",playbook_status:"requirements_met",
+      criteria_verification:{plan_id:"p",plan_version:4,basis_sha256:"a".repeat(64),status:"requirements_met",requirements:[],unbound_slots:[]}});});
+    expect(screen.queryByText("Delivery requirements met")).not.toBeInTheDocument();
     expect(mocks.sendAgentTurn).not.toHaveBeenCalled();
   });
 

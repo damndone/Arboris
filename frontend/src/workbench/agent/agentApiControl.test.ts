@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { approveAgentPlan, continueAgentTurn, getAgentPlan, getAgentTurnState, patchAgentPlan, queueAgentTurnMessage, resumeAgentTurn, sendAgentTurn } from "./agentApi";
+import { approveAgentPlan, continueAgentTurn, getAgentPlan, getAgentPlanVerification, getAgentTurnState, patchAgentPlan, queueAgentTurnMessage, resumeAgentTurn, sendAgentTurn } from "./agentApi";
 
 afterEach(() => vi.unstubAllGlobals());
 it("sends exact plan versions, mode, and explicit turn actions to their own endpoints", async () => {
@@ -14,8 +14,9 @@ it("sends exact plan versions, mode, and explicit turn actions to their own endp
   await resumeAgentTurn("/project","s /1","original-turn");
   await queueAgentTurnMessage("/project","s /1","steer","direction");
   await queueAgentTurnMessage("/project","s /1","follow_up","later");
+  await getAgentPlanVerification("/project","s /1");
   const calls=fetch.mock.calls as [string,RequestInit?][];
-  expect(calls.map(([url]) => url.split("?")[0].split("s%20%2F1")[1])).toEqual(["/turns","/plan","/plan","/plan/approve","/turn-state","/continue","/resume","/steer","/follow_up"]);
+  expect(calls.map(([url]) => url.split("?")[0].split("s%20%2F1")[1])).toEqual(["/turns","/plan","/plan","/plan/approve","/turn-state","/continue","/resume","/steer","/follow_up","/plan/verification"]);
   expect(JSON.parse(calls[0][1]!.body as string)).toEqual({question:"question",execution_policy:"proposal_only",execution_mode:"auto"});
   expect(JSON.parse(calls[2][1]!.body as string)).toEqual({version:7,question:"edited"});
   expect(JSON.parse(calls[3][1]!.body as string)).toEqual({version:7});

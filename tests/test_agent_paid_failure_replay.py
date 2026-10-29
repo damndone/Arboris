@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from tests.test_agent_eval_headless_transport import runner
 from tests.test_agent_routes import _config
 from workbench.agent.completion import evaluate
+from workbench.agent.delivery import delivery_check
 from workbench.agent.model import ModelStreamEvent
 from workbench.agent.plans import PlanStore, merge, parse_steps
 from workbench.agent.runtime_adapter import headless_runtime_scope
@@ -105,9 +106,10 @@ class RepairFromVerifiedBindings:
             yield ModelStreamEvent.done(request.request_id); return
         phase = self.phase
         if phase == 'draft':
-            self.phase = 'inspect'
-            yield ModelStreamEvent.text_delta(request.request_id, '分析尚有交付缺项。')
-            yield ModelStreamEvent.done(request.request_id); return
+            # Repair known product gaps directly. The legacy primary fits have
+            # no confirmed OperationRecords, so a final prose claim cannot
+            # trigger a hidden path that certifies their approved obligations.
+            phase = 'inspect'
         if phase in {'inspect', 'after_ar', 'after_report'}:
             self.phase = {'inspect': 'bind', 'after_ar': 'bind_ar', 'after_report': 'bind_report'}[phase]
             tool, arguments = 'inspect_analysis_completion', {}
@@ -194,7 +196,13 @@ def test_recorded_family_failures_recover_via_real_common_tools_without_nudges(n
             plan = store.current(session)
             checked = evaluate(root, plan.completion, plan.completion_evidence)
             assert checked['status'] == 'requirements_met', (checked['missing'], result, adapter.phase)
-            assert '分析完成' in result['reply']
+            delivery = delivery_check(root, plan)
+            assert delivery['status'] == 'partial'
+            assert delivery['playbook_status'] == 'requirements_met'
+            assert delivery['missing'] == ['plan:approved_criteria_unverified']
+            assert delivery['criteria_verification']['unbound_slots'] == [{'criterion_index': 0}]
+            assert '部分完成' in result['reply'] or 'Partially complete' in result['reply']
+            assert '分析完成。' not in result['reply']
             assert confirmations == ((2 if case['playbook'] == 'iv' else 1) if mode == 'ask'
                                      else (1 if case['playbook'] == 'iv' else 0))
             assert approvals == (1 if mode == 'auto' else 0)
@@ -214,6 +222,7 @@ def test_recorded_family_failures_recover_via_real_common_tools_without_nudges(n
             assert all(record.actor_type in {'user', 'approved_plan'} for record in records)
             # The recorded report id lacked its format suffix; the gate drops it, names it, and
             # binds the composed report that covers the evidence (no second update_plan).
-            assert adapter.catalogs and adapter.catalogs[-1]['status'] == 'requirements_met'
+            assert adapter.catalogs and adapter.catalogs[-1]['status'] == 'partial'
+            assert adapter.catalogs[-1]['playbook_status'] == 'requirements_met'
             assert 'report' in adapter.catalogs[-1]['bound_by_workbench']
             assert plan.completion == contract

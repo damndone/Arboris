@@ -78,7 +78,9 @@ def build_chain_tool_registry(
                 "Write or revise the analysis plan: the research question, the judgement criteria fixed "
                 "before any result is seen, and typed steps (workflow operation ids, dependencies, expected "
                 "outputs, statuses). In Auto mode the person approves it once and planned steps then run "
-                "without a card."
+                "without a card. For full analysis, bind textual promises in completion.requirements to exact "
+                "registered step specifications; attach original producer records and artifact refs in "
+                "completion_evidence.requirements. Unbound or unsupported promises remain partial."
             ),
         )
     )

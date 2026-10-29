@@ -32,6 +32,42 @@ it("shows partial execution coverage without completing the step", () => {
   expect(screen.getByText(/0\/2 completed steps/)).toBeInTheDocument();
   expect(screen.getByText("Recorded operations: 1/2")).toBeInTheDocument();
 });
+it("keeps verified deliverables separate from failed or missing execution receipts", () => {
+  state.agent.planVerification = {plan_id:"p1",plan_version:3,status:"partial",playbook_status:"requirements_met",
+    criteria_verification:{plan_id:"p1",plan_version:3,basis_sha256:"a".repeat(64),status:"partial",
+      requirements:[{id:"covariance",status:"verified",reason:"Registered alternate fit matches the approved request.",
+        verified_artifacts:[{run_id:"run-a",artifact_id:"model-a"}]}],unbound_slots:[{criterion_index:0}]}};
+  render(<AgentPlanPanel />);
+  expect(screen.getByText(/0\/2 completed steps/)).toBeInTheDocument();
+  expect(screen.getByRole("region",{name:"Deliverable verification"})).toHaveTextContent("Partial completion");
+  expect(screen.getByText(/covariance · verified/)).toBeInTheDocument();
+  expect(screen.getByText(/Not bound: Report uncertainty/)).toBeInTheDocument();
+  expect(screen.getByText(/1 registered artifact/)).toBeInTheDocument();
+});
+it("checks deliverables only on request and reports local verification failure", () => {
+  state.agent.verifyPlan = vi.fn().mockResolvedValue(undefined);
+  const view = render(<AgentPlanPanel />);
+  expect(state.agent.verifyPlan).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button",{name:"Check deliverables"}));
+  expect(state.agent.verifyPlan).toHaveBeenCalledTimes(1);
+  state.agent.planVerificationError = "Registered evidence could not be read.";
+  view.rerender(<AgentPlanPanel />);
+  expect(screen.getByRole("alert")).toHaveTextContent("Registered evidence could not be read.");
+  expect(state.agent.sendPrompt).not.toHaveBeenCalled();
+});
+it("shows the exact scientific specification before approving its machine meaning", () => {
+  state.agent.plan = {...plan(),completion:{requirements:[{id:"alternate_covariance",
+    covers:[{criterion_index:0},{step_id:"a",output_index:0}],allow_not_applicable:true,
+    operation:{step_id:"fit",operation_id:"model.genesis",spec:{model_family:"panel_ols",covariance:"clustered"}}}]}};
+  render(<AgentPlanPanel />);
+  const definitions = screen.getByRole("region",{name:"Fixed deliverable definitions"});
+  expect(definitions).toHaveTextContent("alternate_covariance · model.genesis");
+  expect(definitions).toHaveTextContent("Report uncertainty");
+  expect(definitions).toHaveTextContent("summary");
+  expect(definitions).toHaveTextContent('"covariance": "clustered"');
+  expect(definitions).toHaveTextContent("producer-verified");
+  expect(state.agent.approvePlan).not.toHaveBeenCalled();
+});
 it("observes plan-event to DOM latency separately from browser paint", () => {
   const view = render(<AgentPlanPanel />);
   const samples: number[] = [];
@@ -116,7 +152,7 @@ it("shows approval failures without an unhandled rejection", async () => {
 
 it("offers non-local running turn recovery and explains server ownership validation", () => {
   state.agent.sessionId="saved";
-  state.agent.sessionStatus="running";
+  state.agent.sessionStatus="idle";
   state.agent.durableTurns=[{turn_id:"orphan",status:"running",requires_reconcile:false}];
   state.agent.resumeTurn=vi.fn().mockResolvedValue(undefined);
   render(<AgentRunControls />);
@@ -146,7 +182,7 @@ it("keeps edits made while an earlier draft save is pending without rebasing the
   await act(async () => { finishSave(); });
   view.rerender(<AgentPlanPanel />);
   expect(screen.getByRole("textbox",{name:"Plan question"})).toHaveValue("Unsubmitted B");
-  expect(screen.getByRole("status")).toHaveTextContent("A newer plan is available");
+  expect(screen.getByText(/A newer plan is available/)).toHaveAttribute("role", "status");
   expect(screen.getByRole("button",{name:"Save plan"})).toBeDisabled();
   expect(state.agent.savePlan).toHaveBeenCalledTimes(1);
   expect(state.agent.savePlan).toHaveBeenCalledWith(expect.objectContaining({version:3,question:"Submitted A"}));

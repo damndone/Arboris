@@ -386,8 +386,10 @@ def test_product_registration_and_plan_tool_share_the_final_gate(tmp_path):
     assert result.ok and result.output['saved']
     check = {'tool_call_id': 'check', 'tool_id': 'inspect_analysis_completion', 'arguments': {}}
     result = asyncio.run(registry.execute(check, session_id='chain-session'))
-    assert result.ok and result.output['status'] == 'requirements_met'
-    assert f.orchestrator._chain('chain-a')[1].completion_check()['status'] == 'requirements_met'
+    assert result.ok and result.output['status'] == 'partial'
+    assert result.output['playbook_status'] == 'requirements_met'
+    assert result.output['missing'] == ['plan:approved_criteria_unverified']
+    assert f.orchestrator._chain('chain-a')[1].completion_check()['status'] == 'partial'
     assert not asyncio.run(registry.execute(check, session_id='wrong')).ok
 
 
@@ -659,7 +661,10 @@ def test_the_source_sha256_is_bound_from_the_registered_dataset(tmp_path, given)
     if given == 'one_digit_off':
         assert 'differed in 1 of 64' in result.output['workbench_notes'][0]
     check = {'tool_call_id': 'check', 'tool_id': 'inspect_analysis_completion', 'arguments': {}}
-    assert asyncio.run(registry.execute(check, session_id='chain-session')).output['status'] == 'requirements_met'
+    checked = asyncio.run(registry.execute(check, session_id='chain-session')).output
+    assert checked['status'] == 'partial'
+    assert checked['playbook_status'] == 'requirements_met'
+    assert checked['missing'] == ['plan:approved_criteria_unverified']
 
 
 def test_an_unregistered_source_is_still_refused_with_a_way_forward(tmp_path):

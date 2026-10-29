@@ -555,6 +555,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/agent/sessions/{session_id}/plan/verification": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Verify Agent Plan
+         * @description Check registered deliverables on demand; never execute operations or call a model.
+         */
+        get: operations["verify_agent_plan_agent_sessions__session_id__plan_verification_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/agent/sessions/{session_id}/projection": {
         parameters: {
             query?: never;
@@ -2927,10 +2947,7 @@ export interface components {
             budget: {
                 [key: string]: number;
             };
-            /** Completion */
-            completion?: {
-                [key: string]: unknown;
-            };
+            completion?: components["schemas"]["PlanCompletionView"];
             /** Completion Evidence */
             completion_evidence?: {
                 [key: string]: unknown;
@@ -3372,6 +3389,18 @@ export interface components {
             step_id: string;
             /** Title */
             title: string;
+        };
+        /** AgentPlanVerificationResponse */
+        AgentPlanVerificationResponse: {
+            criteria_verification: components["schemas"]["PlanCriteriaVerification"];
+            /** Plan Id */
+            plan_id: string;
+            /** Plan Version */
+            plan_version: number;
+            /** Playbook Status */
+            playbook_status: string;
+            /** Status */
+            status: string;
         };
         /** AgentPlanVersion */
         AgentPlanVersion: {
@@ -9129,6 +9158,43 @@ export interface components {
             /** Execution Mode */
             execution_mode?: ("rerun_child" | "new_run" | "genesis") | null;
         };
+        /** PlanCompletionView */
+        PlanCompletionView: {
+            /** Playbooks */
+            playbooks?: string[];
+            /** Requirements */
+            requirements?: components["schemas"]["PlanRequirementDefinition"][];
+            /** Scope */
+            scope?: string;
+            /** Source */
+            source?: {
+                [key: string]: unknown;
+            };
+            /** Target */
+            target?: {
+                [key: string]: unknown;
+            };
+        };
+        /** PlanCriteriaVerification */
+        PlanCriteriaVerification: {
+            /** Basis Sha256 */
+            basis_sha256: string;
+            /** Plan Id */
+            plan_id: string;
+            /** Plan Version */
+            plan_version: number;
+            /** Requirements */
+            requirements: components["schemas"]["PlanRequirementVerification"][];
+            /** Status */
+            status: string;
+            /** Unbound Slots */
+            unbound_slots: (components["schemas"]["PlanCriterionTextSlot"] | components["schemas"]["PlanOutputSlot"])[];
+        };
+        /** PlanCriterionTextSlot */
+        PlanCriterionTextSlot: {
+            /** Criterion Index */
+            criterion_index: number;
+        };
         /** PlanningCancelled */
         PlanningCancelled: {
             /** Attempt Id */
@@ -9229,6 +9295,54 @@ export interface components {
             user_focus: {
                 [key: string]: unknown;
             };
+        };
+        /** PlanOutputSlot */
+        PlanOutputSlot: {
+            /** Output Index */
+            output_index: number;
+            /** Step Id */
+            step_id: string;
+        };
+        /** PlanRequirementDefinition */
+        PlanRequirementDefinition: {
+            /** Allow Not Applicable */
+            allow_not_applicable?: boolean;
+            /** Covers */
+            covers: (components["schemas"]["PlanCriterionTextSlot"] | components["schemas"]["PlanOutputSlot"])[];
+            /** Id */
+            id: string;
+            operation: components["schemas"]["PlanRequirementOperation"];
+        };
+        /** PlanRequirementOperation */
+        PlanRequirementOperation: {
+            /** Operation Id */
+            operation_id: string;
+            /** Spec */
+            spec: {
+                [key: string]: unknown;
+            };
+            /** Step Id */
+            step_id: string;
+        };
+        /** PlanRequirementVerification */
+        PlanRequirementVerification: {
+            /** Id */
+            id: string;
+            /** Reason */
+            reason: string;
+            /** Status */
+            status: string;
+            /** Verified Artifacts */
+            verified_artifacts: components["schemas"]["PlanVerifiedArtifact"][];
+        };
+        /** PlanVerifiedArtifact */
+        PlanVerifiedArtifact: {
+            /** Artifact Id */
+            artifact_id: string;
+            /** Run Id */
+            run_id: string;
+            /** Sha256 */
+            sha256?: string;
         };
         /**
          * PostEstimationResult
@@ -11958,6 +12072,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentPlanMutationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    verify_agent_plan_agent_sessions__session_id__plan_verification_get: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentPlanVerificationResponse"];
                 };
             };
             /** @description Validation Error */
