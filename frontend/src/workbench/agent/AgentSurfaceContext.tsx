@@ -477,6 +477,7 @@ export function AgentSurfaceProvider({
   const activeScopeRef = useRef(sessionScope);
   const optimisticMessageCounterRef = useRef(0);
   const eventCursorRef = useRef(0);
+  const activeEventCommandRef = useRef<{ commandId: string | null; startedAt: number | null } | null>(null);
   const applyEvents = useCallback((events: AgentEvent[]) => {
     const unseen = events
       .filter((event) => event.seq > eventCursorRef.current)
@@ -487,6 +488,16 @@ export function AgentSurfaceProvider({
     if (observations.length) setProviderSteps(current => [...current, ...observations]);
     eventCursorRef.current = latest.seq;
     for (const event of unseen) {
+      if (event.event_type === "turn_start") {
+        const commandId = event.command_id ?? null;
+        if (!activeEventCommandRef.current || activeEventCommandRef.current.commandId !== commandId) {
+          const startedAt = Date.parse(event.created_at);
+          activeEventCommandRef.current = { commandId, startedAt: Number.isFinite(startedAt) ? startedAt : null };
+        }
+        // Tool and numeric-rewrite rounds share the request's clock. The
+        // session/turn status owns whether the timer is visible or running.
+        setActiveTurnStartedAt(activeEventCommandRef.current.startedAt);
+      }
       if (event.event_type === "message_start") {
         setLiveResponseText("");
       } else if (event.event_type === "message_update") {
@@ -557,6 +568,7 @@ export function AgentSurfaceProvider({
     setActiveOperation(null);
     setIsSubmitting(false);
     setActiveTurnStartedAt(null);
+    activeEventCommandRef.current = null;
     setConfirmationBusyId(null);
     setEventCursor(0);
     setProviderSteps([]);

@@ -53,6 +53,15 @@ function mount(context: AgentSurfaceContextValue) {
 }
 
 describe("AgentComposer", () => {
+  it("does not invent elapsed time for externally started compact activity", () => {
+    render(<AgentSurfaceContext.Provider value={value({ sessionStatus: "running", lastEventType: "message_start" })}>
+      <AgentComposer variant="compact" />
+    </AgentSurfaceContext.Provider>);
+    expect(screen.getByRole("button", { name: "View Agent activity" })).toHaveTextContent("time unavailable");
+    expect(screen.getByRole("button", { name: "View Agent activity" })).toHaveTextContent("Waiting for model output");
+    expect(screen.getByRole("button", { name: "View Agent activity" })).not.toHaveTextContent("0s");
+  });
+
   it("does not render an idle-only session label", () => {
     mount(value({ sessionStatus: "idle" }));
 
@@ -152,6 +161,12 @@ describe("AgentComposer", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "View Agent activity" })).toHaveTextContent(/processed/i);
     });
+    rendered.rerender(
+      <AgentSurfaceContext.Provider value={value({ sessionStatus: "running" })}>
+        <AgentComposer variant="compact" onExpand={onExpand} />
+      </AgentSurfaceContext.Provider>,
+    );
+    expect(screen.getByRole("button", { name: "View Agent activity" })).toHaveTextContent("time unavailable");
     expect(onExpand).not.toHaveBeenCalled();
   });
 

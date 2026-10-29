@@ -768,6 +768,27 @@ describe("AgentSurfaceProvider", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
+  it("restores the server turn start instead of restarting elapsed time on later messages", async () => {
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+    mocks.getAgentSession.mockResolvedValue({ ...session("saved"), status: "running" });
+    mocks.getAgentTurnState.mockResolvedValue({ turns: [{ turn_id: "external", status: "running", requires_reconcile: false }] });
+    mocks.getAgentEvents.mockResolvedValue({ events: [
+      { seq: 1, event_type: "turn_start", command_id: "external-command", created_at: new Date(now - 42_000).toISOString(), payload: {} },
+      { seq: 2, event_type: "turn_end", command_id: "external-command", created_at: new Date(now - 5_000).toISOString(), payload: { stop_reason: "tool_calls" } },
+      { seq: 3, event_type: "turn_start", command_id: "external-command", created_at: new Date(now - 4_000).toISOString(), payload: {} },
+      { seq: 4, event_type: "turn_end", command_id: "external-command", created_at: new Date(now - 3_000).toISOString(), payload: { stop_reason: "revised" } },
+      { seq: 5, event_type: "turn_start", command_id: "external-command", created_at: new Date(now - 2_000).toISOString(), payload: {} },
+      { seq: 6, event_type: "message_start", command_id: "external-command", created_at: new Date(now).toISOString(), payload: {} },
+    ] });
+    render(<MemoryRouter initialEntries={["/?agent_session=saved"]}><AgentSurfaceProvider projectRoot="/proj" runId="run-a"><AgentPanel projectRoot="/proj" runId="run-a" /></AgentSurfaceProvider></MemoryRouter>);
+    await waitFor(() => expect(screen.getByLabelText("Agent execution progress")).toHaveTextContent("42 s"));
+    expect(screen.getByLabelText("Agent execution progress")).toHaveTextContent("Waiting for model output");
+    expect(mocks.sendAgentTurn).not.toHaveBeenCalled();
+    expect(mocks.continueAgentTurn).not.toHaveBeenCalled();
+    clock.mockRestore();
+  });
+
   it("retains a restored durable turn after a failed stop instead of replacing it", async () => {
     mocks.getAgentSession.mockResolvedValue({ ...session("saved"), status: "running" });
     mocks.getAgentTurnState.mockResolvedValue({ turns: [{ turn_id: "original-turn", status: "running", requires_reconcile: false }] });

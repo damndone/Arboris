@@ -45,10 +45,12 @@ function CompactAgentComposer({
     ? 0
     : Math.max(0, agent.contextWindowTokens - agent.contextUsedTokens);
   const isActive = agentTurnActive(agent);
-  const activityStartAt = agent.activeTurnStartedAt ?? compactTurn?.startedAt ?? null;
+  const activityStartAt = agent.activeTurnStartedAt
+    ?? (!isActive || compactTurn?.completedAt === undefined ? compactTurn?.startedAt : null)
+    ?? null;
   const activityEndAt = isActive ? now : compactTurn?.completedAt ?? now;
   const elapsedSeconds = activityStartAt === null
-    ? 0
+    ? null
     : Math.max(0, Math.floor((activityEndAt - activityStartAt) / 1_000));
   const hasActivity = isActive || compactTurn?.completedAt !== undefined;
 
@@ -82,8 +84,8 @@ function CompactAgentComposer({
   };
 
   const activityText = isActive
-    ? `Working · ${elapsedSeconds}s · ${compactActivityLabel(agent.lastEventType)}`
-    : `${compactTurn?.stopped || agent.error ? "Stopped" : "Processed"} · ${elapsedSeconds}s`;
+    ? `Working · ${elapsedSeconds === null ? "time unavailable" : `${elapsedSeconds}s`} · ${compactActivityLabel(agent.lastEventType)}`
+    : `${compactTurn?.stopped || agent.error ? "Stopped" : "Processed"} · ${elapsedSeconds === null ? "time unavailable" : `${elapsedSeconds}s`}`;
 
   return (
     <div className="wb-agent-compact-composer-shell">
@@ -203,7 +205,9 @@ function compactActivityLabel(lastEventType: string | null): string {
   const eventType = lastEventType?.toLowerCase() ?? "";
   if (eventType.includes("tool")) return "Checking evidence";
   if (eventType.includes("proposal")) return "Preparing proposal";
-  if (eventType.includes("response") || eventType.includes("message")) return "Drafting answer";
+  if (eventType === "message_start") return "Waiting for model output";
+  if (eventType === "message_update") return "Receiving model output";
+  if (eventType.includes("response") || eventType.includes("message")) return "Processing the model response";
   return "Working";
 }
 

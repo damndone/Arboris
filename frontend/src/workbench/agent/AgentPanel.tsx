@@ -55,7 +55,9 @@ function observableActivity(eventType: string | null): string {
   if (normalized === "compaction_start") return "Summarizing the earlier conversation to stay within the model's context";
   if (normalized.includes("tool")) return "Checking evidence";
   if (normalized.includes("proposal")) return "Preparing a reviewable proposal";
-  if (normalized.includes("message") || normalized.includes("response")) return "Drafting the response";
+  if (normalized === "message_start") return "Waiting for model output";
+  if (normalized === "message_update") return "Receiving model output";
+  if (normalized.includes("message") || normalized.includes("response")) return "Processing the model response";
   return "Processing the current request";
 }
 
@@ -83,7 +85,7 @@ function terminalFailureMessage(
   return `The Agent stopped before completing the request (${error}). ${retained}`;
 }
 
-function useElapsedSeconds(startedAt: number | null | undefined, active: boolean): number {
+function useElapsedSeconds(startedAt: number | null | undefined, active: boolean): number | null {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!active || startedAt == null) return undefined;
@@ -91,7 +93,7 @@ function useElapsedSeconds(startedAt: number | null | undefined, active: boolean
     const timer = window.setInterval(() => setNow(Date.now()), 1_000);
     return () => window.clearInterval(timer);
   }, [active, startedAt]);
-  return active && startedAt != null ? Math.max(0, Math.floor((now - startedAt) / 1_000)) : 0;
+  return active && startedAt != null ? Math.max(0, Math.floor((now - startedAt) / 1_000)) : null;
 }
 
 function transcriptIsAtBottom(element: HTMLElement): boolean {
@@ -399,7 +401,7 @@ export function AgentPanel({
         {!compactHeader && <span style={{ color: "var(--label-secondary)" }}>{agent.scopeLabel}</span>}
         {!compactHeader && turnActive && (
           <span data-testid="agent-turn-progress" style={{ color: "var(--label-tertiary)" }} aria-live="polite">
-            {`Working · ${elapsedSeconds}s`}
+            {elapsedSeconds === null ? "Working · time unavailable" : `Working · ${elapsedSeconds}s`}
           </span>
         )}
         {!compactHeader && <span
@@ -513,7 +515,7 @@ export function AgentPanel({
             >
               <span className="agt-working__dot" aria-hidden="true" />
               <span>{observableActivity(agent.lastEventType)}</span>
-              <span className="agt-working__time">{elapsedSeconds} s</span>
+              <span className="agt-working__time">{elapsedSeconds === null ? "Elapsed time unavailable" : `${elapsedSeconds} s`}</span>
             </div>
             {agent.liveResponseText && (
               <div

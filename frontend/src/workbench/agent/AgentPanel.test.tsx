@@ -182,6 +182,15 @@ describe("AgentPanel — declared post-estimation results", () => {
 });
 
 describe("AgentPanel", () => {
+  it("does not invent zero elapsed time or a final-answer phase for external model requests", () => {
+    render(<AgentSurfaceContext.Provider value={value({ sessionStatus: "running", lastEventType: "message_start" })}>
+      <AgentPanel runId="run-a" projectRoot="/proj" />
+    </AgentSurfaceContext.Provider>);
+    expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent("Waiting for model output");
+    expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent("Elapsed time unavailable");
+    expect(screen.getByTestId("agent-turn-progress")).not.toHaveTextContent("0s");
+  });
+
   it("shows elapsed time and observable activity without a private-reasoning banner", () => {
     render(
       <AgentSurfaceContext.Provider value={value({
