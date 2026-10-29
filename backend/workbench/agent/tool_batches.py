@@ -95,6 +95,12 @@ async def run_single(core,call,*,tool_context,skip=False):
         core._active_tool_task = task
         try:
             result = await task
+        except asyncio.CancelledError:
+            # A task cancelled before its first step never enters _invoke's
+            # handler. Owner cancellation still owes the original call a receipt.
+            if not (core._timeout_requested or core._abort_requested):
+                raise
+            result = _cancelled(core,call)
         finally:
             if core._active_tool_task is task:
                 core._active_tool_task = None

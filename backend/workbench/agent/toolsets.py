@@ -7,6 +7,7 @@ from typing import Any
 
 from .tools import ToolDefinition, ToolHandler, ToolRegistry
 from .completion import AGENT_CONTRACT_SCHEMA, EVIDENCE_SCHEMA, INSPECT_SCHEMA
+from .operation_request_refs import wire_schema
 
 
 _UPDATE_PLAN_SCHEMA: dict[str, Any] = {
@@ -83,7 +84,7 @@ def build_chain_tool_registry(
     )
 
     registry.register(ToolDefinition(
-        tool_id="run_operation", version="v1", input_schema=proposal_tool_schema(), max_output_budget=24_000,
+        tool_id="run_operation", version="v1", input_schema=wire_schema(proposal_tool_schema()), max_output_budget=24_000,
         side_effect="proposal", scope_requirements=("chain",), handler=run_operation, normalize=normalize_target,
         description=(
             "Run one typed operation under the current permissions, or return its reviewable proposal. "
@@ -92,6 +93,8 @@ def build_chain_tool_registry(
             "Put operation inputs inside changes; keep evidence_refs, expected_effect "
             "and risks alongside changes, never inside it. evidence_refs names inspected source evidence; "
             "use the bound target and preconditions, and never invent references."
+            " Alternatively submit only request_ref from inspect_analysis_completion's operation_requests; "
+            "a reference cannot be combined with overrides and does not authorize execution."
         )
     ))
     registry.register(ToolDefinition(
@@ -113,5 +116,7 @@ def build_chain_tool_registry(
                     "distinct sensitivity fits and a source-bound report. Missing evidence means partial; "
                     "requirements met does not certify scientific validity. Optionally pass a source artifact reference "
                     "to discover its verified dataset sha256 before declaring the plan. Read-only; no model call."
+                    " When operation_requests contains a server-bound request_ref, choose the recommendation "
+                    "that answers the question and pass only that request_ref to run_operation."
     ))
     return registry

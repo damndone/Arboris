@@ -116,6 +116,14 @@ def record_failure(repository, session_id, command_id, provider_step, call, payl
         except (ValueError, TypeError):
             arguments = {}
     arguments = arguments if isinstance(arguments, Mapping) else {}
+    if call.get('tool_id') == 'run_operation' and set(arguments) == {'request_ref'}:
+        from .operation_request_refs import RequestRefError, read
+        try:
+            # Scope an error by the immutable original request, not by its short
+            # spelling. This read grants no execution authority and changes no call SHA.
+            arguments = read(repository, session_id=session_id, request_ref=arguments['request_ref'])['arguments']
+        except RequestRefError:
+            pass  # Unverified refs retain the ordinary unknown-operation failure scope.
     target = arguments.get('target') or arguments.get('source') or arguments
     target = target if isinstance(target, Mapping) else {}
     changes = arguments.get('changes')

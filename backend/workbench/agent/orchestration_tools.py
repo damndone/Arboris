@@ -357,6 +357,11 @@ class OrchestrationTools:
         async def run_operation(arguments: dict[str, Any], context) -> dict[str, Any]:
             if context.session_id != session_id:
                 raise ValueError("tool session is outside the registered chain scope")
+            referenced = "request_ref" in arguments
+            if referenced:
+                from .operation_request_refs import resolve_completion_request
+                arguments = resolve_completion_request(self, session_id=session_id, request_ref=arguments["request_ref"])
+                bound_target, bound_preconditions = dict(arguments["target"]), dict(arguments["preconditions"])
             operation_id = str(arguments["operation_id"])
             operation_chain = self._operation_chain(session_id, arguments["target"])
             arguments = self._canonicalize_proposal_arguments(
@@ -364,6 +369,9 @@ class OrchestrationTools:
                 arguments,
                 session_id=session_id, chain_id=operation_chain,
             )
+            if referenced and (arguments["target"] != bound_target or arguments["preconditions"] != bound_preconditions):
+                from .operation_request_refs import _fail
+                raise _fail("canonical source or preconditions changed")
             metadata = context.metadata
             if "allowed_operations" in metadata:
                 allowed_operations = {
@@ -547,6 +555,8 @@ class OrchestrationTools:
             if context.session_id != session_id:
                 raise ValueError("tool session is outside the registered chain scope")
             result = self._completion_check(session_id, suggest=True)
+            from .operation_request_refs import offer_completion_requests
+            result = offer_completion_requests(self, session_id=session_id, result=result, metadata=context.metadata)
             if "source" in arguments:
                 from .completion import source_receipt
                 root = getattr(self.context_provider, "project_root", self.repository.root.parent)

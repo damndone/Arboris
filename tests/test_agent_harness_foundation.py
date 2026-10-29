@@ -404,6 +404,7 @@ def test_agent_core_abort_closes_active_tool_execution_as_aborted(
 
 def test_agent_core_timeout_closes_active_tool_execution_as_timed_out(
     tmp_path: Path,
+    monkeypatch,
 ) -> None:
     async def scenario() -> None:
         repository = JsonlSessionRepository(tmp_path / "workbench")
@@ -420,7 +421,17 @@ def test_agent_core_timeout_closes_active_tool_execution_as_timed_out(
             tool_runtime=runtime,
         )
 
-        reply = await agent.prompt("inspect this model", budget={"timeout_s": 0.01})
+        loop = asyncio.get_running_loop()
+        clock = [loop.time()]
+        # Session/event writes must not spend this test's deadline before the
+        # runtime enters execute. Advance time only after the tool is active.
+        with monkeypatch.context() as controlled_clock:
+            controlled_clock.setattr(loop, "time", lambda: clock[0])
+            running = asyncio.create_task(agent.prompt("inspect this model", budget={"timeout_s": 0.01}))
+            await runtime.started.wait()
+            assert agent._active_tool_task is not None and not agent._active_tool_task.done()
+            clock[0] += 0.02
+            reply = await running
         assert reply and "agent_timeout" in reply
 
         branch = repository.get_branch("session-a")
