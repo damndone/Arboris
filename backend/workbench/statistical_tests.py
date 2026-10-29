@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import contextvars
 from dataclasses import dataclass, field
 from itertools import combinations
+import logging
 from pathlib import Path
+import threading
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
@@ -109,19 +112,179 @@ TEST_FAMILIES: dict[str, TestFamilyContract] = {
 }
 
 
-def run_statistical_tests(
-    frame: pd.DataFrame,
-    *,
-    analysis_columns: list[str],
-    dataset_sha256: str | None = None,
-    lineage_parent: str | None = None,
+# Candidate cutover: 100k has functional coverage, not performance acceptance.
+# Full workflow resource gates must accept this scheduling candidate separately.
+_STATISTICS_PARALLEL_MIN_ROWS = 100_000
+
+
+def _statistical_columns(frame, analysis_columns):
+    columns = [column for column in analysis_columns if column in frame.columns]
+    numeric = [column for column in columns if _is_numeric(frame[column])]
+    categorical = [column for column in columns if _is_categorical(frame[column])]
+    binary = [column for column in categorical if _non_null_unique(frame[column]) == 2]
+    multi = [column for column in categorical
+             if 3 <= _non_null_unique(frame[column]) <= CATEGORY_MAX_UNIQUE]
+    return numeric, categorical, binary, multi
+
+
+def _serial_statistics_for_columns(frame, numeric, categorical, binary, multi,
+                                   dataset_sha256, lineage_parent, reference_means,
+                                   paired_columns, check_cancel):
+    results = _build_core_results(frame, numeric, categorical, binary, multi, check_cancel)
+    if check_cancel is not None:
+        check_cancel()
+    _apply_multiple_testing_correction(results)
+    advanced = _build_advanced_evidence_results(
+        frame, numeric=numeric, categorical=binary + [c for c in multi if c not in binary],
+        reference_means=reference_means, paired_columns=paired_columns, check_cancel=check_cancel)
+    return _finish_statistical_results(results, advanced, dataset_sha256, lineage_parent, check_cancel)
+
+
+def _run_statistical_tests_serial(
+    frame: pd.DataFrame, *, analysis_columns: list[str],
+    dataset_sha256: str | None = None, lineage_parent: str | None = None,
     reference_means: Mapping[str, float] | None = None,
     paired_columns: Sequence[tuple[str, str]] | None = None,
     check_cancel: Callable[[], None] | None = None,
 ) -> dict[str, dict[str, Any]]:
+    """Direct serial reference, also used by ordinary small default workloads."""
     if check_cancel is not None:
         check_cancel()
-    columns = [column for column in analysis_columns if column in frame.columns]
+    return _serial_statistics_for_columns(
+        frame, *_statistical_columns(frame, analysis_columns), dataset_sha256, lineage_parent,
+        reference_means, paired_columns, check_cancel)
+
+
+def _log_statistics_secondary(primary, name, secondary):
+    # Lifecycle serializes type/message; retain the secondary full traceback in
+    # the existing logger without mutating a possibly frozen primary exception.
+    logging.getLogger(__name__).error(
+        "Concurrent statistics %s failed; preserving original %s failure",
+        name, type(primary).__name__,
+        exc_info=(type(secondary), secondary, secondary.__traceback__))
+
+
+def _run_statistics_lanes(frame, numeric, categorical, binary, multi,
+                          reference_means, paired_columns, check_cancel):
+    """Own exactly the core and advanced pure computations until both exit.
+
+    Each lane has its own shallow manager/cache and copied Context. Observation
+    buffers are shared read-only. No warning filters, thread environment or
+    persistence occur here; raw stderr warning order may interleave.
+    """
+    core_frame, advanced_frame = frame.copy(deep=False), frame.copy(deep=False)
+    values, errors = [None, None], [None, None]
+    completed = [threading.Event(), threading.Event()]
+
+    def work(index):
+        try:
+            if index == 0:
+                values[0] = _build_core_results(
+                    core_frame, numeric, categorical, binary, multi, check_cancel)
+            else:
+                values[1] = _build_advanced_evidence_results(
+                    advanced_frame, numeric=numeric,
+                    categorical=binary + [c for c in multi if c not in binary],
+                    reference_means=reference_means, paired_columns=paired_columns,
+                    check_cancel=check_cancel)
+        except BaseException as error:
+            errors[index] = error
+        finally:
+            completed[index].set()
+
+    workers = [threading.Thread(target=contextvars.copy_context().run, args=(work, index),
+                                name=f"workbench-statistics-{name}", daemon=False)
+               for index, name in enumerate(("core", "advanced"))]
+    started, owner_failure = [], None
+    try:
+        for worker in workers:
+            worker.start()
+            started.append(worker)
+        while not all(done.is_set() for done in completed):
+            if check_cancel is not None:
+                check_cancel()
+            for done in completed:
+                if not done.is_set():
+                    done.wait(.05)
+                    break
+        if check_cancel is not None:
+            check_cancel()
+    except BaseException as error:
+        owner_failure = error
+    finally:
+        # Existing individual SciPy/native calls are not bounded internally.
+        # Returning cancellation cannot leave either actual computation alive.
+        for worker in started:
+            worker.join()
+    if owner_failure is not None:
+        from .engine.context import RunInterruptionRequested
+
+        for name, error in zip(("core", "advanced"), errors, strict=True):
+            expected_cancel = (isinstance(owner_failure, RunInterruptionRequested)
+                               and isinstance(error, RunInterruptionRequested)
+                               and owner_failure.reason == error.reason)
+            if error is not None and not expected_cancel:
+                _log_statistics_secondary(owner_failure, name, error)
+        raise owner_failure
+    if errors[0] is not None:
+        if errors[1] is not None:
+            _log_statistics_secondary(errors[0], "advanced", errors[1])
+        raise errors[0]
+    # Caller must run core BH before exposing advanced failure, matching serial.
+    return values[0], values[1], errors[1]
+
+
+def run_statistical_tests(
+    frame: pd.DataFrame, *, analysis_columns: list[str],
+    dataset_sha256: str | None = None, lineage_parent: str | None = None,
+    reference_means: Mapping[str, float] | None = None,
+    paired_columns: Sequence[tuple[str, str]] | None = None,
+    check_cancel: Callable[[], None] | None = None,
+) -> dict[str, dict[str, Any]]:
+    if len(frame) < _STATISTICS_PARALLEL_MIN_ROWS:
+        return _run_statistical_tests_serial(
+            frame, analysis_columns=analysis_columns, dataset_sha256=dataset_sha256,
+            lineage_parent=lineage_parent, reference_means=reference_means,
+            paired_columns=paired_columns, check_cancel=check_cancel)
+    if check_cancel is not None:
+        check_cancel()
+    numeric, categorical, binary, multi = _statistical_columns(frame, analysis_columns)
+    distinct_groups = any(outcome != group for outcome in numeric for group in binary + multi)
+    core_work = len(numeric) >= 2 or distinct_groups or len(categorical) >= 2
+    advanced_work = (
+        distinct_groups or any(column in numeric for column in (reference_means or {}))
+        or any(isinstance(pair, (tuple, list)) and len(pair) == 2
+               and all(isinstance(column, str) and column in numeric for column in pair)
+               and pair[0] != pair[1] for pair in (paired_columns or ())))
+    if not core_work or not advanced_work:
+        return _serial_statistics_for_columns(
+            frame, numeric, categorical, binary, multi, dataset_sha256, lineage_parent,
+            reference_means, paired_columns, check_cancel)
+    results, advanced, advanced_failure = _run_statistics_lanes(
+        frame, numeric, categorical, binary, multi, reference_means, paired_columns, check_cancel)
+    try:
+        if check_cancel is not None:
+            check_cancel()
+        _apply_multiple_testing_correction(results)
+    except BaseException as core_bh_failure:
+        if advanced_failure is not None:
+            _log_statistics_secondary(core_bh_failure, "advanced", advanced_failure)
+        raise
+    if advanced_failure is not None:
+        raise advanced_failure
+    return _finish_statistical_results(results, advanced, dataset_sha256, lineage_parent, check_cancel)
+
+
+def _build_core_results(
+    frame: pd.DataFrame,
+    numeric: Sequence[str],
+    categorical: Sequence[str],
+    binary: Sequence[str],
+    multi: Sequence[str],
+    check_cancel: Callable[[], None] | None = None,
+) -> dict[str, dict[str, Any]]:
+    if check_cancel is not None:
+        check_cancel()
     results: dict[str, dict[str, Any]] = {
         name: {
             "schema_version": 1,
@@ -135,14 +298,6 @@ def run_statistical_tests(
         }
         for name in TEST_FAMILIES
     }
-    numeric = [column for column in columns if _is_numeric(frame[column])]
-    categorical = [column for column in columns if _is_categorical(frame[column])]
-    binary = [column for column in categorical if _non_null_unique(frame[column]) == 2]
-    multi = [
-        column for column in categorical
-        if 3 <= _non_null_unique(frame[column]) <= CATEGORY_MAX_UNIQUE
-    ]
-
     for left, right in combinations(numeric, 2):
         if check_cancel is not None:
             check_cancel()
@@ -196,19 +351,10 @@ def run_statistical_tests(
         if row is not None:
             results["fisher_exact"]["results"].append(row)
 
-    # Keep the historical eight-family FDR scope stable. The new evidence
-    # packet is assembled only after this correction pass.
-    if check_cancel is not None:
-        check_cancel()
-    _apply_multiple_testing_correction(results)
-    advanced = _build_advanced_evidence_results(
-        frame,
-        numeric=numeric,
-        categorical=binary + [column for column in multi if column not in binary],
-        reference_means=reference_means,
-        paired_columns=paired_columns,
-        check_cancel=check_cancel,
-    )
+    return results
+
+
+def _finish_statistical_results(results, advanced, dataset_sha256, lineage_parent, check_cancel):
     if check_cancel is not None:
         check_cancel()
     evidence_payload = _statistics_evidence_payload(

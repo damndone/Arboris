@@ -211,13 +211,8 @@ def test_trace_memory_noise_does_not_claim_native_rss_is_stable(lane):
     assert lane.noise_accepted(lane.baseline_noise(runs, metrics=('tracemalloc_peak_bytes', 'run_bytes')))
 
 
-@pytest.mark.parametrize('candidate_seconds,expected_exit,baseline_seconds', [(10.1, 0, 10.), (10000., 1, 10.), (14., 1, 14.)])
-@pytest.mark.parametrize('traced', [False, True])
-@pytest.mark.parametrize('rss_jump', [False, True])
-@pytest.mark.parametrize('case', ['panel', 'ols'])
-@pytest.mark.parametrize('comparison', ['v190', 'pre-native'])
-def test_trace_lane_journals_then_deletes_each_run_and_gates_relative_time(lane, tmp_path, monkeypatch,
-                                                                       candidate_seconds, expected_exit, baseline_seconds, traced, rss_jump, case, comparison):
+def _exercise_trace_lane(lane, tmp_path, monkeypatch, candidate_seconds, expected_exit,
+                         baseline_seconds, traced, rss_jump, case, comparison, native_lane=None):
     import shutil
     import subprocess
     # Protocol unit test: mock the machine resource boundary along with the
@@ -235,9 +230,14 @@ def test_trace_lane_journals_then_deletes_each_run_and_gates_relative_time(lane,
         return manifest
     monkeypatch.setattr(lane, 'prepare_family', temporary_prepare)
     monkeypatch.setattr(lane, 'idle_processes', lambda _: None)
-    monkeypatch.setattr(lane, 'product_sources', lambda _: {})
     baseline = tmp_path / 'baseline'
     baseline.mkdir()
+    def sources(repo):
+        is_baseline = repo == baseline
+        if native_lane == ('baseline' if is_baseline else 'candidate'):
+            return {'local/native-spearman-ranks/_spearman_rank.test.so': '0'*64}
+        return {}
+    monkeypatch.setattr(lane, 'product_sources', sources)
     def git(command, cwd=None, text=False):
         if command[1] == 'diff':
             return b''
@@ -280,7 +280,8 @@ def test_trace_lane_journals_then_deletes_each_run_and_gates_relative_time(lane,
     if comparison == 'pre-native':
         command.extend(['--attribution-baseline-sha', 'baseline'])
     # Traced time is diagnostic; only the uninstrumented lane certifies time.
-    expected = 0 if traced else (1 if rss_jump or case == 'ols' else expected_exit)
+    unaccounted = bool(native_lane and traced and rss_jump)
+    expected = int(unaccounted) if traced else (1 if rss_jump or case == 'ols' else expected_exit)
     assert lane.ab_main(command) == expected
     assert calls == ['A']*5+list('AB'*5)
     assert not (out/'active').exists()
@@ -289,6 +290,10 @@ def test_trace_lane_journals_then_deletes_each_run_and_gates_relative_time(lane,
     assert report['default_product_path'] is True
     assert report['comparison_kind'] == ('v1.9.0_regression' if comparison == 'v190' else 'pre_native_attribution')
     assert report['time_acceptance_eligible'] is not traced
+    if unaccounted:
+        assert 'native_workspace_unaccounted' in report['cases'][case]['failed']
+        assert report['cases'][case]['memory_metric'] == 'unaccepted_native_workspace'
+        assert report['cases'][case]['medians']['B']['tracemalloc_peak_bytes'] == 10
     keys = {'tracemalloc_peak_bytes', 'run_bytes'} if traced else {'seconds', 'run_bytes'}
     if not rss_jump:
         keys.add('rss_bytes')
@@ -296,6 +301,30 @@ def test_trace_lane_journals_then_deletes_each_run_and_gates_relative_time(lane,
     if case == 'ols' and not traced:
         assert report['cases'][case]['absolute_seconds_cap'] == 8.0
         assert 'seconds' in report['cases'][case]['failed']
+
+
+@pytest.mark.parametrize('candidate_seconds,expected_exit,baseline_seconds', [(10.1, 0, 10.), (10000., 1, 10.), (14., 1, 14.)])
+@pytest.mark.parametrize('traced', [False, True])
+@pytest.mark.parametrize('rss_jump', [False, True])
+@pytest.mark.parametrize('case', ['panel', 'ols'])
+@pytest.mark.parametrize('comparison', ['v190', 'pre-native'])
+def test_trace_lane_journals_then_deletes_each_run_and_gates_relative_time(lane, tmp_path, monkeypatch,
+                                                                       candidate_seconds, expected_exit, baseline_seconds, traced, rss_jump, case, comparison):
+    _exercise_trace_lane(lane, tmp_path, monkeypatch, candidate_seconds, expected_exit,
+                         baseline_seconds, traced, rss_jump, case, comparison)
+
+
+@pytest.mark.parametrize('native_lane', ['baseline', 'candidate'])
+@pytest.mark.parametrize('traced', [False, True])
+@pytest.mark.parametrize('rss_jump', [False, True])
+def test_native_trace_without_rss_requires_unaccounted_workspace_failure(
+        lane, tmp_path, monkeypatch, capsys, native_lane, traced, rss_jump):
+    _exercise_trace_lane(lane, tmp_path, monkeypatch, 10.1, 0, 10., traced,
+                         rss_jump, 'panel', 'v190', native_lane=native_lane)
+    output = capsys.readouterr().out
+    if traced and rss_jump:
+        assert 'native_workspace_unaccounted' in output
+        assert 'MEMORY CHECKS PASS' not in output
 
 
 @pytest.mark.parametrize('explicit', [None, 'wrong-sha'])

@@ -195,13 +195,15 @@ def test_real_1m_statistics_http_cancel_drains_before_terminal_artifacts(tmp_pat
     from fastapi.testclient import TestClient
     from workbench.app import app
     from workbench.artifacts import read_json
-    from workbench import native_math
+    from workbench import native_math, statistical_tests
     from workbench.events import get_event_manager
     from workbench.engine.stages.statistical_tests import StatisticalTestsStage
     entered, stage_stopped = threading.Event(), threading.Event()
     actual_rank = native_math.average_ranks
+    actual_advanced = statistical_tests._build_advanced_evidence_results
     actual_stage = StatisticalTestsStage.run
     workers = []
+    advanced_workers = []
     sizes = []
 
     def rank(matrix, *, check_cancel=None):
@@ -217,7 +219,12 @@ def test_real_1m_statistics_http_cancel_drains_before_terminal_artifacts(tmp_pat
         finally:
             stage_stopped.set()
 
+    def advanced(*args, **kwargs):
+        advanced_workers.append(threading.current_thread())
+        return actual_advanced(*args, **kwargs)
+
     monkeypatch.setattr(native_math, "average_ranks", rank)
+    monkeypatch.setattr(statistical_tests, "_build_advanced_evidence_results", advanced)
     monkeypatch.setattr(StatisticalTestsStage, "run", stage)
     source = Path(__file__).resolve().parents[1]/"local/perf-inputs/ols/wages.csv"
     with TestClient(app) as client:
@@ -236,6 +243,9 @@ def test_real_1m_statistics_http_cancel_drains_before_terminal_artifacts(tmp_pat
         assert stage_stopped.wait(2), "statistics stage did not drain within tested boundary"
         assert workers and sizes[0] == 1_000_000
         assert all(not worker.is_alive() for worker in workers), "terminal stage left its actual compute worker alive"
+        assert advanced_workers and all(not worker.is_alive() for worker in advanced_workers)
+        assert all(worker.name == "workbench-statistics-core" for worker in workers)
+        assert all(worker.name == "workbench-statistics-advanced" for worker in advanced_workers)
         run_root = Path(root)/"runs"/run_id
         deadline = started + 2
         while time.perf_counter() < deadline:
@@ -251,7 +261,7 @@ def test_real_1m_statistics_http_cancel_drains_before_terminal_artifacts(tmp_pat
         files_after = sorted(str(path.relative_to(run_root)) for path in run_root.rglob("*") if path.is_file())
         time.sleep(.1)
         assert files_after == sorted(str(path.relative_to(run_root)) for path in run_root.rglob("*") if path.is_file())
-        record_property("phase", "real_serial_statistics_core_rank")
+        record_property("phase", "real_default_parallel_statistics_core_rank")
         record_property("rows", sizes[0])
         record_property("http_cancel_seconds", http_seconds)
         record_property("cancel_to_terminal_owned_drain_seconds", elapsed)

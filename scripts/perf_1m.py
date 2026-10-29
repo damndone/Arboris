@@ -582,12 +582,22 @@ def ab_main(argv):
             misses.append('measurement_noise')
         if not args.trace_memory and case_report['native_rss_noise'] >= .05:
             misses.append('native_rss_noise_requires_tracemalloc')
+        native_workspace_unaccounted = (
+            args.trace_memory and 'rss_bytes' not in accepted
+            and any(Path(path).suffix == '.so' for inventory in sources.values() for path in inventory)
+        )
+        if native_workspace_unaccounted:
+            # Python tracing omits the native heaps. Keep its diagnostics, but
+            # do not substitute them for an unaccepted process RSS measurement.
+            misses.append('native_workspace_unaccounted')
         signatures = [r['numeric_signature'] for runs in records.values() for r in runs]
         if not signatures[0] or not all(value==signatures[0] for value in signatures):
             misses.append('numeric_bits')
         case_report.update(medians=medians,budgets=budgets,failed=misses,
                            absolute_seconds_cap=absolute_cap,
                            memory_metric=('rss_and_tracemalloc' if args.trace_memory else 'rss') if 'rss_bytes' in accepted else ('tracemalloc_due_to_native_rss_noise' if args.trace_memory else 'unaccepted_rss_noise'))
+        if native_workspace_unaccounted:
+            case_report['memory_metric'] = 'unaccepted_native_workspace'
         save()
         failed.extend(f'{case}:{key}' for key in misses)
     print(comparison_kind+': '+(('DEFAULT PATH MEMORY CHECKS PASS; traced time is diagnostic' if args.trace_memory else 'DEFAULT PATH CHECKS PASS') if not failed else 'FAIL '+', '.join(failed)),flush=True)
