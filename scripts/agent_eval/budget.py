@@ -422,7 +422,7 @@ class NvidiaFreeEndpointGuard(FreeRouteGuard):
     _change = RoundBudget._change
 
     def __init__(self, path, *, provider_id, base_url, model, round_kind, overload_recovery_ledger=None,
-                 recover_unanswered_read_errors=False):
+                 recover_unanswered_read_errors=False, allow_low_space_this_round=False):
         if (provider_id, base_url, model) != (NVIDIA_PROVIDER_ID, NVIDIA_BASE_URL, NVIDIA_MODEL):
             raise ValueError("NVIDIA evaluation requires the exact authorized provider, base URL and Ultra model")
         if round_kind not in {"dev8", "qrdata40"}:
@@ -435,6 +435,7 @@ class NvidiaFreeEndpointGuard(FreeRouteGuard):
         self.request_limit = 240 if round_kind == "dev8" else 1200
         self.overload_recovery = None
         self.recover_unanswered_read_errors = recover_unanswered_read_errors
+        self.allow_low_space_this_round = allow_low_space_this_round
         self._retry_ticket = None
         if recover_unanswered_read_errors and overload_recovery_ledger is None:
             raise ValueError("unanswered ReadError recovery requires its explicit shared recovery ledger")
@@ -444,6 +445,9 @@ class NvidiaFreeEndpointGuard(FreeRouteGuard):
             self.overload_recovery = NvidiaOverloadRecovery(overload_recovery_ledger,
                 unanswered_read_errors=recover_unanswered_read_errors)
         with self._change() as state:
+            if state.get("allow_low_space_this_round", False) != allow_low_space_this_round:
+                raise ValueError("NVIDIA ledger storage policy changed; use a separate round ledger")
+            state["allow_low_space_this_round"] = allow_low_space_this_round
             expected = {"schema": "nvidia-free-endpoint/v1", "provider_id": provider_id,
                 "base_url": base_url, "model": model, "round_kind": round_kind,
                 "request_limit": self.request_limit, "output_token_limit": 32768,
@@ -465,6 +469,7 @@ class NvidiaFreeEndpointGuard(FreeRouteGuard):
             "base_url": NVIDIA_BASE_URL, "model": NVIDIA_MODEL, "round_kind": self.round_kind,
             "request_limit": self.request_limit, "output_token_limit": 32768, "min_start_interval_s": 2,
             "requests": 0, "calls": 0, "last_start": None, "reservations": {}, "charges": [],
+            "allow_low_space_this_round": self.allow_low_space_this_round,
             "prompt_tokens": 0, "completion_tokens": 0, "stopped": False, "reason": None,
             "billing_status": "unknown; free-listed endpoint is not billing certification"}
 
@@ -492,7 +497,7 @@ class NvidiaFreeEndpointGuard(FreeRouteGuard):
                 raise BudgetStop(self.state["reason"])
 
     def reserve(self, body):
-        if shutil.disk_usage(self.path.parent).free < 5_000_000_000:
+        if not self.allow_low_space_this_round and shutil.disk_usage(self.path.parent).free < 5_000_000_000:
             self.stop("storage threshold: less than 5 GB free before NVIDIA request")
             raise BudgetStop(self.state["reason"])
         try:

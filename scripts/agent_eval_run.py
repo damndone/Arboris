@@ -106,8 +106,6 @@ def main() -> int:
     if args.nvidia_recover_unanswered_read_error and args.nvidia_overload_recovery_ledger is None:
         parser.error("unanswered ReadError recovery requires --nvidia-overload-recovery-ledger with a new v2 ledger")
     if args.nvidia_free_round is not None:
-        if args.allow_low_space_this_round:
-            parser.error("NVIDIA evaluation cannot bypass its 5 GB storage floor")
         if args.transport != "headless" or args.mode not in {"ask", "auto"} or args.repeat != 1:
             parser.error("NVIDIA round requires headless Ask/Auto and repeat=1")
         if not 0 < args.max_wall_s <= 1800:
@@ -129,7 +127,8 @@ def main() -> int:
             budget = NvidiaFreeEndpointGuard(args.nvidia_free_ledger, provider_id=config.provider_id,
                 base_url=config.base_url, model=config.model, round_kind=args.nvidia_free_round,
                 overload_recovery_ledger=args.nvidia_overload_recovery_ledger,
-                recover_unanswered_read_errors=args.nvidia_recover_unanswered_read_error)
+                recover_unanswered_read_errors=args.nvidia_recover_unanswered_read_error,
+                allow_low_space_this_round=args.allow_low_space_this_round)
         except ValueError as exc:
             parser.error(str(exc))
         if budget.stopped:

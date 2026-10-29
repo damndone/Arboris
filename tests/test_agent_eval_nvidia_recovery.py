@@ -7,7 +7,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from tests.test_agent_eval_nvidia_guard import BASE, MODEL, USAGE, guard
+from tests.test_agent_eval_nvidia_guard import BASE, MODEL, USAGE, guard, available_test_storage
 from agent_eval import budget
 from agent_eval.recorder import provider_tape
 from workbench.agent.model import ModelRequest, OpenAICompatibleModelAdapter

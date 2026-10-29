@@ -19,6 +19,11 @@ BODY = {'model': MODEL, 'max_tokens': 8192}
 USAGE = {'prompt_tokens': 20, 'completion_tokens': 3}
 
 
+@pytest.fixture(autouse=True)
+def available_test_storage(monkeypatch):
+    monkeypatch.setattr(budget.shutil, 'disk_usage', lambda root: SimpleNamespace(free=6_000_000_000))
+
+
 def guard(tmp_path, monkeypatch, **kw):
     now = [1000.0]
     monkeypatch.setattr(budget.time, 'time', lambda: now[0])
@@ -180,7 +185,37 @@ def test_each_reservation_checks_storage_without_releasing_unknown_usage(tmp_pat
         g.resume_storage_stop()
 
 
-@pytest.mark.parametrize('extra', [['--allow-low-space-this-round'], ['--suite', 'heldout'], ['--transport', 'http']])
+def test_explicit_storage_exception_preserves_unknown_usage_stop_and_policy(tmp_path, monkeypatch):
+    g, _ = guard(tmp_path, monkeypatch, allow_low_space_this_round=True)
+    monkeypatch.setattr(budget.shutil, 'disk_usage', lambda root: SimpleNamespace(free=1))
+    key = g.reserve(json.dumps(BODY).encode())
+    assert g.state['allow_low_space_this_round'] is True
+    with pytest.raises(budget.BudgetStop):
+        g.settle(key, None)
+    assert g.stopped and key in g.state['reservations']
+    again, _ = guard(tmp_path, monkeypatch, allow_low_space_this_round=True)
+    assert again.stopped and again.state['requests'] == 1
+    with pytest.raises(ValueError, match='storage policy'):
+        guard(tmp_path, monkeypatch)
+
+
+def test_cli_passes_explicit_storage_exception_to_guard(tmp_path, monkeypatch):
+    module = run_module()
+    monkeypatch.setattr(module, 'load_llm_config', lambda: SimpleNamespace(
+        provider_id='nvidia-nemotron-free', base_url=BASE, model=MODEL, is_configured=lambda: True))
+    captured = {}
+    def stopped_guard(*args, **kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(stopped=True, state={'reason': 'retained unknown usage'})
+    monkeypatch.setattr(module, 'NvidiaFreeEndpointGuard', stopped_guard)
+    monkeypatch.setattr(sys, 'argv', ['agent_eval_run.py', '--out', str(tmp_path / 'run'),
+        '--mode', 'ask', '--nvidia-free-ledger', str(tmp_path / 'ledger.json'),
+        '--nvidia-free-round', 'dev8', '--allow-low-space-this-round'])
+    assert module.main() == 86
+    assert captured['allow_low_space_this_round'] is True
+
+
+@pytest.mark.parametrize('extra', [['--suite', 'heldout'], ['--transport', 'http']])
 def test_cli_rejects_nvidia_scope_or_storage_bypass_before_provider(tmp_path, monkeypatch, extra):
     module = run_module()
     monkeypatch.setattr(module, 'load_llm_config', lambda: pytest.fail('invalid CLI reached provider config'))
