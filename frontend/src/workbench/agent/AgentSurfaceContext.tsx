@@ -514,7 +514,9 @@ export function AgentSurfaceProvider({
       }
     }
     setEventCursor((current) => Math.max(current, latest.seq));
-    setLastEventType(latest.event_type);
+    // Usage observations do not change the work currently visible to the user.
+    const activity = [...unseen].reverse().find(event => event.event_type !== "provider_step");
+    if (activity) setLastEventType(activity.event_type);
   }, []);
   const replayEvents = useCallback(async (
     activeSessionId: string,

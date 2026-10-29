@@ -80,29 +80,30 @@ def budget_exhausted_message(
     distinct = list(dict.fromkeys(tools_used))
     if language == "zh":
         reason = "步数预算已用完" if error == "max_steps_exceeded" else "检测到重复调用同一工具"
-        parts = [f"这次请求没有完成：{reason}，我还没有给出结论或提交提案。"]
+        parts = [f"这次请求没有完整交付：{reason}。已执行的操作与证据仍保留，执行状态以确认回执为准。"]
         if distinct:
-            parts.append("已查看：" + "、".join(distinct[:8]) + "。")
+            parts.append("已调用工具（调用不代表执行成功）：" + "、".join(distinct[:8]) + "。")
         if last_failure:
             parts.append(f"最后一次失败的原因：{last_failure}")
-        parts.append("你可以把请求说得更具体（例如写明变量名或要用的方法），或让我继续。")
+        parts.append("下一步先核对已有结果和最后失败，明确剩余工作；需要补充变量含义、数据或权限时再说明，避免重复计算。")
         return "\n".join(parts)
     reason = "the step budget ran out" if error == "max_steps_exceeded" else "the same tool call repeated"
-    parts = [f"This request did not finish: {reason} before I could answer or propose anything."]
+    parts = [f"This request did not finish: {reason}. Existing operations and evidence are retained; "
+             "execution status comes from confirmed receipts."]
     if distinct:
-        parts.append("Checked: " + ", ".join(distinct[:8]) + ".")
+        parts.append("Tools called (a call does not imply success): " + ", ".join(distinct[:8]) + ".")
     if last_failure:
         parts.append(f"Last failure: {last_failure}")
-    parts.append("Try a more specific request (name the variables or the method), or ask me to continue.")
+    parts.append("Next, inspect existing results and the last failure, then identify the remaining work. "
+                 "State any missing variable meaning, data or permission before continuing; avoid duplicate computation.")
     return "\n".join(parts)
 
 
 def provider_failure_message(language: str, error: str) -> str:
     """Why the answer is missing when the model provider failed mid-turn.
 
-    Nothing the provider did can have changed data or a model: a change needs
-    the user's confirmation, so the user can simply ask again. A read-only
-    analysis the Agent ran earlier in the turn did run and stays recorded.
+    Earlier approved operations may already have run. A later provider failure
+    does not undo them, and must not tell the person that nothing changed.
     """
 
     if error == "provider_output_limit":
@@ -123,21 +124,23 @@ def provider_failure_message(language: str, error: str) -> str:
         if language == "zh":
             return (
                 f"AI 服务商拒绝了这次请求（{error}），通常是 API key 无效、过期或没有权限。"
-                "我没有给出回答，也没有改动你的数据或模型。请在设置里检查这个服务商的 API key。"
+                "本次回答未完成；此前已执行的操作与证据仍保留。请在设置里检查这个服务商的 API key，"
+                "恢复后先核对已有结果再继续。"
             )
         return (
             f"The AI provider rejected the request ({error}), usually because the API key is invalid, expired or "
-            "lacks access. There is no answer and nothing in your data or models was changed. "
-            "Check this provider's API key in Settings."
+            "lacks access. The answer is incomplete; earlier operations and evidence are retained. "
+            "Check this provider's API key in Settings, then inspect existing results before continuing."
         )
     if language == "zh":
         return (
-            f"AI 服务商这次没有正常响应（{error}），我没有给出回答，也没有改动你的数据或模型。"
-            "请稍后重试；如果反复出现，请在设置里检查 AI 服务商的配置和网络。"
+            f"AI 服务商这次没有正常响应（{error}），本次回答未完成；此前已执行的操作与证据仍保留。"
+            "请核对已有结果后再继续；如果反复出现，请在设置里检查 AI 服务商的配置和网络。"
         )
     return (
-        f"The AI provider did not respond properly ({error}), so there is no answer and nothing in your data "
-        "or models was changed. Please try again; if it keeps happening, check the AI provider settings and the network."
+        f"The AI provider did not respond properly ({error}), so the answer is incomplete; earlier operations "
+        "and evidence are retained. Inspect existing results before continuing; if it keeps happening, "
+        "check the AI provider settings and the network."
     )
 
 

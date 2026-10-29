@@ -480,6 +480,8 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
+  box-sizing: border-box;
   height: 100%;
   padding: 10px 12px 12px;
   gap: 8px;
@@ -488,6 +490,7 @@
 .wb-agent-terminal {
   flex: 1;
   min-height: 0;
+  min-width: 0;
   overflow: auto;
   padding: 8px 10px;
   border: 1px solid var(--separator);
@@ -521,6 +524,7 @@
 }
 
 .wb-agent-reasoning {
+  min-width: 0;
   margin: 5px 0 6px 18px;
   border: 1px solid color-mix(in oklch, var(--separator) 72%, transparent);
   border-radius: 8px;
@@ -558,6 +562,8 @@
 }
 
 .wb-agent-reasoning > summary > span:first-of-type {
+  min-width: 0;
+  overflow-wrap: anywhere;
   margin-right: auto;
   color: var(--label);
   font-weight: 600;
@@ -566,6 +572,11 @@
 .wb-agent-reasoning > summary > span:last-of-type {
   color: var(--label-tertiary);
   font-size: 11px;
+}
+
+.wb-agent-reasoning > summary > span + span {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .wb-agent-reasoning-content {
@@ -605,7 +616,10 @@
 
 .wb-agent-terminal-markdown {
   min-width: 0;
+  max-width: 100%;
 }
+
+.wb-agent-terminal-markdown img { max-width: 100%; height: auto; }
 
 .wb-agent-terminal-markdown pre,
 .wb-agent-terminal-markdown table {
@@ -654,10 +668,26 @@
   flex-wrap: wrap;
   gap: 3px;
   min-width: 0;
+  align-items: flex-start;
+}
+
+.wb-agent-message-references { min-width: 0; max-width: 100%; }
+.wb-agent-message-references > summary {
+  padding: 2px 4px;
+  color: var(--label-secondary);
+  cursor: pointer;
+  font: 11px/1.35 var(--font-sans, system-ui, sans-serif);
+}
+.wb-agent-message-references > .wb-agent-message-links {
+  display: flex;
+  width: 100%;
+  margin-top: 4px;
 }
 
 .wb-agent-message-link {
-  max-width: 220px;
+  max-width: min(220px, 100%);
+  min-width: 0;
+  min-height: 22px;
   overflow: hidden;
   padding: 1px 4px;
   border: 1px solid color-mix(in oklch, var(--separator) 75%, transparent);
@@ -668,6 +698,17 @@
   font: 10px/1.35 var(--font-mono, ui-monospace, monospace);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.wb-agent-tool-receipt {
+  border-left: 2px solid var(--separator);
+  padding-left: 8px;
+}
+.wb-agent-tool-receipt__label {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--label-tertiary);
+  font: 10px/1.35 var(--font-sans, system-ui, sans-serif);
 }
 
 .wb-agent-message-link:hover:not(:disabled) {
@@ -927,6 +968,7 @@
 .agt-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 2px;
   min-height: 24px;
   padding-left: 0;
@@ -952,6 +994,7 @@
 }
 
 .agt-actions button {
+  flex: 0 0 24px;
   display: inline-grid;
   place-items: center;
   width: 24px;

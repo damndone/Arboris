@@ -145,7 +145,7 @@ export function AgentColumnComposer() {
           <span className="ws-composer__spacer" />
           {busy && (
             <span className="ws-composer__status" role="status" aria-live="polite">
-              {isSubmitting ? "Thinking…" : sessionStatus}
+              {isSubmitting ? "Working…" : sessionStatus}
             </span>
           )}
           <ContextUsageRing

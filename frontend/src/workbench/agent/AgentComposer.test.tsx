@@ -53,6 +53,16 @@ function mount(context: AgentSurfaceContextValue) {
 }
 
 describe("AgentComposer", () => {
+  it.each([
+    ["tool_execution_start", "Executing tool"],
+    ["tool_execution_end", "Tool receipt recorded"],
+  ])("keeps compact %s activity distinct", (lastEventType, expected) => {
+    render(<AgentSurfaceContext.Provider value={value({ sessionStatus: "running", lastEventType })}>
+      <AgentComposer variant="compact" />
+    </AgentSurfaceContext.Provider>);
+    expect(screen.getByRole("button", { name: "View Agent activity" })).toHaveTextContent(expected);
+  });
+
   it("does not invent elapsed time for externally started compact activity", () => {
     render(<AgentSurfaceContext.Provider value={value({ sessionStatus: "running", lastEventType: "message_start" })}>
       <AgentComposer variant="compact" />

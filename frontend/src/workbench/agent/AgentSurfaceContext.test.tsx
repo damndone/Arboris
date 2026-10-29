@@ -290,6 +290,19 @@ describe("AgentSurfaceProvider", () => {
     expect(screen.queryByTestId("agent-usage")).not.toBeInTheDocument();
   });
 
+  it("does not replace a live tool activity with a provider usage observation", async () => {
+    localStorage.setItem("workbench:agent-session:/proj:run-a:project%3Arun-a%3Anone", "saved");
+    mocks.getAgentSession.mockResolvedValue({ ...session("saved"), status: "running" });
+    const base = { schema_version: "agent.event.v1", session_id: "saved", command_id: "command", created_at: "2026-10-20T17:00:00Z" };
+    mocks.getAgentEvents.mockResolvedValue({ events: [
+      { ...base, event_id: "tool", seq: 1, event_type: "tool_execution_start", payload: { tool_id: "inspect_node_context", tool_call_id: "call-1" } },
+      { ...base, event_id: "usage", seq: 2, event_type: "provider_step", payload: {} },
+    ] });
+    mount();
+    await waitFor(() => expect(screen.getByTestId("agent-event-cursor")).toHaveTextContent("events #2"));
+    expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent("Executing tool");
+  });
+
   it("sends the selected mode and explicitly queues follow-ups without starting a second turn", async () => {
     mocks.sendAgentTurn.mockReturnValue(new Promise(() => {}));
     mocks.queueAgentTurnMessage.mockResolvedValue({status:"queued"});

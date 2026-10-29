@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from typing import Any
 from uuid import uuid4
 
@@ -77,6 +78,25 @@ class LifecycleMixin:
         )
         return entry
 
+    def _terminal_completion_notice(self):
+        """Enrich an already failed turn without losing its original failure."""
+        from ..completion import enforce_request_scope, partial_notice
+        language = detect_language(getattr(self, '_user_text', None))
+        try:
+            result = enforce_request_scope(self.completion_check(), getattr(self, '_user_text', ''))
+            notice = (partial_notice(result, language) if result['status'] == 'partial'
+                      and result['missing'] != ['completion_contract:select_playbooks_and_source'] else '')
+            return result, notice, None
+        except Exception as exc:
+            logging.getLogger(__name__).exception('Completion verification failed while recording an existing turn failure')
+            failure = {'type': type(exc).__name__, 'message': str(exc)[:240]}
+            notice = (f"完成核验未能运行（{failure['type']}），不能确认分析已完成。原始终止原因和已有操作仍保留；"
+                      '请检查核验记录后从已有结果继续。' if language == 'zh' else
+                      f"Completion verification could not run ({failure['type']}); analysis completion is unverified. "
+                      'The original failure and earlier operations are retained. Inspect the verification records '
+                      'before continuing from existing results.')
+            return None, notice, failure
+
     def _persist_terminal_error(self, error: str) -> str:
         """Persist a budget stop as a complete, replayable assistant turn."""
 
@@ -125,6 +145,12 @@ class LifecycleMixin:
             if error == "agent_timeout"
             else ""
         )
+        completion_result = None
+        completion_failure = None
+        if self.completion_check is not None and content:
+            completion_result, notice, completion_failure = self._terminal_completion_notice()
+            if notice:
+                content += '\n\n' + notice
         writer = self.repository.append_once if self.turn_journal else self.repository.append
         entry = writer(
             self.session_id,
@@ -134,6 +160,8 @@ class LifecycleMixin:
                 "content": content,
                 "stop_reason": "error",
                 "error": error,
+                **({"completion_check": completion_result} if completion_result is not None else {}),
+                **({"completion_check_error": completion_failure} if completion_failure is not None else {}),
                 **({"command_id": command_id} if self.turn_journal else {}),
             },
             **({"key": command_id, "stage": "terminal_error"} if self.turn_journal else {}),

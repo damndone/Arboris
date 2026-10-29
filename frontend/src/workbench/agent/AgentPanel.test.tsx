@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { AgentPanel, toolStatusLine } from "./AgentPanel";
 import {
@@ -182,6 +182,31 @@ describe("AgentPanel — declared post-estimation results", () => {
 });
 
 describe("AgentPanel", () => {
+  it.each([
+    ["tool_execution_start", "Executing tool"],
+    ["tool_execution_end", "Tool receipt recorded"],
+    ["message_update", "Receiving model output"],
+  ])("distinguishes observable activity for %s", (lastEventType, expected) => {
+    render(<AgentSurfaceContext.Provider value={value({ sessionStatus: "running", lastEventType })}>
+      <AgentPanel runId="run-a" projectRoot="/proj" />
+    </AgentSurfaceContext.Provider>);
+    expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent(expected);
+  });
+
+  it("keeps a previous turn's terminal failure visible after a follow-up is recorded", () => {
+    render(<AgentSurfaceContext.Provider value={value({ messages: [
+      agentMessageFixture({ entry_id: "u1", role: "user", content: "First task" }),
+      agentMessageFixture({ entry_id: "t1", role: "tool", content: '{"ok":true}' }),
+      agentMessageFixture({ entry_id: "a1", role: "assistant", content: "Partial result", stop_reason: "stop" }),
+      agentMessageFixture({ entry_id: "a2", role: "assistant", content: "Timed out", stop_reason: "error", error: "agent_timeout" }),
+      agentMessageFixture({ entry_id: "u2", role: "user", content: "Continue" }),
+    ] })}>
+      <AgentPanel runId="run-a" projectRoot="/proj" />
+    </AgentSurfaceContext.Provider>);
+    expect(screen.getByTestId("agent-reasoning-u1")).toHaveTextContent("Execution stopped");
+    expect(screen.getByTestId("agent-reasoning-u1")).not.toHaveTextContent("Execution completed");
+  });
+
   it("does not invent zero elapsed time or a final-answer phase for external model requests", () => {
     render(<AgentSurfaceContext.Provider value={value({ sessionStatus: "running", lastEventType: "message_start" })}>
       <AgentPanel runId="run-a" projectRoot="/proj" />
@@ -607,11 +632,70 @@ describe("AgentPanel", () => {
       </AgentSurfaceContext.Provider>,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Fork from Agent message u1" }));
+    const fork = screen.getByRole("button", { name: "Fork from Agent message u1" });
+    expect(screen.getByRole("toolbar", { name: "Message actions" })).toContainElement(fork);
+    expect(screen.queryByText("↳ Fork Agent context")).not.toBeInTheDocument();
+    fireEvent.click(fork);
     expect(forkFromMessage).toHaveBeenCalledWith(
       "u1",
       expect.objectContaining({ kind: "graph_node", id: "run-a::model:ols_1" }),
     );
+  });
+
+  it("keeps a tool's context fork in its message actions with the source binding", () => {
+    const forkFromMessage = vi.fn();
+    const source: AgentNavigationRef = {
+      kind: "graph_node", id: "run-a::model:ols_1", label: "Source model:ols_1", relation: "source",
+      available: true, href: { view: "graph", run_id: "run-a", node_ref: "model:ols_1" },
+    };
+    render(<AgentSurfaceContext.Provider value={value({ forkFromMessage, messages: [
+      agentMessageFixture({ entry_id: "t1", role: "tool", name: "inspect_node_context", content: '{"ok":true}', navigation: [source] }),
+    ] })}>
+      <AgentPanel runId="run-a" projectRoot="/proj" />
+    </AgentSurfaceContext.Provider>);
+    const tool = screen.getByTestId("agent-message-tool");
+    expect(tool).toHaveTextContent("Tool receipt");
+    const fork = within(tool).getByRole("button", { name: "Fork from Agent message t1" });
+    expect(within(tool).getByRole("toolbar", { name: "Message actions" })).toContainElement(fork);
+    fireEvent.click(fork);
+    expect(forkFromMessage).toHaveBeenCalledWith("t1", source);
+  });
+
+  it("retains the reason a source context cannot be forked", () => {
+    render(<AgentSurfaceContext.Provider value={value({ messages: [agentMessageFixture({
+      entry_id: "t1", role: "tool", content: '{"ok":true}', navigation: [{
+        kind: "graph_node", id: "missing", label: "Source missing", relation: "source", available: false,
+        reason: "The source node is no longer available", href: { view: "graph", run_id: "run-a" },
+      }],
+    })] })}>
+      <AgentPanel runId="run-a" projectRoot="/proj" />
+    </AgentSurfaceContext.Provider>);
+    const fork = screen.getByRole("button", { name: "Fork from Agent message t1" });
+    expect(fork).toBeDisabled();
+    expect(fork).toHaveAttribute("title", "The source node is no longer available");
+  });
+
+  it("folds dense references without discarding unavailable links or their reasons", () => {
+    const openNavigation = vi.fn();
+    const navigation: AgentNavigationRef[] = Array.from({ length: 8 }, (_, index) => ({
+      kind: "run", id: `result-${index}`, label: `Result artifact ${index}`, relation: "result",
+      available: index !== 7, reason: index === 7 ? "Artifact was removed" : undefined,
+      href: { view: "graph", run_id: "run-a" },
+    }));
+    render(<AgentSurfaceContext.Provider value={value({ openNavigation, messages: [
+      agentMessageFixture({ entry_id: "a1", role: "assistant", content: "Results are recorded.", navigation }),
+    ] })}>
+      <AgentPanel runId="run-a" projectRoot="/proj" />
+    </AgentSurfaceContext.Provider>);
+    const disclosure = screen.getByText("6 more references").closest("details");
+    expect(disclosure).not.toHaveAttribute("open");
+    fireEvent.click(screen.getByText("6 more references"));
+    const last = screen.getByRole("button", { name: "Open result artifact 7", hidden: true });
+    expect(last).toBeDisabled();
+    expect(last).toHaveAttribute("title", "Artifact was removed");
+    const link = screen.getByRole("button", { name: "Open result artifact 6", hidden: true });
+    fireEvent.click(link);
+    expect(openNavigation).toHaveBeenCalledWith(navigation[6]);
   });
 
   it("projects tool messages as typed status lines, not raw JSON dumps", () => {

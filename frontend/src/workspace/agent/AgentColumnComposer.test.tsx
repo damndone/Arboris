@@ -58,6 +58,8 @@ describe("AgentColumnComposer", () => {
     expect(surface.abortTurn).toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: "Voice input" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add context" })).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Working");
+    expect(screen.getByRole("status")).not.toHaveTextContent("Thinking");
   });
 
   test("a restored running turn blocks Enter and retains Stop", () => {

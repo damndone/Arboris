@@ -203,6 +203,8 @@ function CompactAgentComposer({
 
 function compactActivityLabel(lastEventType: string | null): string {
   const eventType = lastEventType?.toLowerCase() ?? "";
+  if (eventType === "tool_execution_start") return "Executing tool";
+  if (eventType === "tool_execution_end") return "Tool receipt recorded";
   if (eventType.includes("tool")) return "Checking evidence";
   if (eventType.includes("proposal")) return "Preparing proposal";
   if (eventType === "message_start") return "Waiting for model output";

@@ -53,6 +53,8 @@ function observableActivity(eventType: string | null): string {
   const normalized = eventType.toLowerCase();
   if (normalized === "provider_retry") return "The provider connection dropped; retrying";
   if (normalized === "compaction_start") return "Summarizing the earlier conversation to stay within the model's context";
+  if (normalized === "tool_execution_start") return "Executing tool";
+  if (normalized === "tool_execution_end") return "Tool receipt recorded";
   if (normalized.includes("tool")) return "Checking evidence";
   if (normalized.includes("proposal")) return "Preparing a reviewable proposal";
   if (normalized === "message_start") return "Waiting for model output";
@@ -305,20 +307,35 @@ export function AgentPanel({
   const renderTranscriptMessage = (message: AgentMessage) => {
     const sourceRef = message.navigation?.find(
       (link) => link.kind === "graph_node" && link.available,
-    );
+    ) ?? message.navigation?.find((link) => link.kind === "graph_node");
+    const references = message.navigation?.map((link) => (
+      <button
+        key={`${link.kind}:${link.id}:${link.relation}`}
+        type="button"
+        className="wb-agent-message-link"
+        aria-label={navigationButtonLabel(link)}
+        disabled={!link.available || !agent.openNavigation}
+        title={!link.available ? link.reason ?? "Unavailable" : !agent.openNavigation ? "Navigation is unavailable in this view" : link.label}
+        onClick={() => { if (link.available) agent.openNavigation?.(link); }}
+      >
+        ↗ {link.label}
+      </button>
+    ));
+    const denseReferences = (references?.length ?? 0) > 3;
     return (
       <div
         key={message.entry_id}
         data-testid={`agent-message-${message.role}`}
         data-role={message.role}
         data-entry-id={message.entry_id}
-        className="wb-agent-terminal-line"
+        className={`wb-agent-terminal-line${message.role === "tool" ? " wb-agent-tool-receipt" : ""}`}
       >
         <span className="wb-agent-terminal-marker" title={roleLabel(message.role)}>
           {roleMarker(message.role)}
         </span>
         {message.role === "tool" ? (
           <span className="wb-agent-terminal-content">
+            <small className="wb-agent-tool-receipt__label">Tool receipt</small>
             {toolStatusLine(message.content, message.name)}
           </span>
         ) : message.role === "assistant" ? (
@@ -336,45 +353,26 @@ export function AgentPanel({
           </span>
         )}
         {message.navigation && message.navigation.length > 0 && (
-          <span className="wb-agent-message-links" aria-label="Message navigation links">
-            {message.navigation.map((link) => (
-              <button
-                key={`${link.kind}:${link.id}:${link.relation}`}
-                type="button"
-                className="wb-agent-message-link"
-                aria-label={navigationButtonLabel(link)}
-                disabled={!link.available || !agent.openNavigation}
-                title={link.available ? link.label : link.reason ?? "Unavailable"}
-                onClick={() => {
-                  if (link.available) agent.openNavigation?.(link);
-                }}
-              >
-                ↗ {link.label}
-              </button>
-            ))}
-          </span>
+          <div className="wb-agent-message-links" aria-label="Message navigation links">
+            {denseReferences ? references?.slice(0, 2) : references}
+            {denseReferences && <details className="wb-agent-message-references">
+              <summary>{references!.length - 2} more references</summary>
+              <div className="wb-agent-message-links">{references?.slice(2)}</div>
+            </details>}
+          </div>
         )}
-        {message.role !== "tool" && message.stop_reason !== "revised" && message.stop_reason !== "tool_calls" && (
+        {(sourceRef || (message.role !== "tool" && message.stop_reason !== "revised" && message.stop_reason !== "tool_calls")) && (
           <MessageActions
             message={message}
             pinned={pinned.has(message.entry_id)}
             busy={turnActive}
             onRewind={agent.rewindTo}
             onFork={agent.forkConversation}
+            onForkContext={sourceRef ? (entryId) => { void agent.forkFromMessage?.(entryId, sourceRef); } : undefined}
+            forkContextDisabledReason={sourceRef ? !sourceRef.available ? sourceRef.reason ?? "The source node is unavailable" : !agent.forkFromMessage ? "Forking is unavailable in this view" : !sourceRef.href.run_id || !sourceRef.href.node_ref ? "The source node reference is incomplete" : undefined : undefined}
             onPin={agent.pinChapter}
             onUnpin={agent.unpinChapter}
           />
-        )}
-        {sourceRef && (
-          <button
-            type="button"
-            className="wb-agent-message-link"
-            aria-label={`Fork from Agent message ${message.entry_id}`}
-            disabled={!agent.forkFromMessage}
-            onClick={() => void agent.forkFromMessage(message.entry_id, sourceRef)}
-          >
-            ↳ Fork Agent context
-          </button>
         )}
       </div>
     );
@@ -465,7 +463,9 @@ export function AgentPanel({
           const live = turnActive && latest;
           const lastToolStep = [...turn.steps].reverse().find(message => message.role === "tool");
           const lastToolStatus = lastToolStep ? toolStatusLine(lastToolStep.content, lastToolStep.name) : null;
+          const lastReply = turn.responses[turn.responses.length - 1];
           const activityStatus = live ? "in progress"
+            : lastReply?.stop_reason === "error" ? "stopped"
             : latest && agent.sessionStatus !== "idle" ? agent.sessionStatus.replace(/_/g, " ")
             : turn.responses.some(message => message.stop_reason === "stop") ? "completed" : "recorded";
           if (turn.summary) return <CompactionMarker key={turn.id} message={turn.summary} />;

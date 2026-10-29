@@ -233,13 +233,22 @@ class TurnLoopMixin:
         elif finish_reason == "error" and content.strip() and error not in {"aborted", "tool_runtime_unavailable"}:
             content = f"{content}\n\n{interrupted_reply_note(detect_language(getattr(self, '_user_text', None)))}"
         completion_result = None
+        completion_failure = None
         from ..completion import claims_completion, publication, enforce_request_scope
-        if (self.completion_check is not None and content.strip()
-                and ((finish_reason == "stop" and not tool_calls) or claims_completion(content))):
+        if self.completion_check is not None and content.strip() and finish_reason == 'error':
+            completion_result, notice, completion_failure = self._terminal_completion_notice()
+            if completion_failure is not None:
+                content += '\n\n' + notice
+            else:
+                content = publication(content, completion_result, detect_language(getattr(self, '_user_text', None)),
+                                      final=True, request_text=getattr(self, '_user_text', ''))
+        elif (self.completion_check is not None and content.strip()
+                and ((finish_reason == "stop" and not tool_calls)
+                     or claims_completion(content))):
 
             completion_result = enforce_request_scope(self.completion_check(), getattr(self, '_user_text', ''))
             content = publication(content, completion_result, detect_language(getattr(self, "_user_text", None)),
-                                  final=finish_reason == "stop" and not tool_calls,
+                                  final=(finish_reason == "stop" and not tool_calls) or finish_reason == "error",
                                   request_text=getattr(self, "_user_text", ""))
         numeric_findings: tuple[numeric_grounding.Finding, ...] = ()
         numeric_check_failed = False
@@ -265,6 +274,8 @@ class TurnLoopMixin:
         }
         if completion_result is not None:
             payload["completion_check"] = completion_result
+        if completion_failure is not None:
+            payload['completion_check_error'] = completion_failure
         if numeric_findings:
             payload["numeric_check"] = {"unverified": [finding.to_dict() for finding in numeric_findings]}
         elif numeric_check_failed:
