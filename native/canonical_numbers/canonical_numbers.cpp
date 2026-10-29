@@ -194,6 +194,72 @@ static bool decimal_sequence_size(PyObject* values, Py_ssize_t& size) {
     return true;
 }
 
+static constexpr char sample_sort_algorithm[] = "iterative-msd-radix";
+
+static unsigned sample_digit(PyObject* value, Py_ssize_t depth) {
+    return depth == PyUnicode_GET_LENGTH(value) ? 0
+        : static_cast<unsigned>(PyUnicode_1BYTE_DATA(value)[depth] - '0') + 1;
+}
+
+static void sort_sample_decimal_rows(std::vector<PyObject*>& values) {
+    if (values.size() < 2) return;
+    struct Range {
+        size_t begin, end;
+        Py_ssize_t depth;
+    };
+    std::vector<Range> pending;
+    pending.push_back({0, values.size(), 0});
+    // Borrowed pointers only: neither buffer owns Python references. Allocate
+    // scratch lazily on the first real split, not for all-identical inputs.
+    std::unique_ptr<PyObject*[]> scratch;
+    while (!pending.empty()) {
+        const Range range = pending.back();
+        pending.pop_back();
+        Py_ssize_t depth = range.depth;
+        const size_t count = range.end - range.begin;
+        for (;;) {
+            size_t counts[11] = {};
+            for (size_t index = range.begin; index < range.end; ++index) ++counts[sample_digit(values[index], depth)];
+            unsigned single = 11;
+            for (unsigned digit = 0; digit < 11; ++digit) {
+                if (counts[digit] == count) { single = digit; break; }
+            }
+            if (single < 11) {
+                if (single == 0) break;  // Equal strings have all ended.
+                ++depth;  // Common prefix: no redistribution or task growth.
+                continue;
+            }
+            if (!scratch) scratch.reset(new PyObject*[values.size()]);
+            size_t begin[11], next[11];
+            begin[0] = range.begin;
+            for (unsigned digit = 1; digit < 11; ++digit) begin[digit] = begin[digit - 1] + counts[digit - 1];
+            std::copy_n(begin, 11, next);
+            for (size_t index = range.begin; index < range.end; ++index) {
+                PyObject* value = values[index];
+                scratch[next[sample_digit(value, depth)]++] = value;
+            }
+            std::copy_n(scratch.get() + range.begin, count, values.data() + range.begin);
+            // Bucket 0 is the terminator and must precede every extension.
+            // Push large ranges first so LIFO processes small branches first;
+            // arbitrary string length never consumes the C++ call stack.
+            Range children[10];
+            size_t child_count = 0;
+            for (unsigned digit = 1; digit < 11; ++digit) {
+                if (counts[digit] < 2) continue;
+                const Range child = {begin[digit], begin[digit] + counts[digit], depth + 1};
+                size_t slot = child_count++;
+                while (slot && counts[digit] > children[slot - 1].end - children[slot - 1].begin) {
+                    children[slot] = children[slot - 1];
+                    --slot;
+                }
+                children[slot] = child;
+            }
+            for (size_t index = 0; index < child_count; ++index) pending.push_back(children[index]);
+            break;
+        }
+    }
+}
+
 static PyObject* analysis_sample_impl(PyObject* row_set, PyObject* row_order) {
     if ((!PyList_CheckExact(row_set) && !PyTuple_CheckExact(row_set)) ||
         (!PyList_CheckExact(row_order) && !PyTuple_CheckExact(row_order))) Py_RETURN_NONE;
@@ -212,20 +278,15 @@ static PyObject* analysis_sample_impl(PyObject* row_set, PyObject* row_order) {
 
     // The arguments own the exact outer containers and their immutable strings.
     // Keep the GIL throughout. After validation there are no Python callbacks,
-    // signal checks, or GC-tracked allocations: vector storage uses the C++
-    // allocator and the final PyBytes is untracked. A GC finalizer therefore
+    // signal checks, or GC-tracked allocations: input/scratch/task storage uses
+    // the C++ allocator and the final PyBytes is untracked. A GC finalizer therefore
     // cannot resize a borrowed input list during these reads. No GIL release or
     // bounded cancellation-latency claim is made for this explicit candidate.
     std::vector<PyObject*> sorted;
     const Py_ssize_t count = sequence_size(row_set);
     sorted.reserve(static_cast<size_t>(count));
     for (Py_ssize_t index = 0; index < count; ++index) sorted.push_back(sequence_item(row_set, index));
-    std::sort(sorted.begin(), sorted.end(), [](PyObject* left, PyObject* right) {
-        const Py_ssize_t a = PyUnicode_GET_LENGTH(left), b = PyUnicode_GET_LENGTH(right);
-        const int comparison = std::memcmp(PyUnicode_1BYTE_DATA(left), PyUnicode_1BYTE_DATA(right),
-                                           static_cast<size_t>(std::min(a, b)));
-        return comparison < 0 || (comparison == 0 && a < b);
-    });
+    sort_sample_decimal_rows(sorted);
     Owned output(PyBytes_FromStringAndSize(nullptr, total));
     if (!output) return nullptr;
     char* destination = PyBytes_AS_STRING(output.get());
@@ -282,6 +343,7 @@ PyMODINIT_FUNC PyInit__canonical_numbers() {
     if (!module) return nullptr;
     if (PyModule_AddIntConstant(module.get(), "ABI_VERSION", 1) < 0) return nullptr;
     if (PyModule_AddIntConstant(module.get(), "ANALYSIS_SAMPLE_ABI_VERSION", 1) < 0) return nullptr;
+    if (PyModule_AddStringConstant(module.get(), "ANALYSIS_SAMPLE_SORT_ALGORITHM", sample_sort_algorithm) < 0) return nullptr;
     if (PyModule_AddStringConstant(module.get(), "ANALYSIS_SAMPLE_SOURCE_SHA256", ANALYSIS_SAMPLE_SOURCE_SHA256) < 0) return nullptr;
     Owned canonical(PyImport_ImportModule("workbench.canonical"));
     if (!canonical) return nullptr;

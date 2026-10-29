@@ -27,10 +27,10 @@ def test_sample_candidate_has_only_an_explicit_entrypoint(module, name):
 
 @pytest.fixture(scope='module')
 def kernel():
-    binary = AREA / 'candidate-runtime' / ('_canonical_numbers' + bridge.EXT_SUFFIX)
+    binary = AREA / 'candidate-runtime/msd-v2' / ('_canonical_numbers' + bridge.EXT_SUFFIX)
     if not binary.is_file() and os.environ.get('NATIVE_SAMPLE_REQUIRED') != '1':
         pytest.skip('build the isolated sample candidate first')
-    assert binary.is_file(), 'build native/canonical_numbers/build.py --output-dir local/native-sample-fingerprint-20261029/candidate-runtime'
+    assert binary.is_file(), 'build native/canonical_numbers/build.py --output-dir local/native-sample-fingerprint-20261029/candidate-runtime/msd-v2'
     module = bridge._load_extension(binary)
     assert callable(getattr(module, 'encode_analysis_sample_v1', None)), 'native sample byte encoder missing'
     return module
@@ -40,6 +40,42 @@ def wire(row_set, row_order):
     return json.dumps({'fingerprint_type': 'analysis_sample_v1',
         'value': {'row_set': sorted(row_set), 'row_order': row_order}},
         ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode()
+
+
+def test_native_sample_declares_iterative_msd_radix(kernel):
+    # Version/selection audit only; byte differentials below prove semantics.
+    assert getattr(kernel, 'ANALYSIS_SAMPLE_SORT_ALGORITHM', None) == 'iterative-msd-radix'
+
+
+@pytest.mark.parametrize('shape', ['common-prefix', 'prefix-chain', 'identical', 'extreme-length'])
+def test_radix_preserves_terminators_duplicates_and_long_decimal_prefixes(kernel, shape):
+    if shape == 'common-prefix':
+        prefix = '0' * 8192
+        rows = [prefix + suffix for suffix in ('9', '00', '', '1', '0', '10', '', '000', '90')]
+    elif shape == 'prefix-chain':
+        rows = ['0' * length for length in range(2049, 0, -1)]
+    elif shape == 'identical':
+        rows = ['7' * 65537] * 17
+    else:
+        prefix = '9' * 100001
+        rows = [prefix + '0', '0', prefix, prefix[:-1], '00', prefix + '0']
+    order = tuple(reversed(rows))
+    before = tuple(rows)
+    actual = kernel.encode_analysis_sample_v1(rows, order)
+    assert actual == wire(rows, order)
+    assert json.loads(actual)['value'] == {'row_set': sorted(rows), 'row_order': list(order)}
+    assert tuple(rows) == before
+
+
+@pytest.mark.parametrize('seed', [912, 11342])
+def test_radix_matches_lexical_sort_for_random_digit_lengths_and_duplicates(kernel, seed):
+    rng = random.Random(seed)
+    rows = ['0' * rng.randrange(20) + ''.join(rng.choices('0123456789', k=rng.randrange(1, 257)))
+            for _ in range(2049)]
+    rows.extend(rows[::7])
+    rng.shuffle(rows)
+    order = rows[::3] + rows[1::3]
+    assert kernel.encode_analysis_sample_v1(tuple(rows), order) == wire(rows, order)
 
 
 @pytest.mark.parametrize('row_set,row_order', [
@@ -223,4 +259,4 @@ def test_original_1m_public_run_ols_arguments_match_native_bytes(kernel, monkeyp
     record_property('original_csv_sha256', manifest['sha256'])
     record_property('sample_wire_sha256', captured['fingerprint'])
     record_property('sample_source_sha256', kernel.ANALYSIS_SAMPLE_SOURCE_SHA256)
-    record_property('sample_candidate_binary_sha256', hashlib.sha256((AREA / 'candidate-runtime' / ('_canonical_numbers' + bridge.EXT_SUFFIX)).read_bytes()).hexdigest())
+    record_property('sample_candidate_binary_sha256', hashlib.sha256(Path(kernel.__file__).read_bytes()).hexdigest())
