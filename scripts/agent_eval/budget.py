@@ -312,7 +312,10 @@ class NvidiaOverloadRecovery(FreeRouteGuard):
     _change = RoundBudget._change
 
     def __init__(self, path, *, unanswered_read_errors=False, unanswered_protocol_errors=False,
-                 complete_http_500_errors=False, complete_http_429_errors=False):
+                 complete_http_500_errors=False, complete_http_429_errors=False, retry_limit=10):
+        if type(retry_limit) is not int or retry_limit <= 0:
+            raise ValueError("NVIDIA shared retry limit must be a positive integer")
+        self.retry_limit = retry_limit
         self.unanswered_read_errors = unanswered_read_errors
         self.unanswered_protocol_errors = unanswered_protocol_errors
         self.complete_http_500_errors = complete_http_500_errors
@@ -329,7 +332,7 @@ class NvidiaOverloadRecovery(FreeRouteGuard):
         self.lock = FileLock(str(self.path) + ".lock")
         with self._change() as state:
             expected = {"schema": self.schema, "provider_id": NVIDIA_PROVIDER_ID,
-                "base_url": NVIDIA_BASE_URL, "model": NVIDIA_MODEL, "retry_limit": 10,
+                "base_url": NVIDIA_BASE_URL, "model": NVIDIA_MODEL, "retry_limit": self.retry_limit,
                 "per_request_retry_limit": 2, "delays_s": [60, 120]}
             if unanswered_read_errors:
                 expected["unanswered_read_errors"] = True
@@ -339,7 +342,8 @@ class NvidiaOverloadRecovery(FreeRouteGuard):
                 expected["complete_http_500_errors"] = True
             if complete_http_429_errors:
                 expected["complete_http_429_errors"] = True
-            if any(state.get(key) != value for key, value in expected.items()):
+            if (type(state.get("retry_limit")) is not int
+                    or any(state.get(key) != value for key, value in expected.items())):
                 raise ValueError("NVIDIA shared overload recovery configuration changed")
 
     @property
@@ -347,7 +351,7 @@ class NvidiaOverloadRecovery(FreeRouteGuard):
         if self.path.exists():
             return json.loads(self.path.read_text())
         return {"schema": self.schema, "provider_id": NVIDIA_PROVIDER_ID,
-            "base_url": NVIDIA_BASE_URL, "model": NVIDIA_MODEL, "retry_limit": 10,
+            "base_url": NVIDIA_BASE_URL, "model": NVIDIA_MODEL, "retry_limit": self.retry_limit,
             "per_request_retry_limit": 2, "delays_s": [60, 120], "retries": 0,
             "request_retries": {}, "tickets": {}, "pending": None, "manual_restarts": {},
             "stopped": False, "reason": None,
@@ -363,7 +367,7 @@ class NvidiaOverloadRecovery(FreeRouteGuard):
         with self._change() as state:
             if identity in state["manual_restarts"]:
                 return
-            if state["stopped"] or state["retries"] >= 10 or state["pending"]:
+            if state["stopped"] or state["retries"] >= self.retry_limit or state["pending"]:
                 refused = "NVIDIA shared recovery allowance cannot authorize a manual restart"
                 state.update(stopped=True, reason=refused)
             else:
@@ -381,7 +385,7 @@ class NvidiaOverloadRecovery(FreeRouteGuard):
                 refused = state["reason"]
             elif state["pending"]:
                 refused = "NVIDIA pending recovery ticket forbids parallel recovery"
-            elif state["retries"] >= 10:
+            elif state["retries"] >= self.retry_limit:
                 refused = "NVIDIA shared recovery retry limit reached"
             elif count >= 2:
                 refused = "NVIDIA per-request overload retry limit reached"
@@ -444,13 +448,19 @@ class NvidiaFreeEndpointGuard(FreeRouteGuard):
                  recover_unanswered_read_errors=False, allow_low_space_this_round=False,
                  recover_unanswered_protocol_errors=False, skip_incomplete_stream_task=False,
                  recover_complete_http_500_errors=False, shared_serial_ledger=None, request_limit=None,
-                 recover_complete_http_429_errors=False):
+                 recover_complete_http_429_errors=False, shared_retry_limit=None):
         if (provider_id, base_url, model) != (NVIDIA_PROVIDER_ID, NVIDIA_BASE_URL, NVIDIA_MODEL):
             raise ValueError("NVIDIA evaluation requires the exact authorized provider, base URL and Ultra model")
         if round_kind not in {"dev8", "qrdata40"}:
             raise ValueError("NVIDIA evaluation supports only dev8 or qrdata40")
         if request_limit is not None and (type(request_limit) is not int or request_limit <= 0):
             raise ValueError("NVIDIA request limit must be a positive integer")
+        if shared_retry_limit is not None:
+            if type(shared_retry_limit) is not int or shared_retry_limit <= 0:
+                raise ValueError("NVIDIA shared retry limit must be a positive integer")
+            if overload_recovery_ledger is None:
+                raise ValueError("NVIDIA shared retry limit requires its explicit recovery ledger")
+        self.shared_retry_limit = 10 if shared_retry_limit is None else shared_retry_limit
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.lock = FileLock(str(self.path) + ".lock")
@@ -478,6 +488,7 @@ class NvidiaFreeEndpointGuard(FreeRouteGuard):
             if self.path.resolve() == Path(overload_recovery_ledger).resolve():
                 raise ValueError("NVIDIA request and recovery ledgers must be separate")
             self.overload_recovery = NvidiaOverloadRecovery(overload_recovery_ledger,
+                retry_limit=self.shared_retry_limit,
                 unanswered_read_errors=recover_unanswered_read_errors,
                 unanswered_protocol_errors=recover_unanswered_protocol_errors,
                 complete_http_500_errors=recover_complete_http_500_errors,

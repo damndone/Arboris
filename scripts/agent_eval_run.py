@@ -93,7 +93,9 @@ def main() -> int:
     parser.add_argument("--nvidia-free-request-limit", type=int,
                         help="explicit positive NVIDIA round request cap; must match the persistent ledger")
     parser.add_argument("--nvidia-overload-recovery-ledger", type=Path,
-                        help="explicit 503-only recovery opt-in; same durable 10-retry ledger for dev8 and QRData40")
+                        help="explicit 503-only recovery opt-in; same durable ledger for dev8 and QRData40 (default 10 retries)")
+    parser.add_argument("--nvidia-shared-retry-limit", type=int,
+                        help="explicit positive NVIDIA shared recovery cap; must match the persistent recovery ledger")
     parser.add_argument("--nvidia-recover-unanswered-read-error", action="store_true",
                         help="explicit v2 recovery policy: additionally permit ReadError before any response headers/body")
     parser.add_argument("--nvidia-recover-unanswered-protocol-error", action="store_true",
@@ -120,6 +122,11 @@ def main() -> int:
             parser.error("NVIDIA request limit must be a positive integer")
     if args.nvidia_overload_recovery_ledger is not None and args.nvidia_free_ledger is None:
         parser.error("NVIDIA overload recovery requires the explicit NVIDIA endpoint guard")
+    if args.nvidia_shared_retry_limit is not None:
+        if args.nvidia_free_ledger is None or args.nvidia_overload_recovery_ledger is None:
+            parser.error("NVIDIA shared retry limit requires the explicit NVIDIA endpoint guard and recovery ledger")
+        if args.nvidia_shared_retry_limit <= 0:
+            parser.error("NVIDIA shared retry limit must be a positive integer")
     if args.nvidia_recover_unanswered_read_error and args.nvidia_overload_recovery_ledger is None:
         parser.error("unanswered ReadError recovery requires --nvidia-overload-recovery-ledger with a new v2 ledger")
     if args.nvidia_recover_unanswered_protocol_error and not args.nvidia_recover_unanswered_read_error:
@@ -155,6 +162,7 @@ def main() -> int:
                 base_url=config.base_url, model=config.model, round_kind=args.nvidia_free_round,
                 request_limit=args.nvidia_free_request_limit,
                 overload_recovery_ledger=args.nvidia_overload_recovery_ledger,
+                shared_retry_limit=args.nvidia_shared_retry_limit,
                 recover_unanswered_read_errors=args.nvidia_recover_unanswered_read_error,
                 recover_unanswered_protocol_errors=args.nvidia_recover_unanswered_protocol_error,
                 recover_complete_http_500_errors=args.nvidia_recover_complete_http_500,
@@ -237,7 +245,7 @@ def main() -> int:
             "queue_wait_counts_toward_task_wall": True,
             "skip_incomplete_stream_task": args.nvidia_skip_incomplete_stream_task,
             "overload_recovery_schema": budget.overload_recovery.schema if budget.overload_recovery is not None else None,
-            "overload_recovery": ({"shared_retry_limit": 10, "per_request_retry_limit": 2,
+            "overload_recovery": ({"shared_retry_limit": budget.overload_recovery.retry_limit, "per_request_retry_limit": 2,
                 "delays_s": [60, 120], "eligibility": "complete observed error-only SSE 503 plus DONE; no generated output"
                     + ("; or ReadError before any response headers or body" if args.nvidia_recover_unanswered_read_error else "")
                     + ("; or RemoteProtocolError before any response headers or body" if args.nvidia_recover_unanswered_protocol_error else "")
