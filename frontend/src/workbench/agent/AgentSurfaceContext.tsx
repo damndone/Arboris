@@ -345,8 +345,17 @@ export function AgentSurfaceProvider({
       // Storage may be unavailable; the draft still lives for this page.
     }
   }, [draftKey]);
-  const [executionPolicy, setExecutionPolicy] = useState<"auto_read_only" | "proposal_only">("proposal_only");
-  const [executionMode, setExecutionMode] = useState<"ask"|"auto">("ask");
+  const [{executionMode, executionPolicy}, setExecutionSettings] = useState<{
+    executionMode: "ask" | "auto"; executionPolicy: "auto_read_only" | "proposal_only";
+  }>({executionMode: "ask", executionPolicy: "proposal_only"});
+  const setExecutionMode = useCallback((mode: "ask" | "auto") => {
+    setExecutionSettings(current => ({executionMode: mode,
+      executionPolicy: mode === "auto" ? "auto_read_only" : current.executionPolicy}));
+  }, []);
+  const setExecutionPolicy = useCallback((policy: "auto_read_only" | "proposal_only") => {
+    setExecutionSettings(current => ({executionPolicy: policy,
+      executionMode: policy === "proposal_only" ? "ask" : current.executionMode}));
+  }, []);
   const [planViewRequest, setPlanViewRequest] = useState(0);
   const showPlan = useCallback(() => setPlanViewRequest(request => request + 1), []);
   const [plan, setPlan] = useState<AgentPlan|null>(null);

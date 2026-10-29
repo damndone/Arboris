@@ -23,7 +23,7 @@ export interface ModeControls {
 }
 
 export function currentMode(agent: ModeControls): AgentMode {
-  if (agent.executionMode === "auto") return "auto";
+  if (agent.executionMode === "auto" && agent.executionPolicy !== "proposal_only") return "auto";
   return agent.executionPolicy === "auto_read_only" ? "read_only" : "review";
 }
 
@@ -36,6 +36,7 @@ export function availableModes(agent: ModeControls): AgentMode[] {
 export function applyMode(agent: ModeControls, mode: AgentMode): void {
   if (mode === "auto") {
     agent.setExecutionMode?.("auto");
+    agent.setExecutionPolicy?.("auto_read_only");
     return;
   }
   agent.setExecutionMode?.("ask");

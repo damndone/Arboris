@@ -217,10 +217,18 @@ def test_choosing_columns_is_not_a_data_change_but_choosing_rows_is() -> None:
 
 
 def test_a_failed_provider_call_leaves_an_explanation_not_an_empty_reply() -> None:
+    from workbench.agent.model import _error_label
     from workbench.agent.turn_messages import provider_failure_message
+    from workbench.llm.client import LLMUpstreamError
 
-    assert "没有改动你的数据或模型" in provider_failure_message("zh", "LLMUpstreamError")
-    assert "nothing in your data or models was changed" in provider_failure_message("en", "LLMUpstreamError")
+    # The production adapter passes a classified label, never the raw body.
+    error = _error_label(LLMUpstreamError("private-provider-body synthetic-secret"))
+    zh, en = (provider_failure_message(language, error) for language in ("zh", "en"))
+    assert "此前已执行的操作与证据仍保留" in zh
+    assert "earlier operations and evidence are retained" in en
+    assert "没有改动你的数据或模型" not in zh
+    assert "nothing in your data or models was changed" not in en
+    assert all("private-provider-body" not in message and "synthetic-secret" not in message for message in (zh, en))
     # A rejected key is not a transient failure: point at the key, not at retrying.
     assert "API key" in provider_failure_message("zh", "LLMUpstreamError:upstream_401")
     assert "稍后重试" not in provider_failure_message("zh", "LLMUpstreamError:upstream_401")

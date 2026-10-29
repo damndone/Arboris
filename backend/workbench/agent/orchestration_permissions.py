@@ -78,7 +78,8 @@ class OrchestrationPermissions:
             from dataclasses import replace
 
             request = replace(request, within_budget=budget.allowed)
-        rules = self.permission_rules or permissions.Rules()
+        configured_rules = self.permission_rules or permissions.Rules()
+        rules = configured_rules
         if self.execution_policy != "auto_read_only":
             # "Review before running": every class asks, read-only analysis included.
             rules = permissions.Rules(allow=rules.allow, deny=rules.deny,
@@ -96,7 +97,17 @@ class OrchestrationPermissions:
                 # the session's test budget), which is the more useful reason.
                 reason = budget.reason
             if self.execution_policy != "auto_read_only" and decision.outcome == permissions.Outcome.ASK and not decision.floor:
-                reason = "Review before execution was requested for this turn."
+                # Review only explains an extra wait it introduced. Preserve
+                # project, plan and budget reasons that already required ASK.
+                configured_decision = permissions.decide(mode, request, configured_rules,
+                                                         self.session_grants or permissions.Grants())
+                reason = ("Review before execution was requested for this turn."
+                          if configured_decision.outcome == permissions.Outcome.ALLOW else configured_decision.reason)
+                if not budget.allowed and request.permission_class == permissions.PermissionClass.ANALYZE:
+                    without_session_budget = permissions.decide(mode, replace(request, within_budget=True),
+                        configured_rules, self.session_grants or permissions.Grants())
+                    if without_session_budget.outcome == permissions.Outcome.ALLOW:
+                        reason = budget.reason
             return {"requires_confirmation": True, "proposal": proposal.to_dict(), "confirmation_reason": reason,
                     **({"plan_recovery": self.plan_scope["plan_recovery"]}
                        if self.plan_scope and self.plan_scope.get("plan_recovery") else {}),

@@ -461,7 +461,7 @@ describe("AgentSurfaceProvider", () => {
     fireEvent.change(screen.getByRole("combobox", {name:"Agent execution mode"}), {target:{value:"auto"}});
     fireEvent.change(screen.getByRole("textbox", {name:"Ask Agent"}), {target:{value:"First request"}});
     fireEvent.click(screen.getByRole("button", {name:"Send to Agent"}));
-    await waitFor(() => expect(mocks.sendAgentTurn).toHaveBeenCalledWith("/proj","agent_chain_new","First request",expect.any(AbortSignal),undefined,"proposal_only","auto"));
+    await waitFor(() => expect(mocks.sendAgentTurn).toHaveBeenCalledWith("/proj","agent_chain_new","First request",expect.any(AbortSignal),undefined,"auto_read_only","auto"));
     fireEvent.change(screen.getByRole("textbox", {name:"Ask Agent"}), {target:{value:"Next request"}});
     fireEvent.keyDown(screen.getByRole("textbox", {name:"Ask Agent"}), {key:"Enter"});
     expect(mocks.sendAgentTurn).toHaveBeenCalledTimes(1);
@@ -469,6 +469,58 @@ describe("AgentSurfaceProvider", () => {
     fireEvent.click(screen.getByRole("button", {name:"Send active-turn message"}));
     await waitFor(() => expect(mocks.queueAgentTurnMessage).toHaveBeenCalledWith("/proj","agent_chain_new","follow_up","Next request"));
     await waitFor(() => expect(screen.getByRole("textbox", {name:"Ask Agent"})).toHaveValue(""));
+  });
+
+  it("restores Auto with its read-only policy in the same next-turn request", async () => {
+    localStorage.setItem("workbench:agent-session:/proj:run-a:project%3Arun-a%3Anone", "saved");
+    mocks.getAgentSession.mockResolvedValue({ ...session("saved"), execution_mode: "auto" });
+    mount();
+    await waitFor(() => expect(screen.getByRole("combobox", {name:"Agent execution mode"})).toHaveValue("auto"));
+    expect(mocks.sendAgentTurn).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByRole("textbox", {name:"Ask Agent"}), {target:{value:"Continue the plan"}});
+    fireEvent.click(screen.getByRole("button", {name:"Send to Agent"}));
+    await waitFor(() => expect(mocks.sendAgentTurn).toHaveBeenCalledWith("/proj", "saved", "Continue the plan", expect.any(AbortSignal), undefined, "auto_read_only", "auto"));
+  });
+
+  it("an explicit Review selection replaces Auto and a refused turn is shown as a failure", async () => {
+    function ReviewControl() {
+      const agent = useAgentSurface();
+      return <button onClick={() => agent.setExecutionPolicy?.("proposal_only")}>Review next turn</button>;
+    }
+    mocks.sendAgentTurn.mockRejectedValue(new Error("Turn was refused"));
+    render(<MemoryRouter><AgentSurfaceProvider projectRoot="/proj" runId="run-a">
+      <ReviewControl /><AgentPanel projectRoot="/proj" runId="run-a" />
+    </AgentSurfaceProvider></MemoryRouter>);
+    fireEvent.change(screen.getByRole("combobox", {name:"Agent execution mode"}), {target:{value:"auto"}});
+    fireEvent.click(screen.getByRole("button", {name:"Review next turn"}));
+    expect(screen.getByRole("combobox", {name:"Agent execution mode"})).toHaveValue("ask");
+    fireEvent.change(screen.getByRole("textbox", {name:"Ask Agent"}), {target:{value:"Review this operation"}});
+    fireEvent.click(screen.getByRole("button", {name:"Send to Agent"}));
+    await waitFor(() => expect(mocks.sendAgentTurn).toHaveBeenCalledWith("/proj", "agent_chain_new", "Review this operation", expect.any(AbortSignal), undefined, "proposal_only", "ask"));
+    expect(await screen.findByText("Turn was refused")).toBeInTheDocument();
+    expect(screen.queryByTestId("agent-message-assistant")).not.toBeInTheDocument();
+    expect(mocks.continueAgentTurn).not.toHaveBeenCalled();
+  });
+
+  it("keeps a read-only selection after an Ask-mode continuation returns", async () => {
+    function ReadOnlyControl() {
+      const agent = useAgentSurface();
+      return <><output data-testid="execution-policy">{agent.executionPolicy}</output>
+        <button onClick={() => agent.setExecutionPolicy?.("auto_read_only")}>Select read-only</button>
+        <button onClick={() => void agent.continueTurn?.()}>Continue read-only</button></>;
+    }
+    localStorage.setItem("workbench:agent-session:/proj:run-a:project%3Arun-a%3Anone", "saved");
+    mocks.getAgentSession.mockResolvedValue({ ...session("saved"), execution_mode: "ask" });
+    mocks.continueAgentTurn.mockResolvedValue({ session: { ...session("saved"), execution_mode: "ask" }, status: "idle" });
+    render(<MemoryRouter><AgentSurfaceProvider projectRoot="/proj" runId="run-a">
+      <ReadOnlyControl /><AgentPanel projectRoot="/proj" runId="run-a" />
+    </AgentSurfaceProvider></MemoryRouter>);
+    await waitFor(() => expect(mocks.getAgentSession).toHaveBeenCalledWith("/proj", "saved"));
+    fireEvent.click(screen.getByRole("button", {name:"Select read-only"}));
+    fireEvent.click(screen.getByRole("button", {name:"Continue read-only"}));
+    await waitFor(() => expect(mocks.continueAgentTurn).toHaveBeenCalledWith("/proj", "saved", expect.objectContaining({execution_mode:"ask", execution_policy:"auto_read_only"}), expect.any(AbortSignal)));
+    await waitFor(() => expect(screen.queryByRole("button", {name:"Stop Agent"})).not.toBeInTheDocument());
+    expect(screen.getByTestId("execution-policy")).toHaveTextContent("auto_read_only");
   });
 
   it("loads recovery state without running a model, then resumes only the original turn on click", async () => {
@@ -703,11 +755,14 @@ describe("AgentSurfaceProvider", () => {
     expect(mocks.continueAgentTurn).not.toHaveBeenCalled();
   });
 
-  it.each([false,true])("explicitly attempts orphan recovery despite running session status (server rejects: %s)", async rejects => {
-    mocks.getAgentSession.mockResolvedValue({...session("saved"),status:"running"});
+  it.each([false,true])("explicitly resumes an idle orphan and prevents a concurrent Resume (server rejects: %s)", async rejects => {
+    mocks.getAgentSession.mockResolvedValue({...session("saved"),status:"idle"});
     mocks.getAgentTurnState.mockResolvedValue({turns:[{turn_id:"orphan",status:"running",requires_reconcile:false}]});
-    if (rejects) mocks.resumeAgentTurn.mockRejectedValue(new Error("The server still has an active owner."));
-    else mocks.resumeAgentTurn.mockResolvedValue({session:session("saved"),status:"idle"});
+    let finishResume!: () => void;
+    mocks.resumeAgentTurn.mockImplementation(() => new Promise((resolve, reject) => {
+      finishResume = () => rejects ? reject(new Error("The server still has an active owner."))
+        : resolve({session:session("saved"),status:"idle"});
+    }));
     render(<MemoryRouter initialEntries={["/?agent_session=saved"]}><AgentSurfaceProvider projectRoot="/proj" runId="run-a"><AgentPanel projectRoot="/proj" runId="run-a" /></AgentSurfaceProvider></MemoryRouter>);
     const resume=await screen.findByRole("button",{name:"Resume original turn"});
     expect(mocks.resumeAgentTurn).not.toHaveBeenCalled();
@@ -717,7 +772,11 @@ describe("AgentSurfaceProvider", () => {
     expect(mocks.sendAgentTurn).not.toHaveBeenCalled();
     fireEvent.click(resume);
     await waitFor(() => expect(mocks.resumeAgentTurn).toHaveBeenCalledWith("/proj","saved","orphan",expect.any(AbortSignal)));
+    expect(screen.queryByRole("button",{name:"Resume original turn"})).not.toBeInTheDocument();
+    expect(screen.getByRole("button",{name:"Stop Agent"})).toBeInTheDocument();
+    expect(mocks.resumeAgentTurn).toHaveBeenCalledTimes(1);
     expect(mocks.continueAgentTurn).not.toHaveBeenCalled();
+    await act(async () => finishResume());
     if (rejects) expect(await screen.findByRole("alert")).toHaveTextContent("The server still has an active owner.");
   });
 

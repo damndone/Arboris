@@ -9,8 +9,11 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from tests.test_read_only_analysis import FINGERPRINT, _Fixture, _explore, _recode
+import pytest
+
+from tests.test_read_only_analysis import FINGERPRINT, _Fixture, _explore, _recode, _t_test
 from workbench import analysis_ledger
+from workbench.agent import plans
 from workbench.agent.permissions import Grants, PermissionClass, Rule, Rules
 
 
@@ -91,3 +94,83 @@ def test_read_only_analysis_still_runs_at_once_in_ask_mode(tmp_path: Path) -> No
     fixture = _Fixture(tmp_path)
     receipt = fixture.propose([_explore("tab", "region")])
     assert receipt["executed"] is True and receipt["authorized_by"] == "read_only_policy"
+
+
+def _approved_explore(fixture, *, failed_dependency=False, allowed_classes=("analyze",), operation_id="statistical.explore", spent=False):
+    preceding = (plans.PlanStep("prepare", "Prepare", ("data.recode",), status="failed" if failed_dependency else "done",
+                               completed_operation_ids=() if failed_dependency else ("data.recode",)),) if failed_dependency or spent else ()
+    step = plans.PlanStep("next", "Next", (operation_id,), depends_on=("prepare",) if preceding else ())
+    plan = plans.approve(plans.merge(None, question="Describe the data", criteria=[], steps=(*preceding, step),
+                                    budget={"steps": 1} if spent else None, allowed_classes=list(allowed_classes)))
+    fixture.orchestrator.plan_store.save("chain-session", plan)
+
+
+def test_auto_ready_planned_analysis_runs_with_the_canonical_ui_policy(tmp_path):
+    fixture = _Fixture(tmp_path)
+    _with_authority_runner(fixture)
+    fixture.orchestrator.execution_mode = "auto"
+    fixture.orchestrator.execution_policy = "auto_read_only"
+    _approved_explore(fixture)
+    result = fixture.propose([_explore("tab", "region")])
+    assert result["executed"] and result["authorized_by"] == "read_only_policy"
+    assert fixture.orchestrator.plan_store.current("chain-session").steps[-1].status == "done"
+
+
+def test_an_explicit_review_still_stops_an_otherwise_planned_auto_analysis(tmp_path):
+    fixture = _Fixture(tmp_path)
+    fixture.orchestrator.execution_mode = "auto"
+    fixture.orchestrator.execution_policy = "proposal_only"
+    _approved_explore(fixture)
+    result = fixture.propose([_explore("tab", "region")])
+    assert result["requires_confirmation"]
+    assert result["confirmation_reason"] == "Review before execution was requested for this turn."
+    assert analysis_ledger.read(fixture.project_root) == []
+
+
+def test_a_legacy_request_with_only_the_policy_keeps_its_review_boundary(tmp_path):
+    from workbench.http.agent_route_requests import AgentTurnRequest
+    request = AgentTurnRequest(question="Inspect the data", execution_policy="proposal_only")
+    assert "execution_mode" not in request.model_fields_set
+    fixture = _Fixture(tmp_path)
+    fixture.orchestrator.execution_mode = request.execution_mode
+    fixture.orchestrator.execution_policy = request.execution_policy
+    result = fixture.propose([_explore("tab", "region")])
+    assert result["requires_confirmation"]
+    assert result["confirmation_reason"] == "Review before execution was requested for this turn."
+    assert analysis_ledger.read(fixture.project_root) == []
+
+
+def test_explicit_review_keeps_the_specific_inferential_budget_count(tmp_path, monkeypatch):
+    from workbench.agent import read_only_policy
+    fixture = _Fixture(tmp_path)
+    fixture.orchestrator.execution_mode = "auto"
+    fixture.orchestrator.execution_policy = "proposal_only"
+    _approved_explore(fixture, operation_id="test.t_tests")
+    monkeypatch.setattr(read_only_policy, "SESSION_INFERENTIAL_BUDGET", 0)
+    result = fixture.propose([_t_test("tt")])
+    assert result["requires_confirmation"]
+    assert "already run 0 inferential tests" in result["confirmation_reason"]
+    assert analysis_ledger.read(fixture.project_root) == []
+
+
+@pytest.mark.parametrize("case,reason", [
+    ("outside", "not in the approved plan"),
+    ("failed_dependency", "not in the approved plan"),
+    ("unapproved_derive", "does not allow this kind of step"),
+    ("project_ask", "a project rule asks"),
+    ("spent_budget", "approved plan's budget is spent"),
+])
+def test_auto_required_ask_reasons_are_not_replaced_by_the_review_policy(tmp_path, case, reason):
+    fixture = _Fixture(tmp_path)
+    fixture.orchestrator.execution_mode = "auto"
+    fixture.orchestrator.execution_policy = "proposal_only"
+    if case != "outside":
+        _approved_explore(fixture, failed_dependency=case == "failed_dependency",
+                          operation_id="data.recode" if case == "unapproved_derive" else "statistical.explore",
+                          spent=case == "spent_budget")
+    if case == "project_ask":
+        fixture.orchestrator.permission_rules = Rules(ask=(Rule(PermissionClass.ANALYZE),))
+    result = fixture.propose([_recode()] if case == "unapproved_derive" else [_explore("tab", "region")])
+    assert result["requires_confirmation"]
+    assert reason in result["confirmation_reason"]
+    assert analysis_ledger.read(fixture.project_root) == []

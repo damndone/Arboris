@@ -9,7 +9,8 @@ describe("AgentModeMenu", () => {
   test("three modes from the two settings", () => {
     expect(currentMode(controls("ask", "proposal_only"))).toBe("review");
     expect(currentMode(controls("ask", "auto_read_only"))).toBe("read_only");
-    expect(currentMode(controls("auto", "proposal_only"))).toBe("auto");
+    expect(currentMode(controls("auto", "auto_read_only"))).toBe("auto");
+    expect(currentMode(controls("auto", "proposal_only"))).toBe("review");
   });
 
   test("each mode sets both settings it needs", () => {
@@ -19,10 +20,22 @@ describe("AgentModeMenu", () => {
     expect(agent.setExecutionPolicy).toHaveBeenCalledWith("proposal_only");
     applyMode(agent, "auto");
     expect(agent.setExecutionMode).toHaveBeenLastCalledWith("auto");
+    expect(agent.setExecutionPolicy).toHaveBeenLastCalledWith("auto_read_only");
+  });
+
+  test.each(["proposal_only", "auto_read_only"] as const)("Auto clears the previous %s policy", (policy) => {
+    const agent = {
+      executionMode: "ask" as "ask" | "auto", executionPolicy: policy as "proposal_only" | "auto_read_only",
+      setExecutionMode(mode: "ask" | "auto") { this.executionMode = mode; },
+      setExecutionPolicy(next: "proposal_only" | "auto_read_only") { this.executionPolicy = next; },
+    };
+    applyMode(agent, "auto");
+    expect([agent.executionMode, agent.executionPolicy]).toEqual(["auto", "auto_read_only"]);
+    expect(currentMode(agent)).toBe("auto");
   });
 
   test("cycling goes review → read-only → auto → review, skipping what is not offered", () => {
-    const agent = controls("auto", "proposal_only");
+    const agent = controls("auto", "auto_read_only");
     cycleMode(agent);
     expect(agent.setExecutionMode).toHaveBeenLastCalledWith("ask");
     expect(agent.setExecutionPolicy).toHaveBeenLastCalledWith("proposal_only");
