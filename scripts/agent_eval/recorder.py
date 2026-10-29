@@ -128,6 +128,8 @@ class _RecordingTransport(httpx.AsyncBaseTransport):
             record = self.tape.take(digest)
             raw = record["response_raw"].encode("utf-8")
             return httpx.Response(record["status"], headers={"content-type": record["content_type"]}, content=raw)
+        if hasattr(self.budget, "wait_for_request_slot"):
+            await self.budget.wait_for_request_slot()
         started = time.time()
         assert self.inner is not None
         reservation = self.budget.reserve(body) if self.budget is not None else None
@@ -193,6 +195,8 @@ class _RecordingTransport(httpx.AsyncBaseTransport):
             "usage": usage,
             "budget_reservation": reservation,
         })
+        if hasattr(self.budget, "recover_complete_http_error"):
+            self.budget.recover_complete_http_error(response.status_code, raw, reservation)
         if hasattr(self.budget, "recover_overload"):
             self.budget.recover_overload(response.status_code, raw, reservation)
         if hasattr(self.budget, "check_response"):
@@ -296,7 +300,22 @@ def provider_tape(path: Path, *, mode: str = "record", budget=None) -> Iterator[
         return httpx.AsyncClient(timeout=config.timeout_s, transport=_RecordingTransport(tape, inner, budget=budget))
 
     llm_client._async_client_factory = factory
-    stream_original = model_original = None
+    stream_original = model_original = adapter_original = None
+    if mode == "record" and getattr(budget, "serial_coordinator", None) is not None:
+        from workbench.agent import model as agent_model
+        adapter_original = agent_model.OpenAICompatibleModelAdapter.stream
+
+        async def serialized_adapter_stream(adapter, request):
+            # Enter the unchanged adapter only after queueing. Its idle clock
+            # and the provider's HTTP timeouts have not started while waiting.
+            await budget.wait_for_request_slot(request.abort_event)
+            try:
+                async for event in adapter_original(adapter, request):
+                    yield event
+            finally:
+                budget.close_request_slot()
+
+        agent_model.OpenAICompatibleModelAdapter.stream = serialized_adapter_stream
     if mode == "record" and getattr(budget, "overload_recovery", None) is not None:
         from workbench.agent import model as agent_model
         from .budget import NvidiaOverloadRetry
@@ -318,6 +337,8 @@ def provider_tape(path: Path, *, mode: str = "record", budget=None) -> Iterator[
         yield tape
     finally:
         llm_client._async_client_factory = original
+        if adapter_original is not None:
+            agent_model.OpenAICompatibleModelAdapter.stream = adapter_original
         if stream_original is not None:
             llm_client.async_stream_chat_completion = stream_original
             agent_model.async_stream_chat_completion = model_original

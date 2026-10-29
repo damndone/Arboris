@@ -311,12 +311,16 @@ class NvidiaOverloadRecovery(FreeRouteGuard):
 
     _change = RoundBudget._change
 
-    def __init__(self, path, *, unanswered_read_errors=False, unanswered_protocol_errors=False):
+    def __init__(self, path, *, unanswered_read_errors=False, unanswered_protocol_errors=False,
+                 complete_http_500_errors=False):
         self.unanswered_read_errors = unanswered_read_errors
         self.unanswered_protocol_errors = unanswered_protocol_errors
+        self.complete_http_500_errors = complete_http_500_errors
         if unanswered_protocol_errors and not unanswered_read_errors:
             raise ValueError("protocol recovery requires the explicit unanswered-read recovery policy")
-        self.schema = "nvidia-overload-recovery/v3" if unanswered_protocol_errors else "nvidia-overload-recovery/v2" if unanswered_read_errors else "nvidia-overload-recovery/v1"
+        if complete_http_500_errors and not unanswered_protocol_errors:
+            raise ValueError("complete HTTP500 recovery requires the explicit v3 recovery policies")
+        self.schema = "nvidia-overload-recovery/v4" if complete_http_500_errors else "nvidia-overload-recovery/v3" if unanswered_protocol_errors else "nvidia-overload-recovery/v2" if unanswered_read_errors else "nvidia-overload-recovery/v1"
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.lock = FileLock(str(self.path) + ".lock")
@@ -328,6 +332,8 @@ class NvidiaOverloadRecovery(FreeRouteGuard):
                 expected["unanswered_read_errors"] = True
             if unanswered_protocol_errors:
                 expected["unanswered_protocol_errors"] = True
+            if complete_http_500_errors:
+                expected["complete_http_500_errors"] = True
             if any(state.get(key) != value for key, value in expected.items()):
                 raise ValueError("NVIDIA shared overload recovery configuration changed")
 
@@ -341,7 +347,8 @@ class NvidiaOverloadRecovery(FreeRouteGuard):
             "request_retries": {}, "tickets": {}, "pending": None, "manual_restarts": {},
             "stopped": False, "reason": None,
             **({"unanswered_read_errors": True} if self.unanswered_read_errors else {}),
-            **({"unanswered_protocol_errors": True} if self.unanswered_protocol_errors else {})}
+            **({"unanswered_protocol_errors": True} if self.unanswered_protocol_errors else {}),
+            **({"complete_http_500_errors": True} if self.complete_http_500_errors else {})}
 
     def record_manual_restart(self, *, source_path, reason):
         """Charge the explicitly approved task restart once, without settling any request."""
@@ -429,7 +436,8 @@ class NvidiaFreeEndpointGuard(FreeRouteGuard):
 
     def __init__(self, path, *, provider_id, base_url, model, round_kind, overload_recovery_ledger=None,
                  recover_unanswered_read_errors=False, allow_low_space_this_round=False,
-                 recover_unanswered_protocol_errors=False, skip_incomplete_stream_task=False):
+                 recover_unanswered_protocol_errors=False, skip_incomplete_stream_task=False,
+                 recover_complete_http_500_errors=False, shared_serial_ledger=None):
         if (provider_id, base_url, model) != (NVIDIA_PROVIDER_ID, NVIDIA_BASE_URL, NVIDIA_MODEL):
             raise ValueError("NVIDIA evaluation requires the exact authorized provider, base URL and Ultra model")
         if round_kind not in {"dev8", "qrdata40"}:
@@ -441,8 +449,10 @@ class NvidiaFreeEndpointGuard(FreeRouteGuard):
         self.round_kind = round_kind
         self.request_limit = 240 if round_kind == "dev8" else 1200
         self.overload_recovery = None
+        self.serial_coordinator = None
         self.recover_unanswered_read_errors = recover_unanswered_read_errors
         self.recover_unanswered_protocol_errors = recover_unanswered_protocol_errors
+        self.recover_complete_http_500_errors = recover_complete_http_500_errors
         self.allow_low_space_this_round = allow_low_space_this_round
         self.skip_incomplete_stream_task = skip_incomplete_stream_task
         self._retry_ticket = None
@@ -450,12 +460,15 @@ class NvidiaFreeEndpointGuard(FreeRouteGuard):
             raise ValueError("unanswered ReadError recovery requires its explicit shared recovery ledger")
         if recover_unanswered_protocol_errors and not recover_unanswered_read_errors:
             raise ValueError("protocol recovery requires the explicit unanswered-read recovery policy")
+        if recover_complete_http_500_errors and not recover_unanswered_protocol_errors:
+            raise ValueError("complete HTTP500 recovery requires the explicit v3 recovery policies")
         if overload_recovery_ledger is not None:
             if self.path.resolve() == Path(overload_recovery_ledger).resolve():
                 raise ValueError("NVIDIA request and recovery ledgers must be separate")
             self.overload_recovery = NvidiaOverloadRecovery(overload_recovery_ledger,
                 unanswered_read_errors=recover_unanswered_read_errors,
-                unanswered_protocol_errors=recover_unanswered_protocol_errors)
+                unanswered_protocol_errors=recover_unanswered_protocol_errors,
+                complete_http_500_errors=recover_complete_http_500_errors)
         with self._change() as state:
             if state.get("allow_low_space_this_round", False) != allow_low_space_this_round:
                 raise ValueError("NVIDIA ledger storage policy changed; use a separate round ledger")
@@ -475,6 +488,50 @@ class NvidiaFreeEndpointGuard(FreeRouteGuard):
                 raise ValueError("NVIDIA round requires its original overload recovery ledger")
             if recovery_path is not None:
                 state["overload_recovery_ledger"] = recovery_path
+            serial_path = str(Path(shared_serial_ledger).resolve()) if shared_serial_ledger is not None else None
+            if state.get("shared_serial_ledger") not in (None, serial_path):
+                raise ValueError("NVIDIA round requires its original shared serial ledger")
+            if serial_path is not None:
+                if serial_path in {str(self.path.resolve()), recovery_path}:
+                    raise ValueError("NVIDIA serial, request and recovery ledgers must be separate")
+                state["shared_serial_ledger"] = serial_path
+        if shared_serial_ledger is not None:
+            from .nvidia_serial import NvidiaSerialCoordinator
+            self.serial_coordinator = NvidiaSerialCoordinator(shared_serial_ledger)
+
+    @property
+    def stopped(self):
+        return self.state["stopped"] or self.serial_coordinator is not None and self.serial_coordinator.stopped
+
+    @property
+    def serial_queue_wait_s(self):
+        return self.serial_coordinator.wait_s if self.serial_coordinator is not None else 0.0
+
+    def stop(self, reason):
+        super().stop(reason)
+        if self.serial_coordinator is not None:
+            self.serial_coordinator.stop(reason)
+
+    async def wait_for_request_slot(self, abort_event=None):
+        if self.serial_coordinator is not None:
+            try:
+                await self.serial_coordinator.acquire(abort_event)
+            except BudgetStop as exc:
+                self.stop(str(exc))
+                raise
+
+    def close_request_slot(self):
+        if self.serial_coordinator is not None:
+            pending = self.overload_recovery is not None and self.overload_recovery.state["pending"]
+            self.serial_coordinator.release(preserve_unknown=bool(self.state["reservations"] or pending))
+
+    def tolerate_transport_interruption(self, error, task=None):
+        try:
+            return super().tolerate_transport_interruption(error, task)
+        except BudgetStop as exc:
+            if self.serial_coordinator is not None:
+                self.serial_coordinator.stop(str(exc))
+            raise
 
     @property
     def state(self):
@@ -513,6 +570,12 @@ class NvidiaFreeEndpointGuard(FreeRouteGuard):
                 raise BudgetStop(self.state["reason"])
 
     def reserve(self, body):
+        if self.serial_coordinator is not None and not self.serial_coordinator.held:
+            self.stop("NVIDIA actual request has no shared serial HTTP lease")
+            raise BudgetStop(self.state["reason"])
+        if self.serial_coordinator is not None and self.serial_coordinator.stopped:
+            self.stop(self.serial_coordinator.state["reason"])
+            raise BudgetStop(self.state["reason"])
         if not self.allow_low_space_this_round and shutil.disk_usage(self.path.parent).free < 5_000_000_000:
             self.stop("storage threshold: less than 5 GB free before NVIDIA request")
             raise BudgetStop(self.state["reason"])
@@ -547,16 +610,43 @@ class NvidiaFreeEndpointGuard(FreeRouteGuard):
                 state.update(stopped=True, reason=reason)
                 refused = True
             else:
-                if state["last_start"] is not None:
+                if self.serial_coordinator is not None:
+                    try:
+                        self.serial_coordinator.record_start(reservation=key, round_ledger=self.path,
+                            request_sha256=request_sha256)
+                    except BudgetStop as exc:
+                        state.update(stopped=True, reason=str(exc))
+                        refused = True
+                elif state["last_start"] is not None:
                     time.sleep(max(0, state["last_start"] + 2 - time.time()))
-                state["last_start"] = time.time()
-                state["requests"] += 1
-                state["reservations"][key] = {"started_at": state["last_start"], "output_bound": output,
-                    "output_limit": "provider_default_unverified" if output is None else output,
-                    "request_sha256": request_sha256}
+                if not refused:
+                    state["last_start"] = time.time()
+                    state["requests"] += 1
+                    state["reservations"][key] = {"started_at": state["last_start"], "output_bound": output,
+                        "output_limit": "provider_default_unverified" if output is None else output,
+                        "request_sha256": request_sha256}
         if refused:
+            self.stop(self.state["reason"])
             raise BudgetStop(self.state["reason"])
         return key
+
+    def recover_complete_http_error(self, status, raw, key):
+        """Called only after recorder read the complete body, never on interruption."""
+        if not self.recover_complete_http_500_errors or self.overload_recovery is None or status != 500:
+            return
+        try:
+            payload = json.loads(raw)
+        except (ValueError, TypeError):
+            return
+        if payload != {"error": {"message": "Failed to generate completions",
+                "type": "Internal Server Error", "code": 500}}:
+            return
+        # bool/float equality must not turn an unobserved envelope into the
+        # approved integer-coded provider failure.
+        if type(payload["error"]["code"]) is not int:
+            return
+        self._recover_unknown(raw, key,
+            "user-authorized complete error-only HTTP 500 recovery; usage and billing remain unknown")
 
     def recover_overload(self, status, raw, key):
         if self.overload_recovery is None or status != 200:
@@ -612,6 +702,7 @@ class NvidiaFreeEndpointGuard(FreeRouteGuard):
             state.setdefault("accepted_unknown_requests", []).append({"key": key, "reservation": reservation,
                 "request_sha256": reservation["request_sha256"], "raw_sha256": hashlib.sha256(raw).hexdigest(),
                 "reason": reason, "task": task, "retry_ticket": None})
+        self.close_request_slot()
         raise TaskStop(reason)
 
     def recover_unanswered_transport_error(self, *, response, raw, sent, error, key):
@@ -676,7 +767,9 @@ class NvidiaFreeEndpointGuard(FreeRouteGuard):
                 state["charges"].append({"key": key, "usage": usage,
                     "billing_status": "reported zero credit" if "credit" in usage else "unknown; credit not reported"})
         if reason:
+            self.stop(reason)
             raise BudgetStop(reason)
+        self.close_request_slot()
 
     def unreachable(self, error):
         self.stop(f"NVIDIA endpoint connection failed ({error}); stop the round; billing remains unknown")

@@ -96,6 +96,10 @@ def main() -> int:
                         help="explicit v2 recovery policy: additionally permit ReadError before any response headers/body")
     parser.add_argument("--nvidia-recover-unanswered-protocol-error", action="store_true",
                         help="explicit v3 policy: additionally permit RemoteProtocolError before any response headers/body")
+    parser.add_argument("--nvidia-recover-complete-http-500", action="store_true",
+                        help="explicit v4 policy: additionally permit the observed complete error-only HTTP500 JSON")
+    parser.add_argument("--nvidia-shared-serial-ledger", type=Path,
+                        help="explicit shared serial HTTP lease/stop/start ledger for overlapping task processes")
     parser.add_argument("--nvidia-skip-incomplete-stream-task", action="store_true",
                         help="explicit task-only failure for partial-output SSE EOF without finish/DONE/usage; never retry")
     parser.add_argument("--allow-low-space-this-round", action="store_true",
@@ -111,6 +115,10 @@ def main() -> int:
         parser.error("unanswered ReadError recovery requires --nvidia-overload-recovery-ledger with a new v2 ledger")
     if args.nvidia_recover_unanswered_protocol_error and not args.nvidia_recover_unanswered_read_error:
         parser.error("protocol recovery requires --nvidia-recover-unanswered-read-error with a new v3 ledger")
+    if args.nvidia_recover_complete_http_500 and not args.nvidia_recover_unanswered_protocol_error:
+        parser.error("complete HTTP500 recovery requires the explicit v3 policies with a new v4 ledger")
+    if args.nvidia_shared_serial_ledger is not None and args.nvidia_free_ledger is None:
+        parser.error("shared serial scheduling requires the explicit NVIDIA endpoint guard")
     if args.nvidia_skip_incomplete_stream_task and args.nvidia_free_ledger is None:
         parser.error("incomplete-stream task skip requires the explicit NVIDIA endpoint guard")
     if args.nvidia_free_round is not None:
@@ -137,6 +145,8 @@ def main() -> int:
                 overload_recovery_ledger=args.nvidia_overload_recovery_ledger,
                 recover_unanswered_read_errors=args.nvidia_recover_unanswered_read_error,
                 recover_unanswered_protocol_errors=args.nvidia_recover_unanswered_protocol_error,
+                recover_complete_http_500_errors=args.nvidia_recover_complete_http_500,
+                shared_serial_ledger=args.nvidia_shared_serial_ledger,
                 skip_incomplete_stream_task=args.nvidia_skip_incomplete_stream_task,
                 allow_low_space_this_round=args.allow_low_space_this_round)
         except ValueError as exc:
@@ -207,12 +217,17 @@ def main() -> int:
             "overload_recovery_ledger": str(args.nvidia_overload_recovery_ledger) if args.nvidia_overload_recovery_ledger is not None else None,
             "recover_unanswered_read_errors": args.nvidia_recover_unanswered_read_error,
             "recover_unanswered_protocol_errors": args.nvidia_recover_unanswered_protocol_error,
+            "recover_complete_http_500_errors": args.nvidia_recover_complete_http_500,
+            "shared_serial_ledger": str(args.nvidia_shared_serial_ledger) if args.nvidia_shared_serial_ledger is not None else None,
+            "max_http_inflight": 1,
+            "queue_wait_counts_toward_task_wall": True,
             "skip_incomplete_stream_task": args.nvidia_skip_incomplete_stream_task,
             "overload_recovery_schema": budget.overload_recovery.schema if budget.overload_recovery is not None else None,
             "overload_recovery": ({"shared_retry_limit": 10, "per_request_retry_limit": 2,
                 "delays_s": [60, 120], "eligibility": "complete observed error-only SSE 503 plus DONE; no generated output"
                     + ("; or ReadError before any response headers or body" if args.nvidia_recover_unanswered_read_error else "")
-                    + ("; or RemoteProtocolError before any response headers or body" if args.nvidia_recover_unanswered_protocol_error else "")}
+                    + ("; or RemoteProtocolError before any response headers or body" if args.nvidia_recover_unanswered_protocol_error else "")
+                    + ("; or the observed complete error-only HTTP500 JSON" if args.nvidia_recover_complete_http_500 else "")}
                 if args.nvidia_overload_recovery_ledger is not None else None),
             "fallback": "forbidden; actual request URL and model checked"} if args.nvidia_free_ledger is not None else None),
         "provider": {key: getattr(config, key, None) for key in ("provider_id", "base_url", "model", "data_location")},
@@ -243,6 +258,7 @@ def main() -> int:
                 continue
             directory.mkdir(parents=True, exist_ok=True)
             started = time.monotonic()
+            queue_wait_before = getattr(budget, "serial_queue_wait_s", 0.0)
             external = isinstance(task, ExternalTask)
             record = {"task_id": task.id, "repeat": rep, "language": task.language, "prompt": task.prompt,
                       "transport": args.transport}
@@ -308,6 +324,9 @@ def main() -> int:
                 record["error"] = f"{type(exc).__name__}: {exc}"
                 record["traceback"] = traceback.format_exc()
             record["elapsed_s"] = round(time.monotonic() - started, 1)
+            if args.nvidia_shared_serial_ledger is not None:
+                record["queue_wait_s"] = round(budget.serial_queue_wait_s - queue_wait_before, 3)
+                record["queue_wait_counts_toward_task_wall"] = True
             (directory / "record.json").write_text(json.dumps(record, ensure_ascii=False, indent=1), encoding="utf-8")
             if record["status"] == "round_budget_stopped":
                 print(f"{name}: round stopped; no further tasks or provider requests", flush=True)
@@ -316,7 +335,9 @@ def main() -> int:
             # Stop the round when the provider stops serving (402 balance, 5xx):
             # every further task would only record the same failure.
             tape = directory / "provider_tape.jsonl"
+            recovered = {entry["key"] for entry in budget.state.get("accepted_unknown_requests", [])} if args.nvidia_free_ledger is not None else set()
             if tape.exists() and any(json.loads(line).get("status") in {402, 500, 502, 503}
+                                     and json.loads(line).get("budget_reservation") not in recovered
                                      for line in tape.read_text(encoding="utf-8").splitlines()[-3:]):
                 print(f"{name}: provider unavailable; stopping the round", flush=True)
                 provider_down = True
