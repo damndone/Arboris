@@ -9,6 +9,7 @@ import matplotlib
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
+from matplotlib.layout_engine import PlaceHolderLayoutEngine
 import numpy as np
 import pandas as pd
 from scipy import stats
@@ -217,6 +218,16 @@ def _close_figure(fig) -> None:
 
 def _save(fig, path: Path, run_root: Path, artifact_id: str, figures: dict[str, str]) -> None:
     fig.tight_layout()
+    if (
+        path.suffix.lower() == ".png"
+        and isinstance(fig.get_layout_engine(), PlaceHolderLayoutEngine)
+        and not matplotlib.rcParams["figure.autolayout"]
+        and not matplotlib.rcParams["figure.constrained_layout.use"]
+        and matplotlib.rcParams["savefig.bbox"] is None
+    ):
+        # The axes are already laid out; a placeholder triggers another save
+        # prepass. None clears it only when automatic layout is disabled.
+        fig.set_layout_engine(None)
     fig.savefig(path)
     _close_figure(fig)
     record = register_artifact(run_root, artifact_id, path, "figure", "visualization", [])
