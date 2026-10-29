@@ -68,6 +68,15 @@ it("shows the exact scientific specification before approving its machine meanin
   expect(definitions).toHaveTextContent("producer-verified");
   expect(state.agent.approvePlan).not.toHaveBeenCalled();
 });
+it("names a missing legacy plan definition rather than showing an empty requirement title", () => {
+  state.agent.planVerification = {plan_id:"p1",plan_version:3,status:"partial",playbook_status:"requirements_met",
+    criteria_verification:{plan_id:"p1",plan_version:3,basis_sha256:"a".repeat(64),status:"partial",
+      requirements:[{id:"",status:"unverified",reason:"No machine-checkable approved deliverable definitions were saved.",verified_artifacts:[]}],
+      unbound_slots:[{criterion_index:0}]}};
+  render(<AgentPlanPanel />);
+  expect(screen.getByText("Plan definitions · unverified")).toBeInTheDocument();
+  expect(screen.getByText(/Not bound: Report uncertainty/)).toBeInTheDocument();
+});
 it("observes plan-event to DOM latency separately from browser paint", () => {
   const view = render(<AgentPlanPanel />);
   const samples: number[] = [];

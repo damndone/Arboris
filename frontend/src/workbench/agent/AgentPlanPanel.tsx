@@ -89,7 +89,7 @@ export function AgentPlanPanel() {
         <p role="status">{verification.status === "requirements_met" ? "Delivery requirements met" : "Partial completion"}
           {" · "}Playbook: {verification.playbook_status}</p>
         <ul>{verification.criteria_verification.requirements.map(requirement => <li key={requirement.id}>
-          <strong>{requirement.id} · {requirement.status}</strong>
+          <strong>{requirement.id || "Plan definitions"} · {requirement.status}</strong>
           <p>{requirement.reason}</p>
           {requirement.verified_artifacts.length > 0 && <small>{requirement.verified_artifacts.length} registered artifact{requirement.verified_artifacts.length === 1 ? "" : "s"}</small>}
         </li>)}
