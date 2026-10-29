@@ -61,6 +61,17 @@ def _source_project(tmp_path: Path, frame: pd.DataFrame) -> tuple[Path, str, str
     return project, run_id, artifact_id
 
 
+def _register_source_node_identity(project: Path, run_id: str) -> None:
+    """Make this source fixture addressable through the real typed-node writer."""
+    from workbench.data_operations.graph import _ensure_node_index_entry
+
+    root = project / "runs" / run_id
+    node = GraphStore(project / "runs").read(run_id).nodes["stage:source"]
+    _ensure_node_index_entry(root, child_node_id=node.id,
+        node_hash=sha256_file(root / node.payload_ref), artifact_rel=node.payload_ref,
+        producing_stage="fixture.source", create_if_missing=True)
+
+
 def test_column_cast_preview_is_strict_and_deterministic(tmp_path: Path) -> None:
     from workbench.data_operations import (
         DataColumnCastSpecV1,

@@ -64,6 +64,8 @@ class Case:
 
     def run_actual_tool_return(self):
         orchestrator = self.fixture.orchestrator
+        from tests.test_data_column_cast import _register_source_node_identity
+        _register_source_node_identity(self.fixture.project_root, self.fixture.run_id)
 
         async def runner(proposal):
             fingerprint = proposal.preconditions["context_fingerprint"]

@@ -28,6 +28,28 @@ from typing import Any, Iterator
 import httpx
 
 
+_RESPONSE_IDENTIFIER_HEADERS = ("x-request-id", "nvcf-reqid", "traceparent")
+_RESPONSE_IDENTIFIER_MAX_CHARS = 256
+
+
+def _response_identifiers(response: httpx.Response | None) -> dict[str, str]:
+    """Keep only bounded opaque response IDs; absent/invalid values stay unknown.
+
+    Never persist all headers, truncate identifiers, or synthesize a provider ID
+    from the local request SHA. Visible ASCII without whitespace excludes header
+    controls and ambiguous joined values while retaining normal opaque IDs.
+    """
+    if response is None:
+        return {}
+    identifiers = {}
+    for name in _RESPONSE_IDENTIFIER_HEADERS:
+        value = response.headers.get(name)
+        if (value and len(value) <= _RESPONSE_IDENTIFIER_MAX_CHARS
+                and all(33 <= ord(char) <= 126 for char in value)):
+            identifiers[name] = value
+    return identifiers
+
+
 def _body_hash(body: bytes) -> str:
     return hashlib.sha256(body).hexdigest()
 
@@ -163,6 +185,7 @@ class _RecordingTransport(httpx.AsyncBaseTransport):
             "url_path": request.url.path,
             "status": response.status_code,
             "content_type": content_type,
+            "response_identifiers": _response_identifiers(response),
             "request_sha256": digest,
             "request": request_json,
             "request_bytes": len(body),
@@ -189,6 +212,7 @@ class _RecordingTransport(httpx.AsyncBaseTransport):
             "url_path": request.url.path, "status": 0,
             "upstream_http_status": response.status_code if response is not None else None,
             "content_type": response.headers.get("content-type", "") if response is not None else "", "request_sha256": digest,
+            "response_identifiers": _response_identifiers(response),
             "request": json.loads(body), "request_bytes": len(body), "response_raw": raw.decode("utf-8", "replace"),
             "usage": None, "transport_error": type(exc).__name__, "budget_reservation": reservation, "sent": sent})
         if hasattr(self.budget, "recover_unanswered_transport_error"):

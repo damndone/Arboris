@@ -5,7 +5,9 @@ from __future__ import annotations
 import inspect
 import asyncio
 import contextvars
+import hashlib
 import json
+import logging
 import re
 from collections import OrderedDict
 from collections.abc import Mapping
@@ -23,6 +25,7 @@ from ..analysis_loop.lifecycle import AnalysisLoopSelectionError
 # not a leak, but an unbounded blob would be.
 MAX_VALIDATION_ERRORS = 5
 MAX_VALIDATION_MESSAGE_CHARS = 240
+MAX_VALIDATION_DETAIL_CHARS = 1200
 
 # Schema admission is expensive and registries are rebuilt on each user turn.
 # Cache only successful checks of immutable content keys, never mutable schema
@@ -355,7 +358,7 @@ def _discriminated_branch(schema: dict[str, Any], instance: Any) -> dict[str, An
 
 def _operation_change_example(schema, arguments):
     """Suggest shape only: preserve source/intent and leave opaque options alone."""
-    if not isinstance(arguments, dict) or not isinstance(arguments.get("changes"), dict):
+    if not isinstance(arguments, dict) or not isinstance(arguments.get("changes"), (dict, str)):
         return None
     try:
         encoded = json.dumps(arguments, ensure_ascii=False, allow_nan=False)
@@ -368,6 +371,25 @@ def _operation_change_example(schema, arguments):
     contract = (branch.get("properties") or {}).get("changes")
     if not isinstance(contract, dict):
         return None
+    if isinstance(example["changes"], str):
+        def unique_object(pairs):
+            result = {}
+            for key, value in pairs:
+                if key in result:
+                    raise ValueError("duplicate JSON key")
+                result[key] = value
+            return result
+        def reject_constant(value):
+            raise ValueError("non-JSON constant")
+        try:
+            decoded = json.loads(example["changes"], object_pairs_hook=unique_object,
+                                 parse_constant=reject_constant)
+            json.dumps(decoded, ensure_ascii=False, allow_nan=False)
+        except (ValueError, RecursionError):
+            return None
+        if not isinstance(decoded, dict):
+            return None
+        example["changes"] = decoded
     def reshape(value, declared):
         selected = _discriminated_branch(declared, value) if isinstance(value, dict) else None
         declared = selected or declared
@@ -484,6 +506,7 @@ class ToolResult:
     output: Any = None
     error: str | None = None
     error_details: list[dict[str, str]] | None = None
+    error_id: str | None = None
 
     def to_payload(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -495,6 +518,8 @@ class ToolResult:
         # successful calls keep their existing shape.
         if self.error_details:
             payload["error_details"] = self.error_details
+        if self.error_id is not None:
+            payload["error_id"] = self.error_id
         return payload
 
 
@@ -721,8 +746,10 @@ class ToolRegistry:
         if details:
             example = _operation_change_example(definition.input_schema, arguments)
             if example is not None:
-                details[0] = {**details[0], "example_arguments": example,
+                illustrated = {**details[0], "example_arguments": example,
                     "example_scope": "Schema-only format suggestion; not executed. Normal source, method preflight and approval still apply."}
+                if len(json.dumps(illustrated, allow_nan=False)) < MAX_VALIDATION_DETAIL_CHARS:
+                    details[0] = illustrated
             return ToolResult(
                 tool_call_id=call_id,
                 tool_id=tool_id,
@@ -777,12 +804,26 @@ class ToolRegistry:
             # reason: surfacing only the class name leaves the model nothing to
             # correct, so it re-submits the same broken payload until the step
             # budget is gone. That exact loop was observed on a live turn.
+            input_fault = _is_agent_input_fault(exc)
+            error_id = None
+            if not input_fault:
+                # Replaying a recorded call must reproduce its model-visible
+                # payload. Correlate identity only, never raw inputs/errors.
+                error_id = hashlib.sha256(json.dumps([
+                    "workbench.agent.tool-error.v1", session_id, call_id, tool_id,
+                ], separators=(",", ":")).encode()).hexdigest()
+                logging.getLogger(__name__).exception(
+                    "Unexpected tool failure; error_id=%s", error_id,
+                    extra={"error_id": error_id, "tool_id": tool_id,
+                           "tool_call_id": call_id, "session_id": session_id},
+                )
             return ToolResult(
                 tool_call_id=call_id,
                 tool_id=tool_id,
                 ok=False,
                 error=type(exc).__name__,
                 error_details=(
-                    [{"message": _with_help(str(exc))}] if _is_agent_input_fault(exc) else None
+                    [{"message": _with_help(str(exc))}] if input_fault else None
                 ),
+                error_id=error_id,
             )

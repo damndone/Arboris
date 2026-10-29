@@ -362,14 +362,14 @@ def test_a_paid_round_still_retries_a_connection_that_was_never_made(tmp_path):
     assert not budget.stopped and budget.state["reservations"] == {}
 
 
-def _sse_transport(gate):
+def _sse_transport(gate, *, response_headers=None):
     async def body():
         yield b'data: {"choices":[{"delta":{"reasoning_content":"thinking"}}]}\n\n'
         await gate.wait()
         yield (b'data: {"choices":[{"delta":{"content":"ok"}}],"usage":{"prompt_tokens":10,'
                b'"completion_tokens":2,"credit":0}}\n\ndata: [DONE]\n\n')
 
-    return httpx.MockTransport(lambda request: httpx.Response(200, headers={"content-type": "text/event-stream"},
+    return httpx.MockTransport(lambda request: httpx.Response(200, headers={"content-type": "text/event-stream", **(response_headers or {})},
                                                               content=body()))
 
 
@@ -407,7 +407,8 @@ def test_a_stream_the_product_abandons_is_taped_as_interrupted(tmp_path):
     tape = _Tape(tmp_path / "tape.jsonl", "record")
 
     async def scenario():
-        transport = _RecordingTransport(tape, _sse_transport(asyncio.Event()), budget=guard)
+        transport = _RecordingTransport(tape, _sse_transport(
+            asyncio.Event(), response_headers={"nvcf-reqid": "interrupted-provider-id"}), budget=guard)
         async with httpx.AsyncClient(transport=transport) as client:
             async with client.stream("POST", f"{FREE_BASE}/chat/completions", json={"max_tokens": 10}) as response:
                 await response.aiter_bytes().__anext__()  # then leaves, as a no-progress cancel does
@@ -415,6 +416,7 @@ def test_a_stream_the_product_abandons_is_taped_as_interrupted(tmp_path):
         asyncio.run(scenario())
     [record] = [json.loads(line) for line in tape.path.read_text().splitlines()]
     assert record["transport_error"] == "CancelledError" and record["sent"] is True and "thinking" in record["response_raw"]
+    assert record["response_identifiers"] == {"nvcf-reqid": "interrupted-provider-id"}
     assert guard.stopped and len(guard.state["transport_interruptions"]) == 1
 
 
@@ -442,3 +444,65 @@ def test_a_stream_closed_after_its_usage_arrived_is_complete(tmp_path):
     [record] = [json.loads(line) for line in tape.path.read_text().splitlines()]
     assert record["status"] == 200 and record["usage"]["credit"] == 0 and "transport_error" not in record
     assert guard.state["calls"] == 1 and not guard.state.get("transport_interruptions")
+
+
+@pytest.mark.parametrize("streaming", [True, False])
+def test_recorder_keeps_only_bounded_response_ids_and_preserves_exact_request_bytes(tmp_path, streaming):
+    import hashlib
+    from agent_eval.recorder import _RecordingTransport, _Tape
+
+    payload = b'{ "model" : "offline", "messages": [], "max_tokens": 10 }'
+    expected_ids = {"x-request-id": "request-opaque-123", "nvcf-reqid": "nvcf-opaque-456",
+                    "traceparent": "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01"}
+    sensitive = {"authorization": "Bearer response-secret", "set-cookie": "response-cookie=secret",
+                 "cookie": "cookie-secret", "x-private-debug": "private-header-secret"}
+    headers = {"X-Request-ID": expected_ids["x-request-id"], "NVCF-REQID": expected_ids["nvcf-reqid"],
+               "Traceparent": expected_ids["traceparent"], **sensitive}
+    status = 200 if streaming else 500
+    raw = (b'data: {"choices":[{"delta":{"content":"ok"}}],"usage":{"prompt_tokens":1,"completion_tokens":1}}\n\ndata: [DONE]\n\n'
+           if streaming else b'{"error":{"message":"Failed to generate completions","type":"Internal Server Error","code":500}}')
+    headers["content-type"] = "text/event-stream" if streaming else "application/json"
+    seen = []
+
+    def handle(request):
+        seen.append(request.content)
+        assert request.headers["authorization"] == "Bearer request-secret"
+        return httpx.Response(status, headers=headers, content=raw)
+
+    tape = _Tape(tmp_path/"tape.jsonl", "record")
+
+    async def scenario():
+        transport = _RecordingTransport(tape, httpx.MockTransport(handle))
+        async with httpx.AsyncClient(transport=transport) as client:
+            response = await client.post("https://provider.invalid/v1/chat/completions", content=payload,
+                                         headers={"authorization": "Bearer request-secret"})
+            assert response.status_code == status and response.content == raw
+            assert response.headers["x-request-id"] == expected_ids["x-request-id"]
+
+    asyncio.run(scenario())
+    [record] = [json.loads(line) for line in tape.path.read_text().splitlines()]
+    assert record["response_identifiers"] == expected_ids
+    assert seen == [payload] and record["request_bytes"] == len(payload)
+    assert record["request_sha256"] == hashlib.sha256(payload).hexdigest()
+    assert record["usage"] is None if not streaming else record["usage"]["completion_tokens"] == 1
+    assert "headers" not in record
+    for secret in (*sensitive.values(), "request-secret"):
+        assert secret not in tape.path.read_text()
+
+
+@pytest.mark.parametrize("headers", [{}, {"x-request-id": "x"*257, "nvcf-reqid": "bad\x00id", "traceparent": "a b"}])
+def test_missing_or_invalid_response_ids_stay_unknown_not_local_sha(tmp_path, headers):
+    from agent_eval.recorder import _RecordingTransport, _Tape
+
+    tape = _Tape(tmp_path/"tape.jsonl", "record")
+
+    async def scenario():
+        transport = _RecordingTransport(tape, httpx.MockTransport(
+            lambda request: httpx.Response(500, headers=headers, json={"error":{"message":"offline"}})))
+        async with httpx.AsyncClient(transport=transport) as client:
+            await client.post("https://provider.invalid/v1/chat/completions", content=b'{}')
+
+    asyncio.run(scenario())
+    [record] = [json.loads(line) for line in tape.path.read_text().splitlines()]
+    assert record["response_identifiers"] == {}
+    assert record["usage"] is None

@@ -1,6 +1,9 @@
 """F4 format failures get schema-valid examples without rewriting requests."""
 import asyncio
 import copy
+import json
+
+import pytest
 
 from jsonschema import Draft202012Validator
 from workbench.agent.operations import OperationRegistry
@@ -50,3 +53,40 @@ def test_control_changes_are_not_silently_removed_to_manufacture_a_valid_example
     assert result.ok is False
     assert not any('example_arguments' in d for d in result.error_details)
     assert any('model_options' in d.get('allowed_fields',[]) for d in result.error_details)
+
+
+def test_json_text_changes_get_an_object_example_without_execution_or_target_rewrite():
+    arguments = request()
+    intended = copy.deepcopy(arguments['changes'])
+    arguments['changes'] = json.dumps(intended)
+    saved = copy.deepcopy(arguments)
+    result, schema = execute(arguments)
+    assert not result.ok and result.error == 'invalid_tool_arguments'
+    assert any(d.get('path') == 'changes' and d.get('expected_type') == 'object'
+               and d.get('actual_type') == 'string' for d in result.error_details)
+    example = next(d['example_arguments'] for d in result.error_details if 'example_arguments' in d)
+    assert Draft202012Validator(schema).is_valid(example)
+    assert example == {**arguments, 'changes': intended}
+    assert arguments == saved
+
+
+@pytest.mark.parametrize('text', ['{"model_type":', '[]', 'null',
+    '{"model_type":"ols","model_type":"linear_mixed_effects"}',
+    '{"model_type":"linear_mixed_effects","model_options":{"x":NaN}}',
+    '{"model_type":"linear_mixed_effects","unknown_control":["z"]}',
+    ' '*4001+'{}'])
+def test_ambiguous_invalid_or_oversized_json_changes_remain_refused_without_example(text):
+    arguments = request()
+    arguments['changes'] = text
+    result, _ = execute(arguments)
+    assert not result.ok and result.error == 'invalid_tool_arguments'
+    assert not any('example_arguments' in d for d in result.error_details)
+
+
+def test_json_exponent_overflow_never_emits_an_infinite_correction_example():
+    arguments = request()
+    arguments['changes'] = '{"model_type":"linear_mixed_effects","model_options":{"x":1e309}}'
+    result, _ = execute(arguments)
+    assert not result.ok and result.error == 'invalid_tool_arguments'
+    assert not any('example_arguments' in d for d in result.error_details)
+    json.dumps(result.to_payload(), allow_nan=False)

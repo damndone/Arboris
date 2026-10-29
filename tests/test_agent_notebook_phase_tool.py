@@ -59,6 +59,8 @@ def test_notebook_planning_tool_uses_the_current_core_model_and_budget(tmp_path,
 
 def test_run_operation_is_the_single_operation_tool_entry(tmp_path):
     fixture = _Fixture(tmp_path)
+    from tests.test_data_column_cast import _register_source_node_identity
+    _register_source_node_identity(fixture.project_root, fixture.run_id)
     registry = fixture.orchestrator.tool_registry("chain-a")
     descriptors = {tool["tool_id"]:tool for tool in registry.descriptors()}
     assert "run_operation" in descriptors

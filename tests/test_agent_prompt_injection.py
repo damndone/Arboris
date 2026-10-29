@@ -11,7 +11,7 @@ import pandas as pd
 import pytest
 
 from tests.test_agent_extensions import install, manifest, digest
-from tests.test_data_column_cast import _source_project
+from tests.test_data_column_cast import _source_project, _register_source_node_identity
 from workbench.agent.chains import ChainStore
 from workbench.agent.context_tools import NodeOperationContextProvider
 from workbench.agent.core import AgentCore
@@ -37,6 +37,7 @@ def _setup(tmp_path, source, payload, monkeypatch):
     frame = pd.DataFrame({"x": [1, 2, 3], payload if source == "column" else "note":
                           [payload if source == "cell" else "ordinary", "b", "c"]})
     root, run_id, artifact_id = _source_project(tmp_path, frame)
+    _register_source_node_identity(root, run_id)
     repo = JsonlSessionRepository(root / "workbench")
     repo.create_session("main", chain_id="project", role="main")
     repo.create_session("s", chain_id="c", role="chain")
@@ -125,7 +126,8 @@ def test_injected_evidence_cannot_gain_execution_or_approval(tmp_path, monkeypat
     receipts = [entry.payload for entry in repo.get_branch("s") if entry.payload.get("tool_call_id") == "attack"]
     assert receipts, "The hostile attempt must actually reach the tool boundary"
     if attack == "exfiltration":
-        assert any('"requires_confirmation": true' in receipt["content"] for receipt in receipts)
+        assert any('"requires_confirmation": true' in receipt["content"] for receipt in receipts), [
+            json.loads(receipt["content"]).get("error_details") for receipt in receipts]
     else:
         assert any('"ok": false' in receipt["content"] for receipt in receipts)
     assert len(calls) == before_calls

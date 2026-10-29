@@ -69,26 +69,33 @@ class OrchestrationTools:
 
         try:
             chain_id = chain_id or self.repository.get_metadata(session_id).get("chain_id")
-        except (KeyError, FileNotFoundError, ValueError):
+        except (KeyError, FileNotFoundError):
             chain_id = None
         active_head = str(preconditions.get("active_head_run_id") or target["run_id"])
         if isinstance(chain_id, str) and chain_id:
             try:
                 active_head = self._resolve_chain_head(chain_id, active_head)
             except ChainHeadConflict as exc:
-                raise ValueError("active_head_run_id: " + str(exc)) from exc
-        try:
-            snapshot = inspect(
-                InspectNodeContextRequest(
-                    request_id=f"propose:{target['run_id']}",
-                    owner_run_id=str(target["run_id"]),
-                    op_node_id=str(target["node_ref"]),
-                    active_head_run_id=active_head,
-                )
+                import json
+
+                head = self._resolve_chain_head(chain_id, None)
+                read_arguments = {"owner_run_id": str(target["run_id"]),
+                    "op_node_id": str(target["node_ref"]), "active_head_run_id": head}
+                raise ToolVisibleError(
+                    f"ACTIVE_HEAD_MISMATCH: current conversation head is {head}, not {active_head}. "
+                    "The operation was not executed; target.run_id and target.node_ref remain unchanged. "
+                    "Verify the original source with inspect_node_context "
+                    + json.dumps(read_arguments, ensure_ascii=False)
+                    + "; then re-propose only after checking that source and fresh preconditions."
+                ) from exc
+        snapshot = inspect(
+            InspectNodeContextRequest(
+                request_id=f"propose:{target['run_id']}",
+                owner_run_id=str(target["run_id"]),
+                op_node_id=str(target["node_ref"]),
+                active_head_run_id=active_head,
             )
-        except (KeyError, OSError, ValueError):
-            # An unresolvable target is the typed validator's to report.
-            return arguments
+        )
         fingerprint = snapshot.get("context_fingerprint")
         if not isinstance(fingerprint, str) or not fingerprint:
             return arguments
@@ -417,7 +424,7 @@ class OrchestrationTools:
 
         async def update_plan(arguments: dict[str, Any], context) -> dict[str, Any]:
             from . import plans as plan_module
-            from .completion import source_receipt
+            from .completion import source_receipt, validate_completion_evidence, CompletionEvidenceError
             from .task_requirements import enforce
             from dataclasses import replace
 
@@ -442,6 +449,10 @@ class OrchestrationTools:
                     arguments = {**arguments, "completion": completion}
                 steps = plan_module.parse_steps(arguments.get("steps"), self.known_plan_operations())
                 def revise(previous):
+                    if 'completion_evidence' in arguments:
+                        effective_completion = completion if completion is not None else previous.completion if previous else None
+                        root = getattr(self.context_provider, 'project_root', self.repository.root.parent)
+                        validate_completion_evidence(root, effective_completion, arguments['completion_evidence'])
                     requirements = self._bind_task_requirements(session_id, previous)
                     if completion is not None and requirements['status'] == 'verified':
                         requested = enforce({'scope': completion.get('scope', 'analysis'),
@@ -493,6 +504,11 @@ class OrchestrationTools:
                         plan = plan_module.Plan.from_dict(intent["plan_snapshot"])
                     return plan
                 plan = self.plan_store.update(session_id, revise)
+            except CompletionEvidenceError as exc:
+                return {'saved': False, 'error': str(exc), 'error_code': exc.code,
+                        'evidence_corrections': exc.corrections,
+                        'guidance': 'The rejected bindings were not saved. Copy exact registered completion_ref values; '
+                                    'keep existing results and recheck completion after correcting the plan.'}
             except plan_module.PlanError as exc:
                 return {"saved": False, "error": str(exc),
                         "guidance": "The rejected change was not applied. Follow the error; if it requires a "

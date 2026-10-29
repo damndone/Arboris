@@ -6,12 +6,13 @@ receipt cannot replace a fitted model, diagnostics or an actual comparison.
 from __future__ import annotations
 
 import math
+import json
 import re
 from pathlib import Path
 from typing import Any
 
 from ..canonical import sha256_canonical
-from .context_compiler import read_completion_artifact, read_completion_dataset_source, read_arima_completion_product, read_garch_completion_product, completion_candidate_refs
+from .context_compiler import read_completion_artifact, read_completion_dataset_source, read_arima_completion_product, read_garch_completion_product, completion_candidate_refs, registered_model_completion_ref
 from .completion_sensitivity import INFLUENCE_DISCLOSURE, MAX_OPTIONS, SENSITIVITY_NEXT_STEP, influence_option, specification_options
 from .completion_profiles import NATIVE_COMPANIONS, companion_model, native_diagnostics, native_findings, verified_iv_ar, with_iv_ar
 from .completion_targets import TARGET_SCHEMA, computed_result, matches_target, requested_targets
@@ -219,6 +220,91 @@ class _Products:
         return found
 
 
+class CompletionEvidenceError(ValueError):
+    def __init__(self, message, *, corrections=()):
+        super().__init__(message)
+        self.code = 'COMPLETION_EVIDENCE_UNRESOLVED'
+        self.corrections = list(corrections)
+
+
+def _source_bound(products, source, ref):
+    return source is not None and any(item.sha256 == source.sha256 for item in products.ancestors(ref))
+
+
+def _registered_alias_replacement(products, source, ref):
+    """Suggest a unique verified model identity; never rewrite submitted refs."""
+    if not isinstance(ref, dict) or not isinstance(ref.get('run_id'), str):
+        return None
+    alias = ref.get('artifact_id')
+    if not isinstance(alias, str) or not alias.startswith('model_results:'):
+        return None
+    root = (products.runs / ref['run_id']).resolve()
+    if root.parent != products.runs:
+        return None
+    model_id = alias[len('model_results:'):]
+    registered = registered_model_completion_ref(root, {'model_id': model_id})
+    if registered is None:
+        return None
+    candidate = {'run_id': registered['run_id'], 'artifact_id': registered['artifact_id']}
+    artifact = products.load(candidate)
+    model = products.model(candidate, artifact)
+    return (candidate if model is not None and model.get('model_id') == model_id
+            and _source_bound(products, source, candidate) else None)
+
+
+def _evidence_binding_errors(products, source, evidence):
+    errors, corrections = [], []
+    for slot in ('models', 'diagnostics', 'sensitivity', 'results', 'report'):
+        values = evidence.get(slot, [])
+        values = [values] if slot == 'report' and values else values
+        if not isinstance(values, list):
+            errors.append(f'{slot}: references must be a list')
+            continue
+        for index, ref in enumerate(values):
+            numeric_alias = (isinstance(ref, dict) and isinstance(ref.get('artifact_id'), str)
+                             and ref['artifact_id'].startswith('model_results:'))
+            # A plan can record pending delivery work. Diagnostics, comparisons
+            # and report collections keep their existing family-specific gate;
+            # a uniform ancestry rule here must not block a verified primary's
+            # progress because its report has not been composed yet.
+            if slot not in ('models', 'results') and not numeric_alias:
+                continue
+            artifact = products.load(ref)
+            valid = not numeric_alias and artifact is not None and _source_bound(products, source, ref)
+            if valid and slot == 'results':
+                valid = computed_result(products, ref, artifact)
+            if valid and slot == 'models':
+                valid = products.model(ref, artifact) is not None
+            if valid:
+                continue
+            field = f'{slot}[{index}]'
+            errors.append(field + ': no verified source-bound registered artifact')
+            replacement = (_registered_alias_replacement(products, source, ref)
+                           if slot in ('models', 'results') else None)
+            if replacement is not None:
+                corrections.append({'field': field, 'rejected_ref': dict(ref),
+                                    'replacement_ref': replacement})
+    return errors, corrections
+
+
+def validate_completion_evidence(project_root, contract, evidence):
+    """Check concrete answer bindings; pending delivery refs stay gate-owned."""
+    products = _Products(project_root)
+    source = products.load(contract.get('source')) if isinstance(contract, dict) else None
+    if (source is None or source.artifact_type not in _DATA_TYPES
+            or source.sha256 != contract.get('source', {}).get('sha256')):
+        raise CompletionEvidenceError('Completion evidence needs a verified completion source first.')
+    if not isinstance(evidence, dict):
+        raise CompletionEvidenceError('Completion evidence must be an object of registered references.')
+    errors, corrections = _evidence_binding_errors(products, source, evidence)
+    if errors:
+        raise CompletionEvidenceError('; '.join(errors[:4]) +
+            '. Numeric result_ref aliases are not artifact_id values. Inspect existing registered receipts; '
+            'use the explicit replacement refs when provided, without rerunning or weakening completion.',
+            corrections=corrections[:8])
+    return evidence
+
+
 def source_receipt(project_root, ref):
     """Discover a registered dataset identity without exposing rows or paths."""
     value = _Products(project_root).load(ref)
@@ -262,7 +348,24 @@ def evaluate(project_root, contract, evidence, *, suggest=False, options=False):
         results = [(ref, products.load(ref)) for ref in evidence.get('results', [])]
         if not results or any(not bound(ref) or not computed_result(products, ref, artifact) for ref, artifact in results):
             missing.append('question:computed_source_bound_result')
-        return {**_result(missing, products, target=target), 'scope': 'question'}
+        result = {**_result(missing, products, target=target), 'scope': 'question'}
+        if missing and (suggest or options):
+            errors, corrections = _evidence_binding_errors(products, source, evidence)
+            if errors:
+                result['repair_steps'] = corrections or [{'reason': 'unverified_result_binding'}]
+                refs = [item['replacement_ref'] for item in corrections[:4]]
+                result['next_step'] = (
+                    'Call update_plan with completion_evidence.results using these verified registered references: '
+                    + json.dumps(refs, ensure_ascii=False)
+                    + '. This repairs identity only; the gate must recheck the source and result. Keep existing computed results; do not refit just to repair a reference.'
+                    if refs else 'Inspect completed operation receipts and copy their canonical completion_ref into '
+                    'update_plan completion_evidence.results. The submitted result is unverified; do not invent IDs, '
+                    'claim completion, or rerun merely to create plan history.')
+                # The repair catalog has verified real products too. Expose
+                # their exact references while retaining the original missing
+                # state; discovering a replacement never accepts the alias.
+                result.update(_result(missing, products, target=target))
+        return result
 
     for family in families:
         names = PLAYBOOKS[family]
@@ -421,7 +524,12 @@ def _result(missing, products, *, target=None):
 _CLAIM = re.compile(
     r'分析(?:已|已经|全部|现已|已全部|现已全部)?完成|(?:已|已经)完成(?:全部|所有)?(?:分析|研究)'
     r'|(?:analysis|analyses|research)\s+(?:(?:is|are|has been|have been)\s+)?(?:now\s+)?(?:complete[d]?|finished)'
-    r'|(?:finished|completed)\s+(?:the\s+)?(?:analysis|analyses|research)', re.I)
+    r'|(?:finished|completed)\s+(?:the\s+)?(?:analysis|analyses|research)'
+    r'|(?:本|当前|这项|该)?问题(?:导向)?(?:已|已经|现已)?完成(?=$|[\s。！？.!?（(，,；;])'
+    r'|(?:本|当前|该)?问题(?:的)?(?:全部|所有)(?:要求)?(?:已|均已)?满足(?=$|[\s。！？.!?（(，,；;])'
+    r'|(?:^|\n)[ \t✅✓*#-]*(?:判断标准)?全部满足(?=$|[\s。！？.!?（(，,；;：:])'
+    r'|(?:focused\s+)?question\s+(?:(?:is|has been)\s+)?complete[d]?\b'
+    r'|(?:focused\s+)?question\s+requirements\s+(?:are\s+)?satisfied\b(?!\s+(?:(?:only\s+)?partially|in\s+part)\b)', re.I)
 _GENERIC_CLAIM = re.compile(r'全部完成|everything\s+is\s+(?:done|complete)', re.I)
 _FULL_REQUEST = re.compile(r'完整分析|全部分析|全面分析|(?:full|complete|entire|end.to.end)\s+analysis', re.I)
 
@@ -582,7 +690,19 @@ def publication(content: str, result: dict, language: str, *, final=True, reques
     content = content.removeprefix(notice).strip()
     content = _PARTIAL_NOTICE.sub('', content).strip()
     if claim:
-        sentences = re.split(r'(?<=[。！？])|(?<=[.!?])(?=\s|$)', content)
+        # Keep a claim spanning newlines together. Splitting it first would
+        # leave two unmatched fragments that join back into a completion claim.
+        # A regex's leading line anchor/newline is not part of its visible claim.
+        spans = [match.span() for pattern in (_CLAIM, _GENERIC_CLAIM)
+                 for match in pattern.finditer(content)]
+        boundaries = [0]
+        for match in re.finditer(r'(?<=\n)|(?<=[。！？])|(?<=[.!?])(?=\s|$)', content):
+            position = match.start()
+            if not any(start < position < end and content[start:position].strip()
+                       and content[position:end].strip() for start, end in spans):
+                boundaries.append(position)
+        boundaries.append(len(content))
+        sentences = [content[start:end] for start, end in zip(boundaries, boundaries[1:])]
         content = ''.join(sentence for sentence in sentences
                           if not claims_completion(sentence, request_text)
                           and not _GENERIC_CLAIM.search(sentence)).strip()
@@ -617,12 +737,16 @@ def partial_notice(result, language):
                   if 'completion_contract:select_playbooks_and_source' in result['missing'] else
                   '先补齐上列缺项，再重新核验；缺报告时应引用已有的已核验结果，避免重复拟合。'
                   '若需要额外数据、权限或预算，明确列出并等待接管。')
+        if result.get('next_step'):
+            advice += '\n' + str(result['next_step'])[:4000]
         return notice + '\n\n下一步建议\n' + advice + '\n\n' + _PARTIAL_BOUNDARIES['zh'] + '\n\n---'
     advice = ('Save a plan matching the question and bind its dataset source. Keep existing results; '
               'do not rerun computations just to create plan history. Bind the executed evidence and recheck.'
               if 'completion_contract:select_playbooks_and_source' in result['missing'] else
               'Address the missing evidence, then recheck. Compose missing reports from verified results rather '
               'than refitting. State any additional data, permission or budget needed and pause for takeover.')
+    if result.get('next_step'):
+        advice += '\n' + str(result['next_step'])[:4000]
     return notice + '\n\nRecommended next steps\n' + advice + '\n\n' + _PARTIAL_BOUNDARIES['en'] + '\n\n---'
 
 

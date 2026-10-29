@@ -401,6 +401,11 @@ def _bounded_family_diagnostic(value: Any) -> dict[str, Any]:
     }
 
 
+def _model_evidence_ref(run_root, result):
+    from ..context_compiler import model_evidence_ref
+    return model_evidence_ref(run_root, result, run_id=run_root.name)
+
+
 def _bounded_persisted_model_facts(
     model_results: list[dict[str, Any]],
     run_root: Path | None = None,
@@ -440,8 +445,7 @@ def _bounded_persisted_model_facts(
         projected.append(
             {
                 "model_id": model_id,
-                **({"evidence_ref": {"run_id": run_root.name, "model_id": model_id,
-                                     "result_ref": f"model_results:{model_id}"}} if run_root is not None else {}),
+                **({"evidence_ref": _model_evidence_ref(run_root, result)} if run_root is not None else {}),
                 # What n counts: rows, or units for estimators that aggregate
                 # over units (v1.8.10: CS reported 12 units beside 120 rows).
                 "nobs": result.get("nobs") if isinstance(result.get("nobs"), int) else None,

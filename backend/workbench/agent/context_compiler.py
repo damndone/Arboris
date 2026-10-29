@@ -511,6 +511,48 @@ def read_completion_artifact(run_root: Path, artifact_id: str) -> VerifiedComple
     return VerifiedCompletionArtifact(artifact_id, kind, digest, tuple(inputs), payload, path.suffix.lower(), path.stat().st_size)
 
 
+def registered_model_completion_ref(run_root: Path, result: dict[str, Any]) -> dict[str, str] | None:
+    """The producer's unique registered model-id slot, without rereading models.
+
+    This is identity discovery only. Neither the already loaded projection nor
+    registry metadata becomes numerical/scientific certification. The plan
+    boundary and completion gate verify bytes and source lineage independently.
+    Native owners with another artifact naming contract retain their old ref;
+    this helper never guesses a packet suffix or searches historical runs.
+    """
+    index = _read_json(run_root / 'artifacts_index.json')
+    entries = index.get('artifacts') if isinstance(index, dict) else None
+    if not isinstance(entries, list):
+        return None
+    matches = [item for item in entries if isinstance(item, dict)
+               and item.get('artifact_id') == result.get('model_id')]
+    if len(matches) != 1:
+        return None
+    item = matches[0]
+    digest = item.get('sha256')
+    if (item.get('artifact_type') not in {'model_result', 'workflow_result', 'model_result_packet'}
+            or not isinstance(digest, str) or len(digest) != 64):
+        return None
+    if any(other is not item and isinstance(other, dict)
+           and other.get('artifact_type') == item['artifact_type']
+           and other.get('sha256') == digest for other in entries):
+        return None  # Several registered owners of the same bytes need an explicit receipt.
+    return {'run_id': run_root.name, 'artifact_id': item['artifact_id'],
+            'registered_sha256': digest, 'binding_status': 'registered'}
+
+
+def model_evidence_ref(run_root: Path | None, result: dict[str, Any], *, run_id: str) -> dict[str, Any]:
+    """Keep legacy numeric aliases separate from usable completion bindings."""
+    model_id = result['model_id']
+    value = {'run_id': run_id, 'model_id': model_id, 'result_ref': f'model_results:{model_id}'}
+    ref = registered_model_completion_ref(run_root, result) if run_root is not None and run_root.name == run_id else None
+    if ref is not None:
+        value.update(artifact_id=ref['artifact_id'], registered_sha256=ref['registered_sha256'],
+                     binding_status='registered',
+                     completion_ref={'run_id': ref['run_id'], 'artifact_id': ref['artifact_id']})
+    return value
+
+
 def completion_candidate_refs(run_root: Path) -> list[dict[str, str]]:
     """Bounded discovery only; every candidate still needs content/lineage verification."""
     index = _read_json(run_root / 'artifacts_index.json')
