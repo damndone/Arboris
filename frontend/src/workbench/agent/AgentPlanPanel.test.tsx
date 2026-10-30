@@ -40,6 +40,7 @@ it("keeps verified deliverables separate from failed or missing execution receip
   render(<AgentPlanPanel />);
   expect(screen.getByText(/0\/2 completed steps/)).toBeInTheDocument();
   expect(screen.getByRole("region",{name:"Deliverable verification"})).toHaveTextContent("Partial completion");
+  expect(screen.getByRole("region",{name:"Deliverable verification"})).toHaveTextContent("Core analysis checks met");
   expect(screen.getByText(/covariance · verified/)).toBeInTheDocument();
   expect(screen.getByText(/Not bound: Report uncertainty/)).toBeInTheDocument();
   expect(screen.getByText(/1 registered artifact/)).toBeInTheDocument();

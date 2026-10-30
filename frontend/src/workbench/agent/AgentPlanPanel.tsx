@@ -87,7 +87,7 @@ export function AgentPlanPanel() {
       {agent.planVerificationError && <p role="alert">{agent.planVerificationError}</p>}
       {verification ? <>
         <p role="status">{verification.status === "requirements_met" ? "Delivery requirements met" : "Partial completion"}
-          {" · "}Playbook: {verification.playbook_status}</p>
+          {" · "}{verification.playbook_status === "requirements_met" ? "Core analysis checks met" : "Core analysis checks incomplete"}</p>
         <ul>{verification.criteria_verification.requirements.map(requirement => <li key={requirement.id}>
           <strong>{requirement.id || "Plan definitions"} · {requirement.status}</strong>
           <p>{requirement.reason}</p>

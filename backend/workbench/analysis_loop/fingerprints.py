@@ -10,6 +10,9 @@ from .canonical import canonical_json_v1, sha256_canonical
 
 
 _OMITTED = object()
+# The sample component evidence starts at 1M members. This candidate cutoff
+# does not certify the complete OLS workflow or bounded cancellation.
+_SAMPLE_NATIVE_MIN_ROWS = 1_000_000
 
 
 def _fingerprint(kind: str, value: Any) -> str:
@@ -38,7 +41,24 @@ def analysis_sample_fingerprint(
     row_set: Any,
     row_order: Any,
 ) -> str:
-    """Fingerprint membership and the order in which rows enter estimation."""
+    """Fingerprint membership and estimation order with a large-sample candidate.
+
+    Exact list/tuple inputs at the measured 1M member minimum use the optional
+    decimal-ID encoder. Other shapes and missing builds retain the reference
+    semantics. Complete-workflow performance and cancellation remain unverified.
+    """
+
+    if (
+        type(row_set) in (list, tuple)
+        and type(row_order) in (list, tuple)
+        and len(row_set) >= _SAMPLE_NATIVE_MIN_ROWS
+    ):
+        return analysis_sample_fingerprint_native(row_set, row_order)
+    return _analysis_sample_fingerprint_reference(row_set, row_order)
+
+
+def _analysis_sample_fingerprint_reference(row_set: Any, row_order: Any) -> str:
+    """Preserve the original sample bytes and error semantics."""
 
     # Decimal ASCII IDs need neither normalization nor JSON escaping. Their
     # ordinary lexical order matches the quoted canonical sort keys, including
@@ -69,17 +89,17 @@ def analysis_sample_fingerprint(
 
 
 def analysis_sample_fingerprint_native(row_set: Any, row_order: Any) -> str:
-    """Explicit decimal-ID candidate; default selection remains the reference.
+    """Use the decimal-ID candidate or the original reference semantics.
 
-    No sample size has performance acceptance for this encoder yet. Missing
-    optional builds and unsupported shapes retain the existing Python/error
+    The public selector enters at 1M members; this explicit entry has no size
+    cutoff. Missing optional builds and unsupported shapes retain Python/error
     semantics; present incompatible builds and computation errors propagate.
     """
     from ..native_canonical import encode_analysis_sample_v1
 
     encoded = encode_analysis_sample_v1(row_set, row_order)
     if encoded is None:
-        return analysis_sample_fingerprint(row_set, row_order)
+        return _analysis_sample_fingerprint_reference(row_set, row_order)
     return hashlib.sha256(encoded).hexdigest()
 
 
