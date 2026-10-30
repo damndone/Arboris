@@ -251,10 +251,16 @@ class WorkflowResultsMixin:
             None,
         )
         if record is None:
+            hint = self._scope_hint(
+                request.operation_record_id, chain_id=chain_id, session_id=session_id,
+                owner_run_id=request.owner_run_id, op_node_id=request.op_node_id,
+            )
+            if hint:
+                code, message = hint
+                raise ToolVisibleError(code + ": " + message)
             raise ToolVisibleError(
                 "OPERATION_RESULT_NOT_IN_SCOPE: the completed operation is not "
                 "available in this Chain and node scope."
-                + self._scope_hint(request.operation_record_id, chain_id=chain_id, session_id=session_id)
             )
         declared_artifacts = _operation_artifact_ids(record)
         allowed_artifacts = set(declared_artifacts)
@@ -493,22 +499,34 @@ class WorkflowResultsMixin:
             )
         return evidence, unavailable + max(len(artifact_ids) - 16, 0)
 
-    def _scope_hint(self, record_id: str, *, chain_id: str, session_id: str) -> str:
-        """Where the caller's own completed operation is, when it asked at the wrong node or run.
+    def _scope_hint(self, record_id: str, *, chain_id: str, session_id: str,
+                    owner_run_id: str, op_node_id: str) -> tuple[str, str] | None:
+        """Preserve owned completed-record locations; status needs the exact node scope.
 
-        Only records this conversation owns are named, so the hint reveals
-        nothing the Agent could not list itself; the node check still applies.
+        A persisted running state is not evidence that a process is still alive,
+        nor does a completed child run authorize reading without its parent receipt.
         """
 
         store = OperationRecordStore(self.project_root / "workbench", create=False)
         for record in store.list_records():
-            if (record.status == "completed" and record.chain_id == chain_id
-                    and record.agent_session_id == session_id and record.workflow_step_id is None
+            if (record.chain_id == chain_id and record.agent_session_id == session_id
+                    and record.workflow_step_id is None
                     and record_id in _record_ids(record)):
-                return (f" It ran on node {record.target.get('node_ref')} of run {record.target.get('run_id')}: "
-                        f"call again with owner_run_id {record.target.get('run_id')}, op_node_id "
-                        f"{record.target.get('node_ref')} and operation_record_id {record.record_id}.")
-        return ""
+                if record.status == "completed":
+                    return ("OPERATION_RESULT_NOT_IN_SCOPE",
+                            "the completed operation is not available in this Chain and node scope."
+                            f" It ran on node {record.target.get('node_ref')} of run {record.target.get('run_id')}: "
+                            f"call again with owner_run_id {record.target.get('run_id')}, op_node_id "
+                            f"{record.target.get('node_ref')} and operation_record_id {record.record_id}.")
+                if (record.status in {"pending", "submitted", "running", "recovering"}
+                        and record.target.get("run_id") == owner_run_id
+                        and record.target.get("node_ref") == op_node_id):
+                    return ("OPERATION_RESULT_NOT_COMPLETED",
+                            f"last persisted status: {record.status}; no completed operation receipt is available. "
+                            "This status does not prove a process is running. Do not automatically rerun the operation. "
+                            "Inspect its saved execution state and request human takeover to reconcile the completion "
+                            "receipt; do not invent one. Artifacts remain unavailable.")
+        return None
 
     def _completed_operation_records(
         self,

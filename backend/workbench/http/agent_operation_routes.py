@@ -1,6 +1,8 @@
 """agent operation routes: extracted HTTP responsibility."""
 from __future__ import annotations
+import asyncio
 from pathlib import Path
+import queue
 from typing import Any
 from ..agent.context_tools import NodeOperationContextProvider
 from ..operation_approvals import OperationApprovalStore, OperationApprovalError
@@ -166,11 +168,13 @@ def revise_agent_proposal(
 
 async def _run_read_only_proposal(root: Path, orchestrator: WorkbenchOrchestrator, proposal,
                                   actor: str | None = None) -> Any:
-    """Confirm and execute a read-only workflow under the read-only policy.
+    """Confirm an allowed proposal and observe its original execution.
 
     The same checks as a user's confirmation -- current context fingerprint
     and authoritative active head -- with the policy as the actor, so the
-    operation record says who allowed it."""
+    operation record says who allowed it. Waiting stays inside the Agent's
+    existing command wall budget and cancellable tool task.
+    """
 
     from ..agent.read_only_policy import ACTOR
 
@@ -190,12 +194,48 @@ async def _run_read_only_proposal(root: Path, orchestrator: WorkbenchOrchestrato
         current_context_fingerprint=fingerprint,
         current_active_head_run_id=active_head_run_id,
     )
-    return await orchestrator.execute_confirmed_operation(
-        record.record_id,
-        project_root=root,
-        current_context_fingerprint=fingerprint,
-        current_active_head_run_id=active_head_run_id,
-    )
+    execution = {"project_root": root, "current_context_fingerprint": fingerprint,
+                 "current_active_head_run_id": active_head_run_id}
+    record = await orchestrator.execute_confirmed_operation(record.record_id, **execution)
+    if record.status in OUTCOME_TERMINAL:
+        return record
+    from ..agent.operation_outcome import produced_run
+    child_run_id = produced_run(record.to_dict())
+    if child_run_id is None:
+        # Preserve the real pending receipt for explicit takeover. Without a
+        # bound child there is no run event this caller is authorized to await.
+        return record
+    from ..events import get_event_manager
+    from ..services.rerun_service import TERMINAL_RUN_STATUSES
+
+    manager = get_event_manager()
+    manager.register_run(child_run_id, root / "runs" / child_run_id / "workflow_log.jsonl")
+    subscriber, history = manager.subscribe(child_run_id)
+    try:
+        # Subscribe first: an already finished child or a completion racing
+        # subscription must still pass the same immutable-provenance checks.
+        record = await orchestrator.execute_confirmed_operation(
+            record.record_id, **execution, allow_recovery=True)
+        pending_events = iter(history)
+        while record.status not in OUTCOME_TERMINAL:
+            try:
+                event = next(pending_events)
+            except StopIteration:
+                try:
+                    event = subscriber.get_nowait()
+                except queue.Empty:
+                    # No blocked executor thread survives Stop or the existing
+                    # command timeout. Events stay local and never enter context.
+                    await asyncio.sleep(.1)
+                    continue
+            if event is None or event.get("status") in TERMINAL_RUN_STATUSES:
+                # A run event wakes observation; only the original reconciler
+                # may commit the parent, publish its receipt and activate forks.
+                record = await orchestrator.execute_confirmed_operation(
+                    record.record_id, **execution, allow_recovery=True)
+        return record
+    finally:
+        manager.unsubscribe(child_run_id, subscriber)
 
 
 @router.post("/agent/sessions/{session_id}/proposals/{proposal_id}/confirm")
