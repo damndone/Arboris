@@ -81,6 +81,17 @@ def first_stage_diagnostic(fitted: Any) -> dict[str, Any]:
 
 
 def first_stage_strength(context: CheckContext, spec: CheckSpec, *, compute_ar: bool = False) -> CheckOutcome:
+    return _first_stage_strength(context, spec, compute_ar=compute_ar,
+        robust=lambda y, x, z, w: anderson_rubin_robust(y, x, z, w, 0., 1.))
+
+
+def _first_stage_strength_owned(context: CheckContext, spec: CheckSpec) -> CheckOutcome:
+    """Explicit AR for the unshared fit reconstructed inside compute_ar."""
+    from .ar_confidence import _robust_set_owned
+    return _first_stage_strength(context, spec, compute_ar=True, robust=_robust_set_owned)
+
+
+def _first_stage_strength(context, spec, *, compute_ar, robust):
     fitted = context.fitted
     try:
         evidence = first_stage_diagnostic(fitted)
@@ -99,7 +110,7 @@ def first_stage_strength(context: CheckContext, spec: CheckSpec, *, compute_ar: 
         elif arrays['cov_type'] == 'unadjusted':
             region = anderson_rubin_homoskedastic(arrays['y'], arrays['x'], arrays['z'], arrays['w'])
         elif arrays['cov_type'] in {'robust', 'heteroskedastic'}:
-            region = anderson_rubin_robust(arrays['y'], arrays['x'], arrays['z'], arrays['w'], 0., 1.)
+            region = robust(arrays['y'], arrays['x'], arrays['z'], arrays['w'])
         else:
             region = {'kind': 'unavailable', 'reason': 'unsupported_covariance_for_ar'}
     evidence['anderson_rubin_95'] = region

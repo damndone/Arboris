@@ -24,6 +24,7 @@ class VerificationUncertain(Exception):
 
 
 _SCALE = 2**192
+_BLOCK_ROWS = 16384
 
 
 @dataclass(frozen=True, eq=False)
@@ -92,8 +93,13 @@ def moment_enclosure(data):
     A 4n*eta additive allowance covers gradual-underflow in sums. Products
     outside the normal arithmetic envelope are sent to exact fallback.
     """
-    import hashlib
     n, m = data.shape
+    return _moment_enclosure_blocks(n, m,
+        (data[start:start+_BLOCK_ROWS] for start in range(0, n, _BLOCK_ROWS)))
+
+
+def _moment_enclosure_blocks(n, m, blocks):
+    import hashlib
     steps = 4*n+16
     if steps >= 2**53:
         raise VerificationUncertain('gamma_envelope_exhausted')
@@ -106,8 +112,8 @@ def moment_enclosure(data):
     digest = hashlib.sha256(f'ar_raw_binary64_moments_v1:{n}:{m}:<f8'.encode())
     finfo = np.finfo(np.float64)
     safe_low, safe_high = np.sqrt(finfo.tiny), np.sqrt(finfo.max/(4*n+16))
-    for start in range(0, n, 16384):
-        block = np.asarray(data[start:start+16384], dtype='<f8', order='C')
+    for block in blocks:
+        block = np.asarray(block, dtype='<f8', order='C')
         if not np.isfinite(block).all():
             raise VerificationUncertain('nonfinite_input')
         digest.update(memoryview(block).cast('B'))
@@ -167,15 +173,31 @@ def _bilinear(a, moment, b):
 
 
 def polynomial_enclosures(y, x, z, w, critical):
+    # Constant, response, endogenous, nuisance, excluded instruments.
+    # Public inputs retain their complete private snapshot before reduction.
+    data = np.column_stack([np.ones(len(y)), y, x, w, z])
+    return _polynomial_enclosures(moment_enclosure(data), w.shape[1], z.shape[1], critical)
+
+
+def _polynomial_enclosures_owned(y, x, z, w, critical):
+    """Reduce request-private fit arrays with no concurrent or published writers."""
+    n = len(y)
+    blocks = (np.column_stack([np.ones(min(_BLOCK_ROWS, n-start)),
+        y[start:start+_BLOCK_ROWS], x[start:start+_BLOCK_ROWS],
+        w[start:start+_BLOCK_ROWS], z[start:start+_BLOCK_ROWS]])
+        for start in range(0, n, _BLOCK_ROWS))
+    enclosed = _moment_enclosure_blocks(n, 3+w.shape[1]+z.shape[1], blocks)
+    return _polynomial_enclosures(enclosed, w.shape[1], z.shape[1], critical)
+
+
+def _polynomial_enclosures(enclosed, nuisance, q, critical):
     from .ar_confidence import determinant
     from .ar_polynomials import add
-    # Constant, response, endogenous, nuisance, excluded instruments.
-    data = np.column_stack([np.ones(len(y)), y, x, w, z])
-    moment, pairs, evidence = moment_enclosure(data)
+    moment, pairs, evidence = enclosed
     index = {pair: i for i, pair in enumerate(pairs)}
     def second(i, j):
         return moment[index[(0, min(i, j))]][index[(0, max(i, j))]]
-    p, q = w.shape[1]+z.shape[1], z.shape[1]
+    p = nuisance+q
     inverse = inverse_enclosure([[second(i+3, j+3) for j in range(p)] for i in range(p)])
     u = [sum(row[j]*second(j+3, 1) for j in range(p)) for row in inverse]
     v = [sum(row[j]*second(j+3, 2) for j in range(p)) for row in inverse]
@@ -291,7 +313,15 @@ def verify_polynomials(numerator, denominator):
 
 
 def verified_set(y, x, z, w, critical):
-    numerator, denominator, evidence = polynomial_enclosures(y, x, z, w, critical)
+    return _verified_result(polynomial_enclosures(y, x, z, w, critical))
+
+
+def _verified_set_owned(y, x, z, w, critical):
+    return _verified_result(_polynomial_enclosures_owned(y, x, z, w, critical))
+
+
+def _verified_result(enclosed):
+    numerator, denominator, evidence = enclosed
     result = verify_polynomials(numerator, denominator)
     result['global_certification']['reduction'] = evidence
     return result

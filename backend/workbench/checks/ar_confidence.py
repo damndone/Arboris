@@ -139,6 +139,17 @@ def robust_polynomials(y, x, z, w, critical):
 
 
 def robust_set(y, x, z, w, alpha=.05):
+    from .ar_verified import verified_set
+    return _robust_set(y, x, z, w, alpha, verified_set)
+
+
+def _robust_set_owned(y, x, z, w, alpha=.05):
+    """Internal AR for execution-owned buffers with no published writer aliases."""
+    from .ar_verified import _verified_set_owned
+    return _robust_set(y, x, z, w, alpha, _verified_set_owned)
+
+
+def _robust_set(y, x, z, w, alpha, verify):
     check_cancellation()
     q = z.shape[1]
     method = {'method': 'robust_hc0', 'reference_distribution': f'chi2({q})',
@@ -148,9 +159,9 @@ def robust_set(y, x, z, w, alpha=.05):
     if x.shape[1] != 1 or q not in range(1, 5) or w.shape[1]+q > 12:
         return method | {'kind': 'unavailable', 'reason': 'outside_exact_certification_envelope'}
     critical = float(stats.chi2.ppf(1-alpha, q))
-    from .ar_verified import VerificationUncertain, verified_set
+    from .ar_verified import VerificationUncertain
     try:
-        result = verified_set(y, x, z, w, critical)
+        result = verify(y, x, z, w, critical)
         computation = {'path': 'verified_numpy', 'certification_target': 'original_binary64_observations'}
     except VerificationUncertain as uncertainty:
         from ..native_ar import engine_status

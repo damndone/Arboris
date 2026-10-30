@@ -245,7 +245,7 @@ def test_native_ar_http_abort_stops_real_bound_workflow_before_artifact(tmp_path
     def force_exact(*args):
         raise ar_verified.VerificationUncertain('offline native cancellation exercise')
 
-    monkeypatch.setattr(ar_verified, 'verified_set', force_exact)
+    monkeypatch.setattr(ar_verified, 'verify_polynomials', force_exact)
     app = FastAPI()
     app.include_router(router)
 
@@ -360,7 +360,7 @@ def test_native_ar_actual_bound_service_publishes_exact_native_evidence(tmp_path
         raise ar_verified.VerificationUncertain('offline integration of exact native fallback')
 
     monkeypatch.setattr(native, 'robust_polynomials', calculate_and_compare)
-    monkeypatch.setattr(ar_verified, 'verified_set', force_exact)
+    monkeypatch.setattr(ar_verified, 'verify_polynomials', force_exact)
     draft = ar_workflow(project, contract, name='real-bound-native-success')
     state = execute_workflow(project, draft)
     assert state.status == 'completed'
