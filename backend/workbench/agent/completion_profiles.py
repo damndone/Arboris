@@ -6,16 +6,25 @@ from ..canonical import sha256_canonical
 NATIVE_COMPANIONS = {'survival_cox', 'iv_2sls', 'panel_ols', 'did'}
 
 
-def verified_iv_ar(products, main_ref, main, ref, artifact):
+def iv_ar_wrapper(artifact):
+    """Recognize this producer's wrapper; recognition alone certifies no result."""
     if artifact is None or artifact.artifact_type != 'post_estimation':
         return None
     wrapper = artifact.payload or {}
+    return (wrapper if wrapper.get('schema_version') == 'workbench.workflow.post-estimation/v1'
+            and isinstance(wrapper.get('result'), dict)
+            and wrapper['result'].get('contract') == 'iv-ar.evidence.v1' else None)
+
+
+def verified_iv_ar(products, main_ref, main, ref, artifact):
+    wrapper = iv_ar_wrapper(artifact)
+    if wrapper is None:
+        return None
     value = wrapper.get('result') or {}
     source = wrapper.get('source') or {}
     model = products.load(main_ref)
     companion = products.load({**main_ref, 'artifact_id': main['model_id'] + '.completion'})
-    if (wrapper.get('schema_version') != 'workbench.workflow.post-estimation/v1'
-            or value.get('contract') != 'iv-ar.evidence.v1' or model is None or companion is None
+    if (model is None or companion is None
             or source.get('model_run_id') != main_ref['run_id']
             or source.get('model_artifact_id') != main['model_id']
             or value.get('model_run_id') != main_ref['run_id'] or value.get('model_id') != main['model_id']
@@ -80,7 +89,9 @@ def companion_model(products, ref, artifact, model):
         diagnostic = products.load({'run_id': ref['run_id'], 'artifact_id': artifact_id})
         if diagnostic is None or diagnostic.sha256 != value.get('diagnostic_artifact_sha256', {}).get(artifact_id):
             return None
-    return {**model, 'point_estimation_fingerprint': value['point_estimation_fingerprint'],
+    return {**model, **({'point_definition': value.get('point_definition')}
+                       if model['model_type'] == 'iv_2sls' else {}),
+            'point_estimation_fingerprint': value['point_estimation_fingerprint'],
             'analysis_sample_fingerprint': value['analysis_sample_fingerprint']}
 
 

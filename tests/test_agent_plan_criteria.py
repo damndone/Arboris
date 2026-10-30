@@ -53,6 +53,25 @@ def test_legacy_approved_text_cannot_become_complete_from_a_playbook_pass(tmp_pa
     assert plan.steps[0].completed_operation_ids == ()
 
 
+@pytest.mark.parametrize('status', ['draft', 'needs_approval'])
+def test_unbound_delivery_guidance_distinguishes_original_confirmation_from_plan_approval(tmp_path, status):
+    contract, evidence = completion_fixture(tmp_path)
+    plan, repository = approved_plan(tmp_path, contract, evidence, approve=False)
+    plan = replace(plan, status=status)
+    store = plans.PlanStore(repository.root)
+    before = {path.name: path.read_bytes() for path in store.root.glob('*.jsonl')}
+
+    checked = delivery_check(tmp_path, plan)
+
+    assert checked['status'] == 'partial'
+    assert checked['criteria_verification']['unbound_slots'] == [
+        {'criterion_index': 0}, {'step_id': 'fit', 'output_index': 0}]
+    assert 'Ask' in checked['next_step'] and 'human-confirmed' in checked['next_step']
+    assert 'Auto' in checked['next_step'] and 'approved plan' in checked['next_step']
+    assert 'needs_approval' in checked['next_step']
+    assert {path.name: path.read_bytes() for path in store.root.glob('*.jsonl')} == before
+
+
 @pytest.mark.parametrize('approved', [False, True])
 def test_unbound_slots_can_gain_machine_definitions_but_need_explicit_approval(tmp_path, approved):
     contract, evidence = completion_fixture(tmp_path)

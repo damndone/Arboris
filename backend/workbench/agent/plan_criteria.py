@@ -301,12 +301,30 @@ def _model_output(products, definition, record, state, refs, source, definitions
         if model is None or model.get('model_id') != ref['artifact_id'] or not _source(products, source, ref):
             raise ValueError('model_or_source_unverified')
         frozen = branch.get('branch_spec') or {}
+        outcome = model.get('y_column')
+        if model.get('model_type') == 'iv_2sls':
+            actual = model.get('point_definition')
+            kernel = products.load({**ref, 'artifact_id': 'inference_kernel_' + ref['artifact_id']}).payload
+            if (not isinstance(actual, dict)
+                    or sha256_canonical(actual) != model.get('point_estimation_fingerprint')
+                    or actual.get('family') != 'iv_2sls' or actual.get('intercept') is not True
+                    or actual.get('outcome') != [requested['outcome']]
+                    or actual.get('exogenous') != ['Intercept', *requested['predictors']]
+                    or actual.get('endogenous') != spec.get('iv_endog')
+                    or actual.get('instruments') != spec.get('iv_instruments')
+                    or len(str(actual.get('actual_design_sha256', ''))) != 64
+                    or requested.get('categorical') or requested.get('polynomials')
+                    or kernel.get('param_names') != actual['exogenous'] + actual['endogenous']
+                    or kernel.get('nobs') != model['nobs']
+                    or kernel.get('covariance_estimator') != frozen.get('covariance')):
+                raise ValueError('iv_runtime_definition_unverified')
+            outcome = actual['outcome'][0]
         if (frozen.get('model_family') != spec.get('model_family', 'ols')
                 or frozen.get('outcome') != requested['outcome']
                 or frozen.get('predictors') != requested['predictors']
                 or frozen.get('categorical', []) != requested.get('categorical', [])
                 or frozen.get('polynomials', []) != requested.get('polynomials', [])
-                or model.get('y_column') != requested['outcome']):
+                or outcome != requested['outcome']):
             raise ValueError('model_scientific_spec_changed')
         for key, value in spec.items():
             if key in {'branches', 'source'}:
@@ -331,6 +349,103 @@ def _model_output(products, definition, record, state, refs, source, definitions
         verified.append({**ref, 'sha256': artifact.sha256})
     if any(ref not in [{'run_id': b['run_id'], 'artifact_id': b['model_id']} for b in branches] for ref in refs):
         raise ValueError('unrelated_artifact_reference')
+    return verified
+
+
+def _iv_ar_output(products, definition, record, state, refs, source, definitions,
+                  proofs, read_record, approved):
+    from .completion_profiles import iv_ar_wrapper, verified_iv_ar
+    from .postestimation_steps import model_step_reference
+    step, _ = _upstream(record, definition['operation']['step_id'], definitions)
+    input_source = _step_source(products, record, step, source, definitions)
+    spec = step['spec']
+    symbolic = model_step_reference(spec['model_ref'])
+    candidates = []
+    if symbolic is not None:
+        producer, produced = _upstream(record, symbolic[0], definitions)
+        candidates = [(record, producer, produced, branch) for branch in produced.get('model_branches', [])
+                      if branch.get('branch_id') == symbolic[1]]
+    else:
+        target = {'run_id': spec.get('model_run_id', record.target['run_id']), 'artifact_id': spec['model_ref']}
+        for producer in definitions.values():
+            if producer['operation_id'] != 'model.genesis':
+                continue
+            matches = [p for p in proofs if p['workflow_step_id'] == producer['step_id']]
+            if len(matches) != 1:
+                continue
+            owner, executed, produced, _ = read_record(matches[0])
+            if executed['operation_id'] != producer['operation_id'] or executed['spec'] != producer['spec']:
+                raise ValueError('upstream_scientific_spec_changed')
+            if not approved and not _human_confirmation(owner):
+                raise ValueError('human_request_confirmation_or_approved_basis_required')
+            candidates.extend((owner, executed, produced, b) for b in produced.get('model_branches', [])
+                if {'run_id': b.get('run_id'), 'artifact_id': b.get('model_id')} == target)
+    if len(candidates) != 1:
+        raise ValueError('iv_ar_model_producer_unverified')
+    owner, producer, produced, branch = candidates[0]
+    if producer['operation_id'] != 'model.genesis':
+        raise ValueError('typed_model_producer_not_available')
+    model_source = _step_source(products, owner, producer, source, definitions)
+    if input_source != model_source:
+        raise ValueError('iv_ar_model_source_unverified')
+    model_refs = [{'run_id': b['run_id'], 'artifact_id': b['model_id']} for b in produced['model_branches']]
+    _model_output(products, {'operation': producer}, owner, produced, model_refs, source, definitions)
+    main_ref = {'run_id': branch['run_id'], 'artifact_id': branch['model_id']}
+    main = products.model(main_ref, products.load(main_ref))
+    verified = []
+    for ref in refs:
+        artifact = products.load(ref)
+        wrapper = iv_ar_wrapper(artifact)
+        origin = (wrapper or {}).get('source') or {}
+        execution = (wrapper or {}).get('execution') or {}
+        if (not _published(record, state, ref) or wrapper is None
+                or origin.get('workflow_id') != record.outputs.get('workflow_id')
+                or origin.get('workflow_step_id') != state['step_id']
+                or origin.get('workflow_step_fingerprint') != state['fingerprint']
+                or origin.get('run_id') != record.target['run_id']
+                or execution.get('workflow_id') != record.outputs.get('workflow_id')
+                or execution.get('plan_fingerprint') != record.execution.get('workflow_plan_fingerprint')
+                or any(origin.get(k) != input_source[k] for k in ('artifact_id', 'sha256', 'node_ref'))
+                or not _source(products, source, ref)):
+            raise ValueError('iv_ar_published_source_unverified')
+        region = verified_iv_ar(products, main_ref, main, ref, artifact)
+        if not isinstance(region, dict):
+            raise ValueError('iv_ar_model_binding_unverified')
+        certificate = region.get('global_certification') or {}
+        computation = region.get('computation') or {}
+        common = {'coefficient_order', 'cauchy_bound', 'distinct_real_roots', 'root_brackets',
+                  'cell_accepted', 'boundary_tolerance'}
+        if (certificate.get('status') != 'certified'
+                or certificate.get('arithmetic') != 'exact_binary64_input_rationals'
+                or not common <= certificate.keys()
+                or region.get('kind') not in {'interval', 'singleton', 'whole_line', 'ray_below',
+                    'ray_above', 'union_of_rays', 'disjoint', 'empty'}
+                or not isinstance(region.get('components'), list)
+                or not region.get('critical_binary64_ratio') or region.get('coverage_certified') is not False):
+            raise ValueError('iv_ar_global_certificate_unverified')
+        if region.get('method') == 'robust_hc0':
+            if computation.get('certification_target') != 'original_binary64_observations':
+                raise ValueError('iv_ar_original_input_unverified')
+            if computation.get('path') == 'verified_numpy':
+                reduction = certificate.get('reduction') or {}
+                if (certificate.get('algorithm') != 'gamma_moments_rational_intervals_sturm_bernstein_v1'
+                        or certificate.get('input_topology_certified') is not True
+                        or not all(certificate.get(k) for k in ('numerator_coefficient_bounds',
+                            'denominator_coefficient_bounds', 'denominator_proof'))
+                        or not {'root_proofs', 'complement_proof'} <= certificate.keys()
+                        or reduction.get('rows') != main['nobs']
+                        or len(str(reduction.get('input_sha256', ''))) != 64
+                        or not all(reduction.get(k) for k in ('gamma_steps', 'gamma', 'underflow_allowance', 'moment_bounds'))):
+                    raise ValueError('iv_ar_original_input_unverified')
+            elif computation.get('path') != 'exact_fallback':
+                raise ValueError('iv_ar_original_input_unverified')
+        elif region.get('method') != 'homoskedastic':
+            raise ValueError('iv_ar_method_unverified')
+        if (region.get('method') == 'homoskedastic' or computation.get('path') == 'exact_fallback') and (
+                certificate.get('algorithm') != 'sturm_sign_decomposition_v1'
+                or not certificate.get('numerator') or not certificate.get('denominator')):
+            raise ValueError('iv_ar_global_certificate_unverified')
+        verified.append({**ref, 'sha256': artifact.sha256})
     return verified
 
 
@@ -440,7 +555,7 @@ def verify(project_root, plan, products, selected_evidence=None):
             if plan.status == 'needs_approval':
                 raise ValueError('approved_requirement_basis_unverified')
             operation_id = definition['operation']['operation_id']
-            if operation_id not in {'model.genesis', 'model.joint_f_test', 'report.compose', 'data.subset'}:
+            if operation_id not in {'model.genesis', 'model.joint_f_test', 'report.compose', 'data.subset', 'iv.ar_confidence'}:
                 raise ValueError('typed_artifact_verifier_not_available: ' + operation_id)
             spec = definition['operation']['spec']
             matches = [p for p in proofs if p['requirement_id'] == definition['id']] if proof_valid else []
@@ -455,6 +570,9 @@ def verify(project_root, plan, products, selected_evidence=None):
                 raise ValueError('human_request_confirmation_or_approved_basis_required')
             if operation_id == 'report.compose':
                 row['verified_artifacts'] = _report_output(products, record, state, proof['artifacts'], source, selected_evidence)
+            elif operation_id == 'iv.ar_confidence':
+                row['verified_artifacts'] = _iv_ar_output(products, definition, record, state, proof['artifacts'], source,
+                    definitions_by_step, proofs, lambda p: _record(project_root, p, records), approved)
             elif operation_id == 'data.subset':
                 _upstream(record, step['step_id'], definitions_by_step)
                 binding = _dataset_binding(products, record, step, state, source, definitions_by_step, ())

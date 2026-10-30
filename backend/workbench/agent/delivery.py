@@ -96,7 +96,9 @@ def delivery_state(project_root, plan, *, suggest=False):
     if checked['status'] == 'partial':
         result['next_step'] = ('Approved criteria or expected outputs remain unverified. Inspect criteria_verification; '
             'bind existing producer records and registered artifacts without rerunning. Missing machine definitions '
-            'need a visible plan revision and approval; unsupported claims remain partial for human takeover.')
+            'need a visible plan revision. Auto requires its approved plan basis; Ask may reuse the exact '
+            'human-confirmed executed request. A plan marked needs_approval still requires approval. '
+            'Unsupported claims remain partial for human takeover; do not erase promises or invent receipts.')
     return result, evidence
 
 

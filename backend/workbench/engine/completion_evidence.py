@@ -32,6 +32,8 @@ def publish_completion_evidence(ctx, env, primary, *, point_definition, retained
         'diagnostic_artifact_ids': list(diagnostic_artifact_ids),
         'diagnostic_artifact_sha256': {key: registered[key] for key in diagnostic_artifact_ids},
         'scientific_validity': 'not_certified'}
+    if primary['model_type'] == 'iv_2sls':
+        payload['point_definition'] = point_definition
     path = env.run_root / 'model_results' / f'{model_id}.completion.json'
     write_json(path, payload)
     register_artifact(env.run_root, f'{model_id}.completion', path, 'analysis_completion_evidence',

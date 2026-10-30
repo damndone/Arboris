@@ -14,7 +14,7 @@ from typing import Any
 from ..canonical import sha256_canonical
 from .context_compiler import read_completion_artifact, read_completion_dataset_source, read_arima_completion_product, read_garch_completion_product, completion_candidate_refs, registered_model_completion_ref
 from .completion_sensitivity import INFLUENCE_DISCLOSURE, MAX_OPTIONS, SENSITIVITY_NEXT_STEP, influence_option, specification_options
-from .completion_profiles import NATIVE_COMPANIONS, companion_model, native_diagnostics, native_findings, verified_iv_ar, with_iv_ar
+from .completion_profiles import NATIVE_COMPANIONS, companion_model, iv_ar_wrapper, native_diagnostics, native_findings, verified_iv_ar, with_iv_ar
 from .completion_targets import TARGET_SCHEMA, computed_result, matches_target, requested_targets
 from .plan_criteria import REQUIREMENTS_SCHEMA, PROOFS_SCHEMA
 
@@ -289,6 +289,11 @@ def _evidence_binding_errors(products, source, evidence):
                 continue
             field = f'{slot}[{index}]'
             errors.append(field + ': no verified source-bound registered artifact')
+            if (slot == 'results' and iv_ar_wrapper(artifact) is not None
+                    and _source_bound(products, source, ref)):
+                errors.append('This iv.ar_confidence artifact belongs in completion_evidence.diagnostics: '
+                    + json.dumps(ref, ensure_ascii=False)
+                    + '. Nothing was saved or moved; this role hint does not certify its model, source or AR proof')
             replacement = (_registered_alias_replacement(products, source, ref)
                            if slot in ('models', 'results') else None)
             if replacement is not None:
