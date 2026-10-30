@@ -162,8 +162,127 @@ def _human_confirmation(record):
             and confirmation.get('fingerprint') == record.proposal_fingerprint)
 
 
-def _model_output(products, definition, record, state, refs, source):
+def _published(record, state, ref):
+    return (f"{ref['run_id']}:{ref['artifact_id']}" in state.get('artifact_ids', [])
+        or ref['run_id'] == record.target['run_id'] and ref['artifact_id'] in state.get('artifact_ids', []))
+
+
+def _upstream(record, step_id, definitions, *, scientific=True):
+    """Project an original completed producer, never resolve a live workflow."""
+    workflow = record.outputs['workflow_state']
+    if (workflow['workflow_id'] != record.execution.get('workflow_id')
+            or not workflow.get('plan_fingerprint')
+            or workflow['plan_fingerprint'] != record.execution.get('workflow_plan_fingerprint')):
+        raise ValueError('workflow_binding_unverified')
+    matches = [s for s in record.changes['steps'] if s['step_id'] == step_id]
+    state = workflow['steps'].get(step_id)
+    if len(matches) != 1 or not state or state['status'] != 'completed' or state.get('error'):
+        raise ValueError('producer_step_not_completed')
+    step = matches[0]
+    if scientific:
+        fixed = definitions.get(step_id)
+        if fixed is not None:
+            if fixed['operation_id'] != step['operation_id'] or fixed['spec'] != step['spec']:
+                raise ValueError('upstream_scientific_spec_changed')
+        elif not _human_confirmation(record):
+            # An Auto execution receipt is not human approval of an unspecified
+            # scientific input. Ask may reuse the exact whole request confirmation.
+            raise ValueError('upstream_scientific_definition_unverified')
+    return step, state
+
+
+def _dataset_binding(products, record, step, state, source, definitions, seen):
+    from .workflow_runtime_parts.constants import _PRODUCED_DATASET_SCHEMA
+    if step['operation_id'] != 'data.subset':
+        raise ValueError('typed_dataset_verifier_not_available: ' + step['operation_id'])
+    produced = state.get('produced_dataset') or {}
+    if not isinstance(produced, dict):
+        raise ValueError('produced_dataset_unverified')
+    ref = {key: produced.get(key) for key in ('run_id', 'artifact_id')}
+    artifact = products.load(ref)
+    if (produced.get('schema_version') != _PRODUCED_DATASET_SCHEMA
+            or produced.get('run_id') != record.target['run_id'] or not produced.get('node_ref')
+            or produced.get('dataset_kind') != 'derived_data'
+            or artifact is None or artifact.artifact_type != 'derived_data'
+            or artifact.sha256 != produced.get('content_sha256') or not _published(record, state, ref)
+            or not state.get('result_fingerprint')
+            or produced.get('result_fingerprint') != state['result_fingerprint']):
+        raise ValueError('produced_dataset_unverified')
+    parent = _step_source(products, record, step, source, definitions, seen)
+    if not _source(products, parent, ref):
+        raise ValueError('produced_dataset_source_unverified')
+    return {**ref, 'sha256': artifact.sha256, 'node_ref': produced['node_ref']}
+
+
+def _step_source(products, record, step, source, definitions, seen=()):
+    if step['step_id'] in seen:
+        raise ValueError('cyclic_source_binding')
+    commitment = step['spec'].get('source')
+    if commitment is None:
+        from .workflow_contracts import WORKFLOW_STEP_SPEC_CONTRACTS
+        pending, visited = list(step.get('depends_on', [])), set()
+        while pending:
+            dependency = pending.pop()
+            if dependency in visited:
+                continue
+            visited.add(dependency)
+            ancestor, _ = _upstream(record, dependency, definitions, scientific=False)
+            contract = WORKFLOW_STEP_SPEC_CONTRACTS.get(ancestor['operation_id'])
+            if contract is None or contract.produces_dataset:
+                raise ValueError('implicit_dataset_source_unverified; declare a supported persisted source')
+            pending.extend(ancestor.get('depends_on', []))
+            if ancestor['spec'].get('source'):
+                pending.append(ancestor['spec']['source']['from_step'])
+        ref = {key: record.target[key] for key in ('run_id', 'artifact_id')}
+        artifact = products.load(ref)
+        if artifact is None or not _source(products, source, ref):
+            raise ValueError('workflow_target_source_unverified')
+        return {**ref, 'sha256': artifact.sha256, 'node_ref': record.target['node_ref']}
+    # source.from_step itself declares the edge; the compiler inserts it into
+    # depends_on while the immutable original proposal may omit that list.
+    if commitment['output'] != 'produced_dataset':
+        raise ValueError('source_dependency_unverified')
+    producer, state = _upstream(record, commitment['from_step'], definitions)
+    return _dataset_binding(products, record, producer, state, source, definitions, (*seen, step['step_id']))
+
+
+def _model_kernel(products, record, state, branch, source):
+    from ..artifacts import read_json
+    from .context_compiler import read_completion_dataset_source
+    from ..contracts.model.inference_kernel import validate_inference_kernel
+    model_id = branch.get('model_id')
+    frozen = branch.get('branch_spec')
+    if not isinstance(model_id, str) or not model_id or not isinstance(frozen, dict) or frozen.get('by_group'):
+        raise ValueError('single_model_binding_unverified')
+    ref = {'run_id': branch['run_id'], 'artifact_id': model_id}
+    kernel_ref = {**ref, 'artifact_id': 'inference_kernel_' + model_id}
+    kernel = products.load(kernel_ref)
+    if (model_id not in branch.get('artifact_ids', []) or not _published(record, state, ref)
+            or kernel is None or kernel.artifact_type != 'inference_kernel'
+            or kernel.sha256 != branch.get('inference_kernel_sha256')
+            or (kernel.payload or {}).get('model_id') != model_id):
+        raise ValueError('inference_kernel_unverified')
+    validate_inference_kernel(kernel.payload)
+    run = products.runs / ref['run_id']
+    manifest = read_json(run / 'run_manifest.json')
+    if not isinstance(manifest, dict):
+        raise ValueError('model_run_manifest_unverified')
+    origin = manifest.get('dataset_source') or {}
+    lineage = read_completion_dataset_source(run)
+    if (manifest.get('status') != 'completed' or lineage is None
+            or lineage['source'] != {k: source[k] for k in ('run_id', 'artifact_id', 'sha256')}
+            or origin.get('source_run_id') != source['run_id']
+            or origin.get('source_artifact_id') != source['artifact_id']
+            or origin.get('source_sha256') != source['sha256'] or origin.get('op_node_id') != source['node_ref']
+            or not _source(products, source, ref)):
+        raise ValueError('model_input_source_unverified')
+    return ref
+
+
+def _model_output(products, definition, record, state, refs, source, definitions):
     spec = definition['operation']['spec']
+    step, _ = _upstream(record, definition['operation']['step_id'], definitions)
+    input_source = _step_source(products, record, step, source, definitions)
     branches = state.get('model_branches') or []
     expected = spec.get('branches') or []
     if not expected or len(branches) != len(expected):
@@ -174,21 +293,35 @@ def _model_output(products, definition, record, state, refs, source):
         if len(candidates) != 1:
             raise ValueError('model_branch_ambiguous')
         branch = candidates[0]
-        ref = {'run_id': branch['run_id'], 'artifact_id': branch['model_id']}
+        ref = _model_kernel(products, record, state, branch, input_source)
         if ref not in refs or f"{ref['run_id']}:{ref['artifact_id']}" not in state.get('artifact_ids', []):
             raise ValueError('model_not_published_by_this_step')
         artifact = products.load(ref)
         model = products.model(ref, artifact)
-        if model is None or not _source(products, source, ref):
+        if model is None or model.get('model_id') != ref['artifact_id'] or not _source(products, source, ref):
             raise ValueError('model_or_source_unverified')
         frozen = branch.get('branch_spec') or {}
         if (frozen.get('model_family') != spec.get('model_family', 'ols')
                 or frozen.get('outcome') != requested['outcome']
                 or frozen.get('predictors') != requested['predictors']
+                or frozen.get('categorical', []) != requested.get('categorical', [])
+                or frozen.get('polynomials', []) != requested.get('polynomials', [])
                 or model.get('y_column') != requested['outcome']):
             raise ValueError('model_scientific_spec_changed')
         for key, value in spec.items():
-            if key not in {'branches', 'source'} and key in frozen and frozen[key] != value:
+            if key in {'branches', 'source'}:
+                continue
+            if key not in frozen:
+                raise ValueError('model_scientific_fields_unverified: ' + key)
+            expected_value = requested.get('covariance', value) if key == 'covariance' else value
+            if frozen[key] != expected_value:
+                raise ValueError('model_scientific_spec_changed')
+        for key, value in requested.items():
+            if key == 'branch_id':
+                continue
+            if key not in frozen:
+                raise ValueError('model_scientific_fields_unverified: branches.' + key)
+            if frozen[key] != value:
                 raise ValueError('model_scientific_spec_changed')
         if model.get('model_type') in {'panel_ols', 'iv_2sls', 'survival_cox', 'did'}:
             companion = products.load({**ref, 'artifact_id': branch['model_id'] + '.completion'})
@@ -201,7 +334,27 @@ def _model_output(products, definition, record, state, refs, source):
     return verified
 
 
-def _joint_f_output(products, definition, record, state, refs, source):
+def _joint_f_output(products, definition, record, state, refs, source, definitions):
+    step, _ = _upstream(record, definition['operation']['step_id'], definitions)
+    candidates = []
+    for dependency in step.get('depends_on', []):
+        producer, produced_state = _upstream(record, dependency, definitions, scientific=False)
+        for branch in produced_state.get('model_branches') or []:
+            if branch.get('branch_id') == step['spec']['branch_id']:
+                candidates.append((producer, produced_state, branch))
+    if len(candidates) != 1:
+        raise ValueError('model_branch_ambiguous')
+    producer, produced_state, branch = candidates[0]
+    _upstream(record, producer['step_id'], definitions)
+    if producer['operation_id'] != 'model.genesis':
+        raise ValueError('typed_model_producer_not_available')
+    input_source = _step_source(products, record, producer, source, definitions)
+    model_ref = _model_kernel(products, record, produced_state, branch, input_source)
+    producer_refs = [{'run_id': b['run_id'], 'artifact_id': b['model_id']}
+                     for b in produced_state['model_branches']]
+    _model_output(products, {'operation': producer}, record, produced_state, producer_refs, source, definitions)
+    if _step_source(products, record, step, source, definitions) != input_source:
+        raise ValueError('joint_f_model_source_unverified')
     verified = []
     for ref in refs:
         qualified = f"{ref['run_id']}:{ref['artifact_id']}"
@@ -211,10 +364,16 @@ def _joint_f_output(products, definition, record, state, refs, source):
         payload = artifact.payload if artifact else None
         result = (payload or {}).get('result') or {}
         origin = (payload or {}).get('source') or {}
+        if (origin.get('model_run_id') != model_ref['run_id'] or origin.get('model_artifact_id') != model_ref['artifact_id']
+                or result.get('branch_id') != branch['branch_id']
+                or result.get('covariance') != branch['branch_spec'].get('covariance')):
+            raise ValueError('joint_f_model_binding_unverified')
         if (artifact is None or artifact.artifact_type != 'statistical_test'
                 or payload.get('schema_version') != 'workbench.workflow.post-estimation/v1'
                 or origin.get('workflow_step_id') != state['step_id']
                 or origin.get('workflow_id') != record.outputs.get('workflow_id')
+                or origin.get('workflow_step_fingerprint') != state['fingerprint']
+                or any(origin.get(k) != input_source[k] for k in ('artifact_id', 'sha256', 'node_ref'))
                 or result.get('schema_version') != 'workbench.model.joint-f-test/v1'
                 or result.get('test') != 'joint_f_test' or result.get('distribution') != 'F'
                 or result.get('term_selectors') != definition['operation']['spec'].get('term_selectors')
@@ -273,6 +432,7 @@ def verify(project_root, plan, products, selected_evidence=None):
     covered = {sha256_canonical(slot) for item in definitions for slot in item['covers']}
     result['unbound_slots'] = [slot for slot in required if sha256_canonical(slot) not in covered]
     records = {}
+    definitions_by_step = {d['operation']['step_id']: d['operation'] for d in definitions}
     for definition in definitions:
         row = {'id': definition['id'], 'status': 'unverified', 'reason': '', 'verified_artifacts': []}
         result['requirements'].append(row)
@@ -280,13 +440,9 @@ def verify(project_root, plan, products, selected_evidence=None):
             if plan.status == 'needs_approval':
                 raise ValueError('approved_requirement_basis_unverified')
             operation_id = definition['operation']['operation_id']
-            if operation_id not in {'model.genesis', 'model.joint_f_test', 'report.compose'}:
+            if operation_id not in {'model.genesis', 'model.joint_f_test', 'report.compose', 'data.subset'}:
                 raise ValueError('typed_artifact_verifier_not_available: ' + operation_id)
             spec = definition['operation']['spec']
-            if 'source' in spec:
-                raise ValueError('symbolic_source_verifier_not_available; upstream scientific definitions remain unverified')
-            if isinstance(spec.get('model_ref'), dict) and 'from_step' in spec['model_ref']:
-                raise ValueError('symbolic_model_verifier_not_available; bind a registered model reference')
             matches = [p for p in proofs if p['requirement_id'] == definition['id']] if proof_valid else []
             if len(matches) != 1:
                 raise ValueError('unique_execution_evidence_required')
@@ -299,9 +455,15 @@ def verify(project_root, plan, products, selected_evidence=None):
                 raise ValueError('human_request_confirmation_or_approved_basis_required')
             if operation_id == 'report.compose':
                 row['verified_artifacts'] = _report_output(products, record, state, proof['artifacts'], source, selected_evidence)
+            elif operation_id == 'data.subset':
+                _upstream(record, step['step_id'], definitions_by_step)
+                binding = _dataset_binding(products, record, step, state, source, definitions_by_step, ())
+                if proof['artifacts'] != [{k: binding[k] for k in ('run_id', 'artifact_id')}]:
+                    raise ValueError('produced_dataset_proof_unverified')
+                row['verified_artifacts'] = [{k: binding[k] for k in ('run_id', 'artifact_id', 'sha256')}]
             else:
                 reader = _model_output if operation_id == 'model.genesis' else _joint_f_output
-                row['verified_artifacts'] = reader(products, definition, record, state, proof['artifacts'], source)
+                row['verified_artifacts'] = reader(products, definition, record, state, proof['artifacts'], source, definitions_by_step)
             row['status'] = 'verified'
             # A digest is recorded by the verifier, not accepted from the caller.
             row['reason'] = 'verified_registered_producer; request_sha256=' + request_sha

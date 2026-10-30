@@ -309,3 +309,238 @@ def test_final_publication_keeps_findings_and_explains_unverified_obligations(tm
     rendered = publication(kept + '\n' + claim, checked, language)
     assert kept in rendered and label in rendered
     assert claim not in rendered
+
+
+@pytest.fixture(scope='module')
+def symbolic_products(tmp_path_factory):
+    from tests import test_read_only_analysis as sample
+    rng = np.random.default_rng(602)
+    x, z = rng.normal(size=(2, 96))
+    frame = pd.DataFrame({'row': np.arange(96), 'x': x, 'z': z,
+                          'wage': 2 + x + z / 3 + rng.normal(size=96)})
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(sample, '_frame', lambda: frame)
+        runtime = sample._Fixture(tmp_path_factory.mktemp('criteria-symbolic'))
+    fit = {'step_id': 'fit', 'operation_id': 'model.genesis', 'spec': {
+        'model_family': 'ols', 'covariance': 'robust',
+        'branches': [{'branch_id': 'main', 'outcome': 'wage', 'predictors': ['x', 'z']}]}}
+    describe = {'step_id': 'explore', 'operation_id': 'statistical.explore', 'spec': {
+        'operation': 'summarize_detail', 'selected_columns': ['x', 'z'], 'options': {}}}
+    fit['depends_on'] = ['explore']
+    subset = {'step_id': 'subset', 'operation_id': 'data.subset', 'spec': {
+        'columns': ['row', 'x', 'z', 'wage'],
+        'filters': [{'column': 'row', 'op': 'not_in', 'value': [0, 1, 2]}]}}
+    alternate = deepcopy(fit)
+    alternate['step_id'] = 'alternate'
+    alternate['spec']['source'] = {'from_step': 'subset', 'output': 'produced_dataset'}
+    test = {'step_id': 'joint', 'operation_id': 'model.joint_f_test', 'depends_on': ['alternate', 'explore'], 'spec': {
+        'branch_id': 'main', 'term_selectors': [{'kind': 'linear', 'column': 'x'}],
+        'source': {'from_step': 'subset', 'output': 'produced_dataset'}}}
+    report = {'step_id': 'report', 'operation_id': 'report.compose',
+              'depends_on': ['fit', 'alternate', 'joint'], 'spec': {'sections': ['models']}}
+    pending = runtime.propose([describe, fit, subset, alternate, test, report])
+    proposal = runtime.orchestrator.proposal_store.latest_revision(pending['proposal']['proposal_id'])
+    record = runtime.orchestrator.confirm_proposal(proposal.proposal_id, revision=proposal.revision,
+        fingerprint=proposal.fingerprint, actor_type='user', current_context_fingerprint=sample.FINGERPRINT,
+        current_active_head_run_id=runtime.run_id)
+    record = asyncio.run(runtime.orchestrator.execute_confirmed_operation(record.record_id,
+        project_root=runtime.project_root, current_context_fingerprint=sample.FINGERPRINT,
+        current_active_head_run_id=runtime.run_id))
+    assert record.status == 'completed', record.error
+    state = record.outputs['workflow_state']['steps']
+    references = {}
+    for step_id in ['fit', 'alternate']:
+        branch = state[step_id]['model_branches'][0]
+        references[step_id] = {'run_id': branch['run_id'], 'artifact_id': branch['model_id']}
+    references['subset'] = {k: state['subset']['produced_dataset'][k] for k in ['run_id', 'artifact_id']}
+    references['joint'] = {'run_id': runtime.run_id, 'artifact_id': state['joint']['artifact_ids'][0]}
+    references['report'] = {'run_id': runtime.run_id, 'artifact_id': next(
+        a for a in state['report']['artifact_ids'] if a.endswith('_html'))}
+    digest = hashlib.sha256((runtime.project_root / 'runs' / runtime.run_id / 'data.csv').read_bytes()).hexdigest()
+    return runtime, record, references, digest
+
+
+def symbolic_plan(products, change=None, *, approve=True):
+    runtime, record, refs, digest = products
+    definitions = [{**requirement({k: deepcopy(step[k]) for k in ['step_id', 'operation_id', 'spec']}),
+                    'id': step['step_id']} for step in record.changes['steps'] if step['step_id'] != 'explore']
+    contract = {'scope': 'analysis', 'playbooks': ['ols'], 'source': {
+        'run_id': runtime.run_id, 'artifact_id': runtime.artifact_id, 'sha256': digest}, 'requirements': definitions}
+    evidence = {'models': [refs['fit']], 'sensitivity': [refs['alternate']], 'report': refs['report'],
+        'requirements': [{'requirement_id': step['step_id'], 'operation_record_id': record.record_id,
+            'workflow_step_id': step['step_id'], 'artifacts': [refs[step['step_id']]]}
+            for step in record.changes['steps'] if step['step_id'] != 'explore']}
+    if change:
+        change(contract, evidence)
+    return approved_plan(runtime.project_root, contract, evidence, approve=approve)[0]
+
+
+@pytest.mark.parametrize('approve', [False, True])
+def test_symbolic_source_joint_f_and_report_reuse_real_products_after_restart(symbolic_products, monkeypatch, approve):
+    from workbench.agent import workflow_runtime, postestimation_steps
+    from workbench.agent.completion import _Products
+    from workbench.agent.plan_criteria import verify
+    runtime, record, *_ = symbolic_products
+    plan = symbolic_plan(symbolic_products, approve=approve)
+    def forbidden(*args, **kwargs):
+        pytest.fail('delivery verification attempted execution or fitting')
+    monkeypatch.setattr(workflow_runtime, 'build_workflow_step_executor', forbidden)
+    monkeypatch.setattr(postestimation_steps, '_resolve_model_binding', forbidden)
+    records_before = [r.to_dict() for r in runtime.orchestrator.operation_store.list_records()]
+    first = verify(runtime.project_root, plan, _Products(runtime.project_root), plan.completion_evidence)
+    assert first['status'] == 'requirements_met', first
+    assert {row['id'] for row in first['requirements'] if row['status'] == 'verified'} == {
+        'fit', 'subset', 'alternate', 'joint', 'report'}
+    restored = plans.Plan.from_dict(json.loads(json.dumps(plan.to_dict())))
+    assert verify(runtime.project_root, restored, _Products(runtime.project_root), restored.completion_evidence) == first
+    assert [r.to_dict() for r in runtime.orchestrator.operation_store.list_records()] == records_before
+    assert plan.steps[0].completed_operation_ids == ()
+
+
+@pytest.mark.parametrize('change,reason', [
+    ('upstream_spec', 'upstream_scientific_spec_changed'),
+    ('source_identity', 'model_input_source_unverified'),
+    ('source_sha', 'produced_dataset_unverified'),
+    ('missing_binding', 'produced_dataset_unverified'),
+    ('branch', 'model_branch_ambiguous'),
+    ('model_id', 'single_model_binding_unverified'),
+    ('model_packet', 'model_or_source_unverified'),
+    ('kernel', 'inference_kernel_unverified'),
+    ('missing_kernel', 'inference_kernel_unverified'),
+    ('joint_model', 'joint_f_model_binding_unverified'),
+    ('joint_covariance', 'joint_f_model_binding_unverified'),
+    ('joint_branch', 'joint_f_model_binding_unverified'),
+    ('joint_selectors', 'typed_joint_f_result_unverified'),
+])
+def test_symbolic_binding_rejects_changed_or_missing_provenance(symbolic_products, monkeypatch, change, reason):
+    from workbench.agent.completion import _Products
+    from workbench.agent.plan_criteria import verify
+    from workbench.agent.operation_records import OperationRecordStore
+    runtime, record, refs, _ = symbolic_products
+    plan = symbolic_plan(symbolic_products)
+    changed = deepcopy(record.outputs)
+    states = changed['workflow_state']['steps']
+    if change == 'upstream_spec':
+        def revise(contract, evidence):
+            next(d for d in contract['requirements'] if d['id'] == 'subset')['operation']['spec']['filters'][0]['value'] = [0, 1]
+        plan = symbolic_plan(symbolic_products, revise)
+    elif change == 'source_identity':
+        # Same bytes under another registered identity cannot replace the
+        # exact source the model's persisted input declaration names.
+        from workbench.artifacts import read_json, register_artifact
+        root = runtime.project_root / 'runs' / runtime.run_id
+        index = root / 'artifacts_index.json'
+        original = index.read_bytes()
+        entry = next(a for a in read_json(index)['artifacts'] if a['artifact_id'] == refs['subset']['artifact_id'])
+        register_artifact(root, 'same_bytes_other_source', root / entry['path'], 'derived_data', 'fixture', entry['inputs'])
+        states['subset']['produced_dataset']['artifact_id'] = 'same_bytes_other_source'
+        states['subset']['artifact_ids'].append('same_bytes_other_source')
+    elif change == 'source_sha':
+        states['subset']['produced_dataset']['content_sha256'] = '0' * 64
+    elif change == 'missing_binding':
+        states['subset']['produced_dataset'] = None
+    elif change == 'branch':
+        states['alternate']['model_branches'].append(deepcopy(states['alternate']['model_branches'][0]))
+    elif change == 'model_id':
+        states['alternate']['model_branches'][0]['model_id'] = None
+    elif change.startswith('joint_') or change in {'missing_kernel', 'model_packet'}:
+        # The typed result remains real; simulate an origin read that names
+        # the other completed model instead of its selected dependency.
+        original_load = _Products.load
+        def load(self, ref):
+            value = original_load(self, ref)
+            if (change == 'missing_kernel' and ref.get('run_id') == refs['alternate']['run_id']
+                    and ref.get('artifact_id') == 'inference_kernel_' + refs['alternate']['artifact_id']):
+                return None
+            if change == 'model_packet' and ref == refs['alternate'] and value:
+                return replace(value, payload={**value.payload, 'model_id': 'ols_2'})
+            if change.startswith('joint_') and ref == refs['joint'] and value:
+                payload = deepcopy(value.payload)
+                if change == 'joint_model':
+                    payload['source']['model_run_id'] = refs['fit']['run_id']
+                elif change == 'joint_covariance':
+                    payload['result']['covariance'] = 'unadjusted'
+                elif change == 'joint_branch':
+                    payload['result']['branch_id'] = 'another_branch'
+                else:
+                    payload['result']['term_selectors'] = [{'kind': 'linear', 'column': 'z'}]
+                return replace(value, payload=payload)
+            return value
+        monkeypatch.setattr(_Products, 'load', load)
+    else:
+        states['alternate']['model_branches'][0]['inference_kernel_sha256'] = '0' * 64
+    original_get = OperationRecordStore.get
+    monkeypatch.setattr(OperationRecordStore, 'get', lambda self, identity:
+        replace(record, outputs=changed) if identity == record.record_id else original_get(self, identity))
+    try:
+        checked = verify(runtime.project_root, plan, _Products(runtime.project_root), plan.completion_evidence)
+        assert checked['status'] == 'partial', checked
+        assert any(reason in row['reason'] for row in checked['requirements']), checked
+    finally:
+        if change == 'source_identity':
+            index.write_bytes(original)
+
+
+def test_machine_source_binding_needs_an_exact_approved_upstream_definition(symbolic_products, monkeypatch):
+    from workbench.agent import plan_criteria
+    from workbench.agent.completion import _Products
+    runtime, record, *_ = symbolic_products
+    def remove_upstream(contract, evidence):
+        contract['requirements'] = [d for d in contract['requirements'] if d['id'] != 'subset']
+        evidence['requirements'] = [p for p in evidence['requirements'] if p['requirement_id'] != 'subset']
+    plan = symbolic_plan(symbolic_products, remove_upstream)
+    original = plan_criteria._validated_record
+    def machine_record(root, identity):
+        found, workflow, digest = original(root, identity)
+        return replace(found, actor_type='approved_plan'), workflow, digest
+    monkeypatch.setattr(plan_criteria, '_validated_record', machine_record)
+    checked = plan_criteria.verify(runtime.project_root, plan, _Products(runtime.project_root), plan.completion_evidence)
+    assert checked['status'] == 'partial'
+    assert any('upstream_scientific_definition_unverified' in row['reason'] for row in checked['requirements'])
+
+
+def test_machine_verification_allows_unbound_descriptive_ordering_dependencies(symbolic_products, monkeypatch):
+    from workbench.agent import plan_criteria
+    from workbench.agent.completion import _Products
+    runtime, *_ = symbolic_products
+    plan = symbolic_plan(symbolic_products)
+    assert all(d['operation']['step_id'] != 'explore' for d in plan.completion['requirements'])
+    original = plan_criteria._validated_record
+    def machine_record(root, identity):
+        found, workflow, digest = original(root, identity)
+        return replace(found, actor_type='approved_plan'), workflow, digest
+    # Exercise the Auto proof branch with real executed producer outputs; do
+    # not create another receipt or change the original human confirmation.
+    monkeypatch.setattr(plan_criteria, '_validated_record', machine_record)
+    checked = plan_criteria.verify(runtime.project_root, plan, _Products(runtime.project_root), plan.completion_evidence)
+    assert checked['status'] == 'requirements_met', checked
+
+
+def test_implicit_dataset_input_is_not_certified_as_the_workflow_target(symbolic_products):
+    from workbench.agent.completion import _Products
+    from workbench.agent.plan_criteria import _step_source
+    runtime, record, *_ = symbolic_products
+    plan = symbolic_plan(symbolic_products)
+    consumer = deepcopy(next(s for s in record.changes['steps'] if s['step_id'] == 'alternate'))
+    consumer['spec'].pop('source')
+    consumer['depends_on'] = ['subset']
+    definitions = {d['operation']['step_id']: d['operation'] for d in plan.completion['requirements']}
+    with pytest.raises(ValueError, match='implicit_dataset_source_unverified'):
+        _step_source(_Products(runtime.project_root), record, consumer, plan.completion['source'], definitions)
+
+
+@pytest.mark.parametrize('field,value', [('sampling_weight', 'row'), ('model_options', {})])
+def test_model_reader_cannot_certify_scientific_fields_missing_from_producer_binding(symbolic_products, field, value):
+    from workbench.agent.completion import _Products
+    from workbench.agent.plan_criteria import _model_output
+    runtime, record, refs, digest = symbolic_products
+    operations = {s['step_id']: s for s in record.changes['steps']}
+    declaration = deepcopy(operations['fit'])
+    declaration['spec'][field] = value
+    # At the typed-reader boundary, a real unweighted fit cannot certify a
+    # request field absent from its published scientific binding. No receipt
+    # or project file is changed to make this declaration an executed request.
+    with pytest.raises(ValueError, match='model_scientific_fields_unverified'):
+        _model_output(_Products(runtime.project_root), {'operation': declaration}, record,
+            record.outputs['workflow_state']['steps']['fit'], [refs['fit']],
+            {'run_id': runtime.run_id, 'artifact_id': runtime.artifact_id, 'sha256': digest}, operations)
