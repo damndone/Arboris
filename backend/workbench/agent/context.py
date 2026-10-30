@@ -131,6 +131,102 @@ class ContextBuilder:
         return ContextSnapshot(messages=messages, fingerprint=fingerprint, source_entry_ids=source_entry_ids)
 
 
+def project_published_contracts(snapshot: ContextSnapshot, tools: list[dict[str, Any]]) -> ContextSnapshot:
+    """Elide schema fields only when their exact declaration is in this request.
+
+    This is a model view, not an execution reference or a mutation of the WAL.
+    Scientific evidence, errors, approval records and other tool results stay full.
+    """
+    from copy import deepcopy
+    from .protocol import _reference_step_spec, step_reference
+
+    calls = set()
+    for message in snapshot.messages:
+        if message.get("role") != "assistant":
+            continue
+        for call in message.get("tool_calls") or []:
+            function = call.get("function") or {}
+            if call.get("tool_id", function.get("name")) == "inspect_operation_contract":
+                calls.add(call.get("tool_call_id", call.get("id")))
+    candidates = [message for message in snapshot.messages
+                  if message.get("role") == "tool" and message.get("name") == "inspect_operation_contract"
+                  and message.get("tool_call_id") in calls]
+    protocols = [message.get("content") for message in snapshot.messages
+                 if message.get("role") == "system" and message.get("name") == "workbench_agent_protocol"]
+    declarations = [tool.get("input_schema") for tool in tools if tool.get("tool_id") == "run_operation"]
+    if not candidates or len(protocols) != 1 or len(declarations) != 1:
+        return snapshot
+    schema = declarations[0]
+    if not isinstance(protocols[0], str) or not isinstance(schema, dict):
+        return snapshot
+    references = step_reference()
+    lines = set(protocols[0].splitlines())
+    published = {name: spec for name, spec in references.items()
+                 if "      " + name + ": " + json.dumps(spec, ensure_ascii=False, separators=(",", ":")) in lines}
+    if not published:
+        return snapshot
+
+    def digest(value):
+        return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True,
+                                         separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+
+    def project(message):
+        try:
+            result = json.loads(message["content"])
+        except (TypeError, ValueError):
+            return message
+        if not isinstance(result, dict) or result.get("ok") is not True or result.get("error") is not None:
+            return message
+        output = result.get("output")
+        if not isinstance(output, dict) or output.get("status") == "partial" or output.get("omitted_sections") or output.get("truncated_sections"):
+            return message
+        contract = output.get("contract")
+        if not isinstance(contract, dict) or contract.get("contract_owner") != "operation_registry":
+            return message
+        operation_id = contract.get("op_type")
+        branches = [branch for branch in schema.get("oneOf", [])
+                    if branch.get("properties", {}).get("operation_id", {}).get("const") == operation_id]
+        if len(branches) != 1:
+            return message
+        properties = branches[0]["properties"]
+        version = properties.get("operation_version", {}).get("const")
+        editable = properties.get("changes")
+        if version is None or contract.get("schema_id") != f"{operation_id}@{version}" or contract.get("editable_schema") != editable:
+            return message
+        vocabulary = contract.get("step_vocabulary")
+        if not isinstance(vocabulary, dict) or vocabulary.get("unknown_step_operation_ids"):
+            return message
+        specs = vocabulary.get("step_operations")
+        if not isinstance(specs, dict):
+            return message
+        for name, spec in specs.items():
+            if name in references and (name not in published or not isinstance(spec, dict)
+                                      or _reference_step_spec(spec) != published[name]):
+                return message
+        projected = deepcopy(result)
+        compact = projected["output"]["contract"]
+        compact["editable_schema"] = {"published_in": f"run_operation.{operation_id}.changes",
+                                       "schema_sha256": digest(editable)}
+        for name, spec in compact["step_vocabulary"]["step_operations"].items():
+            if name not in published:
+                continue
+            equal = [key for key, value in spec.items() if key in published[name] and published[name][key] == value]
+            retained = {key: value for key, value in spec.items() if key not in equal}
+            retained["same_as_published"] = {"name": "workbench_agent_protocol:" + name,
+                                            "schema_sha256": digest(published[name]), "unchanged_fields": equal}
+            compact["step_vocabulary"]["step_operations"][name] = retained
+        content = json.dumps(projected, ensure_ascii=False, sort_keys=True, allow_nan=False)
+        return {**message, "content": content} if len(content.encode()) < len(message["content"].encode()) else message
+
+    candidate_ids = {id(message) for message in candidates}
+    messages = [project(message) if id(message) in candidate_ids else message for message in snapshot.messages]
+    if messages == snapshot.messages:
+        return snapshot
+    serialized = json.dumps(messages, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return ContextSnapshot(messages=messages, fingerprint=hashlib.sha256(serialized.encode()).hexdigest(),
+                           source_entry_ids=list(snapshot.source_entry_ids))
+
+
 # Proposal audit messages repeat the proposal the model already received in its
 # run_operation tool result (the changes up to four times per confirmation). The
 # projection keeps every field whose value is new for that proposal and names

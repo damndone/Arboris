@@ -577,7 +577,15 @@ def _bounded_checks(run_root: Path, model_results: list[dict[str, Any]]) -> list
         return None
     return [
         {"check_id": item.get("check_id"), "status": item.get("status"), "blinding": item.get("blinding"),
-         "summary": str(item.get("summary") or "")[:300]}
+         "summary": str(item.get("summary") or "")[:300],
+         **({"evidence": {
+             **_bounded_numeric_fields(item.get("evidence"),
+                 fields=("first_stage_statistic", "first_stage_f", "df", "numerator_df", "denominator_df"),
+                 string_fields=("test", "reference_distribution", "covariance", "verdict")),
+             **({"strength_certified": item["evidence"]["strength_certified"]}
+                if isinstance(item.get("evidence"), dict)
+                and type(item["evidence"].get("strength_certified")) is bool else {})}}
+            if item.get("check_id") == "iv.first_stage_strength" else {})}
         for item in payload.get("checks", []) if isinstance(item, dict)
     ]
 
@@ -830,6 +838,59 @@ class _PublicResultBudget:
     omitted_items: int = 0
 
 
+def _public_iv_ar_result(payload: dict[str, Any]) -> dict[str, Any]:
+    """Keep set topology and certificate scope ahead of the large stored proof."""
+    result = payload["result"]
+    region = result.get("anderson_rubin_95")
+    region = region if isinstance(region, dict) else {}
+    certificate = region.get("global_certification")
+    certificate = certificate if isinstance(certificate, dict) else {}
+    computation = region.get("computation")
+    computation = computation if isinstance(computation, dict) else {}
+    source = payload.get("source")
+    source = source if isinstance(source, dict) else {}
+    components = region.get("components")
+    component_keys = {"lower", "upper", "lower_closed", "upper_closed", "lower_root", "upper_root"}
+    selected = (components[:16] if isinstance(components, list) else [])
+    bounded_components = [{key: value for key, value in component.items()
+        if key in component_keys and (value is None or type(value) in {bool, int, float})}
+        for component in selected if isinstance(component, dict)]
+    detail_omitted = (len(bounded_components) != len(selected)
+        or any(not isinstance(c, dict) or set(c) != set(b) for c, b in zip(selected, bounded_components)))
+    projected_region = _bounded_public_result_value({key: region[key] for key in
+        ("kind", "method", "reference_distribution", "inference_scope", "coverage_certified",
+         "critical_value", "critical_binary64_ratio", "lower", "upper", "reason") if key in region})
+    projected_region.update(
+        components=bounded_components,
+        components_omitted=max(0, len(components)-len(selected)) if isinstance(components, list) else 0,
+        component_details_omitted=detail_omitted or not isinstance(components, list),
+        global_certification=_bounded_public_result_value({key: certificate[key] for key in
+            ("status", "arithmetic", "algorithm", "input_topology_certified") if key in certificate}),
+        computation=_bounded_public_result_value({key: computation[key] for key in
+            ("path", "certification_target", "engine") if key in computation}))
+    # This compact view is still bounded; it never reads or validates a new source.
+    public = _bounded_public_result_value({key: result[key] for key in
+        ("contract", "model_id", "model_run_id", "model_sha256", "completion_sha256",
+         "point_estimation_fingerprint", "analysis_sample_fingerprint", "covariance", "confidence_level",
+         "scientific_validity") if key in result})
+    public["source"] = _bounded_public_result_value({key: source[key] for key in
+        ("run_id", "node_ref", "artifact_id", "sha256", "model_run_id", "model_artifact_id",
+         "workflow_id", "workflow_step_id", "workflow_step_fingerprint") if key in source})
+    public["anderson_rubin_95"] = projected_region
+    public["interpretation_limits"] = {
+        "set": "A certified whole_line rejects no real candidate at this test level under its assumptions. "
+               "The set shape does not supply or imply a first-stage F or Wald statistic.",
+        "certification": "global_certification concerns mathematical inversion. coverage_certified and "
+                         "scientific_validity concern different sampling/design/causal assumptions; their "
+                         "absence of certification does not undo a certified mathematical set.",
+        "proof": "Bounded summary only; the full original proof remains in the registered artifact named by "
+                 "the outer evidence_ref and its SHA. This summary does not independently recompute it.",
+        "reader": "Use the exact receipt reference with inspect_operation_artifact for an Agent operation; "
+                  "use inspect_notebook_workflow_results for a Notebook receipt. inspect_analysis_completion "
+                  "checks the bound original producer evidence, not arbitrary free-text interpretation."}
+    return public
+
+
 def _public_operation_artifact_result(
     artifact_type: str,
     payload: dict[str, Any],
@@ -847,6 +908,8 @@ def _public_operation_artifact_result(
     result = payload.get("result")
     if not isinstance(result, dict):
         return None, ["raw_artifact_payloads"]
+    if artifact_type == "post_estimation" and result.get("contract") == "iv-ar.evidence.v1":
+        return _public_iv_ar_result(payload), ["raw_artifact_payloads", "raw_rows", "full_ar_certificate"]
     if artifact_type == "workflow_capability_result" and isinstance(result.get("result"), dict):
         # {operation_id, family, source_columns, result: {...}}: the inner
         # result holds the statistics; lifting it keeps them inside the

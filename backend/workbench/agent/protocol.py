@@ -142,11 +142,14 @@ def step_reference(vocabulary: dict | None = None) -> dict:
     from .workflow_contracts import workflow_step_vocabulary
 
     view = _step_vocabulary_view(vocabulary or workflow_step_vocabulary(), REFERENCE_STEP_IDS)["step_operations"]
-    return {
-        operation_id: {key: value for key, value in spec.items()
-                       if value not in (None, [], {}, "") and not (key == "ui_description" and value == spec.get("summary"))}
-        for operation_id, spec in view.items()
-    }
+    return {operation_id: _reference_step_spec(spec) for operation_id, spec in view.items()}
+
+
+def _reference_step_spec(spec: dict) -> dict:
+    """The exact existing protocol projection, shared with lossless history views."""
+    return {key: value for key, value in spec.items()
+            if value not in (None, [], {}, "")
+            and not (key == "ui_description" and value == spec.get("summary"))}
 
 
 def chain_agent_protocol(registry: OperationRegistry) -> str:

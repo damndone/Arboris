@@ -280,7 +280,9 @@ def test_absent_completion_contract_returns_an_actionable_plan_repair(tmp_path):
     assert result.output["status"] == "partial"
     guidance = result.output["next_step"]
     assert "update_plan" in guidance and "completion" in guidance
-    assert "pending" in guidance and "not rerun" in guidance
+    assert "pending" in guidance and "do not repeat it merely to create plan history" in guidance
+    assert "genuinely missing analysis" in guidance
+    assert "original permissions and approval path" in guidance
     assert runtime.orchestrator.plan_store.current("chain-session") is None
 
 

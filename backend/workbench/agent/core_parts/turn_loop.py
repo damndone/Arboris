@@ -100,6 +100,11 @@ class TurnLoopMixin:
                 self.repository.append(self.session_id, "phase_message", {
                     "episode_id": active_phase.episode_id, "message": message,
                 })
+        if phase_request is None:
+            from ..context import project_published_contracts
+
+            context = project_published_contracts(context, self.tools)
+            self._active_context_fingerprint = context.fingerprint
         self._steps_used += 1
         request = ModelRequest(
             request_id=uuid4().hex,

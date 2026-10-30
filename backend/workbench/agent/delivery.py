@@ -60,7 +60,9 @@ def delivery_state(project_root, plan, *, suggest=False):
         result['next_step'] = ('No completion contract was saved. Call update_plan with completion: select scope '
             'and playbooks from the user request, and bind the registered dataset source. '
             'When adding steps, omit status or use pending; only stored execution receipts can mark them done. '
-            'For work already executed, bind its verified completion_evidence; do not rerun it to create plan history. '
+            'For work already executed, bind its verified completion_evidence; do not repeat it merely to create plan history. '
+            'A genuinely missing analysis may be proposed as a scientifically justified supported specification '
+            'through the original permissions and approval path; unavailable or unjustified work stays partial. '
             'Check saved is true before checking completion again. Keep unverified evidence partial.')
     elif result['status'] == 'requirements_met':
         # In the paid fix2 round (iv_weak, Auto) the Agent met every requirement and still
@@ -95,7 +97,10 @@ def delivery_state(project_root, plan, *, suggest=False):
             result['recovery_question_sha256'] = sha256_canonical(plan.question)
     if checked['status'] == 'partial':
         result['next_step'] = ('Approved criteria or expected outputs remain unverified. Inspect criteria_verification; '
-            'bind existing producer records and registered artifacts without rerunning. Missing machine definitions '
+            'bind existing producer records and registered artifacts without repeating an execution merely to repair its binding. '
+            'If an analysis is truly missing, propose a scientifically justified supported new specification under '
+            'the original permissions and approval path; if none is feasible, keep partial status and state the '
+            'human takeover needed. Do not repeat the same fit to manufacture evidence or select by significance. Missing machine definitions '
             'need a visible plan revision. Auto requires its approved plan basis; Ask may reuse the exact '
             'human-confirmed executed request. A plan marked needs_approval still requires approval. '
             'Unsupported claims remain partial for human takeover; do not erase promises or invent receipts.')
