@@ -76,12 +76,11 @@ def encode_numbers(values: list | tuple) -> str | None:
 
 
 def encode_analysis_sample_v1(row_set, row_order) -> bytes | None:
-    """Encode exact decimal IDs for the sample fingerprint candidate.
+    """Explicit, unaccepted sample candidate; no measured size cutoff exists.
 
     Only missing builds or unsupported input shapes return None. Present old,
     incompatible or broken builds and computation failures propagate. The
-    public fingerprint selects this at its own 1M-member evidence cutoff;
-    complete-workflow performance and bounded cancellation remain unverified.
+    default analysis_sample_fingerprint does not enter this optional path.
     """
     module, _, _ = _load()
     if module is None:

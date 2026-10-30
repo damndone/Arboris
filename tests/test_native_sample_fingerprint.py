@@ -1,4 +1,4 @@
-"""Sample candidate bytes, dispatch and errors; no performance acceptance."""
+"""Explicit sample candidate: exact bytes/errors, no performance thresholds."""
 from __future__ import annotations
 
 import gc
@@ -21,7 +21,7 @@ AREA = ROOT / 'local/native-sample-fingerprint-20261029'
 
 @pytest.mark.parametrize('module,name', [(bridge, 'encode_analysis_sample_v1'),
                                       (fingerprints, 'analysis_sample_fingerprint_native')])
-def test_sample_candidate_exposes_the_existing_explicit_entrypoints(module, name):
+def test_sample_candidate_has_only_an_explicit_entrypoint(module, name):
     assert callable(getattr(module, name, None)), 'explicit sample candidate entrypoint missing'
 
 
@@ -160,96 +160,12 @@ def test_explicit_small_sample_uses_native_without_borrowing_the_numeric_cutover
     assert len(calls) == 1 and calls[0][0] is rows and calls[0][1] is rows
 
 
-def test_small_default_sample_does_not_probe_the_candidate(monkeypatch):
+def test_default_sample_fingerprint_does_not_probe_the_candidate(monkeypatch):
     def forbidden(*args):
-        pytest.fail('small samples must not load the sample candidate')
+        pytest.fail('unaccepted sample candidate must not load on the default path')
     monkeypatch.setattr(bridge, '_load', forbidden)
     rows = ['2', '10', '001']
     assert fingerprints.analysis_sample_fingerprint(rows, rows) == hashlib.sha256(wire(rows, rows)).hexdigest()
-
-
-def test_large_default_sample_dispatches_to_the_existing_native_entrypoint(monkeypatch):
-    rows = ['1'] * 1_000_000
-    called = []
-    def native(row_set, row_order):
-        called.append((row_set, row_order))
-        return 'native-dispatch-proof'
-    monkeypatch.setattr(fingerprints, 'analysis_sample_fingerprint_native', native)
-    assert fingerprints.analysis_sample_fingerprint(rows, rows) == 'native-dispatch-proof'
-    assert len(called) == 1 and called[0][0] is rows and called[0][1] is rows
-
-
-@pytest.mark.parametrize('size,selected', [(999_999, 'reference'), (1_000_000, 'native'), (1_000_001, 'native')])
-def test_sample_cutoff_counts_members_without_restricting_order_length(monkeypatch, size, selected):
-    assert callable(getattr(fingerprints, '_analysis_sample_fingerprint_reference', None))
-    rows, order = ['1'] * size, ()
-    calls = []
-    def answer(name):
-        def compute(row_set, row_order):
-            calls.append((name, row_set, row_order))
-            return name
-        return compute
-    monkeypatch.setattr(fingerprints, '_analysis_sample_fingerprint_reference', answer('reference'))
-    monkeypatch.setattr(fingerprints, 'analysis_sample_fingerprint_native', answer('native'))
-    assert fingerprints.analysis_sample_fingerprint(rows, order) == selected
-    assert len(calls) == 1 and calls[0][1] is rows and calls[0][2] is order
-
-
-@pytest.mark.parametrize('row_set,row_order', [
-    (ListSubclass(['2', '1']), ['1', '2']), (['2', '1'], ListSubclass(['1', '2'])),
-    ({'1', '2'}, ['1', '2']),
-])
-def test_other_outer_shapes_keep_reference_without_loading_a_kernel(monkeypatch, row_set, row_order):
-    monkeypatch.setattr(fingerprints, '_SAMPLE_NATIVE_MIN_ROWS', 1)
-    expected = fingerprints._analysis_sample_fingerprint_reference(row_set, row_order)
-    def forbidden():
-        pytest.fail('unsupported outer shapes must not load the native candidate')
-    monkeypatch.setattr(bridge, '_load', forbidden)
-    assert fingerprints.analysis_sample_fingerprint(row_set, row_order) == expected
-
-
-@pytest.mark.parametrize('missing', [True, False], ids=['missing-so', 'unsupported-inner-shape'])
-def test_large_default_reference_fallback_occurs_once_without_redispatch(kernel, monkeypatch, missing):
-    rows = ['r1'] * 1_000_000
-    loads, references = [], []
-    monkeypatch.setattr(bridge, '_load', lambda: loads.append(True) or (None if missing else kernel, 'reference' if missing else 'native', 'unit-fixture'))
-    def reference(row_set, row_order):
-        references.append((row_set, row_order))
-        return 'single-reference-result'
-    monkeypatch.setattr(fingerprints, '_analysis_sample_fingerprint_reference', reference)
-    assert fingerprints.analysis_sample_fingerprint(rows, rows) == 'single-reference-result'
-    assert loads == [True] and len(references) == 1
-    assert references[0][0] is rows and references[0][1] is rows
-
-
-@pytest.mark.parametrize('failure', ['load', 'abi', 'source', 'calculation'])
-def test_large_default_keeps_present_kernel_errors_visible(kernel, monkeypatch, failure):
-    rows = ['1'] * 1_000_000
-    fields = {name: getattr(kernel, name) for name in ('ANALYSIS_SAMPLE_ABI_VERSION', 'ANALYSIS_SAMPLE_SOURCE_SHA256', 'encode_analysis_sample_v1')}
-    original = ImportError('present sample load failed') if failure == 'load' else ArithmeticError('sample calculation failed')
-    def broken(*args):
-        raise original
-    if failure == 'load':
-        monkeypatch.setattr(bridge, '_load', broken)
-        error, message = ImportError, 'present sample load failed'
-    else:
-        if failure == 'abi':
-            fields['ANALYSIS_SAMPLE_ABI_VERSION'] = True
-            error, message = RuntimeError, 'ABI mismatch'
-        elif failure == 'source':
-            fields['ANALYSIS_SAMPLE_SOURCE_SHA256'] = 'stale'
-            error, message = RuntimeError, 'source digest mismatch'
-        else:
-            fields['encode_analysis_sample_v1'] = broken
-            error, message = ArithmeticError, 'sample calculation failed'
-        monkeypatch.setattr(bridge, '_load', lambda: (SimpleNamespace(**fields), 'native', 'extension_loaded'))
-    def forbidden(*args):
-        pytest.fail('a present invalid kernel must not enter reference fallback')
-    monkeypatch.setattr(fingerprints, '_analysis_sample_fingerprint_reference', forbidden)
-    with pytest.raises(error, match=message) as caught:
-        fingerprints.analysis_sample_fingerprint(rows, rows)
-    if failure in {'load', 'calculation'}:
-        assert caught.value is original
 
 
 def test_missing_optional_binary_keeps_the_explicit_python_reference(monkeypatch):
@@ -292,7 +208,7 @@ def test_invalid_sample_output_is_not_hashed_or_replaced(kernel, monkeypatch, in
         fingerprints.analysis_sample_fingerprint_native(['1'], ['1'])
 
 
-def test_original_1m_public_run_ols_arguments_match_native_bytes(monkeypatch, tmp_path, record_property):
+def test_original_1m_public_run_ols_arguments_match_native_bytes(kernel, monkeypatch, tmp_path, record_property):
     if os.environ.get('NATIVE_SAMPLE_ORIGINAL_1M') != '1':
         pytest.skip('explicit original-input functional check; no clocks or performance claim')
     from workbench.cleaning import clean_frame
@@ -301,19 +217,6 @@ def test_original_1m_public_run_ols_arguments_match_native_bytes(monkeypatch, tm
     from workbench.ingestion import read_frame_bounded
     from workbench.metadata import infer_schema
     from workbench.orchestrator._column_checks import _detect_categorical_x_vars
-
-    module, _, reason = bridge._load()
-    if module is None:
-        if os.environ.get('NATIVE_SAMPLE_REQUIRED') != '1':
-            pytest.skip(f'ordinary optional native build unavailable: {reason}')
-        pytest.fail('ordinary native build required for default-path functional proof')
-    original_encoder = module.encode_analysis_sample_v1
-    native_calls = []
-    def encode(row_set, row_order):
-        encoded = original_encoder(row_set, row_order)
-        native_calls.append((row_set, row_order, encoded))
-        return encoded
-    monkeypatch.setattr(module, 'encode_analysis_sample_v1', encode)
 
     manifest = json.loads((ROOT / 'local/perf-inputs/ols/source.json').read_text())
     source = Path(manifest['source'])
@@ -346,15 +249,14 @@ def test_original_1m_public_run_ols_arguments_match_native_bytes(monkeypatch, tm
     del fitted
     rows, order = captured['row_set'], captured['row_order']
     assert rows is order and len(rows) == 1_000_000
-    assert len(native_calls) == 1
-    native_set, native_order, encoded = native_calls[0]
-    assert native_set is rows and native_order is order
+    encoded = kernel.encode_analysis_sample_v1(rows, order)
     assert encoded == wire(rows, order)
     assert hashlib.sha256(encoded).hexdigest() == captured['fingerprint'] == '349201f22eecd0ad8c56340812cb76aaf3928ff096161df163bf8dfe0af19e1f'
+    monkeypatch.setattr(bridge, '_load', lambda: (kernel, 'native', 'extension_loaded'))
+    assert fingerprints.analysis_sample_fingerprint_native(rows, order) == captured['fingerprint']
     after = source.stat()
     assert (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) == (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
     record_property('original_csv_sha256', manifest['sha256'])
     record_property('sample_wire_sha256', captured['fingerprint'])
-    record_property('default_native_call_count', len(native_calls))
-    record_property('sample_source_sha256', module.ANALYSIS_SAMPLE_SOURCE_SHA256)
-    record_property('sample_candidate_binary_sha256', hashlib.sha256(Path(module.__file__).read_bytes()).hexdigest())
+    record_property('sample_source_sha256', kernel.ANALYSIS_SAMPLE_SOURCE_SHA256)
+    record_property('sample_candidate_binary_sha256', hashlib.sha256(Path(kernel.__file__).read_bytes()).hexdigest())
