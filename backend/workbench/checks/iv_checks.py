@@ -81,38 +81,13 @@ def first_stage_diagnostic(fitted: Any) -> dict[str, Any]:
 
 
 def first_stage_strength(context: CheckContext, spec: CheckSpec, *, compute_ar: bool = False) -> CheckOutcome:
-    return _first_stage_strength(context, spec, compute_ar=compute_ar,
-        robust=lambda y, x, z, w: anderson_rubin_robust(y, x, z, w, 0., 1.))
-
-
-def _first_stage_strength_owned(context: CheckContext, spec: CheckSpec) -> CheckOutcome:
-    """Explicit AR for the unshared fit reconstructed inside compute_ar."""
-    from .ar_confidence import _robust_set_owned
-    return _first_stage_strength(context, spec, compute_ar=True, robust=_robust_set_owned)
-
-
-def _first_stage_strength(context, spec, *, compute_ar, robust):
     fitted = context.fitted
     try:
         evidence = first_stage_diagnostic(fitted)
     except (AttributeError, KeyError, TypeError, ValueError):
         return CheckOutcome('not_checked', 'The fit does not expose its first-stage statistics.')
-    arrays = _arrays(fitted)
-    region = {'kind': 'unavailable', 'reason': 'multiple_endogenous_regressors'}
-    if arrays is not None and arrays['x'].shape[1] == 1:
-        weights = np.asarray(fitted.model.weights.ndarray)
-        if not np.all(weights == 1):
-            region = {'kind': 'unavailable', 'reason': 'weighted_ar_not_validated'}
-        elif arrays['cov_type'] not in {'unadjusted', 'robust', 'heteroskedastic'}:
-            region = {'kind': 'unavailable', 'reason': 'unsupported_covariance_for_ar'}
-        elif not compute_ar:
-            region = {'kind': 'not_computed', 'reason': 'request_ar_confidence_explicitly'}
-        elif arrays['cov_type'] == 'unadjusted':
-            region = anderson_rubin_homoskedastic(arrays['y'], arrays['x'], arrays['z'], arrays['w'])
-        elif arrays['cov_type'] in {'robust', 'heteroskedastic'}:
-            region = robust(arrays['y'], arrays['x'], arrays['z'], arrays['w'])
-        else:
-            region = {'kind': 'unavailable', 'reason': 'unsupported_covariance_for_ar'}
+    region = _ar_region(fitted, compute_ar=compute_ar,
+        robust=lambda y, x, z, w: anderson_rubin_robust(y, x, z, w, 0., 1.))
     evidence['anderson_rubin_95'] = region
     evidence['endogenous_regressor'] = ', '.join(fitted.model.endog.cols)
     statistic, distribution = evidence['first_stage_statistic'], evidence['reference_distribution']
@@ -133,6 +108,32 @@ def _first_stage_strength(context, spec, *, compute_ar, robust):
     status = 'fails' if evidence['verdict'] == 'weak' else 'holds' if evidence['verdict'] == 'strong' else 'caution'
     return CheckOutcome(status, summary, evidence,
                         'Justify instrument validity and use applicable weak-instrument-robust inference.')
+
+
+def _ar_region_owned(fitted: Any) -> dict[str, Any]:
+    """AR only for the unshared fit reconstructed inside compute_ar."""
+    from .ar_confidence import _robust_set_owned
+    return _ar_region(fitted, compute_ar=True, robust=_robust_set_owned)
+
+
+def _ar_region(fitted, *, compute_ar, robust):
+    arrays = _arrays(fitted)
+    region = {'kind': 'unavailable', 'reason': 'multiple_endogenous_regressors'}
+    if arrays is not None and arrays['x'].shape[1] == 1:
+        weights = np.asarray(fitted.model.weights.ndarray)
+        if not np.all(weights == 1):
+            region = {'kind': 'unavailable', 'reason': 'weighted_ar_not_validated'}
+        elif arrays['cov_type'] not in {'unadjusted', 'robust', 'heteroskedastic'}:
+            region = {'kind': 'unavailable', 'reason': 'unsupported_covariance_for_ar'}
+        elif not compute_ar:
+            region = {'kind': 'not_computed', 'reason': 'request_ar_confidence_explicitly'}
+        elif arrays['cov_type'] == 'unadjusted':
+            region = anderson_rubin_homoskedastic(arrays['y'], arrays['x'], arrays['z'], arrays['w'])
+        elif arrays['cov_type'] in {'robust', 'heteroskedastic'}:
+            region = robust(arrays['y'], arrays['x'], arrays['z'], arrays['w'])
+        else:
+            region = {'kind': 'unavailable', 'reason': 'unsupported_covariance_for_ar'}
+    return region
 
 
 def exclusion_restriction(context: CheckContext, spec: CheckSpec) -> CheckOutcome:

@@ -250,3 +250,154 @@ def test_long_family_refusal_keeps_usable_help_within_the_existing_bound():
     assert len(message) <= MAX_VALIDATION_DETAIL_CHARS
     assert "step.spec context fields: entity_col, time_col" in message
     assert "step_operation_ids=[\"model.genesis\"]" in message
+
+
+def _workflow_dependency_refusal(arguments):
+    from workbench.agent.operations import OperationRegistry
+    from workbench.agent.workflow_contracts import validate_workflow_steps
+
+    registry = ToolRegistry()
+    registry.register(ToolDefinition(tool_id="run_operation", version="v1", side_effect="proposal",
+        input_schema=OperationRegistry().proposal_tool_schema(),
+        handler=lambda submitted, context: validate_workflow_steps(submitted["changes"]["steps"])))
+    return asyncio.run(registry.execute({"tool_call_id": "dependency", "tool_id": "run_operation",
+                                        "arguments": arguments}, session_id="s"))
+
+
+def test_unknown_workflow_dependency_retains_refusal_and_names_its_local_scope():
+    arguments = _workflow_request()
+    arguments["changes"]["steps"][0]["depends_on"] = ["earlier_fit"]
+    original = copy.deepcopy(arguments)
+
+    refused = _workflow_dependency_refusal(arguments)
+
+    assert not refused.ok and refused.error == "OperationValidationError"
+    message = refused.error_details[0]["message"]
+    assert "depends on unknown step(s): earlier_fit" in message
+    assert "depends_on names only step IDs in this changes.steps" in message
+    assert "current step_ids: summary" in message
+    assert "inspect_completed_operations" in message and "registered artifact refs" in message
+    assert "do not add or rerun old steps" in message
+    assert arguments == original
+
+
+def test_unknown_workflow_dependency_feedback_bounds_the_visible_ids_without_mutating_input():
+    from workbench.agent.tools import MAX_VALIDATION_DETAIL_CHARS
+
+    arguments = _workflow_request()
+    template = arguments["changes"]["steps"][0]
+    step_ids = [f"s{number:02d}" + "_" * 61 for number in range(10)]
+    arguments["changes"]["steps"] = [{**copy.deepcopy(template), "step_id": step_id} for step_id in step_ids]
+    arguments["changes"]["steps"][-1]["depends_on"] = [f"earlier_{number}_" + "x" * 2000 for number in range(10)]
+    original = copy.deepcopy(arguments)
+
+    refused = _workflow_dependency_refusal(arguments)
+
+    assert not refused.ok and refused.error == "OperationValidationError"
+    (detail,) = refused.error_details
+    assert len(json.dumps(detail)) <= MAX_VALIDATION_DETAIL_CHARS
+    current_ids = detail["message"].split("current step_ids: ", 1)[1].split(". For ", 1)[0]
+    assert all(step_id in current_ids for step_id in step_ids[:6])
+    assert all(step_id not in current_ids for step_id in step_ids[6:])
+    assert "4 more" in current_ids and "7 more" in detail["message"]
+    assert "registered artifact refs" in detail["message"]
+    assert arguments == original
+
+
+def test_saved_plan_steps_are_refused_until_the_caller_explicitly_submits_writable_fields(tmp_path):
+    from workbench.agent import plans
+    from workbench.agent.tools import MAX_VALIDATION_DETAIL_CHARS
+
+    known = {"statistical.explore"}
+    first = plans.PlanStep("first", "Describe x", ("statistical.explore",))
+    initial = plans.merge(None, question="q", criteria=["c"], steps=(first,),
+                          budget=None, allowed_classes=None)
+    approved = plans.approve(initial)
+    added = plans.PlanStep("later", "Explore y", ("statistical.explore",))
+    revised = plans.merge(approved, question="q", criteria=["c"], steps=(first, added),
+                          budget=None, allowed_classes=None)
+    store = plans.PlanStore(tmp_path)
+    store.save("s", revised)
+    returned = store.current("s").to_dict()
+    assert returned["steps"][1]["added_after_results"] is True
+    calls = []
+
+    def save(arguments, context):
+        calls.append(copy.deepcopy(arguments))
+        previous = store.current("s")
+        updated = plans.merge(previous, question=previous.question, criteria=list(previous.criteria),
+                              steps=plans.parse_steps(arguments["steps"], known),
+                              budget=None, allowed_classes=None)
+        store.save("s", updated)
+        return {"saved": True, "plan": updated.to_dict()}
+
+    registry = ToolRegistry()
+    registry.register(ToolDefinition(tool_id="update_plan", version="v1", side_effect="proposal",
+                                     input_schema=_UPDATE_PLAN_SCHEMA, handler=save))
+    arguments = {"steps": returned["steps"]}
+    original = copy.deepcopy(arguments)
+    before = store._path("s").read_bytes()
+    refused = asyncio.run(registry.execute({"tool_call_id": "copied-plan", "tool_id": "update_plan",
+                                           "arguments": arguments}, session_id="s"))
+
+    assert not refused.ok and refused.error == "invalid_tool_arguments"
+    assert not calls and arguments == original and store._path("s").read_bytes() == before
+    allowed = sorted(_UPDATE_PLAN_SCHEMA["properties"]["steps"]["items"]["properties"])
+    for detail in refused.error_details:
+        assert detail["constraint"] == "additionalProperties"
+        assert detail["allowed_fields"] == allowed
+        assert detail["retry_hint"]["allowed_step_fields"] == allowed
+        assert detail["retry_hint"]["tool_id"] == "update_plan"
+        assert "not saved" in detail["retry_hint"]["message"]
+        assert "statistical labels" in detail["retry_hint"]["message"]
+        assert "execution receipts" in detail["retry_hint"]["message"]
+        assert len(json.dumps(detail)) <= MAX_VALIDATION_DETAIL_CHARS
+
+    writable = {"steps": [{key: value for key, value in step.items() if key in allowed}
+                           for step in returned["steps"]]}
+    accepted = asyncio.run(registry.execute({"tool_call_id": "explicit-plan", "tool_id": "update_plan",
+                                            "arguments": writable}, session_id="s"))
+    assert accepted.ok and accepted.output["saved"] is True and calls == [writable]
+    assert len(store.history("s")) == 2
+    assert store.current("s").steps[1].added_after_results is True
+    assert all(not step.completed_operation_ids for step in store.current("s").steps)
+    assert arguments == original
+
+
+def test_plan_step_retry_hint_uses_the_registered_schema():
+    schema = copy.deepcopy(_UPDATE_PLAN_SCHEMA)
+    schema["properties"]["steps"]["items"]["properties"]["fixture_declared_field"] = {"type": "string"}
+    registry = ToolRegistry()
+    calls = []
+    registry.register(ToolDefinition(tool_id="update_plan", version="v1", side_effect="proposal",
+                                     input_schema=schema, handler=lambda args, context: calls.append(args)))
+    arguments = {"steps": [{"step_id": "s", "title": "t", "operation_ids": [], "permission_class": "read"}]}
+
+    refused = asyncio.run(registry.execute({"tool_call_id": "registered-fields", "tool_id": "update_plan",
+                                           "arguments": arguments}, session_id="s"))
+
+    assert not refused.ok and not calls
+    (detail,) = refused.error_details
+    assert detail["retry_hint"]["allowed_step_fields"] == sorted(
+        schema["properties"]["steps"]["items"]["properties"])
+    assert "fixture_declared_field" in detail["retry_hint"]["allowed_step_fields"]
+
+
+@pytest.mark.parametrize(("tool_id", "arguments"), [
+    ("another_tool", {"steps": [{"step_id": "s", "title": "t", "operation_ids": [], "permission_class": "read"}]}),
+    ("update_plan", {"steps": "not a list"}),
+    ("update_plan", {"steps": [{"step_id": "s", "title": "t", "operation_ids": []}], "permission_class": "read"}),
+])
+def test_plan_step_retry_hint_does_not_apply_to_other_tools_paths_or_constraints(tool_id, arguments):
+    registry = ToolRegistry()
+    calls = []
+    registry.register(ToolDefinition(tool_id=tool_id, version="v1", side_effect="proposal",
+                                     input_schema=_UPDATE_PLAN_SCHEMA, handler=lambda args, context: calls.append(args)))
+    original = copy.deepcopy(arguments)
+
+    refused = asyncio.run(registry.execute({"tool_call_id": "other-input", "tool_id": tool_id,
+                                           "arguments": arguments}, session_id="s"))
+
+    assert not refused.ok and refused.error == "invalid_tool_arguments" and not calls
+    assert all("retry_hint" not in detail for detail in refused.error_details)
+    assert arguments == original

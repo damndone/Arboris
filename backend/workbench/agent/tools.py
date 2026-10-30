@@ -833,6 +833,19 @@ class ToolRegistry:
             arguments = _wrap_single_strings(definition, arguments)
         details = validation_details(definition.input_schema, arguments)
         if details:
+            if tool_id == "update_plan":
+                for detail in details:
+                    if (detail.get("constraint") == "additionalProperties"
+                            and re.fullmatch(r"steps\.\d+", detail.get("path", ""))
+                            and (allowed := detail.get("allowed_fields"))):
+                        hint = {
+                            "tool_id": "update_plan", "allowed_step_fields": allowed,
+                            "message": "Returned Plan steps include server-owned audit metadata. Explicitly resubmit "
+                                       "only allowed_step_fields; this change was not saved. Keep statistical labels "
+                                       "and execution receipts server-owned.",
+                        }
+                        if len(json.dumps({**detail, "retry_hint": hint}, allow_nan=False)) < MAX_VALIDATION_DETAIL_CHARS:
+                            detail["retry_hint"] = hint
             if caller_supplied_changes_string:
                 for detail in details:
                     if (detail.get("path") == "changes" and detail.get("expected_type") == "object"

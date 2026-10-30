@@ -307,9 +307,19 @@ def validate_workflow_steps(
     for step in normalized:
         missing = [dep for dep in step["depends_on"] if dep not in known]
         if missing:
+            missing_ids = ", ".join(dep[:48] + ("…" if len(dep) > 48 else "") for dep in missing[:3])
+            if len(missing) > 3:
+                missing_ids += f", … ({len(missing) - 3} more)"
+            current_ids = ", ".join(sorted(known)[:6])
+            if len(known) > 6:
+                current_ids += f", … ({len(known) - 6} more)"
             raise OperationValidationError(
-                f"workflow step {step['step_id']} depends on unknown step(s): "
-                + ", ".join(missing)
+                f"workflow step {step['step_id']} depends on unknown step(s): {missing_ids}. "
+                "depends_on names only step IDs in this changes.steps; "
+                f"current step_ids: {current_ids}. "
+                "For an earlier operation's results, inspect_completed_operations at its recorded scope and "
+                "use emitted registered artifact refs where the consumer supports them; "
+                "do not add or rerun old steps just to satisfy a dependency reference."
             )
         if step["step_id"] in step["depends_on"]:
             raise OperationValidationError(f"workflow step {step['step_id']} depends on itself")

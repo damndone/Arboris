@@ -12,8 +12,7 @@ import numpy as np
 
 from ..canonical import sha256_canonical
 from ..checks.ar_cancellation import check_cancellation
-from ..checks.context import build_context
-from ..checks.iv_checks import _first_stage_strength_owned, FIRST_STAGE_STRENGTH
+from ..checks.iv_checks import _ar_region_owned
 from ..engine.iv_diagnostics import iv_point_definition
 from ..econometrics.runner import run_iv_2sls
 from ..postestimation.comparison_data import _bound_bytes
@@ -81,17 +80,15 @@ def compute_ar(run_root, model_id, expected_source, target_frame):
     if (point != completion['point_estimation_fingerprint']
             or sample != completion['sample'] or fitted.nobs != primary['nobs']):
         _refuse('Reconstructed IV inputs do not match the original design and retained rows.')
-    context = build_context(model_id=model_id, model_type='iv_2sls', fitted=fitted,
-                            kernel=None, nobs=primary['nobs'])
     # run_iv_2sls copies the frame and IVData copies its numerical arrays. This
     # request retains the fit locally and publishes no model or writer aliases.
     # Keep generic checks/public callers on their existing private snapshot.
-    outcome = _first_stage_strength_owned(context, FIRST_STAGE_STRENGTH)
+    region = _ar_region_owned(fitted)
     check_cancellation()
     return {'contract': 'iv-ar.evidence.v1', 'model_id': model_id, 'model_run_id': run_root.name,
         'model_sha256': hashlib.sha256(primary_raw).hexdigest(),
         'completion_sha256': hashlib.sha256(completion_raw).hexdigest(),
         'point_estimation_fingerprint': point, 'analysis_sample_fingerprint': sample['positions_sha256'],
         'covariance': covariance, 'confidence_level': .95,
-        'anderson_rubin_95': outcome.evidence['anderson_rubin_95'],
+        'anderson_rubin_95': region,
         'scientific_validity': 'not_certified'}

@@ -24,6 +24,10 @@ POLYNOMIAL_SHA = {
     16389: 'ccd1fecb45366865518747fc5e2c6ff863ee9b528560b5691de0ac5a49bd7738',
 }
 PUBLIC_SHA = 'e8d461ef36ad9f06d8773213edba39aa730306553f684a66c88620954f71e989'
+PUBLIC_DIAGNOSTIC_SHA = {
+    False: 'd2a9832f4b411f2b5d74127123e76edc56ae9a1fd02189c6953c4bc97014e9b0',
+    True: '04998824f23d10e90509ab193270ac01ec42395fde27609a5aab8259fbc84614',
+}
 
 
 def _encoded(value):
@@ -94,6 +98,49 @@ def test_real_service_owned_path_never_stacks_the_full_observation_matrix(tmp_pa
     assert shapes and max(rows for rows, _ in shapes) <= 16384, shapes
     assert shapes == [(16384, 7), (5, 7)]
     pd.testing.assert_frame_equal(frame, before, check_exact=True)
+
+
+def test_real_service_does_not_compute_unused_first_stage_diagnostic(tmp_path, monkeypatch):
+    from workbench.checks import iv_checks
+    from workbench.services.iv_ar import compute_ar
+    y, x, z, w = _case()
+    frame = pd.DataFrame({'y': y, 'd': x[:, 0], 'w': w[:, 1], 'z1': z[:, 0], 'z2': z[:, 1]})
+    run, binding, frame = _completed_owner(tmp_path / 'region-only', frame)
+    diagnostic = iv_checks.first_stage_diagnostic
+    calls = []
+
+    def observe(fitted):
+        calls.append(1)
+        return diagnostic(fitted)
+
+    monkeypatch.setattr(iv_checks, 'first_stage_diagnostic', observe)
+    result = compute_ar(run, 'iv_2sls_1', binding, frame)
+    assert calls == [], 'AR-only service recomputed unused first-stage diagnostics'
+    assert _sha(result['anderson_rubin_95']) == PUBLIC_SHA
+
+
+@pytest.mark.parametrize('compute_ar', [False, True])
+def test_public_diagnostic_keeps_its_original_call_and_complete_result(compute_ar, monkeypatch):
+    from workbench.econometrics.runner import run_iv_2sls
+    from workbench.checks.context import build_context
+    from workbench.checks import iv_checks
+    y, x, z, w = _case()
+    frame = pd.DataFrame({'y': y, 'd': x[:, 0], 'w': w[:, 1], 'z1': z[:, 0], 'z2': z[:, 1]})
+    _, fitted = run_iv_2sls(frame, y='y', exog=['w'], endog=['d'], instruments=['z1', 'z2'],
+                          model_id='iv_2sls_1', covariance='robust')
+    context = build_context(model_id='iv_2sls_1', model_type='iv_2sls', fitted=fitted, kernel=None, nobs=len(y))
+    diagnostic = iv_checks.first_stage_diagnostic
+    calls = []
+
+    def observe(actual):
+        calls.append(1)
+        return diagnostic(actual)
+
+    monkeypatch.setattr(iv_checks, 'first_stage_diagnostic', observe)
+    spec = iv_checks.FIRST_STAGE_STRENGTH
+    outcome = iv_checks.first_stage_strength(context, spec, compute_ar=compute_ar)
+    assert calls == [1]
+    assert _sha(spec.result(outcome)) == PUBLIC_DIAGNOSTIC_SHA[compute_ar]
 
 
 @pytest.mark.parametrize('entry', ['robust_set', 'verified_set', 'polynomial_enclosures'])
@@ -191,10 +238,10 @@ def test_owned_check_keeps_the_original_eligibility_refusals(case, reason):
     weights = np.linspace(1., 2., len(y)) if case == 'weighted' else None
     fitted = IV2SLS(y, w, x, z, weights=weights).fit(cov_type='clustered' if case == 'clustered' else 'robust')
     context = build_context(model_id='iv_2sls_1', model_type='iv_2sls', fitted=fitted, kernel=None, nobs=len(y))
-    owned = _owned(iv_checks, '_first_stage_strength_owned')(context, FIRST_STAGE_STRENGTH)
+    owned = _owned(iv_checks, '_ar_region_owned')(fitted)
     public = first_stage_strength(context, FIRST_STAGE_STRENGTH, compute_ar=True)
-    assert owned == public
-    assert owned.evidence['anderson_rubin_95'] == {'kind': 'unavailable', 'reason': reason}
+    assert _encoded(owned) == _encoded(public.evidence['anderson_rubin_95'])
+    assert owned == {'kind': 'unavailable', 'reason': reason}
 
 
 def test_owned_unadjusted_fit_keeps_the_homoskedastic_path():
@@ -207,9 +254,10 @@ def test_owned_unadjusted_fit_keeps_the_homoskedastic_path():
     _, fitted = run_iv_2sls(frame, y='y', exog=['w'], endog=['d'], instruments=['z1', 'z2'],
                           model_id='iv_2sls_1', covariance='unadjusted')
     context = build_context(model_id='iv_2sls_1', model_type='iv_2sls', fitted=fitted, kernel=None, nobs=len(y))
-    owned = _owned(iv_checks, '_first_stage_strength_owned')(context, FIRST_STAGE_STRENGTH)
-    assert owned == first_stage_strength(context, FIRST_STAGE_STRENGTH, compute_ar=True)
-    assert owned.evidence['anderson_rubin_95']['method'] == 'homoskedastic'
+    owned = _owned(iv_checks, '_ar_region_owned')(fitted)
+    public = first_stage_strength(context, FIRST_STAGE_STRENGTH, compute_ar=True)
+    assert _encoded(owned) == _encoded(public.evidence['anderson_rubin_95'])
+    assert owned['method'] == 'homoskedastic'
 
 
 def _frozen_public():
@@ -236,6 +284,7 @@ def test_original1m_completed_owner_service_matches_frozen_public(tmp_path, monk
     """Real owner/source admission and default fit; no timing or memory claim."""
     from workbench.services import iv_ar
     from workbench.services.completion_products import array_fingerprint
+    from workbench.checks import iv_checks
     from workbench.checks.iv_checks import _arrays
     root = Path(__file__).resolve().parents[1]
     source = root / 'local/perf-inputs/iv/iv.csv'
@@ -251,19 +300,25 @@ def test_original1m_completed_owner_service_matches_frozen_public(tmp_path, monk
     assert completion['diagnostics']['iv']['weak_instruments']['anderson_rubin_95']['kind'] == 'not_computed'
     original_files = {path: path.read_bytes() for path in [run / 'run_manifest.json',
         run / 'model_results/iv_2sls_1.json', run / 'model_results/iv_2sls_1.completion.json', run / 'iv_diagnostics.json']}
-    checked = iv_ar._first_stage_strength_owned
+    checked = iv_ar._ar_region_owned
     observed = []
+    diagnostic_calls = []
+    diagnostic = iv_checks.first_stage_diagnostic
 
-    def compare(context, spec):
-        arrays = _arrays(context.fitted)
+    def compare(fitted):
+        arrays = _arrays(fitted)
         values = tuple(arrays[key] for key in ('y', 'x', 'z', 'w'))
         before = [array_fingerprint(value) for value in values]
         expected = frozen.robust_set(*values)
-        result = checked(context, spec)
-        assert _encoded(result.evidence['anderson_rubin_95']) == _encoded(expected)
+        result = checked(fitted)
+        assert _encoded(result) == _encoded(expected)
         assert [array_fingerprint(value) for value in values] == before
         observed.append(expected)
         return result
+
+    def observe_diagnostic(fitted):
+        diagnostic_calls.append(1)
+        return diagnostic(fitted)
 
     shapes = []
     stack = np.column_stack
@@ -274,10 +329,12 @@ def test_original1m_completed_owner_service_matches_frozen_public(tmp_path, monk
             shapes.append(result.shape)
         return result
 
-    monkeypatch.setattr(iv_ar, '_first_stage_strength_owned', compare)
+    monkeypatch.setattr(iv_ar, '_ar_region_owned', compare)
+    monkeypatch.setattr(iv_checks, 'first_stage_diagnostic', observe_diagnostic)
     monkeypatch.setattr(verified.np, 'column_stack', observe)
     result = iv_ar.compute_ar(run, 'iv_2sls_1', binding, frame)
     assert len(observed) == 1
+    assert diagnostic_calls == []
     expected, = observed
     assert _encoded(result['anderson_rubin_95']) == _encoded(expected)
     assert expected['computation']['path'] == 'verified_numpy'
@@ -295,3 +352,4 @@ def test_original1m_completed_owner_service_matches_frozen_public(tmp_path, monk
     record_property('moment_input_sha256', expected['global_certification']['reduction']['input_sha256'])
     record_property('owned_blocks', len(shapes))
     record_property('complete_bounds_and_certificate_exact', True)
+    record_property('first_stage_diagnostic_calls_in_service', len(diagnostic_calls))
