@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import get_args, get_type_hints
+from typing import Any, get_args, get_type_hints
 
 from workbench.contracts.model.arma_garch import (
     ARMA_GARCH_CONTRACT_VERSION,
@@ -19,7 +19,12 @@ from workbench.engine.pack import AnalysisPack, register_pack
 from workbench.engine.registry import ModelHandler
 from workbench.model_options import ModelOptionsContract
 
-from .runner import fit_from_context
+
+def fit_from_context(ctx: Any, env: Any) -> tuple[str, dict[str, Any], None]:
+    """Load execution dependencies when the registered handler is invoked."""
+    from .runner import fit_from_context as fit
+
+    return fit(ctx, env)
 
 
 def declare_pack() -> None:
