@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 #: What an operation result carries of the check: enough to act on, not the evidence catalog.
-DIGEST_FIELDS = ("status", "missing", "next_step", "compose_report", "sensitivity_options", "primary_candidates",
+DIGEST_FIELDS = ("status", "missing", "next_step", "repair_steps", "compose_report", "sensitivity_options", "primary_candidates",
                  "dropped_references", "disclosures", "verified_artifacts", "scientific_validity",
                  "playbook_status", "criteria_verification")
 
@@ -56,6 +56,8 @@ def delivery_state(project_root, plan, *, suggest=False):
         # Named back to the Agent: a reference that does not resolve to the right kind
         # of verified product is not evidence, whatever it was meant to be.
         result['dropped_references'] = bound['dropped'][:12]
+    ar_repair = next((step for step in result.get('repair_steps', [])
+                      if step.get('reason') == 'ar_not_requested'), None)
     if 'completion_contract:select_playbooks_and_source' in result['missing']:
         result['next_step'] = ('No completion contract was saved. Call update_plan with completion: select scope '
             'and playbooks from the user request, and bind the registered dataset source. '
@@ -78,6 +80,10 @@ def delivery_state(project_root, plan, *, suggest=False):
                                'specification and question, never by significance, and call update_plan with '
                                'completion_evidence {"models": [its run_id and artifact_id]}; the Workbench binds '
                                'its diagnostics, the other fits and the report.')
+    elif ar_repair and result['status'] == 'partial':
+        import json
+        result['next_step'] = (ar_repair['action'] + ' Operation: '
+                               + json.dumps(ar_repair['operation'], ensure_ascii=False))
     elif result.get('sensitivity_options') and result['status'] == 'partial':
         # off3 leverage.goal composed its report three times before the sensitivity fit it lacked.
         from .completion_sensitivity import SENSITIVITY_NEXT_STEP
@@ -96,7 +102,7 @@ def delivery_state(project_root, plan, *, suggest=False):
             from ..canonical import sha256_canonical
             result['recovery_question_sha256'] = sha256_canonical(plan.question)
     if checked['status'] == 'partial':
-        result['next_step'] = ('Approved criteria or expected outputs remain unverified. Inspect criteria_verification; '
+        criteria_guidance = ('Approved criteria or expected outputs remain unverified. Inspect criteria_verification; '
             'bind existing producer records and registered artifacts without repeating an execution merely to repair its binding. '
             'If an analysis is truly missing, propose a scientifically justified supported new specification under '
             'the original permissions and approval path; if none is feasible, keep partial status and state the '
@@ -104,6 +110,7 @@ def delivery_state(project_root, plan, *, suggest=False):
             'need a visible plan revision. Auto requires its approved plan basis; Ask may reuse the exact '
             'human-confirmed executed request. A plan marked needs_approval still requires approval. '
             'Unsupported claims remain partial for human takeover; do not erase promises or invent receipts.')
+        result['next_step'] = ((result['next_step'] + ' ') if result.get('next_step') else '') + criteria_guidance
     return result, evidence
 
 
@@ -139,7 +146,7 @@ def delivery_lines(digest: dict[str, Any] | None) -> list[str]:
     if digest.get("verified_artifacts"):
         lines.append("Verified artifact references (integrity only, not scientific certification): "
                      + json.dumps(digest["verified_artifacts"][:8], ensure_ascii=False)[:3000])
-    for key in ("compose_report", "sensitivity_options", "primary_candidates", "disclosures"):
+    for key in ("repair_steps", "compose_report", "sensitivity_options", "primary_candidates", "disclosures"):
         if digest.get(key):
             lines.append(f"{key}: " + json.dumps(digest[key], ensure_ascii=False)[:3000])
     lines.append("This is the same check inspect_analysis_completion returns; call it only for its evidence catalog "

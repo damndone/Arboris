@@ -403,7 +403,7 @@ def evaluate(project_root, contract, evidence, *, suggest=False, options=False, 
         if family == 'iv' and main_ref:
             diagnostic_values = with_iv_ar(products, main_ref, main, diagnostic_values,
                 [(ref, artifact) for ref, artifact in groups['diagnostics'] if artifact and bound(ref)])
-            if suggest and any(((v.get('diagnostics') or {}).get('iv', {}).get('weak_instruments') or {}).get('anderson_rubin_95', {}).get('kind') == 'not_computed' for v in diagnostic_values):
+            if (suggest or options) and any(((v.get('diagnostics') or {}).get('iv', {}).get('weak_instruments') or {}).get('anderson_rubin_95', {}).get('kind') == 'not_computed' for v in diagnostic_values):
                 repairs.append({'family': 'iv', 'reason': 'ar_not_requested',
                     'operation': {'operation_id': 'iv.ar_confidence',
                                   'spec': {'model_run_id': main_ref['run_id'], 'model_ref': main['model_id']}},
@@ -457,6 +457,7 @@ def evaluate(project_root, contract, evidence, *, suggest=False, options=False, 
     result = _result(missing, products, target=target)
     if suggest:
         result['evidence_catalog'] = catalog
+    if suggest or repairs:
         result['repair_steps'] = repairs
     if sensitivity_options:
         result['sensitivity_options'] = sensitivity_options[:MAX_OPTIONS]
@@ -885,15 +886,15 @@ def derive_evidence(project_root, contract, evidence, *, _products=None):
                          if isinstance(ref, dict) and products.load(ref) is not None]
     notes['dropped'] += [{'diagnostics': ref} for ref in given.get('diagnostics') or []
                          if isinstance(ref, dict) and plain(ref) not in given_diagnostics]
-    # Only a primary's own diagnostics, and only for a primary the Agent gave
-    # none for: every selected artifact must be covered by the report, so an
-    # extra one would make a correct report fail coverage.
+    # Native models require their exact companion. Another same-run result
+    # cannot replace it; other models retain the existing diagnostic selection.
     own = []
     for primary in primaries:
-        if any(ref['run_id'] == primary['run_id'] for ref in given_diagnostics):
-            continue
         model = next(model for ref, model in models if plain(ref) == primary)
         companion = {'run_id': primary['run_id'], 'artifact_id': model['model_id'] + '.completion'}
+        if (companion in given_diagnostics if model.get('model_type') in NATIVE_COMPANIONS
+                else any(ref['run_id'] == primary['run_id'] for ref in given_diagnostics)):
+            continue
         if companion in [plain(ref) for ref in diagnostics]:
             own.append(companion)
         else:
