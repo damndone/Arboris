@@ -591,8 +591,20 @@ def _align_model_preview_frame(
     sample = model_result.get("analysis_sample")
     row_order = sample.get("row_order") if isinstance(sample, dict) else None
     if isinstance(row_order, list) and len(row_order) >= n:
-        positions = {str(value): position for position, value in enumerate(frame.index)}
-        selected = [positions.get(str(value)) for value in row_order[:n]]
+        if type(frame.index) is pd.RangeIndex:
+            selected = []
+            for value in row_order[:n]:
+                key = str(value)
+                try:
+                    label = int(key)
+                    # Match the original string keys, including rejection of "01".
+                    position = frame.index.get_loc(label) if str(label) == key else None
+                except (ValueError, KeyError):
+                    position = None
+                selected.append(position)
+        else:
+            positions = {str(value): position for position, value in enumerate(frame.index)}
+            selected = [positions.get(str(value)) for value in row_order[:n]]
         if all(position is not None for position in selected):
             return frame.iloc[[int(position) for position in selected]]
     return frame.iloc[:n]
