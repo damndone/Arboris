@@ -310,16 +310,28 @@ export async function sendAgentTurn(
   contextPacket?: Record<string, unknown>,
   executionPolicy: "auto_read_only" | "proposal_only" = "auto_read_only",
   executionMode: "ask" | "auto" = "ask",
+  attachments: string[] = [],
 ): Promise<ResponseOf<"/agent/sessions/{session_id}/turns", "post">> {
   return request(
     agentPath(projectRoot, `/agent/sessions/${encodeURIComponent(sessionId)}/turns`),
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({question, execution_policy: executionPolicy, execution_mode: executionMode, ...(contextPacket ? {context_packet: contextPacket} : {})}),
+      body: JSON.stringify({question, execution_policy: executionPolicy, execution_mode: executionMode, ...(attachments.length ? {attachments} : {}), ...(contextPacket ? {context_packet: contextPacket} : {})}),
       signal,
     },
   );
+}
+
+export function uploadAgentAttachment(projectRoot: string, file: File): Promise<ResponseOf<"/agent/attachments", "post">> {
+  const form = new FormData();
+  form.append("project_root", projectRoot);
+  form.append("file", file);
+  return request(apiUrl("/agent/attachments"), { method: "POST", body: form });
+}
+
+export function agentAttachmentUrl(projectRoot: string, attachmentId: string): string {
+  return agentPath(projectRoot, `/agent/attachments/${encodeURIComponent(attachmentId)}`);
 }
 
 /** Request cancellation for the active server-side turn in this session. */

@@ -439,6 +439,15 @@ export function AgentPanel({
           </div>
         ) : (
           <span className="wb-agent-terminal-content wb-agent-terminal-plain">
+            {message.attachments?.length ? (
+              <span className="wb-agent-attachments" data-testid="agent-message-attachments">
+                {message.attachments.map((item) => (
+                  item.kind === "image" && agent.attachmentUrl
+                    ? <img key={item.attachment_id} src={agent.attachmentUrl(item.attachment_id)} alt={item.name} title={item.name} className="wb-agent-attachment-image" />
+                    : <span key={item.attachment_id} className="wb-agent-attachment-chip">{item.name}</span>
+                ))}
+              </span>
+            ) : null}
             {message.content}
           </span>
         )}

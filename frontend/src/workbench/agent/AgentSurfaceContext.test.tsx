@@ -301,7 +301,7 @@ describe("AgentSurfaceProvider", () => {
     await waitFor(()=>expect(mocks.getAgentPlan).toHaveBeenCalledWith("/proj","restored"));
     fireEvent.change(screen.getByRole("textbox",{name:"Ask Agent"}),{target:{value:"Revised request"}});
     fireEvent.click(screen.getByRole("button",{name:"Send to Agent"}));
-    await waitFor(()=>expect(mocks.sendAgentTurn).toHaveBeenCalledWith("/proj","restored","Revised request",expect.any(AbortSignal),expect.anything(),"proposal_only","ask"));
+    await waitFor(()=>expect(mocks.sendAgentTurn).toHaveBeenCalledWith("/proj","restored","Revised request",expect.any(AbortSignal),expect.anything(),"proposal_only","ask", []));
     expect(mocks.continueAgentTurn).not.toHaveBeenCalled();
   });
 
@@ -465,7 +465,7 @@ describe("AgentSurfaceProvider", () => {
     fireEvent.change(screen.getByRole("combobox", {name:"Agent execution mode"}), {target:{value:"auto"}});
     fireEvent.change(screen.getByRole("textbox", {name:"Ask Agent"}), {target:{value:"First request"}});
     fireEvent.click(screen.getByRole("button", {name:"Send to Agent"}));
-    await waitFor(() => expect(mocks.sendAgentTurn).toHaveBeenCalledWith("/proj","agent_chain_new","First request",expect.any(AbortSignal),undefined,"auto_read_only","auto"));
+    await waitFor(() => expect(mocks.sendAgentTurn).toHaveBeenCalledWith("/proj","agent_chain_new","First request",expect.any(AbortSignal),undefined,"auto_read_only","auto", []));
     fireEvent.change(screen.getByRole("textbox", {name:"Ask Agent"}), {target:{value:"Next request"}});
     fireEvent.keyDown(screen.getByRole("textbox", {name:"Ask Agent"}), {key:"Enter"});
     expect(mocks.sendAgentTurn).toHaveBeenCalledTimes(1);
@@ -483,7 +483,7 @@ describe("AgentSurfaceProvider", () => {
     expect(mocks.sendAgentTurn).not.toHaveBeenCalled();
     fireEvent.change(screen.getByRole("textbox", {name:"Ask Agent"}), {target:{value:"Continue the plan"}});
     fireEvent.click(screen.getByRole("button", {name:"Send to Agent"}));
-    await waitFor(() => expect(mocks.sendAgentTurn).toHaveBeenCalledWith("/proj", "saved", "Continue the plan", expect.any(AbortSignal), undefined, "auto_read_only", "auto"));
+    await waitFor(() => expect(mocks.sendAgentTurn).toHaveBeenCalledWith("/proj", "saved", "Continue the plan", expect.any(AbortSignal), undefined, "auto_read_only", "auto", []));
   });
 
   it("an explicit Review selection replaces Auto and a refused turn is shown as a failure", async () => {
@@ -500,7 +500,7 @@ describe("AgentSurfaceProvider", () => {
     expect(screen.getByRole("combobox", {name:"Agent execution mode"})).toHaveValue("ask");
     fireEvent.change(screen.getByRole("textbox", {name:"Ask Agent"}), {target:{value:"Review this operation"}});
     fireEvent.click(screen.getByRole("button", {name:"Send to Agent"}));
-    await waitFor(() => expect(mocks.sendAgentTurn).toHaveBeenCalledWith("/proj", "agent_chain_new", "Review this operation", expect.any(AbortSignal), undefined, "proposal_only", "ask"));
+    await waitFor(() => expect(mocks.sendAgentTurn).toHaveBeenCalledWith("/proj", "agent_chain_new", "Review this operation", expect.any(AbortSignal), undefined, "proposal_only", "ask", []));
     expect(await screen.findByText("Turn was refused")).toBeInTheDocument();
     expect(screen.queryByTestId("agent-message-assistant")).not.toBeInTheDocument();
     expect(mocks.continueAgentTurn).not.toHaveBeenCalled();
@@ -974,6 +974,7 @@ describe("AgentSurfaceProvider", () => {
       undefined, // a chain session's context is bound by the server, not refreshed per turn
       "proposal_only",
       "ask",
+      [],
     ));
   });
 

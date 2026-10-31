@@ -33,6 +33,7 @@ class AgentTurnRequest(BaseModel):
     execution_policy: Literal["auto_read_only", "proposal_only"] = "auto_read_only"
     # v1.9.1: "ask" every step, or "auto" within the approved plan.
     execution_mode: Literal["ask", "auto"] = "ask"
+    attachments: list[str] = Field(default_factory=list, max_length=8)
     # The panel's current project context. A Main session's overview was
     # written once, at creation, so runs made afterwards (a metadata edit, a
     # rerun) were invisible and the Agent kept reading the old run.

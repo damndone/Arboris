@@ -12,6 +12,7 @@ from ..services.dataset_view import run_labels
 
 def _messages(repository: JsonlSessionRepository, session_id: str) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
+    attachments: list[dict[str, Any]] = []  # shown on the message they came with
     projector = AgentNavigationProjector(repository.root.parent)
     branch = repository.get_branch(session_id)
     try:
@@ -38,6 +39,9 @@ def _messages(repository: JsonlSessionRepository, session_id: str) -> list[dict[
                 },
             })
             continue
+        if entry.entry_type == "custom_message" and isinstance(entry.payload.get("attachment"), dict):
+            attachments.append(entry.payload["attachment"])
+            continue
         if entry.entry_type != "message":
             continue
         role = entry.payload.get("role")
@@ -55,6 +59,9 @@ def _messages(repository: JsonlSessionRepository, session_id: str) -> list[dict[
             "stop_reason": entry.payload.get("stop_reason"),
             "error": entry.payload.get("error"),
         }
+        if role == "user" and attachments:
+            message["attachments"] = attachments
+            attachments = []
         if isinstance(entry.payload.get("reasoning_content"), str) and entry.payload["reasoning_content"].strip():
             # Folded beside its step at the person's request (2026-10-31); events never carry it.
             message["reasoning"] = entry.payload["reasoning_content"]

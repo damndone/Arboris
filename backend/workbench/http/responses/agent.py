@@ -180,6 +180,15 @@ class AgentCompactionView(TypedDict):
     summarized_messages: int
 
 
+class AgentAttachment(TypedDict):
+    attachment_id: str
+    name: str
+    kind: str
+    media_type: str
+    bytes: int
+    sha256: str
+
+
 class AgentContextPart(TypedDict):
     label: str
     tokens: int
@@ -208,6 +217,7 @@ class AgentMessage(TypedDict):
     stop_reason: str | None
     error: str | None
     reasoning: NotRequired[str]
+    attachments: NotRequired[list[AgentAttachment]]
     numeric_check: NotRequired[NumericCheckUnverified | NumericCheckFailed]
     navigation: list[NavigationRefView]
     compaction: NotRequired[AgentCompactionView]

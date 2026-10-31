@@ -492,6 +492,11 @@ def _chat_request_payload(
     except EgressPolicyError as exc:
         # A broken policy blocks the call; it never falls back to sending more.
         raise LLMUpstreamError(f"Data-sharing policy is invalid: {exc}") from exc
+    if any(message.get("attachment_image") for message in guarded):
+        from ..agent.attachments import expand_images
+        from ..egress import current_project
+        project = current_project()
+        guarded = expand_images(guarded, project, supports_vision=bool(config.supports_vision) and project is not None)
     payload: dict[str, Any] = {
         "model": config.model,
         "messages": guarded,

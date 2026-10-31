@@ -30,7 +30,9 @@ import {
   getAgentEvents,
   getAgentCapabilities,
   getAgentOperationProjection,
+  agentAttachmentUrl,
   getAgentSession,
+  uploadAgentAttachment,
   getAgentSessionProjection,
   forkAgentSession,
   pinAgentChapter,
@@ -216,7 +218,9 @@ export interface AgentSurfaceContextValue {
   setPrompt: (value: string) => void;
   executionPolicy?: "auto_read_only" | "proposal_only";
   setExecutionPolicy?: (value: "auto_read_only" | "proposal_only") => void;
-  sendPrompt: (value?: string) => Promise<void>;
+  sendPrompt: (value?: string, attachments?: AgentMessage["attachments"]) => Promise<void>;
+  attachFile?: (file: File) => Promise<NonNullable<AgentMessage["attachments"]>[number]>;
+  attachmentUrl?: (attachmentId: string) => string;
   abortTurn: () => Promise<void>;
   isSubmitting: boolean;
   error: string | null;
@@ -961,7 +965,7 @@ export function AgentSurfaceProvider({
     await runContinuation();
   }, [sessionId,sessionScope,approvePlanVersion,runContinuation]);
 
-  const sendPrompt = useCallback(async (value = prompt) => {
+  const sendPrompt = useCallback(async (value = prompt, attachments: AgentMessage["attachments"] = []) => {
     const question = value.trim();
     if (!question || isSubmitting || activeTurnControllerRef.current || confirmationControllerRef.current || ["running","working","cancelling"].includes(sessionStatus)) return;
     if (durableTurns.length) {setError("An unfinished turn needs recovery. Resume the original turn before sending a new request.");return;}
@@ -977,6 +981,7 @@ export function AgentSurfaceProvider({
       stop_reason: null,
       error: null,
       navigation: [],
+      ...(attachments?.length ? { attachments } : {}),
     };
     // The transcript is the conversation surface, so a sent turn must be
     // visible before the provider round-trip completes. The durable response
@@ -1029,6 +1034,7 @@ export function AgentSurfaceProvider({
         isGlobalScope ? (contextPacket as Record<string, unknown>) : undefined,
         executionPolicy,
         executionMode,
+        (attachments ?? []).map((item) => item.attachment_id),
       );
       if (activeScopeRef.current !== requestScope || activeTurnControllerRef.current !== controller || controller.signal.aborted) return;
       setMessages(result.session.messages);
@@ -1401,6 +1407,8 @@ export function AgentSurfaceProvider({
     contextWindowTokens,
     contextPercent,
     contextWindowAssumed,
+    attachFile: (file: File) => uploadAgentAttachment(projectRoot, file),
+    attachmentUrl: (attachmentId: string) => agentAttachmentUrl(projectRoot, attachmentId),
     compactAtTokens: serverContext?.compact_at_tokens ?? null,
     contextBreakdown: serverContext?.breakdown ?? [],
     compactConversation,

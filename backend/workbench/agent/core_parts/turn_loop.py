@@ -273,13 +273,14 @@ class TurnLoopMixin:
                 numeric_check_failed = True
                 language = detect_language(getattr(self, "_user_text", None))
                 content = f"{content}\n\n{numeric_grounding.unchecked_note(language)}"
-            if numeric_findings and self._numeric_repairs_left > 0 and self._has_step_left():
+            from_image = numeric_grounding.image_in_this_turn(context.messages)
+            if numeric_findings and not from_image and self._numeric_repairs_left > 0 and self._has_step_left():
                 return await self._withdraw_draft(
                     content, numeric_findings, command_id=command_id, context=context, tool_context=tool_context
                 )
             if numeric_findings:
                 language = detect_language(getattr(self, "_user_text", None))
-                content = f"{content}\n\n{numeric_grounding.unverified_note(numeric_findings, language)}"
+                content = f"{content}\n\n{numeric_grounding.unverified_note(numeric_findings, language, image=from_image)}"
         payload: dict[str, Any] = {
             "role": "assistant",
             "content": content,

@@ -14,7 +14,10 @@ from ..agent.operations import OperationRegistry
 from ..agent.orchestrator import WorkbenchOrchestrator
 from ..agent.tools import ToolRegistry
 from ..api_errors import WorkbenchAPIError
+from fastapi import File, Form, Response, UploadFile
+from ..agent.attachments import MAX_BYTES as MAX_ATTACHMENT_BYTES, AttachmentError, load as load_attachment, message_payload, store as store_attachment
 from ..agent.protocol import CONTINUATION_NOTE
+from .responses.agent import AgentAttachment
 from ..agent.turn_runtime import turn_budget, turn_registry
 from ..egress import egress_project
 from .responses.agent import AgentEvents, AgentMessageQueued, AgentTurn, AgentTurnCancelling
@@ -29,6 +32,28 @@ from fastapi import APIRouter
 from .typed_routes import TypedAPIRoute
 
 router = APIRouter(route_class=TypedAPIRoute)
+
+
+@router.post("/agent/attachments")
+async def upload_agent_attachment(project_root: str = Form(...), file: UploadFile = File(...)) -> AgentAttachment:
+    root = Path(project_root).expanduser().resolve()
+    if not (root / "workbench").is_dir():
+        raise WorkbenchAPIError(status_code=404, code="PROJECT_NOT_FOUND", message="No such project.")
+    try:
+        return store_attachment(root, file.filename or "attachment", await file.read(MAX_ATTACHMENT_BYTES + 1))
+    except AttachmentError as exc:
+        code, _, message = str(exc).partition(": ")
+        raise WorkbenchAPIError(status_code=422, code=code, message=message) from exc
+
+
+@router.get("/agent/attachments/{attachment_id}", response_class=Response, response_model=None)
+def read_agent_attachment(attachment_id: str, project_root: str) -> Response:
+    try:
+        record, data = load_attachment(Path(project_root).expanduser().resolve(), attachment_id)
+    except AttachmentError as exc:
+        raise WorkbenchAPIError(status_code=404, code="ATTACHMENT_NOT_FOUND", message=str(exc)) from exc
+    # Text is served as plain text and images by their sniffed type, so nothing here runs in the page.
+    return Response(content=data, media_type=record["media_type"], headers={"X-Content-Type-Options": "nosniff"})
 
 @router.post("/agent/sessions/{session_id}/turns")
 async def run_agent_turn(
@@ -251,6 +276,12 @@ async def _run_reserved_agent_turn(
                 })
                 await agent.continue_(budget=budget, tool_context=tool_context)
             else:
+                try:
+                    entries = [message_payload(root, attachment_id) for attachment_id in body.attachments]
+                except AttachmentError as exc:
+                    raise WorkbenchAPIError(status_code=422, code="ATTACHMENT_NOT_FOUND", message=str(exc)) from exc
+                for entry in entries:
+                    repository.append(session_id, "custom_message", entry)
                 await agent.prompt(body.question.strip(), budget=budget, tool_context=tool_context)
     except TurnStoreError as exc:
         raise WorkbenchAPIError(status_code=409, code="AGENT_TURN_RECOVERY_REQUIRED",

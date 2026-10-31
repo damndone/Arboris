@@ -10,6 +10,7 @@ import { agentTurnActive } from "../../workbench/agent/AgentRunControls";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useAgentSurfaceOptional } from "../../workbench/agent/AgentSurfaceContext";
 import { AgentCapabilityPopover } from "../../workbench/agent/AgentCapabilityPopover";
+import type { AgentMessage } from "../../workbench/agent/agentTypes";
 import { ContextUsageRing } from "../../workbench/agent/ContextUsageRing";
 import { SendIcon, StopIcon } from "../icons";
 import { AgentModeMenu, cycleMode } from "./AgentModeMenu";
@@ -30,6 +31,10 @@ export function AgentColumnComposer() {
   const agent = useAgentSurfaceOptional();
   const { handleCommand, feedback } = useAgentSlashCommands(agent);
   const textRef = useRef<HTMLTextAreaElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [attached, setAttached] = useState<NonNullable<AgentMessage["attachments"]>>([]);
+  const [attachError, setAttachError] = useState<string | null>(null);
+  const [dropping, setDropping] = useState(false);
   const prompt = agent?.prompt ?? "";
   const [steer, setSteer] = useState(false);
   const busyNow = agent ? agentTurnActive(agent) : false;
@@ -66,8 +71,25 @@ export function AgentColumnComposer() {
   const submit = () => {
     if (!canSend) return;
     if (handleCommand(prompt)) return;
-    if (!busy) void sendPrompt(prompt);
+    if (!busy) {
+      void sendPrompt(prompt, attached);
+      setAttached([]);
+    }
     else if (canQueue) void agent.queueTurnMessage?.(steer ? "steer" : "follow_up", prompt);
+  };
+  const imageUnread = attached.some((item) => item.kind === "image")
+    && agent.modelOptions?.find((option) => option.request_model === agent.model)?.supports_vision === false;
+  const attach = async (files: Iterable<File>) => {
+    if (!agent.attachFile) return;
+    setAttachError(null);
+    for (const file of files) {
+      try {
+        const record = await agent.attachFile(file);
+        setAttached((current) => current.some((item) => item.attachment_id === record.attachment_id) ? current : [...current, record].slice(0, 8));
+      } catch (problem) {
+        setAttachError(problem instanceof Error ? problem.message : `Could not attach ${file.name}`);
+      }
+    }
   };
   const unfinished = !busyNow ? agent.durableTurns ?? [] : [];
 
@@ -98,6 +120,18 @@ export function AgentColumnComposer() {
       <form
         className="ws-composer"
         data-testid="agent-composer"
+        data-dropping={dropping || undefined}
+        onDragOver={(event) => {
+          if (!event.dataTransfer.types.includes("Files")) return;
+          event.preventDefault();
+          setDropping(true);
+        }}
+        onDragLeave={() => setDropping(false)}
+        onDrop={(event) => {
+          event.preventDefault();
+          setDropping(false);
+          void attach(Array.from(event.dataTransfer.files));
+        }}
         onSubmit={(event) => {
           event.preventDefault();
           submit();
@@ -110,6 +144,21 @@ export function AgentColumnComposer() {
             {focusChipText(scopeLabel)}
           </span>
         </div>
+        {attached.length > 0 && (
+          <div className="ws-composer__attachments" data-testid="agent-composer-attachments">
+            {attached.map((item) => (
+              <span key={item.attachment_id} className="ws-composer__attachment" title={`Sent to the model with your message: ${item.name}`}>
+                {item.kind === "image" && agent.attachmentUrl
+                  ? <img src={agent.attachmentUrl(item.attachment_id)} alt="" />
+                  : null}
+                <span>{item.name}</span>
+                <button type="button" aria-label={`Remove ${item.name}`} onClick={() => setAttached((current) => current.filter((other) => other !== item))}>×</button>
+              </span>
+            ))}
+          </div>
+        )}
+        {attachError && <div className="ws-composer__attach-error" role="alert">{attachError}</div>}
+        {imageUnread && <div className="ws-composer__attach-error">{agent.model} can't read images. Switch to a vision model to use them.</div>}
         <label htmlFor="ws-composer-text" className="ws-visually-hidden">
           Message the Agent
         </label>
@@ -121,6 +170,12 @@ export function AgentColumnComposer() {
           value={prompt}
           placeholder="Ask Arboris…"
           onChange={(event) => setPrompt(event.target.value)}
+          onPaste={(event) => {
+            const files = Array.from(event.clipboardData.files);
+            if (files.length === 0) return;
+            event.preventDefault();
+            void attach(files);
+          }}
           onKeyDown={(event) => {
             if (event.key === "Tab" && event.shiftKey && !busy) {
               event.preventDefault();
@@ -134,6 +189,18 @@ export function AgentColumnComposer() {
           }}
         />
         <div className="ws-composer__bar">
+          <input
+            ref={fileRef}
+            type="file"
+            multiple
+            hidden
+            data-testid="agent-attach-input"
+            onChange={(event) => {
+              void attach(Array.from(event.target.files ?? []));
+              event.target.value = "";
+            }}
+          />
+          <button type="button" className="ws-composer__attach" aria-label="Attach files" title="Attach files or images" disabled={busy || !agent.attachFile} onClick={() => fileRef.current?.click()}>+</button>
           <AgentCapabilityPopover
             catalog={capabilityCatalog}
             onPromptSelect={(next) => {

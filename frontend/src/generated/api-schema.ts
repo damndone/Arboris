@@ -26,6 +26,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/agent/attachments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Upload Agent Attachment */
+        post: operations["upload_agent_attachment_agent_attachments_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent/attachments/{attachment_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Agent Attachment */
+        get: operations["read_agent_attachment_agent_attachments__attachment_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/agent/capabilities": {
         parameters: {
             query?: never;
@@ -2971,6 +3005,21 @@ export interface components {
             /** Version */
             version: number;
         };
+        /** AgentAttachment */
+        AgentAttachment: {
+            /** Attachment Id */
+            attachment_id: string;
+            /** Bytes */
+            bytes: number;
+            /** Kind */
+            kind: string;
+            /** Media Type */
+            media_type: string;
+            /** Name */
+            name: string;
+            /** Sha256 */
+            sha256: string;
+        };
         /**
          * AgentAuditExport
          * @description The session audit (a versioned audit document) with its renderings.
@@ -3272,6 +3321,8 @@ export interface components {
         AgentMessage: {
             /** At */
             at: string;
+            /** Attachments */
+            attachments?: components["schemas"]["AgentAttachment"][];
             compaction?: components["schemas"]["AgentCompactionView"];
             /** Content */
             content: string;
@@ -3624,6 +3675,8 @@ export interface components {
         };
         /** AgentTurnRequest */
         AgentTurnRequest: {
+            /** Attachments */
+            attachments?: string[];
             /** Context Packet */
             context_packet?: {
                 [key: string]: unknown;
@@ -4526,6 +4579,13 @@ export interface components {
              * @description Outcome column.
              */
             y: string;
+        };
+        /** Body_upload_agent_attachment_agent_attachments_post */
+        Body_upload_agent_attachment_agent_attachments_post: {
+            /** File */
+            file: string;
+            /** Project Root */
+            project_root: string;
         };
         /** Body_upload_dataset_endpoint_uploads_post */
         Body_upload_dataset_endpoint_uploads_post: {
@@ -11079,6 +11139,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentActivity"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_agent_attachment_agent_attachments_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_agent_attachment_agent_attachments_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentAttachment"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_agent_attachment_agent_attachments__attachment_id__get: {
+        parameters: {
+            query: {
+                project_root: string;
+            };
+            header?: never;
+            path: {
+                attachment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": string;
                 };
             };
             /** @description Validation Error */

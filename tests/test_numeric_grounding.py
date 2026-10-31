@@ -259,3 +259,17 @@ def test_scientific_notation_is_read_as_one_number(reply: str) -> None:
 )
 def test_a_wrong_mantissa_or_exponent_is_still_found(reply: str, bad: str) -> None:
     assert [finding.text for finding in grounding.check(reply, [TINY_P])] == [bad]
+
+
+def test_a_number_read_from_an_image_of_this_turn_says_what_to_compare_it_with() -> None:
+    image = {"role": "user", "content": "The person attached the image a.png.", "name": "workbench_attachment", "attachment_image": {"attachment_id": "a"}}
+    text = {"role": "user", "content": "The person attached the file b.txt.", "name": "workbench_attachment"}
+    asked = {"role": "user", "content": "What does it show?"}
+    tool = {"role": "tool", "content": "{}", "name": "get_context"}
+    assert grounding.image_in_this_turn([image, text, asked, tool])
+    assert not grounding.image_in_this_turn([text, asked])
+    assert not grounding.image_in_this_turn([image, asked, {"role": "assistant", "content": "7316"}, {"role": "user", "content": "And the coefficient?"}])
+    findings = grounding.check("The image shows 7316.", [image, asked])
+    assert findings
+    assert "Compare them with the image" in grounding.unverified_note(findings, "en", image=True)
+    assert "do not rely on them" in grounding.unverified_note(findings, "en")

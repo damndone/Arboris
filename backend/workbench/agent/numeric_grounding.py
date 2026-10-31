@@ -410,7 +410,25 @@ def correction_message(findings: Sequence[Finding]) -> str:
     )
 
 
-def unverified_note(findings: Sequence[Finding], language: str) -> str:
+def image_in_this_turn(messages: Sequence[Mapping[str, Any]]) -> bool:
+    """Whether the person's latest message came with an image.
+
+    A number read from a picture has no result to match, so a rewrite cannot
+    fix it; the reply keeps a warning that says what to compare it with.
+    """
+
+    index = len(messages) - 1
+    while index >= 0 and not (messages[index].get("role") == "user" and not messages[index].get("name")):
+        index -= 1
+    index -= 1
+    while index >= 0 and messages[index].get("name") == "workbench_attachment":
+        if messages[index].get("attachment_image"):
+            return True
+        index -= 1
+    return False
+
+
+def unverified_note(findings: Sequence[Finding], language: str, *, image: bool = False) -> str:
     """The warning shown with a reply whose rewrite still failed the check."""
 
     comparisons = [finding for finding in findings if finding.kind == "group_comparison"]
@@ -428,6 +446,10 @@ def unverified_note(findings: Sequence[Finding], language: str) -> str:
         return " ".join(notes)
     items = "; ".join(_finding_line(finding, language) for finding in findings)
     prefix = (" ".join(notes) + " ") if notes else ""
+    if image:
+        if language == "zh":
+            return f"{prefix}⚠️ Workbench 数字核对：以下数字不是计算结果，从图片读取的数字无法自动核对，请对照图片确认：{items}。"
+        return f"{prefix}⚠️ Workbench numeric check: these numbers are not computed results, and a number read from an image cannot be checked. Compare them with the image: {items}."
     if language == "zh":
         return f"{prefix}⚠️ Workbench 数字核对：以下数字与任何计算结果都对不上，请勿引用：{items}。"
     return f"{prefix}⚠️ Workbench numeric check: these numbers do not match any computed result; do not rely on them: {items}."

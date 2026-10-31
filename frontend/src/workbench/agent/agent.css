@@ -1315,3 +1315,6 @@
 .wb-context-ring-tooltip:has(.wb-context-ring-parts) { width: 280px; min-width: 280px; max-width: min(280px, calc(100vw - 32px)); }
 /* Bridges the gap to the ring so the pointer can reach the panel's button. */
 .wb-context-ring-tooltip::after { content: ""; position: absolute; left: 0; right: 0; top: 100%; height: 10px; }
+.wb-agent-attachments { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px; margin-bottom: 4px; }
+.wb-agent-attachment-image { max-width: 180px; max-height: 140px; border-radius: 6px; }
+.wb-agent-attachment-chip { padding: 1px 6px; border-radius: var(--radius-sm); background: color-mix(in oklch, var(--label) 8%, transparent); }

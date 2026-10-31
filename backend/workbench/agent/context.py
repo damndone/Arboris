@@ -97,6 +97,11 @@ class ContextBuilder:
                     # answer inside a turn that already used tools.
                     role = "user" if payload.get("model_role") == "user" else "system"
                     content = _proposal_record_content(payload, content, shown_proposals)
+                    if isinstance(payload.get("attachment"), dict) and payload["attachment"].get("kind") == "image":
+                        messages.append({"role": role, "content": content, "name": payload.get("name"),
+                                         "attachment_image": payload["attachment"]})
+                        source_entry_ids.append(entry.entry_id)
+                        continue
                     messages.append({"role": role, "content": content, "name": payload.get("name", "workbench")})
                     source_entry_ids.append(entry.entry_id)
             elif entry.entry_type == "compaction":

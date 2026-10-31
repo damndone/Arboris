@@ -172,3 +172,20 @@
     display: none;
   }
 }
+
+.ws-composer[data-dropping] { outline: 2px dashed var(--tint); outline-offset: -2px; }
+.ws-composer__attachments { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 0; }
+.ws-composer__attachment {
+  display: inline-flex; align-items: center; gap: 5px; max-width: 220px; padding: 2px 4px 2px 8px;
+  border: var(--hairline) solid var(--border); border-radius: var(--radius-sm);
+  background: var(--bg-elev); color: var(--label-secondary); font-size: var(--text-small);
+}
+.ws-composer__attachment > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-composer__attachment img { width: 28px; height: 28px; object-fit: cover; border-radius: 3px; }
+.ws-composer__attachment button { min-height: 0; padding: 0 4px; border: 0; background: transparent; color: inherit; cursor: pointer; }
+.ws-composer__attach-error { padding: 2px 0; color: var(--status-caution-fg); font-size: var(--text-small); }
+.ws-composer__attach {
+  flex: 0 0 auto; width: 26px; height: 26px; min-height: 0; padding: 0; border: 0; border-radius: 50%;
+  background: transparent; color: var(--label-secondary); font-size: 18px; line-height: 1; cursor: pointer;
+}
+.ws-composer__attach:hover:not(:disabled) { background: var(--bg-elev); color: var(--label); }

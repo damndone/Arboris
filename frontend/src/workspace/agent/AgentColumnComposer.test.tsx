@@ -13,6 +13,8 @@ const surface = {
   prompt: "",
   scopeLabel: "Current chain · ols_robust (primary)",
   sendPrompt: vi.fn(),
+  attachFile: vi.fn(),
+  attachmentUrl: (id: string) => `/files/${id}`,
   sessionStatus: "idle",
   setModel: vi.fn(),
   setPrompt: vi.fn(),
@@ -31,6 +33,7 @@ describe("AgentColumnComposer", () => {
     surface.isSubmitting = false;
     surface.sessionStatus = "idle";
     surface.sendPrompt.mockClear();
+    surface.attachFile.mockReset();
   });
 
   test("names what the Agent is about in reader terms", () => {
@@ -48,7 +51,39 @@ describe("AgentColumnComposer", () => {
     fireEvent.keyDown(screen.getByRole("textbox", { name: "Ask Agent" }), { key: "Enter", shiftKey: true });
     expect(surface.sendPrompt).not.toHaveBeenCalled();
     fireEvent.keyDown(screen.getByRole("textbox", { name: "Ask Agent" }), { key: "Enter" });
-    expect(surface.sendPrompt).toHaveBeenCalledWith("Is educ = 1?");
+    expect(surface.sendPrompt).toHaveBeenCalledWith("Is educ = 1?", []);
+  });
+
+  test("attaches a file, can remove it, and sends what is left with the message", async () => {
+    const notes = { attachment_id: "a1", name: "notes.txt", kind: "text", media_type: "text/plain", bytes: 5, sha256: "s1" };
+    const chart = { attachment_id: "a2", name: "chart.png", kind: "image", media_type: "image/png", bytes: 9, sha256: "s2" };
+    surface.attachFile.mockResolvedValueOnce(notes).mockResolvedValueOnce(chart);
+    surface.prompt = "Read these";
+    render(<AgentColumnComposer />);
+    fireEvent.change(screen.getByTestId("agent-attach-input"), { target: { files: [new File(["hello"], "notes.txt"), new File(["x"], "chart.png")] } });
+    await screen.findByText("chart.png");
+    fireEvent.click(screen.getByRole("button", { name: "Remove notes.txt" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send to Agent" }));
+    expect(surface.sendPrompt).toHaveBeenCalledWith("Read these", [chart]);
+    expect(screen.queryByText("chart.png")).toBeNull();
+  });
+
+  test("says when the chosen model cannot read an attached image", async () => {
+    surface.attachFile.mockResolvedValueOnce({ attachment_id: "a2", name: "chart.png", kind: "image", media_type: "image/png", bytes: 9, sha256: "s2" });
+    const before = surface.modelOptions;
+    surface.modelOptions = [{ request_model: surface.model, supports_vision: false }] as never;
+    render(<AgentColumnComposer />);
+    fireEvent.change(screen.getByTestId("agent-attach-input"), { target: { files: [new File(["x"], "chart.png")] } });
+    expect(await screen.findByText(/can't read images/)).toBeInTheDocument();
+    surface.modelOptions = before;
+  });
+
+  test("a refused file says why and sends nothing", async () => {
+    surface.attachFile.mockRejectedValueOnce(new Error("Attachment is larger than 20 MB"));
+    render(<AgentColumnComposer />);
+    fireEvent.change(screen.getByTestId("agent-attach-input"), { target: { files: [new File(["x"], "big.bin")] } });
+    expect(await screen.findByRole("alert")).toHaveTextContent("larger than 20 MB");
+    expect(surface.sendPrompt).not.toHaveBeenCalled();
   });
 
   test("while the Agent works, send becomes stop; no dead controls are shown", () => {
