@@ -312,12 +312,18 @@ def provider_tape(path: Path, *, mode: str = "record", budget=None) -> Iterator[
     stream_original = model_original = adapter_original = None
     if mode == "record" and getattr(budget, "serial_coordinator", None) is not None:
         from workbench.agent import model as agent_model
+        from workbench.llm.client import provider_stream_wait_s
+        from .budget import RETRY_DELAYS_S
         adapter_original = agent_model.OpenAICompatibleModelAdapter.stream
 
         async def serialized_adapter_stream(adapter, request):
             # Enter the unchanged adapter only after queueing. Its idle clock
             # and the provider's HTTP timeouts have not started while waiting.
             await budget.wait_for_request_slot(request.abort_event)
+            # A recovery wait runs inside the adapter's idle clock, and the HTTP read
+            # timeout still bounds a silent provider: only the wait itself is added.
+            if budget.overload_recovery is not None:
+                adapter.idle_timeout_s = max(adapter.idle_timeout_s, provider_stream_wait_s(adapter.config, default_s=90.0) + sum(RETRY_DELAYS_S))
             try:
                 async for event in adapter_original(adapter, request):
                     yield event

@@ -220,3 +220,31 @@ def test_shared_pace_spaces_starts_across_lanes_and_a_429_holds_them_back(tmp_pa
     before = clock[0]
     pace.wait_turn()
     assert clock[0] == before + 30.0
+
+
+def test_a_recovery_wait_does_not_trip_the_adapter_idle_clock(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from workbench.agent.model import ModelRequest, OpenAICompatibleModelAdapter
+    from workbench.llm.config import LLMConfig
+    seen = []
+
+    async def provider(adapter, request):
+        seen.append(adapter.idle_timeout_s)
+        yield {'type': 'done'}
+
+    async def slot(abort_event=None):
+        return None
+
+    monkeypatch.setattr(OpenAICompatibleModelAdapter, 'stream', provider)
+    config = LLMConfig(base_url=BASE, api_key='offline', model=MODEL, timeout_s=300, provider_id='nvidia-nemotron-free')
+    for recovery, expected in ((object(), 300 + sum(budget.RETRY_DELAYS_S)), (None, 300)):
+        gate = SimpleNamespace(serial_coordinator=object(), overload_recovery=recovery, wait_for_request_slot=slot, close_request_slot=lambda: None)
+        async def scenario():
+            with provider_tape(tmp_path / 'tape.jsonl', budget=gate):
+                adapter = OpenAICompatibleModelAdapter(config)
+                for _ in range(2):  # never grows turn after turn
+                    async for _event in adapter.stream(ModelRequest(messages=[{'role': 'user', 'content': 'offline'}])):
+                        pass
+            return adapter
+        asyncio.run(scenario())
+        assert seen[-2:] == [expected, expected]
