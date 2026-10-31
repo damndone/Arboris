@@ -77,6 +77,7 @@ class LLMConfig:
     source: ConfigSource = "none"
     context_window_tokens: int | None = None
     supports_1m: bool = False
+    context_limit_tokens: int | None = None
     supports_vision: bool = False
     data_location: DataLocation = "remote"
     #: The efforts the model accepts; None: decided by the model id (DeepSeek V4).
@@ -211,6 +212,7 @@ def _config_from_provider(provider: ProviderRecord, *, source: ConfigSource) -> 
         context_window_tokens=(
             model_record.effective_window_tokens if model_record is not None else None
         ),
+        context_limit_tokens=model_record.context_limit_tokens if model_record is not None else None,
         supports_1m=model_record.supports_1m if model_record is not None else False,
         supports_vision=(
             model_record.supports_vision if model_record is not None else False

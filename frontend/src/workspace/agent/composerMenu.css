@@ -59,7 +59,11 @@
   text-overflow: ellipsis;
 }
 
+/* Reserved for the longest level, so changing it never moves the model name. */
 .ws-menu__label-sub {
+  flex: 0 0 auto;
+  min-width: 7ch;
+  text-align: right;
   color: var(--label-tertiary);
   font-weight: 400;
 }
@@ -222,7 +226,29 @@
   color: var(--label);
   font: inherit;
 }
-.ws-menu__slider { display: grid; gap: 2px; cursor: default; }
+.ws-menu__slider { display: grid; gap: 4px; }
 .ws-menu__slider-head { display: flex; justify-content: space-between; color: var(--label-secondary); }
 .ws-menu__slider-value { color: var(--label); font-weight: 500; font-variant-numeric: tabular-nums; }
-.ws-menu__slider input[type="range"] { width: 100%; margin: 0; accent-color: var(--tint); cursor: pointer; }
+.ws-menu__slider-track { position: relative; height: 20px; cursor: pointer; touch-action: none; outline: none; }
+.ws-menu__slider-rail, .ws-menu__slider-fill {
+  position: absolute; top: 7px; left: 0; height: 6px; border-radius: 3px;
+}
+.ws-menu__slider-rail { right: 0; background: var(--bg-elev); box-shadow: inset 0 0 0 var(--hairline) var(--border); }
+.ws-menu__slider-fill { background: var(--tint); transition: width 160ms cubic-bezier(.2,.8,.2,1), opacity 160ms ease; }
+.ws-menu__slider-stop {
+  position: absolute; top: 8px; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%;
+  background: var(--label-tertiary); pointer-events: none;
+}
+.ws-menu__slider-stop[data-passed] { background: var(--bg-card); }
+.ws-menu__slider-thumb {
+  position: absolute; top: 2px; width: 16px; height: 16px; margin-left: -8px; border-radius: 50%;
+  background: var(--bg-card); box-shadow: 0 0 0 var(--hairline) var(--border), var(--shadow-pop);
+  transition: left 160ms cubic-bezier(.2,.8,.2,1), transform 120ms ease;
+}
+.ws-menu__slider-track[data-dragging] .ws-menu__slider-fill,
+.ws-menu__slider-track[data-dragging] .ws-menu__slider-thumb { transition: none; }
+.ws-menu__slider-track[data-dragging] .ws-menu__slider-thumb { transform: scale(1.1); }
+.ws-menu__slider-track:focus-visible .ws-menu__slider-thumb { box-shadow: 0 0 0 2px var(--focus-ring); }
+@media (prefers-reduced-motion: reduce) {
+  .ws-menu__slider-fill, .ws-menu__slider-thumb { transition: none; }
+}

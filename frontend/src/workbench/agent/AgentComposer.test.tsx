@@ -338,7 +338,7 @@ describe("AgentComposer", () => {
 
     fireEvent.mouseEnter(ring);
     const tooltip = screen.getByTestId("agent-context-tooltip");
-    expect(tooltip).toHaveTextContent("2K of 32K");
+    expect(tooltip).toHaveTextContent("2K / 32K");
 
     fireEvent.mouseLeave(ring);
     expect(screen.queryByTestId("agent-context-tooltip")).not.toBeInTheDocument();

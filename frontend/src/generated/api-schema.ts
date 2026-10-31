@@ -3036,11 +3036,20 @@ export interface components {
             /** Focus */
             focus?: string | null;
         };
+        /** AgentContextPart */
+        AgentContextPart: {
+            /** Label */
+            label: string;
+            /** Tokens */
+            tokens: number;
+        };
         /**
          * AgentContextUsage
          * @description How full the next request is, as the server will send it.
          */
         AgentContextUsage: {
+            /** Breakdown */
+            breakdown?: components["schemas"]["AgentContextPart"][];
             /** Compact At Tokens */
             compact_at_tokens: number;
             /** Estimated Tokens */

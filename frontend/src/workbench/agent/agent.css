@@ -1306,3 +1306,10 @@
 .agt-chart__data > summary { width: fit-content; cursor: pointer; }
 .agt-chart__data table { margin-top: 4px; border-collapse: collapse; font-variant-numeric: tabular-nums; color: var(--label-secondary); }
 .agt-chart__data th, .agt-chart__data td { padding: 1px 8px 1px 0; text-align: left; font-weight: 400; }
+.wb-context-ring-tooltip-head { display: flex; justify-content: space-between; gap: 16px; }
+.wb-context-ring-bar { display: flex; gap: 1px; height: 6px; margin: 6px 0; overflow: hidden; border-radius: 3px; background: var(--bg-elev); }
+.wb-context-ring-parts { display: grid; gap: 3px; margin: 0; padding: 0; list-style: none; font-variant-numeric: tabular-nums; }
+.wb-context-ring-parts li { display: grid; grid-template-columns: 10px 1fr auto 44px; align-items: center; gap: 8px; }
+.wb-context-ring-parts li > :nth-child(n+3) { text-align: right; }
+.wb-context-ring-swatch { width: 8px; height: 8px; border-radius: 2px; background: var(--bg-elev); }
+.wb-context-ring-tooltip:has(.wb-context-ring-parts) { width: 280px; min-width: 280px; max-width: min(280px, calc(100vw - 32px)); }

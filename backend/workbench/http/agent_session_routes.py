@@ -408,7 +408,8 @@ async def compact_agent_session(
         if not _agent_llm_configured(config):
             raise WorkbenchAPIError(status_code=503, code="LLM_NOT_CONFIGURED",
                                     message=config.configuration_error_message())
-        policy = CompactionPolicy.from_config(config.context_window_tokens, supports_1m=config.supports_1m)
+        policy = CompactionPolicy.from_config(config.context_window_tokens, supports_1m=config.supports_1m,
+            explicit_limit=getattr(config, "context_limit_tokens", None))
         tokens = estimate_messages_tokens(ContextBuilder(repository).build(session_id).messages)
         events.emit(session_id, "compaction_start", {"trigger": "manual", "tokens_before": tokens, **policy.to_dict()})
         try:

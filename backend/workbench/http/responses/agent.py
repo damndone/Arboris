@@ -180,10 +180,17 @@ class AgentCompactionView(TypedDict):
     summarized_messages: int
 
 
+class AgentContextPart(TypedDict):
+    label: str
+    tokens: int
+
+
 class AgentContextUsage(TypedDict):
     """How full the next request is, as the server will send it."""
 
     estimated_tokens: int
+    #: The same estimate by kind, largest first.
+    breakdown: NotRequired[list[AgentContextPart]]
     window_tokens: int
     #: False: the model declares no window and ``window_tokens`` is assumed.
     window_declared: bool

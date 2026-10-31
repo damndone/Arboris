@@ -2,7 +2,14 @@
 // the way Claude Code's mode and model pickers do. Escape and a click outside
 // close it; focus returns to the button.
 
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
+
+const THUMB = 16;
+
+/** Positions computed while dragging; everything static lives in the stylesheet. */
+function geometry(property: "left" | "width", value: string, opacity?: number): CSSProperties {
+  return { [property]: value, ...(opacity === undefined ? {} : { opacity }) };
+}
 
 export function ComposerMenu({
   label,
@@ -81,7 +88,8 @@ export function ComposerMenu({
 }
 
 /** A row of equal choices (Off / Low / High / Max), one selected. */
-/** A setting with ordered levels: drag or use the arrow keys; the choice saves as it moves. */
+/** A setting with ordered levels: every level is a visible stop, and the bar deepens as it rises.
+ *  The thumb follows the pointer and settles on the nearest stop; the choice saves on release. */
 export function StepSlider<T extends string>({
   label,
   title,
@@ -95,30 +103,73 @@ export function StepSlider<T extends string>({
   value: T;
   onChange: (value: T) => void;
 }) {
-  const [shown, setShown] = useState(value);
-  useEffect(() => setShown(value), [value]);
-  const index = Math.max(0, options.findIndex((option) => option.value === shown));
+  const track = useRef<HTMLDivElement>(null);
+  const [drag, setDrag] = useState<number | null>(null);
+  const [chosen, setChosen] = useState(value);
+  useEffect(() => setChosen(value), [value]);
+  const last = options.length - 1;
+  const index = Math.max(0, options.findIndex((option) => option.value === chosen));
+  const position = drag ?? (last > 0 ? index / last : 0);
+  const shown = last > 0 ? Math.round(position * last) : 0;
+  const choose = (next: number) => {
+    const option = options[Math.min(last, Math.max(0, next))];
+    if (!option) return;
+    setChosen(option.value);
+    if (option.value !== chosen) onChange(option.value);
+  };
+  const fraction = (clientX: number) => {
+    const box = track.current?.getBoundingClientRect();
+    if (!box || box.width <= THUMB) return position;
+    return Math.min(1, Math.max(0, (clientX - box.left - THUMB / 2) / (box.width - THUMB)));
+  };
+  const at = (share: number) => `calc(${THUMB / 2}px + ${share} * (100% - ${THUMB}px))`;
   return (
-    <label className="ws-menu__slider" title={title}>
-      <span className="ws-menu__slider-head">
+    <div className="ws-menu__slider" title={title}>
+      <div className="ws-menu__slider-head">
         <span>{label}</span>
-        <span className="ws-menu__slider-value">{options[index]?.label}</span>
-      </span>
-      <input
-        type="range"
-        min={0}
-        max={options.length - 1}
-        step={1}
-        value={index}
+        <span className="ws-menu__slider-value">{options[shown]?.label}</span>
+      </div>
+      <div
+        ref={track}
+        className="ws-menu__slider-track"
+        data-dragging={drag !== null || undefined}
+        role="slider"
+        tabIndex={0}
         aria-label={label}
-        aria-valuetext={options[index]?.label}
-        onChange={(event) => {
-          const next = options[Number(event.target.value)];
-          if (!next) return;
-          setShown(next.value);
-          onChange(next.value);
+        aria-valuemin={0}
+        aria-valuemax={last}
+        aria-valuenow={shown}
+        aria-valuetext={options[shown]?.label}
+        onPointerDown={(event) => {
+          event.currentTarget.setPointerCapture?.(event.pointerId);
+          setDrag(fraction(event.clientX));
         }}
-      />
-    </label>
+        onPointerMove={(event) => { if (drag !== null) setDrag(fraction(event.clientX)); }}
+        onPointerUp={(event) => {
+          if (drag === null) return;
+          setDrag(null);
+          choose(Math.round(fraction(event.clientX) * last));
+        }}
+        onPointerCancel={() => setDrag(null)}
+        onKeyDown={(event) => {
+          const next = { ArrowLeft: index - 1, ArrowDown: index - 1, ArrowRight: index + 1, ArrowUp: index + 1, Home: 0, End: last }[event.key];
+          if (next === undefined) return;
+          event.preventDefault();
+          choose(next);
+        }}
+      >
+        <span className="ws-menu__slider-rail" />
+        <span className="ws-menu__slider-fill" style={geometry("width", at(position), 0.35 + 0.65 * position)} />
+        {options.map((option, stop) => (
+          <span
+            key={option.value}
+            className="ws-menu__slider-stop"
+            data-passed={stop <= shown || undefined}
+            style={geometry("left", at(last > 0 ? stop / last : 0))}
+          />
+        ))}
+        <span className="ws-menu__slider-thumb" style={geometry("left", at(position))} />
+      </div>
+    </div>
   );
 }

@@ -228,6 +228,7 @@ export interface AgentSurfaceContextValue {
   contextWindowAssumed?: boolean;
   /** Above this the earlier conversation is summarized before the next step. */
   compactAtTokens?: number | null;
+  contextBreakdown?: { label: string; tokens: number }[];
   /** Summarize the earlier conversation now (optionally keeping something in particular). */
   compactConversation?: (focus?: string) => Promise<void>;
   compacting?: boolean;
@@ -1396,6 +1397,7 @@ export function AgentSurfaceProvider({
     contextPercent,
     contextWindowAssumed,
     compactAtTokens: serverContext?.compact_at_tokens ?? null,
+    contextBreakdown: serverContext?.breakdown ?? [],
     compactConversation,
     compacting,
     sessionId,

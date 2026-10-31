@@ -152,10 +152,11 @@ export function AgentColumnComposer() {
             used={contextUsedTokens}
             remaining={contextWindowTokens === null ? 0 : Math.max(0, contextWindowTokens - contextUsedTokens)}
             total={contextWindowTokens}
-            size={18}
-            strokeWidth={2}
+            size={20}
+            strokeWidth={3}
             assumed={agent.contextWindowAssumed}
             compactAt={agent.compactAtTokens}
+            breakdown={agent.contextBreakdown}
             onCompact={agent.compactConversation && agent.messages.some((message) => message.role === "user") ? () => void agent.compactConversation?.() : undefined}
             compacting={agent.compacting}
           />

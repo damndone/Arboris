@@ -20,7 +20,9 @@ export function defaultEffort(efforts: readonly Effort[]): Effort | null {
 }
 
 const ONE_MILLION = 1_000_000;
-const LIMITS = [768_000, 512_000, 256_000, 128_000, 64_000];
+const CAPS = [64_000, 128_000, 256_000, 512_000, 768_000];
+/** The server summarizes here unless a limit is chosen (WORKING_BUDGET_TOKENS). */
+const DEFAULT_BUDGET = 200_000;
 
 function tokens(value: number): string {
   return value >= ONE_MILLION ? `${+(value / ONE_MILLION).toFixed(1)}M` : `${Math.round(value / 1000)}K`;
@@ -31,12 +33,18 @@ export function modelWindow(model: AgentModelOption): number | null {
   return model.context_window_tokens ?? (model.supports_1m ? ONE_MILLION : null);
 }
 
-/** Full (the model's window) and the usual caps below it. */
+/** Lowest to highest: the usual caps, the default working budget, and the model's whole window. */
 export function limitOptions(model: AgentModelOption): { value: string; label: string }[] {
   const window = modelWindow(model);
   if (window === null) return [];
-  return [{ value: "full", label: `Full ${tokens(window)}` },
-    ...LIMITS.filter((limit) => limit < window).map((limit) => ({ value: String(limit), label: tokens(limit) }))];
+  if (window <= DEFAULT_BUDGET) {
+    return [...CAPS.filter((cap) => cap < window).map((cap) => ({ value: String(cap), label: tokens(cap) })),
+      { value: "auto", label: `Full ${tokens(window)}` }];
+  }
+  const below = CAPS.filter((cap) => cap < DEFAULT_BUDGET).map((cap) => ({ value: String(cap), label: tokens(cap) }));
+  const above = CAPS.filter((cap) => cap > DEFAULT_BUDGET && cap < window).map((cap) => ({ value: String(cap), label: tokens(cap) }));
+  return [...below, { value: "auto", label: `Auto ${tokens(DEFAULT_BUDGET)}` }, ...above,
+    { value: String(window), label: `Full ${tokens(window)}` }];
 }
 
 /** Scrolls inside the sheet, opens on the current model, and filters a long list. */
@@ -106,7 +114,7 @@ export function AgentModelMenu({
   const label = (
     <span className="ws-menu__label">
       <span className="ws-menu__label-main">{name}</span>
-      {effort && <span className="ws-menu__label-sub">{effort === "none" ? "Thinking off" : EFFORT_NAME[effort]}</span>}
+      {effort && <span className="ws-menu__label-sub">{EFFORT_NAME[effort]}</span>}
     </span>
   );
   return (
@@ -127,11 +135,11 @@ export function AgentModelMenu({
               {limits.length > 1 && (
                 <StepSlider
                   label="Context"
-                  title="A lower limit summarizes the conversation sooner: faster and cheaper, less remembered."
-                  options={[...limits].reverse()}
-                  value={current.context_limit_tokens ? String(current.context_limit_tokens) : "full"}
+                  title="The conversation is summarized near this size. Lower is faster and cheaper; higher remembers more."
+                  options={limits}
+                  value={current.context_limit_tokens ? String(current.context_limit_tokens) : "auto"}
                   onChange={(value) => onSettings(current.request_model, {
-                    context_limit_tokens: value === "full" ? null : Number(value),
+                    context_limit_tokens: value === "auto" ? null : Number(value),
                   })}
                 />
               )}

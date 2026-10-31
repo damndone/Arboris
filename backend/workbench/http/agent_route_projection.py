@@ -2,7 +2,7 @@
 from __future__ import annotations
 from pathlib import Path
 from typing import Any
-from ..agent.compaction import CompactionPolicy, estimate_messages_tokens
+from ..agent.compaction import CompactionPolicy, estimate_messages_tokens, estimate_text_tokens
 from ..agent.context import ContextBuilder
 from ..agent.navigation import AgentNavigationProjector
 from ..agent.proposals import ProposalStore
@@ -66,15 +66,49 @@ def _messages(repository: JsonlSessionRepository, session_id: str) -> list[dict[
     return result
 
 
+def _context_breakdown(messages) -> list[dict[str, Any]]:
+    """What the next request holds, by kind, for the context panel."""
+
+    totals: dict[str, int] = {}
+
+    def add(label: str, tokens: int) -> None:
+        if tokens > 0:
+            totals[label] = totals.get(label, 0) + tokens
+
+    for message in messages:
+        tokens = estimate_messages_tokens([message])
+        name = str(message.get("name") or "")
+        thinking = message.get("reasoning_content")
+        if isinstance(thinking, str):
+            used = estimate_text_tokens(thinking)
+            add("Thinking", used)
+            tokens -= used
+        if message.get("role") == "tool":
+            add("Tool results", tokens)
+        elif "protocol" in name:
+            add("System prompt", tokens)
+        elif "skill" in name:
+            add("Skills", tokens)
+        elif "memory" in name:
+            add("Memory", tokens)
+        elif name:
+            add("Workbench context", tokens)
+        else:
+            add("Messages", tokens)
+    return [{"label": label, "tokens": tokens} for label, tokens in sorted(totals.items(), key=lambda kv: -kv[1])]
+
+
 def _context_usage(repository: JsonlSessionRepository, session_id: str, config) -> dict[str, Any]:
     """The next request's size as the server builds it (tools not included)."""
 
-    policy = CompactionPolicy.from_config(config.context_window_tokens, supports_1m=config.supports_1m)
+    policy = CompactionPolicy.from_config(config.context_window_tokens, supports_1m=config.supports_1m,
+                                         explicit_limit=getattr(config, "context_limit_tokens", None))
     try:
         messages = ContextBuilder(repository).build(session_id).messages
     except (KeyError, ValueError):
         messages = []
     return {
+        "breakdown": _context_breakdown(messages),
         "estimated_tokens": estimate_messages_tokens(messages),
         "window_tokens": policy.window,
         "window_declared": policy.window_declared,

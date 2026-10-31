@@ -108,7 +108,8 @@ class CompactionPolicy:
     budget_tokens: int = WORKING_BUDGET_TOKENS
 
     @classmethod
-    def from_config(cls, window_tokens: int | None, *, supports_1m: bool = False) -> "CompactionPolicy":
+    def from_config(cls, window_tokens: int | None, *, supports_1m: bool = False,
+                    explicit_limit: int | None = None) -> "CompactionPolicy":
         """The policy for a configured model: its declared window, else the
         1M flag the model carries in Settings (as the context ring reads it),
         with the working budget from the environment when set (a whole number
@@ -118,6 +119,9 @@ class CompactionPolicy:
 
         raw = os.environ.get(WORKING_BUDGET_ENV, "").strip().replace("_", "")
         budget = int(raw) if raw.isdigit() and int(raw) >= 8_000 else WORKING_BUDGET_TOKENS
+        # A limit the person chose is what they asked for; the working budget is only the default.
+        if explicit_limit:
+            budget = max(budget, explicit_limit)
         return cls(declared_window(window_tokens, supports_1m), budget_tokens=budget)
 
     @property

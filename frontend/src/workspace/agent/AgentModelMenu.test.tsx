@@ -17,12 +17,11 @@ describe("AgentModelMenu", () => {
     const button = screen.getByRole("button", { name: "Model: DeepSeek V4.1 Flash" });
     expect(button).toHaveTextContent("Low");
     fireEvent.click(button);
-    const thinking = screen.getByRole("slider", { name: "Thinking" });
-    fireEvent.change(thinking, { target: { value: thinking.getAttribute("max") } });
+    fireEvent.keyDown(screen.getByRole("slider", { name: "Thinking" }), { key: "End" });
     expect(onSettings).toHaveBeenLastCalledWith(flash.request_model, { reasoning_effort: "max" });
     const context = screen.getByRole("slider", { name: "Context" });
-    expect(context).toHaveAttribute("aria-valuetext", "Full 1M");
-    fireEvent.change(context, { target: { value: "1" } });
+    expect(context).toHaveAttribute("aria-valuetext", "Auto 200K");
+    fireEvent.keyDown(context, { key: "ArrowLeft" });
     expect(onSettings).toHaveBeenLastCalledWith(flash.request_model, { context_limit_tokens: 128_000 });
     fireEvent.click(screen.getByRole("radio", { name: "Hy3" }));
     expect(onSelect).toHaveBeenCalledWith(hy3.request_model);
@@ -32,8 +31,8 @@ describe("AgentModelMenu", () => {
     render(<AgentModelMenu model={hy3.request_model} options={[flash, hy3]} onSelect={vi.fn()} onSettings={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Model: Hy3" }));
     const thinking = screen.getByRole("slider", { name: "Thinking" });
-    expect(thinking).toHaveAttribute("max", "1");
-    expect(limitOptions(hy3).map((option) => option.label)).toEqual(["Full 192K", "128K", "64K"]);
+    expect(thinking).toHaveAttribute("aria-valuemax", "1");
+    expect(limitOptions(hy3).map((option) => option.label)).toEqual(["64K", "128K", "Full 192K"]);
     expect(defaultEffort(["low", "medium"])).toBe("medium");
   });
 
@@ -41,18 +40,16 @@ describe("AgentModelMenu", () => {
     const onSettings = vi.fn();
     render(<AgentModelMenu model={flash.request_model} options={[flash]} onSelect={vi.fn()} onSettings={onSettings} />);
     fireEvent.click(screen.getByRole("button", { name: "Model: DeepSeek V4.1 Flash" }));
-    expect(limitOptions(flash).map(({ label }) => label)).toEqual(["Full 1M", "768K", "512K", "256K", "128K", "64K"]);
+    expect(limitOptions(flash).map(({ label }) => label)).toEqual(["64K", "128K", "Auto 200K", "256K", "512K", "768K", "Full 1M"]);
     const context = screen.getByRole("slider", { name: "Context" });
-    for (const [step, cap] of [["4", 768_000], ["3", 512_000]] as const) {
-      fireEvent.change(context, { target: { value: step } });
+    for (const cap of [256_000, 512_000, 768_000, 1_000_000]) {
+      fireEvent.keyDown(context, { key: "ArrowRight" });
       expect(onSettings).toHaveBeenLastCalledWith(flash.request_model, { context_limit_tokens: cap });
     }
-    fireEvent.change(context, { target: { value: "5" } });
-    expect(onSettings).toHaveBeenLastCalledWith(flash.request_model, { context_limit_tokens: null });
     expect(limitOptions({ ...flash, context_window_tokens: 262_144 }).map(({ label }) => label))
-      .toEqual(["Full 262K", "256K", "128K", "64K"]);
+      .toEqual(["64K", "128K", "Auto 200K", "256K", "Full 262K"]);
     expect(limitOptions({ ...flash, context_window_tokens: 65_536 }).map(({ label }) => label))
-      .toEqual(["Full 66K", "64K"]);
+      .toEqual(["64K", "Full 66K"]);
   });
 
   test("a model with no efforts and no known window shows neither control", () => {

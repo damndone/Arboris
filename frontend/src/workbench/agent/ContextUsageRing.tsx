@@ -11,6 +11,8 @@ export interface ContextUsageRingProps {
   assumed?: boolean;
   /** Above this the earlier conversation is summarized automatically. */
   compactAt?: number | null;
+  /** The next request by kind, largest first. */
+  breakdown?: { label: string; tokens: number }[];
   /** Clicking the ring pins its details with a "summarize now" action. */
   onCompact?: () => void;
   compacting?: boolean;
@@ -28,6 +30,12 @@ export interface ContextUsageRingProps {
  * never jumps. Ring size and stroke width are fixed, so progress never causes
  * layout jitter. The token details live only in the hover tooltip.
  */
+const PART_COLORS = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-axis)", "var(--chart-grid)"];
+
+function partStyle(index: number, widthPercent?: number) {
+  return { background: PART_COLORS[index % PART_COLORS.length], ...(widthPercent === undefined ? {} : { width: `${widthPercent}%` }) };
+}
+
 function shortTokens(value: number): string {
   if (value >= 1_000_000) return `${+(value / 1_000_000).toFixed(2)}M`;
   return value >= 1_000 ? `${Math.round(value / 1_000)}K` : String(value);
@@ -38,9 +46,10 @@ export function ContextUsageRing({
   remaining,
   total,
   size = 20,
-  strokeWidth = 2,
+  strokeWidth = 3,
   assumed = false,
   compactAt = null,
+  breakdown = [],
   onCompact,
   compacting = false,
 }: ContextUsageRingProps) {
@@ -64,14 +73,14 @@ export function ContextUsageRing({
   const circumference = 2 * Math.PI * radius;
 
   const hasCapacity = typeof total === "number" && total > 0;
-  const progress = hasCapacity ? Math.min(Math.max(used / total, 0), 1) : 0;
+  // The ring fills toward the next automatic summary: that is the limit that acts.
+  const limit = compactAt ?? total;
+  const progress = hasCapacity && limit ? Math.min(Math.max(used / limit, 0), 1) : 0;
   const percentage = progress * 100;
   const dashOffset = circumference * (1 - progress);
 
-  // What matters is how close the next automatic summary is, not the raw window.
-  const towardSummary = hasCapacity && compactAt ? Math.min(used / compactAt, 1) * 100 : percentage;
-  const level = !hasCapacity ? "empty" : towardSummary >= 95 ? "danger" : towardSummary >= 80 ? "warning" : "normal";
-  const leftUntilSummary = Math.max(0, Math.round(100 - towardSummary));
+  const level = !hasCapacity ? "empty" : percentage >= 95 ? "danger" : percentage >= 80 ? "warning" : "normal";
+  const leftUntilSummary = Math.max(0, Math.round(100 - percentage));
 
   const ariaLabel = hasCapacity
     ? `Context usage: ${Math.round(percentage)}%, ${remaining.toLocaleString()} tokens remaining out of ${total.toLocaleString()}`
@@ -139,9 +148,33 @@ export function ContextUsageRing({
           {hasCapacity ? (
             <>
               <div className="wb-context-ring-tooltip-head">
-                <strong>{shortTokens(used)}</strong> of {shortTokens(total as number)}{assumed ? " (assumed)" : ""}
+                <strong>{Math.round(percentage)}% used</strong>
+                <span>{shortTokens(used)} / {shortTokens(limit as number)}</span>
               </div>
-              {compactAt ? <p className="wb-context-ring-note">{leftUntilSummary}% left until the conversation is summarized</p> : null}
+              <div className="wb-context-ring-bar" aria-hidden="true">
+                {breakdown.map((part, index) => (
+                  <span key={part.label} style={partStyle(index, (part.tokens / (limit as number)) * 100)} />
+                ))}
+              </div>
+              {breakdown.length > 0 && (
+                <ul className="wb-context-ring-parts">
+                  {breakdown.map((part, index) => (
+                    <li key={part.label}>
+                      <span className="wb-context-ring-swatch" style={partStyle(index)} />
+                      <span>{part.label}</span>
+                      <span>{shortTokens(part.tokens)}</span>
+                      <span>{((part.tokens / (limit as number)) * 100).toFixed(1)}%</span>
+                    </li>
+                  ))}
+                  <li>
+                    <span className="wb-context-ring-swatch" />
+                    <span>Free</span>
+                    <span>{shortTokens(Math.max(0, (limit as number) - used))}</span>
+                    <span>{Math.max(0, 100 - percentage).toFixed(1)}%</span>
+                  </li>
+                </ul>
+              )}
+              {compactAt ? <p className="wb-context-ring-note">Summarized at {shortTokens(compactAt)}; the model allows {shortTokens(total as number)}.</p> : null}
               {assumed && (
                 <p className="wb-context-ring-note">
                   The model declares no context window, so this one is assumed. Set the real one for the model in Settings › LLM providers.
@@ -163,11 +196,6 @@ export function ContextUsageRing({
             >
               {compacting ? "Summarizing…" : "Summarize earlier conversation"}
             </button>
-          )}
-          {pinned && onCompact && (
-            <p className="wb-context-ring-note">
-              Earlier messages are replaced by a checked summary in what the Agent reads; the full conversation stays here.
-            </p>
           )}
         </div>
       )}
