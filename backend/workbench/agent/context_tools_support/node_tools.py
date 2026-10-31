@@ -6,6 +6,7 @@ from typing import Any
 from ...artifacts import read_json
 from ...contracts.common.envelope import ContractError
 from ..chains import ChainHeadConflict, ChainStore
+from ..context_compiler import read_completion_artifact
 from ...diagnostic_preview import build_diagnostic_summary_preview
 from ...diagnostic_preview.artifact_manifest import build_artifact_manifest
 from ...graph_store import GraphStore, graph_to_json
@@ -319,12 +320,60 @@ class NodeToolsMixin:
             active_head_run_id=request.active_head_run_id,
         )
         run_root = self.project_root / "runs" / request.owner_run_id
+        persisted = []
+        index_path = run_root / "artifacts_index.json"
+        registered = index_path.exists() or index_path.is_symlink()
+        if registered:
+            # The old reader scans every model_results JSON, including potentially
+            # large diagnostic row arrays. Use the existing size/SHA-bound reader
+            # for this selected model; failed verification is never a legacy read.
+            try:
+                index = read_json(index_path)
+            except (OSError, ValueError) as exc:
+                raise ToolVisibleError("DIAGNOSTIC_INDEX_UNAVAILABLE: registered diagnostic index could not be read; no legacy fallback.") from exc
+            if not isinstance(index, dict) or not isinstance(index.get("artifacts"), list):
+                raise ToolVisibleError("DIAGNOSTIC_INDEX_UNAVAILABLE: registered diagnostic index is malformed; no legacy fallback.")
+            entries = index["artifacts"]
+            model_id = request.op_node_id.removeprefix("model:")
+            # Versioned native packets retain their existing public owner reader;
+            # do not introduce the full completion verifier/source-frame reader.
+            if any(isinstance(item, dict) and item.get("artifact_type") == "model_result_packet"
+                   and item.get("artifact_id") == f"{model_id}.result" for item in entries):
+                from ...services.lmm_result_adapter import read_lmm_public_results
+                models = read_lmm_public_results(run_root)
+                model_sha = None
+            else:
+                model = read_completion_artifact(run_root, model_id) if request.op_node_id.startswith("model:") else None
+                if (model is None or model.artifact_type != "model_result" or not model.payload
+                        or model.payload.get("model_id") != model_id):
+                    raise ToolVisibleError("DIAGNOSTIC_MODEL_UNAVAILABLE: selected registered model could not be verified within the bounded read limit; no legacy fallback.")
+                models, model_sha = [model.payload], model.sha256
+            if model_sha:
+                for artifact_id, kind in ((f"diagnostics_{model_id}", "model_diagnostic"),
+                                          (f"{model_id}.completion", "analysis_completion_evidence")):
+                    artifact = read_completion_artifact(run_root, artifact_id)
+                    value = {"model_id": model_id, "source": {"run_id": request.owner_run_id, "artifact_id": artifact_id},
+                             "status": "unavailable", "reason": "Registered diagnostic exceeds the bounded read limit or could not be verified for this model; use explicit artifact inspection."}
+                    payload = artifact.payload if artifact is not None else None
+                    if (artifact is not None and artifact.artifact_type == kind and isinstance(payload, dict)
+                            and payload.get("model_id") == model_id
+                            and (kind != "analysis_completion_evidence" or payload.get("model_payload_sha256") == model_sha)):
+                        value.update(status="available", source={**value["source"], "sha256": artifact.sha256},
+                                     summary=payload.get("diagnostics", {}) if kind == "analysis_completion_evidence" else payload)
+                        value.pop("reason")
+                    persisted.append(value)
+        else:
+            models = read_model_results(run_root)
         preview = build_diagnostic_summary_preview(
             run_root,
             manifest,
-            read_model_results(run_root),
+            models,
         )
-        diagnostics, omitted_sections = _bounded_diagnostics(preview)
+        diagnostics, omitted_sections = _bounded_diagnostics(preview, persisted=persisted)
+        if not registered:
+            diagnostics["evidence_verification"] = "Legacy preview; no registered artifact index was available for byte verification."
+        elif model_sha is None:
+            diagnostics["evidence_verification"] = "Native public preview; the added registered-risk projection is not covered. This does not establish an absence of diagnostic risk."
         return {
             **canonical,
             "node": _bounded_node(node),

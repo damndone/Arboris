@@ -1178,7 +1178,7 @@ def _resolve_verified_registered_artifact(
     return payload, registered_sha256
 
 
-def _bounded_diagnostics(preview: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+def _bounded_diagnostics(preview: dict[str, Any], *, persisted=()) -> tuple[dict[str, Any], list[str]]:
     allowed = (
         "available",
         "preview_contract_version",
@@ -1196,6 +1196,61 @@ def _bounded_diagnostics(preview: dict[str, Any]) -> tuple[dict[str, Any], list[
     )
     diagnostics = {key: preview[key] for key in allowed if key in preview}
     omitted_sections = ["artifact_manifest", "coefficient_risk"]
+
+    # These are existing producer scalars, not a new diagnostic or a reliability
+    # verdict. Never project a list: an unfamiliar diagnostic may contain a row
+    # array under an unfamiliar field name. Risk summaries precede bulky detail.
+    budget = _PublicResultBudget(remaining_items=64, remaining_string_characters=1024,
+                                 remaining_key_characters=800)
+
+    def small_summary(value, depth=0):
+        if not isinstance(value, dict):
+            budget.omitted_items += 1
+            return {}
+        result = {}
+        priority = {"cooks_distance", "influence", "weak_instruments", "status", "severity", "error",
+                    "n_high", "n_severe", "threshold", "leverage_max"}
+        items = sorted(value.items(), key=lambda item: item[0] not in priority)
+        for index, (key, item) in enumerate(items):
+            if len(result) >= 24 or budget.remaining_items <= 0 or budget.remaining_key_characters <= 0:
+                budget.omitted_items += len(items) - index
+                break
+            if (not isinstance(key, str) or len(key) > 64 or len(key) > budget.remaining_key_characters
+                    or isinstance(item, (list, tuple)) or key.lower() in _PUBLIC_RESULT_DENIED_KEYS
+                    or key.lower().startswith("raw_")):
+                budget.omitted_items += 1
+                continue
+            if isinstance(item, dict):
+                if depth >= 4:
+                    budget.omitted_items += 1
+                    continue
+                result[key] = small_summary(item, depth + 1)
+            elif isinstance(item, str):
+                limit = min(300, budget.remaining_string_characters)
+                if not limit:
+                    budget.omitted_items += 1
+                    continue
+                result[key] = item[:limit]
+                budget.remaining_string_characters -= len(result[key])
+                budget.omitted_items += int(len(item) > limit)
+            elif item is None or isinstance(item, (bool, int)) or isinstance(item, float) and math.isfinite(item):
+                result[key] = item
+            else:
+                budget.omitted_items += 1
+                continue
+            budget.remaining_items -= 1
+            budget.remaining_key_characters -= len(key)
+        return result
+
+    if persisted:
+        diagnostics["persisted_diagnostics"] = []
+        for evidence in persisted[:2]:
+            public = {key: value for key, value in evidence.items() if key != "summary"}
+            if "summary" in evidence:
+                before = budget.omitted_items
+                public["summary"] = small_summary(evidence["summary"])
+                public["omitted_field_count"] = budget.omitted_items - before
+            diagnostics["persisted_diagnostics"].append(public)
 
     identity = preview.get("model_identity")
     if isinstance(identity, dict):
