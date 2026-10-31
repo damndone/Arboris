@@ -520,4 +520,4 @@ def test_a_compacted_tape_is_still_read_by_the_grader(tmp_path):
     path = tmp_path / "provider_tape.jsonl"
     line = json.dumps({"elapsed_s": 1.0, "usage": {"prompt_tokens": 7, "completion_tokens": 2}}) + "\n"
     path.with_name(path.name + ".gz").write_bytes(gzip.compress(line.encode()))
-    assert usage_from_tape(path)["calls"] == 1
+    assert usage_from_tape(path)["provider_calls"] == 1
