@@ -16,6 +16,7 @@ requiring identical hashes.
 
 from __future__ import annotations
 
+import gzip
 import hashlib
 import asyncio
 import json
@@ -88,7 +89,10 @@ class _Tape:
         self.queue: list[dict[str, Any]] = []
         self.mismatches = 0
         if mode == "replay":
-            self.queue = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            compacted = path.with_name(path.name + ".gz")  # scripts/agent_eval/compact_rounds.py
+            text = (gzip.decompress(compacted.read_bytes()).decode("utf-8")
+                    if not path.exists() and compacted.exists() else path.read_text(encoding="utf-8"))
+            self.queue = [json.loads(line) for line in text.splitlines() if line.strip()]
 
     def write(self, record: dict[str, Any]) -> None:
         with self.lock, self.path.open("a", encoding="utf-8") as handle:

@@ -19,6 +19,7 @@ Judged part (``--judge``): a model judge scores the five rubric dimensions
 from __future__ import annotations
 
 import argparse
+import gzip
 import json
 import math
 import re
@@ -320,8 +321,11 @@ def usage_from_tape(path: Path) -> dict[str, Any]:
     calls = prompt = completion = hit = miss = 0
     elapsed = []
     request_bytes = []
-    if path.exists():
-        for line in path.read_text(encoding="utf-8").splitlines():
+    compacted = path.with_name(path.name + ".gz")  # scripts/agent_eval/compact_rounds.py
+    text = (path.read_text(encoding="utf-8") if path.exists()
+            else gzip.decompress(compacted.read_bytes()).decode("utf-8") if compacted.exists() else None)
+    if text is not None:
+        for line in text.splitlines():
             record = json.loads(line)
             calls += 1
             elapsed.append(record.get("elapsed_s") or 0)

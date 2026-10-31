@@ -56,3 +56,13 @@ model, containment, browser, performance, or release acceptance evidence.
   numerical results; verify the journal and file count. Keep one verified
   tar.gz representative per family/release, logs and scripts. This cleanup
   authorization applies to benchmark products only, never other data/worktrees.
+
+# Disk discipline for evaluations and measurements (2026-10-31)
+
+- Before blaming files for lost disk, read `sysctl vm.swapusage` and the APFS VM volume: on 2026-10-25 swap, not evaluation data, took 9 GB. Close heavy applications before long runs.
+- Evaluation rounds keep every record, but not uncompressed: after a round is graded and reviewed, run `scripts/agent_eval/compact_rounds.py local/agent-eval <rounds still running>`. It verifies by SHA-256 and journals before replacing; provider tapes were 4.7 GB of 15 GB and compress to about 10%.
+- Do not copy an unchanged input per task. Clone (`cp -c`) or reference one registered file.
+- Start only rounds whose size you have estimated: free space must cover them above the 5 GB floor. A floor is checked per task and pauses or stops; it is never lowered silently.
+- Never delete evidence, data or worktrees to make room, including failed runs. Compress losslessly, archive with checksums, or ask.
+- Keep one root per round. Finished previews, viewers and observers are stopped; their logs go inside the round root, not loose in `local/`.
+- Bytes per run are a measured budget: new default-path code stays within 1.05 times v1.9.0, and a round's growth per task is reported with its results.

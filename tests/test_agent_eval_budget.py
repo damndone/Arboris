@@ -506,3 +506,18 @@ def test_missing_or_invalid_response_ids_stay_unknown_not_local_sha(tmp_path, he
     [record] = [json.loads(line) for line in tape.path.read_text().splitlines()]
     assert record["response_identifiers"] == {}
     assert record["usage"] is None
+
+
+def test_a_compacted_tape_is_still_read_by_the_grader(tmp_path):
+    import gzip
+    import json
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path("scripts")))
+    from agent_eval_grade import usage_from_tape
+
+    path = tmp_path / "provider_tape.jsonl"
+    line = json.dumps({"elapsed_s": 1.0, "usage": {"prompt_tokens": 7, "completion_tokens": 2}}) + "\n"
+    path.with_name(path.name + ".gz").write_bytes(gzip.compress(line.encode()))
+    assert usage_from_tape(path)["calls"] == 1
