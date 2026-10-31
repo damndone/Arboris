@@ -35,7 +35,7 @@ function isStep(message: AgentMessage): boolean {
 function finish(turn: Turn & { last: AgentMessage | null }): Turn {
   const replies = turn.responses.map((response) => response.content);
   const steps = turn.steps.filter(
-    (step) => step.role === "tool" || (step.content.trim() && !replies.some((reply) => repeats(step.content, reply))),
+    (step) => step.role === "tool" || step.reasoning?.trim() || (step.content.trim() && !replies.some((reply) => repeats(step.content, reply))),
   );
   const drafts = turn.drafts.filter((draft) => !replies.some((reply) => repeats(draft.content, reply)));
   const start = turn.user?.at ? Date.parse(turn.user.at) : NaN;

@@ -4,6 +4,7 @@ import asyncio
 from decimal import Decimal
 import hashlib
 import json
+import os
 import shutil
 import time
 from pathlib import Path
@@ -298,6 +299,11 @@ NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
 NVIDIA_MODEL = "nvidia/nemotron-3-ultra-550b-a55b"
 
 
+#: A 429 on the free endpoint is its capacity, not this account's rate, so a round queues rather
+#: than stops. A round may ask to wait longer (user 2026-10-31: queue within the limit).
+RETRY_DELAYS_S = [int(item) for item in os.environ.get("WORKBENCH_EVAL_RETRY_DELAYS_S", "60,120").split(",")]
+
+
 class NvidiaOverloadRetry(BaseException):
     """Consumed only by the explicitly installed evaluation stream wrapper."""
 
@@ -333,7 +339,7 @@ class NvidiaOverloadRecovery(FreeRouteGuard):
         with self._change() as state:
             expected = {"schema": self.schema, "provider_id": NVIDIA_PROVIDER_ID,
                 "base_url": NVIDIA_BASE_URL, "model": NVIDIA_MODEL, "retry_limit": self.retry_limit,
-                "per_request_retry_limit": 2, "delays_s": [60, 120]}
+                "per_request_retry_limit": len(RETRY_DELAYS_S), "delays_s": RETRY_DELAYS_S}
             if unanswered_read_errors:
                 expected["unanswered_read_errors"] = True
             if unanswered_protocol_errors:
@@ -352,7 +358,7 @@ class NvidiaOverloadRecovery(FreeRouteGuard):
             return json.loads(self.path.read_text())
         return {"schema": self.schema, "provider_id": NVIDIA_PROVIDER_ID,
             "base_url": NVIDIA_BASE_URL, "model": NVIDIA_MODEL, "retry_limit": self.retry_limit,
-            "per_request_retry_limit": 2, "delays_s": [60, 120], "retries": 0,
+            "per_request_retry_limit": len(RETRY_DELAYS_S), "delays_s": RETRY_DELAYS_S, "retries": 0,
             "request_retries": {}, "tickets": {}, "pending": None, "manual_restarts": {},
             "stopped": False, "reason": None,
             **({"unanswered_read_errors": True} if self.unanswered_read_errors else {}),
@@ -387,12 +393,12 @@ class NvidiaOverloadRecovery(FreeRouteGuard):
                 refused = "NVIDIA pending recovery ticket forbids parallel recovery"
             elif state["retries"] >= self.retry_limit:
                 refused = "NVIDIA shared recovery retry limit reached"
-            elif count >= 2:
+            elif count >= len(RETRY_DELAYS_S):
                 refused = "NVIDIA per-request overload retry limit reached"
             if refused:
                 state.update(stopped=True, reason=refused)
             else:
-                delay = [60, 120][count]
+                delay = RETRY_DELAYS_S[count]
                 state["retries"] += 1
                 state["request_retries"][request_sha256] = count + 1
                 state["tickets"][ticket] = {"request_sha256": request_sha256,

@@ -55,6 +55,9 @@ def _messages(repository: JsonlSessionRepository, session_id: str) -> list[dict[
             "stop_reason": entry.payload.get("stop_reason"),
             "error": entry.payload.get("error"),
         }
+        if isinstance(entry.payload.get("reasoning_content"), str) and entry.payload["reasoning_content"].strip():
+            # Folded beside its step at the person's request (2026-10-31); events never carry it.
+            message["reasoning"] = entry.payload["reasoning_content"]
         if isinstance(entry.payload.get("numeric_check"), dict):
             message["numeric_check"] = entry.payload["numeric_check"]
         # A legacy/corrupt entry must not make the whole session unreadable.

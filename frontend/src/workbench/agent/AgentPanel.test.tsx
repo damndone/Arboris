@@ -1494,4 +1494,14 @@ describe("Agent recorded usage", () => {
     render(<AgentSurfaceContext.Provider value={value()}><AgentPanel runId="run-a" projectRoot="/proj" /></AgentSurfaceContext.Provider>);
     expect(screen.queryByTestId("agent-usage")).not.toBeInTheDocument();
   });
+
+  it("folds the model's thinking beside the step that followed it", () => {
+    render(<AgentSurfaceContext.Provider value={value({messages: [
+      agentMessageFixture({entry_id: "u1", role: "user", content: "Why?"}),
+      agentMessageFixture({entry_id: "a1", role: "assistant", content: "Because.", stop_reason: "stop", reasoning: "Check the residuals first."}),
+    ]})}><AgentPanel runId="run-a" projectRoot="/proj" /></AgentSurfaceContext.Provider>);
+    const thinking = screen.getByTestId("agent-thinking");
+    expect(thinking).not.toHaveAttribute("open");
+    expect(thinking).toHaveTextContent("Check the residuals first.");
+  });
 });

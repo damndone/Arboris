@@ -1316,3 +1316,8 @@
 .wb-agent-terminal-line[data-role="assistant"] > .wb-agent-terminal-marker { display: none; }
 .wb-context-ring-left { margin-left: 4px; font-size: 11px; font-variant-numeric: tabular-nums; color: var(--label-secondary); }
 .wb-context-ring[data-level="danger"] .wb-context-ring-left { color: var(--status-caution-fg); }
+.wb-agent-thinking { margin: 0 0 4px; color: var(--label-tertiary); }
+.wb-agent-thinking > summary { width: fit-content; cursor: pointer; font-style: italic; list-style: none; }
+.wb-agent-thinking > summary::-webkit-details-marker { display: none; }
+.wb-agent-thinking > summary::after { content: " ›"; font-style: normal; }
+.wb-agent-thinking__text { margin-top: 2px; padding-left: 10px; border-left: 1px solid var(--separator); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.5; }

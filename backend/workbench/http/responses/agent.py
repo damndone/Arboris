@@ -200,6 +200,7 @@ class AgentMessage(TypedDict):
     name: str | None
     stop_reason: str | None
     error: str | None
+    reasoning: NotRequired[str]
     numeric_check: NotRequired[NumericCheckUnverified | NumericCheckFailed]
     navigation: list[NavigationRefView]
     compaction: NotRequired[AgentCompactionView]

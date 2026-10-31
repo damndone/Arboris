@@ -3276,6 +3276,8 @@ export interface components {
             navigation: components["schemas"]["AgentNavigationRef"][];
             /** Numeric Check */
             numeric_check?: components["schemas"]["NumericCheckUnverified"] | components["schemas"]["NumericCheckFailed"];
+            /** Reasoning */
+            reasoning?: string;
             /**
              * Role
              * @enum {string}

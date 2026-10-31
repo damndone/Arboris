@@ -423,6 +423,12 @@ export function AgentPanel({
           </ToolStepRow>
         ) : message.role === "assistant" ? (
           <div className="wb-agent-terminal-content wb-agent-terminal-markdown">
+            {message.reasoning?.trim() && (
+              <details className="wb-agent-thinking" data-testid="agent-thinking">
+                <summary>Thought</summary>
+                <div className="wb-agent-thinking__text">{message.reasoning}</div>
+              </details>
+            )}
             {message.stop_reason === "revised" && (
               <p data-testid="agent-withdrawn-draft" className="wb-agent-withdrawn-draft">
                 Earlier draft, withdrawn by the number check: {withdrawnNumbers(message)} matched no result, so the Agent rewrote the answer below.
