@@ -5,7 +5,8 @@
 // they hold for every conversation with that model.
 
 import type { AgentModelOption, AgentModelSettings } from "../../workbench/agent/agentTypes";
-import { ComposerMenu, Segmented } from "./ComposerMenu";
+import { useEffect, useRef, useState } from "react";
+import { ComposerMenu, StepSlider } from "./ComposerMenu";
 
 type Effort = NonNullable<AgentModelOption["reasoning_effort"]>;
 const EFFORT_NAME: Record<Effort, string> = {
@@ -38,6 +39,52 @@ export function limitOptions(model: AgentModelOption): { value: string; label: s
     ...LIMITS.filter((limit) => limit < window).map((limit) => ({ value: String(limit), label: tokens(limit) }))];
 }
 
+/** Scrolls inside the sheet, opens on the current model, and filters a long list. */
+function ModelList({ model, options, onSelect }: {
+  model: string;
+  options: AgentModelOption[];
+  onSelect: (requestModel: string) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const current = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => { current.current?.scrollIntoView?.({ block: "nearest" }); }, []);
+  const needle = query.trim().toLowerCase();
+  const shown = needle
+    ? options.filter((option) => `${option.display_name} ${option.request_model}`.toLowerCase().includes(needle))
+    : options;
+  return (
+    <div className="ws-menu__section">
+      {options.length > 8 && (
+        <input
+          className="ws-menu__search"
+          type="search"
+          aria-label="Filter models"
+          placeholder="Filter models"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
+      )}
+      <div className="ws-menu__scroll" role="radiogroup" aria-label="Model">
+        {shown.map((option) => (
+          <button
+            key={option.request_model}
+            ref={option.request_model === model ? current : undefined}
+            type="button"
+            role="radio"
+            aria-checked={option.request_model === model}
+            className="ws-menu__item"
+            title={option.request_model}
+            onClick={() => onSelect(option.request_model)}
+          >
+            <span className="ws-menu__check" aria-hidden="true">{option.request_model === model ? "✓" : ""}</span>
+            <span className="ws-menu__item-name">{option.display_name}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function AgentModelMenu({
   model,
   options,
@@ -66,26 +113,11 @@ export function AgentModelMenu({
     <ComposerMenu label={label} title={`Model: ${name}`} disabled={disabled || options.length === 0} className="ws-model-menu">
       {() => (
         <>
-          <div className="ws-menu__section" role="radiogroup" aria-label="Model">
-            {options.map((option) => (
-              <button
-                key={option.request_model}
-                type="button"
-                role="radio"
-                aria-checked={option.request_model === model}
-                className="ws-menu__item"
-                title={option.request_model}
-                onClick={() => onSelect(option.request_model)}
-              >
-                <span className="ws-menu__check" aria-hidden="true">{option.request_model === model ? "✓" : ""}</span>
-                <span className="ws-menu__item-name">{option.display_name}</span>
-              </button>
-            ))}
-          </div>
+          <ModelList model={model} options={options} onSelect={onSelect} />
           {current && onSettings && (efforts.length > 0 || limits.length > 1) && (
             <div className="ws-menu__section ws-menu__section--settings">
               {efforts.length > 0 && effort && (
-                <Segmented
+                <StepSlider
                   label="Thinking"
                   options={efforts.map((value) => ({ value, label: EFFORT_NAME[value] }))}
                   value={effort}
@@ -93,20 +125,16 @@ export function AgentModelMenu({
                 />
               )}
               {limits.length > 1 && (
-                <div className="ws-model-context-limit">
-                  <Segmented
-                    label="Context limit"
-                    options={limits}
-                    value={current.context_limit_tokens ? String(current.context_limit_tokens) : "full"}
-                    onChange={(value) => onSettings(current.request_model, {
-                      context_limit_tokens: value === "full" ? null : Number(value),
-                    })}
-                  />
-                </div>
+                <StepSlider
+                  label="Context"
+                  title="A lower limit summarizes the conversation sooner: faster and cheaper, less remembered."
+                  options={[...limits].reverse()}
+                  value={current.context_limit_tokens ? String(current.context_limit_tokens) : "full"}
+                  onChange={(value) => onSettings(current.request_model, {
+                    context_limit_tokens: value === "full" ? null : Number(value),
+                  })}
+                />
               )}
-              <p className="ws-menu__hint">
-                Saved for this model. A lower limit compacts the conversation sooner: faster and cheaper, less remembered.
-              </p>
             </div>
           )}
         </>

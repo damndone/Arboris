@@ -249,3 +249,22 @@
   background: var(--tint-bg);
   color: var(--tint-label);
 }
+
+/* The sheet never outgrows the window; a long model list scrolls inside it. */
+.ws-model-menu .ws-menu__sheet { max-height: calc(100vh - 140px); overflow-y: auto; width: 320px; }
+.ws-menu__scroll { max-height: min(40vh, 320px); overflow-y: auto; overscroll-behavior: contain; }
+.ws-menu__search {
+  box-sizing: border-box;
+  width: 100%;
+  margin-bottom: 4px;
+  padding: 5px 8px;
+  border: var(--hairline) solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev);
+  color: var(--label);
+  font: inherit;
+}
+.ws-menu__slider { display: grid; gap: 2px; cursor: default; }
+.ws-menu__slider-head { display: flex; justify-content: space-between; color: var(--label-secondary); }
+.ws-menu__slider-value { color: var(--label); font-weight: 500; font-variant-numeric: tabular-nums; }
+.ws-menu__slider input[type="range"] { width: 100%; margin: 0; accent-color: var(--tint); cursor: pointer; }

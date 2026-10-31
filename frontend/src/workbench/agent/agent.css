@@ -1314,3 +1314,5 @@
 .wb-agent-receipt > :not(summary) { margin: 4px 0 4px 18px; }
 .wb-agent-receipt ol { padding-left: 16px; }
 .wb-agent-terminal-line[data-role="assistant"] > .wb-agent-terminal-marker { display: none; }
+.wb-context-ring-left { margin-left: 4px; font-size: 11px; font-variant-numeric: tabular-nums; color: var(--label-secondary); }
+.wb-context-ring[data-level="danger"] .wb-context-ring-left { color: var(--status-caution-fg); }

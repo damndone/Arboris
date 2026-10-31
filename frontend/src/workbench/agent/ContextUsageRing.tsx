@@ -28,6 +28,11 @@ export interface ContextUsageRingProps {
  * never jumps. Ring size and stroke width are fixed, so progress never causes
  * layout jitter. The token details live only in the hover tooltip.
  */
+function shortTokens(value: number): string {
+  if (value >= 1_000_000) return `${+(value / 1_000_000).toFixed(2)}M`;
+  return value >= 1_000 ? `${Math.round(value / 1_000)}K` : String(value);
+}
+
 export function ContextUsageRing({
   used,
   remaining,
@@ -63,13 +68,10 @@ export function ContextUsageRing({
   const percentage = progress * 100;
   const dashOffset = circumference * (1 - progress);
 
-  const level = !hasCapacity
-    ? "empty"
-    : percentage >= 95
-      ? "danger"
-      : percentage >= 80
-        ? "warning"
-        : "normal";
+  // What matters is how close the next automatic summary is, not the raw window.
+  const towardSummary = hasCapacity && compactAt ? Math.min(used / compactAt, 1) * 100 : percentage;
+  const level = !hasCapacity ? "empty" : towardSummary >= 95 ? "danger" : towardSummary >= 80 ? "warning" : "normal";
+  const leftUntilSummary = Math.max(0, Math.round(100 - towardSummary));
 
   const ariaLabel = hasCapacity
     ? `Context usage: ${Math.round(percentage)}%, ${remaining.toLocaleString()} tokens remaining out of ${total.toLocaleString()}`
@@ -123,6 +125,9 @@ export function ContextUsageRing({
           />
         )}
       </svg>
+      {level !== "normal" && level !== "empty" && (
+        <span className="wb-context-ring-left" aria-hidden="true">{leftUntilSummary}%</span>
+      )}
       {(hover || pinned) && (
         <div
           className="wb-context-ring-tooltip"
@@ -134,14 +139,9 @@ export function ContextUsageRing({
           {hasCapacity ? (
             <>
               <div className="wb-context-ring-tooltip-head">
-                <strong>{Math.round(percentage)}%</strong> of context used
+                <strong>{shortTokens(used)}</strong> of {shortTokens(total as number)}{assumed ? " (assumed)" : ""}
               </div>
-              <dl>
-                <div><dt>Used</dt><dd>{used.toLocaleString()}</dd></div>
-                <div><dt>Remaining</dt><dd>{remaining.toLocaleString()}</dd></div>
-                <div><dt>Total</dt><dd>{total.toLocaleString()}{assumed ? " (assumed)" : ""}</dd></div>
-                {compactAt ? <div><dt>Summarized at</dt><dd>{compactAt.toLocaleString()}</dd></div> : null}
-              </dl>
+              {compactAt ? <p className="wb-context-ring-note">{leftUntilSummary}% left until the conversation is summarized</p> : null}
               {assumed && (
                 <p className="wb-context-ring-note">
                   The model declares no context window, so this one is assumed. Set the real one for the model in Settings › LLM providers.

@@ -81,33 +81,44 @@ export function ComposerMenu({
 }
 
 /** A row of equal choices (Off / Low / High / Max), one selected. */
-export function Segmented<T extends string>({
+/** A setting with ordered levels: drag or use the arrow keys; the choice saves as it moves. */
+export function StepSlider<T extends string>({
   label,
+  title,
   options,
   value,
   onChange,
 }: {
   label: string;
+  title?: string;
   options: { value: T; label: string }[];
   value: T;
   onChange: (value: T) => void;
 }) {
+  const [shown, setShown] = useState(value);
+  useEffect(() => setShown(value), [value]);
+  const index = Math.max(0, options.findIndex((option) => option.value === shown));
   return (
-    <div className="ws-menu__field">
-      <span className="ws-menu__field-label">{label}</span>
-      <div role="radiogroup" aria-label={label} className="ws-menu__segmented">
-        {options.map((option) => (
-          <button
-            key={option.value}
-            type="button"
-            role="radio"
-            aria-checked={option.value === value}
-            onClick={() => onChange(option.value)}
-          >
-            {option.label}
-          </button>
-        ))}
-      </div>
-    </div>
+    <label className="ws-menu__slider" title={title}>
+      <span className="ws-menu__slider-head">
+        <span>{label}</span>
+        <span className="ws-menu__slider-value">{options[index]?.label}</span>
+      </span>
+      <input
+        type="range"
+        min={0}
+        max={options.length - 1}
+        step={1}
+        value={index}
+        aria-label={label}
+        aria-valuetext={options[index]?.label}
+        onChange={(event) => {
+          const next = options[Number(event.target.value)];
+          if (!next) return;
+          setShown(next.value);
+          onChange(next.value);
+        }}
+      />
+    </label>
   );
 }

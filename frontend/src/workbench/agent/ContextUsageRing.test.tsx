@@ -7,8 +7,8 @@ describe("context ring", () => {
     render(<ContextUsageRing used={30_000} remaining={34_000} total={64_000} assumed compactAt={47_616} />);
     fireEvent.mouseEnter(screen.getByTestId("agent-context-ring"));
     const details = screen.getByTestId("agent-context-tooltip");
-    expect(details).toHaveTextContent("64,000 (assumed)");
-    expect(details).toHaveTextContent("Summarized at47,616");
+    expect(details).toHaveTextContent("30K of 64K (assumed)");
+    expect(details).toHaveTextContent("37% left until the conversation is summarized");
     expect(details).toHaveTextContent("The model declares no context window");
     expect(screen.queryByRole("button", { name: "Summarize earlier conversation" })).toBeNull();
   });

@@ -31,7 +31,7 @@ function BoundaryList({
           {items.map((item) => {
             const executable = "operation_id" in item;
             const operationId = executable ? item.operation_id : item.id;
-            const description = executable ? item.ui_description : item.description;
+            const title = executable ? item.ui_description : item.label;
             const examples = executable ? item.example_prompts : [];
             const prompt = examples[0]
               ?? (executable
@@ -41,17 +41,8 @@ function BoundaryList({
               <li key={operationId}>
                 <div className="wb-agent-capability-title">
                   <span aria-hidden="true">{executable ? "✓" : "○"}</span>
-                  <strong>{executable ? description : item.label}</strong>
+                  <strong>{title}</strong>
                 </div>
-                <div className="wb-agent-capability-description">{description}</div>
-                {executable && (
-                  <div className="wb-agent-capability-meta">
-                    {item.risk_level} · confirmation: {item.confirmation_policy} · {operationId}
-                  </div>
-                )}
-                {examples.length > 0 && (
-                  <div className="wb-agent-capability-example">Example: {examples[0]}</div>
-                )}
                 {onPromptSelect && (
                   <button
                     type="button"
@@ -179,9 +170,6 @@ export function AgentCapabilityPopover({
         <div className="wb-agent-capability-unavailable">Capabilities unavailable</div>
       ) : (
         <>
-          <p className="wb-agent-capability-help">
-            Choose an action to place a prompt in the composer. Nothing runs until you send it and confirm any proposal.
-          </p>
           <BoundaryList
             title="Available to run"
             items={executable}

@@ -17,11 +17,12 @@ describe("AgentModelMenu", () => {
     const button = screen.getByRole("button", { name: "Model: DeepSeek V4.1 Flash" });
     expect(button).toHaveTextContent("Low");
     fireEvent.click(button);
-    expect(screen.getAllByRole("radio").map((radio) => radio.textContent)).toEqual(expect.arrayContaining(["Off", "Low", "High", "Max"]));
-    fireEvent.click(screen.getByRole("radio", { name: "Max" }));
+    const thinking = screen.getByRole("slider", { name: "Thinking" });
+    fireEvent.change(thinking, { target: { value: thinking.getAttribute("max") } });
     expect(onSettings).toHaveBeenLastCalledWith(flash.request_model, { reasoning_effort: "max" });
-    expect(screen.getByRole("radio", { name: "Full 1M" })).toHaveAttribute("aria-checked", "true");
-    fireEvent.click(screen.getByRole("radio", { name: "128K" }));
+    const context = screen.getByRole("slider", { name: "Context" });
+    expect(context).toHaveAttribute("aria-valuetext", "Full 1M");
+    fireEvent.change(context, { target: { value: "1" } });
     expect(onSettings).toHaveBeenLastCalledWith(flash.request_model, { context_limit_tokens: 128_000 });
     fireEvent.click(screen.getByRole("radio", { name: "Hy3" }));
     expect(onSelect).toHaveBeenCalledWith(hy3.request_model);
@@ -30,8 +31,8 @@ describe("AgentModelMenu", () => {
   test("each model offers its own efforts and only the limits below its window", () => {
     render(<AgentModelMenu model={hy3.request_model} options={[flash, hy3]} onSelect={vi.fn()} onSettings={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Model: Hy3" }));
-    const thinking = screen.getByRole("radiogroup", { name: "Thinking" });
-    expect(Array.from(thinking.querySelectorAll("[role=radio]")).map((radio) => radio.textContent)).toEqual(["Low", "High"]);
+    const thinking = screen.getByRole("slider", { name: "Thinking" });
+    expect(thinking).toHaveAttribute("max", "1");
     expect(limitOptions(hy3).map((option) => option.label)).toEqual(["Full 192K", "128K", "64K"]);
     expect(defaultEffort(["low", "medium"])).toBe("medium");
   });
@@ -41,11 +42,12 @@ describe("AgentModelMenu", () => {
     render(<AgentModelMenu model={flash.request_model} options={[flash]} onSelect={vi.fn()} onSettings={onSettings} />);
     fireEvent.click(screen.getByRole("button", { name: "Model: DeepSeek V4.1 Flash" }));
     expect(limitOptions(flash).map(({ label }) => label)).toEqual(["Full 1M", "768K", "512K", "256K", "128K", "64K"]);
-    for (const cap of [768_000, 512_000]) {
-      fireEvent.click(screen.getByRole("radio", { name: `${cap / 1000}K` }));
+    const context = screen.getByRole("slider", { name: "Context" });
+    for (const [step, cap] of [["4", 768_000], ["3", 512_000]] as const) {
+      fireEvent.change(context, { target: { value: step } });
       expect(onSettings).toHaveBeenLastCalledWith(flash.request_model, { context_limit_tokens: cap });
     }
-    fireEvent.click(screen.getByRole("radio", { name: "Full 1M" }));
+    fireEvent.change(context, { target: { value: "5" } });
     expect(onSettings).toHaveBeenLastCalledWith(flash.request_model, { context_limit_tokens: null });
     expect(limitOptions({ ...flash, context_window_tokens: 262_144 }).map(({ label }) => label))
       .toEqual(["Full 262K", "256K", "128K", "64K"]);
@@ -56,7 +58,7 @@ describe("AgentModelMenu", () => {
   test("a model with no efforts and no known window shows neither control", () => {
     render(<AgentModelMenu model="plain" options={[plain]} onSelect={vi.fn()} onSettings={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Model: Plain" }));
-    expect(screen.queryByRole("radiogroup", { name: "Thinking" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("slider", { name: "Thinking" })).not.toBeInTheDocument();
     expect(screen.queryByRole("radiogroup", { name: "Context limit" })).not.toBeInTheDocument();
   });
 
