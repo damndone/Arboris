@@ -199,6 +199,11 @@ class _RecordingTransport(httpx.AsyncBaseTransport):
             "usage": usage,
             "budget_reservation": reservation,
         })
+        if response.status_code == 429:
+            from .nvidia_serial import shared_pace
+            pace = shared_pace()
+            if pace is not None:
+                pace.hold_after_429()
         if hasattr(self.budget, "recover_complete_http_error"):
             self.budget.recover_complete_http_error(response.status_code, raw, reservation)
         if hasattr(self.budget, "recover_overload"):

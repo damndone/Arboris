@@ -196,3 +196,27 @@ def test_serial_lease_is_retained_through_the_original_retry_ticket(tmp_path, mo
     assert g.overload_recovery.state['retries'] == 1
     assert len(g.state['accepted_unknown_requests']) == 1
     assert len(g.serial_coordinator.state['starts']) == 2
+
+
+def test_shared_pace_spaces_starts_across_lanes_and_a_429_holds_them_back(tmp_path, monkeypatch):
+    from agent_eval import nvidia_serial
+    from agent_eval.nvidia_serial import SharedStartPace
+
+    pace = SharedStartPace(tmp_path / 'pace')
+    clock, slept = [1000.0], []
+    monkeypatch.setattr(nvidia_serial.time, 'time', lambda: clock[0])
+
+    def sleep(seconds):
+        slept.append(seconds)
+        clock[0] += seconds
+
+    monkeypatch.setattr(nvidia_serial.time, 'sleep', sleep)
+    starts = []
+    for _ in range(4):
+        pace.wait_turn()
+        starts.append(clock[0])
+    assert [round(b - a, 6) for a, b in zip(starts, starts[1:])] == [1.6, 1.6, 1.6]
+    pace.hold_after_429()
+    before = clock[0]
+    pace.wait_turn()
+    assert clock[0] == before + 30.0

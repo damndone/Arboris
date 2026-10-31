@@ -10,6 +10,45 @@ from filelock import FileLock, Timeout
 from .budget import BudgetStop, NVIDIA_BASE_URL, NVIDIA_MODEL, NVIDIA_PROVIDER_ID, RoundBudget
 
 
+class SharedStartPace:
+    """Pace request starts across parallel lanes, each keeping its own serial ledgers.
+
+    The account limit is per minute across every lane (NVIDIA: up to 40 rpm), so one file
+    holds the next permitted start; 1.6 s apart is 37.5 rpm. 65 HTTP 429s in the 2026-10-28..30
+    rounds came at 2-9 starts a minute, far below that, so a 429 is capacity rather than
+    this account's rate: one lane's 429 also holds the others back instead of adding load.
+    """
+
+    MIN_INTERVAL_S = 1.6
+    AFTER_429_S = 30.0
+
+    def __init__(self, path):
+        self.path = Path(path)
+        self.lock = FileLock(str(self.path) + '.lock')
+
+    def _read(self):
+        return float(self.path.read_text()) if self.path.exists() else 0.0
+
+    def wait_turn(self):
+        while True:
+            with self.lock:
+                now = time.time()
+                allowed = self._read()
+                if now >= allowed:
+                    self.path.write_text(str(now + self.MIN_INTERVAL_S))
+                    return
+            time.sleep(min(allowed - now, 5.0))
+
+    def hold_after_429(self):
+        with self.lock:
+            self.path.write_text(str(max(self._read(), time.time() + self.AFTER_429_S)))
+
+
+def shared_pace():
+    path = os.environ.get('WORKBENCH_EVAL_SHARED_PACE')
+    return SharedStartPace(path) if path else None
+
+
 class NvidiaSerialCoordinator:
     """Keep the original single reservation/ticket rules across task processes.
 
@@ -95,6 +134,9 @@ class NvidiaSerialCoordinator:
         if not self.held:
             self.stop('NVIDIA request has no shared serial HTTP lease')
             raise BudgetStop(self.state['reason'])
+        pace = shared_pace()
+        if pace is not None:
+            pace.wait_turn()
         # The HTTP lease excludes other starts. Release the state lock while
         # sleeping so another process can publish stop during the rate wait.
         while True:
