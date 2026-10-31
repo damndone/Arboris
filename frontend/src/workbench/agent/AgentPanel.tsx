@@ -9,6 +9,7 @@ import { AgentComposer } from "./AgentComposer";
 import { agentTurnActive } from "./AgentRunControls";
 import type { AgentMessage, AgentNavigationRef } from "./agentTypes";
 import { AgentRowsTable, shownRows } from "./AgentRowsTable";
+import { AgentChart, shownChart } from "./AgentChart";
 import { AgentTargetRecovery } from "./AgentTargetRecovery";
 import { renderMarkdown } from "../../report/markdown";
 import "./agent.css";
@@ -544,6 +545,10 @@ export function AgentPanel({
               {turn.steps.map((message) => {
                 const shown = shownRows(message);
                 return shown ? <AgentRowsTable key={`rows-${message.entry_id}`} shown={shown} /> : null;
+              })}
+              {turn.steps.map((message) => {
+                const chart = shownChart(message);
+                return chart ? <AgentChart key={`chart-${message.entry_id}`} chart={chart} /> : null;
               })}
               {turn.steps.filter((message) => message.role === "tool").map((message) => (
                 <AgentTargetRecovery key={`target-recovery-${message.entry_id}`} content={message.content}

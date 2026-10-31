@@ -56,6 +56,7 @@ Tool-result content classes, including historical persisted tool names. Retired 
 | `request_notebook_inspections` | `aggregate` |
 | `run_operation` | `workbench_state` |
 | `search_project_conversations` | `workbench_state` |
+| `show_chart` | `model_result` |
 | `show_dataset_rows` | `rows` |
 | `submit_analysis_loop_intent` | `workbench_state` |
 | `submit_notebook_option_batch` | `workbench_state` |

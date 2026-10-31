@@ -422,12 +422,6 @@
   border-radius: 7px;
 }
 
-.wb-agent-capability-help {
-  margin: 0;
-  color: var(--label-secondary);
-  font-size: 10px;
-  line-height: 1.45;
-}
 
 .wb-agent-capability-title {
   display: flex;
@@ -436,19 +430,7 @@
   font-size: 11px;
 }
 
-.wb-agent-capability-description,
-.wb-agent-capability-meta,
-.wb-agent-capability-example,
-.wb-agent-capability-empty,
-.wb-agent-capability-unavailable {
-  margin-top: 2px;
-  color: var(--label-tertiary);
-  font-size: 10px;
-}
 
-.wb-agent-capability-meta {
-  font-family: var(--font-mono, ui-monospace, monospace);
-}
 
 .wb-agent-capability-action {
   margin-top: 6px;
@@ -693,8 +675,8 @@
 
 .wb-agent-tool-receipt > .wb-agent-terminal-marker { display: none; }
 .wb-agent-step { display: inline-flex; gap: 6px; align-items: baseline; min-width: 0; color: var(--label-secondary); }
-.wb-agent-step__mark { flex: 0 0 auto; color: var(--status-success-fg, var(--label-tertiary)); }
-.wb-agent-step--failed .wb-agent-step__mark { color: var(--status-error-fg, var(--status-caution-fg)); }
+.wb-agent-step__mark { flex: 0 0 auto; color: var(--label-tertiary); }
+.wb-agent-step--failed .wb-agent-step__mark { color: var(--status-caution-fg); }
 .wb-agent-step--waiting .wb-agent-step__mark { color: var(--tint); }
 .wb-agent-step__detail { color: var(--label-tertiary); overflow-wrap: anywhere; }
 .wb-agent-work-count { color: var(--label-tertiary); font-weight: 400; }
@@ -1115,20 +1097,8 @@
   overflow-wrap: anywhere;
 }
 
-.agt-working__steps {
-  flex-basis: 100%;
-  padding-left: 13px;
-  color: var(--label-tertiary);
-}
 
-.agt-working__steps summary {
-  cursor: pointer;
-}
 
-.agt-working__steps ul {
-  margin: 4px 0 0;
-  padding-left: 16px;
-}
 
 @keyframes agt-pulse {
   0%, 100% { opacity: 0.35; }
@@ -1321,3 +1291,18 @@
 .wb-agent-thinking > summary::-webkit-details-marker { display: none; }
 .wb-agent-thinking > summary::after { content: " ›"; font-style: normal; }
 .wb-agent-thinking__text { margin-top: 2px; padding-left: 10px; border-left: 1px solid var(--separator); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.5; }
+.agt-chart { margin: 6px 0 8px; min-width: 0; font-size: 12px; }
+.agt-chart__title { margin: 0 0 2px; font-weight: 600; color: var(--label); }
+.agt-chart__readout { min-height: 18px; color: var(--label-secondary); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.agt-chart__legend { display: flex; flex-wrap: wrap; gap: 10px; margin: 2px 0; color: var(--label-secondary); }
+.agt-chart__swatch { display: inline-block; width: 8px; height: 8px; margin-right: 4px; border-radius: 2px; }
+.agt-chart svg { display: block; width: 100%; overflow: visible; }
+.agt-chart text { fill: var(--label-secondary); font-size: 11px; font-variant-numeric: tabular-nums; }
+.agt-chart__grid { stroke: var(--chart-grid); stroke-width: 1; }
+.agt-chart__reference { stroke: var(--chart-axis); stroke-width: 1; stroke-dasharray: 3 3; }
+.agt-chart__hit { fill: transparent; outline: none; }
+.agt-chart__hit:hover, .agt-chart__hit:focus { fill: color-mix(in oklch, var(--label) 7%, transparent); }
+.agt-chart__data { margin-top: 2px; color: var(--label-tertiary); }
+.agt-chart__data > summary { width: fit-content; cursor: pointer; }
+.agt-chart__data table { margin-top: 4px; border-collapse: collapse; font-variant-numeric: tabular-nums; color: var(--label-secondary); }
+.agt-chart__data th, .agt-chart__data td { padding: 1px 8px 1px 0; text-align: left; font-weight: 400; }
