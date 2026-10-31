@@ -192,6 +192,7 @@ def run_conversation(client, root: Path, run_id: str, prompt: str, policy: Polic
     nudge = NUDGE_ZH if policy.language == "zh" else NUDGE_EN
     confirmed_note = CONFIRMED_ZH if policy.language == "zh" else CONFIRMED_EN
     started = time.monotonic()
+    wall_started = time.time()
     turn = lambda text: _turn(client, root, session_id, text, policy.execution_policy, policy.mode, transport=policy.transport)  # noqa: E731
     turns: list[dict[str, Any]] = []
     confirmations: list[dict[str, Any]] = []
@@ -252,6 +253,9 @@ def run_conversation(client, root: Path, run_id: str, prompt: str, policy: Polic
             "completed_marker": completed,
             "stop_reason": stop_reason,
             "wall_s": round(time.monotonic() - started, 1),
+            # Wall time beyond the monotonic clock: the machine slept. A failure in such a
+            # run is environment evidence first (IV Auto, 2026-10-31: 22 min asleep).
+            "machine_asleep_s": round(max(0.0, (time.time() - wall_started) - (time.monotonic() - started)), 1),
             "entries": _session_entries(root, session_id),
         }
         if progress_path is not None:

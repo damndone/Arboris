@@ -433,7 +433,8 @@ class TurnStore:
         return record
 
     def _edit(self, turn_id: str, expected_version: int, change: Callable[[dict[str, Any]], None],
-              *, owner: str | None = None, fence: int | None = None, owned: bool = False) -> TurnRecord:
+              *, owner: str | None = None, fence: int | None = None, owned: bool = False,
+              lapsed_ok: bool = False) -> TurnRecord:
         _number(expected_version, integer=True, positive=True)
         if owned:
             _text(owner)
@@ -445,7 +446,8 @@ class TurnStore:
             if current.status in TERMINAL:
                 raise TurnStoreError("terminal turns are immutable")
             if owned and (current.lease_owner != owner or owner is None or current.lease_epoch != fence
-                          or current.lease_expires_at is None or current.lease_expires_at <= self._now()):
+                          or current.lease_expires_at is None
+                          or (current.lease_expires_at <= self._now() and not lapsed_ok)):
                 raise TurnStoreError("turn lease is expired, unowned or fenced")
             document = current.to_dict()
             change(document)
@@ -472,10 +474,15 @@ class TurnStore:
         return self._edit(turn_id, expected_version, change)
 
     def renew(self, turn_id: str, *, expected_version: int, owner: str, fence: int, lease_seconds: float) -> TurnRecord:
+        """Extend the lease. A lapsed lease extends too while owner and epoch still match:
+        any takeover bumps the epoch under the store lock, so nobody else has run."""
         _number(lease_seconds, positive=True)
         def change(value):
             value["lease_expires_at"] = max(value["lease_expires_at"], self._now() + lease_seconds)
-        return self._edit(turn_id, expected_version, change, owner=owner, fence=fence, owned=True)
+        return self._edit(turn_id, expected_version, change, owner=owner, fence=fence, owned=True, lapsed_ok=True)
+
+    def lease_lapsed(self, record: TurnRecord) -> bool:
+        return record.lease_expires_at is not None and record.lease_expires_at <= self._now()
 
     @staticmethod
     def _pending(value: dict[str, Any]) -> bool:

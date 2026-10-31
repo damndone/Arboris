@@ -110,7 +110,8 @@ def test_model_cannot_submit_coverage_or_promote_a_partial_step_to_done(tmp_path
     PlanControl(runtime.project_root, runtime.repository, 'chain-session').approve(plan.version)
     assert runtime.propose([_recode()])['executed']
     fake_done = _update(runtime, status='done')
-    assert fake_done.ok and not fake_done.output['saved']
+    # The claim is not applied and says why; the rest of the update still lands.
+    assert fake_done.ok and fake_done.output['saved'] and 'no successful execution' in str(fake_done.output)
     saved = runtime.orchestrator.plan_store.current('chain-session')
     assert saved.steps[0].status != 'done'
     assert not plans.scope_for(saved, ['statistical.derive_numeric'])['in_plan']

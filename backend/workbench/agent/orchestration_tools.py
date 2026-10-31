@@ -462,6 +462,16 @@ class OrchestrationTools:
                         root = getattr(self.context_provider, 'project_root', self.repository.root.parent)
                         validate_completion_evidence(root, effective_completion, arguments['completion_evidence'])
                     requirements = self._bind_task_requirements(session_id, previous)
+                    target = (completion or {}).get('target')
+                    if (target and requirements['status'] == 'verified'
+                            and target['estimand'] not in requirements['estimands']
+                            and not (previous and previous.completion and previous.completion.get('target') == target)):
+                        # A target is the person's requirement, not the Agent's choice: IV Auto
+                        # (2026-10-31) volunteered ATE on an IV question, which no producer can
+                        # certify, and spent all eight nudges on a requirement nobody had asked for.
+                        raise plan_module.PlanError(
+                            f"completion.target {target['estimand']} was not requested by the person. Remove target and "
+                            "state in your answer which quantity the method identifies under which assumptions.")
                     if completion is not None and requirements['status'] == 'verified':
                         requested = enforce({'scope': completion.get('scope', 'analysis'),
                             'target': completion.get('target'), 'status': 'requirements_met', 'missing': []}, requirements)

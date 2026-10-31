@@ -16,6 +16,7 @@ import json
 import os
 import tempfile
 import threading
+from collections import Counter
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -205,9 +206,13 @@ def merge(previous: Plan | None, *, question: str, criteria: list[str], steps: t
             # unverified, never an implicit request to rerun the old operation.
             status = old.status
         elif step.operation_ids and status == "done" and not set(step.operation_ids) <= set(coverage):
-            raise PlanError(f"step {step.step_id} cannot be done without successful execution receipts. "
-                            "Omit status or use pending when adding a step; bind existing verified results "
-                            "in completion_evidence. Do not rerun completed operations to create plan history.")
+            # Receipts decide a step's status; the claim is not applied. Refusing the whole
+            # update also threw away its completion_evidence, the one choice the gate needed.
+            from .tools import tool_note
+            tool_note(f"step {step.step_id} stays {old.status if old else 'pending'}: no successful execution "
+                      "receipt covers it. Bind existing verified results in completion_evidence; "
+                      "do not rerun completed operations to create plan history.")
+            status = old.status if old else "pending"
         elif human_revision and step.operation_ids and coverage and set(step.operation_ids) <= set(coverage):
             status = "done"
         preserved.append(replace(step, status=status, completed_operation_ids=coverage))
@@ -339,14 +344,30 @@ def mark_executed(plan: Plan, operation_ids: list[str], status: str) -> Plan:
 def mark_covered(plan: Plan, operation_ids: list[str], status: str) -> Plan:
     """Apply confirmed receipt coverage; partial steps keep their remaining work."""
 
-    ran = set(operation_ids)
-    done = {step.step_id for step in plan.steps if _verified_done(step)}
     selected = _ready_step_index(plan, operation_ids)
-    steps = [_with_receipt(step, operation_ids, status)
-             if (index == selected or selected is None
-                 and step.status in {"pending", "running", "awaiting"} and step.operation_ids
-                 and set(step.operation_ids) <= ran and all(item in done for item in step.depends_on))
-             else step for index, step in enumerate(plan.steps)]
+    steps = list(plan.steps)
+    if selected is not None:
+        steps[selected] = _with_receipt(steps[selected], operation_ids, status)
+    else:
+        # One workflow can finish several plan steps. Earlier steps it finishes satisfy
+        # later steps' dependencies, and each run operation covers one step only
+        # (IV Auto, 2026-10-31: fit, AR and weak-IV ran together, only the fit was marked,
+        # so the Agent's truthful "done" was refused along with its primary choice).
+        unused = Counter(operation_ids)
+        progressed = True
+        while progressed:
+            progressed = False
+            done = {step.step_id for step in steps if _verified_done(step)}
+            for index, step in enumerate(steps):
+                needed = Counter(set(step.operation_ids))
+                if (step.status in {"pending", "running", "awaiting"} and step.operation_ids
+                        and all(unused[name] >= count for name, count in needed.items())
+                        and all(item in done for item in step.depends_on)):
+                    steps[index] = _with_receipt(step, list(needed), status)
+                    unused -= needed
+                    progressed = status == "completed"
+                    if progressed:
+                        break
     if steps == list(plan.steps):
         return plan
     return replace(plan, steps=tuple(steps), status="completed" if _finished(steps) and plan.status == "approved" else plan.status,

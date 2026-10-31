@@ -68,6 +68,17 @@ def _seed(root: Path, dataset: Path, form: dict[str, str]) -> str:
     return result["run_id"]
 
 
+def _hold_machine_awake() -> None:
+    """An idle sleep suspends a round mid-request and leaves its usage unknown (2026-10-31).
+
+    Holds only idle sleep, until this process exits; a closed lid still sleeps, and the
+    run then records it as ``machine_asleep_s``.
+    """
+    if sys.platform == "darwin" and shutil.which("caffeinate"):
+        subprocess.Popen(["caffeinate", "-i", "-w", str(os.getpid())],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--out", type=Path, required=True)
@@ -111,6 +122,7 @@ def main() -> int:
     parser.add_argument("--allow-low-space-this-round", action="store_true",
                         help="explicit user-authorized storage exception; never releases financial stops")
     args = parser.parse_args()
+    _hold_machine_awake()
     if sum(item is not None for item in (args.round_budget_cny, args.free_route_ledger, args.nvidia_free_ledger)) > 1:
         parser.error("choose one CNY budget, Magpie free route, or NVIDIA free endpoint guard")
     if (args.nvidia_free_ledger is None) != (args.nvidia_free_round is None):

@@ -290,11 +290,10 @@ def test_done_without_receipts_can_be_corrected_without_rerunning_an_operation(t
     from tests.test_agent_plan_coverage import _runtime, _update
 
     runtime = _runtime(tmp_path)
-    refused = _update(runtime, status="done")
-    assert refused.ok and not refused.output["saved"]
-    assert "pending" in refused.output["error"]
-    assert "not rerun" in refused.output["error"]
-    assert runtime.orchestrator.plan_store.current("chain-session") is None
+    # The claim is not applied; the rest of the update lands, and the note says what to do instead.
+    claimed = _update(runtime, status="done")
+    assert claimed.ok and claimed.output["saved"] and claimed.output["plan"]["steps"][0]["status"] == "pending"
+    assert "not rerun" in str(claimed.output.get("workbench_notes"))
     corrected = _update(runtime)
     assert corrected.ok and corrected.output["saved"]
     assert corrected.output["plan"]["steps"][0]["status"] == "pending"

@@ -12,7 +12,7 @@ from workbench.agent.model import ModelStreamEvent
 from workbench.agent.session import JsonlSessionRepository
 from workbench.agent.tools import ToolResult
 from workbench.agent.turn_journal import TurnJournal, TurnRecoveryRequired
-from workbench.agent.turn_store import TurnStore
+from workbench.agent.turn_store import TurnStore, TurnStoreError
 
 
 class ProcessLost(BaseException):
@@ -394,3 +394,48 @@ def test_final_charged_step_repairs_receipt_but_never_grants_a_provider_retry(tm
         assert len([e for e in repository.get_branch("session-a") if e.payload.get("role") == "tool"]) == 1
         assert (tmp_path / "effects.txt").read_text().count("\n") == 1
     asyncio.run(scenario())
+
+
+def test_a_machine_sleep_during_a_model_call_does_not_lose_the_turn(tmp_path, monkeypatch):
+    """IV Auto, 2026-10-31: the Mac slept 22 min during one request. The turn's own
+    clock is monotonic and stopped; the wall-clock lease and wall_s_used did not, so
+    the owner, alone and unfenced, was refused at its next checkpoint (HTTP 409)."""
+
+    wall = [1000.0]
+    monkeypatch.setattr("workbench.agent.turn_journal.time.time", lambda: wall[0])
+
+    class SleepingAdapter(Adapter):
+        async def stream(self, request):
+            wall[0] += 5000  # the wall clock jumps; the monotonic clock does not
+            async for event in super().stream(request):
+                yield event
+
+    async def scenario():
+        repository = JsonlSessionRepository(tmp_path / "workbench")
+        repository.create_session("session-a", chain_id="chain-a", role="chain")
+        store = TurnStore(tmp_path, clock=lambda: wall[0])
+        journal = TurnJournal(store, repository, session_id="session-a", execution_mode="ask")
+        core = AgentCore(repository, AgentEventStream(tmp_path / "workbench"), SleepingAdapter(),
+                         session_id="session-a", turn_journal=journal)
+        assert await core.prompt("Answer.", budget={"max_steps": 3, "timeout_s": 30}) == "Saved."
+        record = store.get(journal.record.turn_id)
+        assert record.status == "completed"
+        assert record.wall_s_used < 30  # the sleep is not spent budget
+    asyncio.run(scenario())
+
+
+def test_a_fenced_owner_is_still_refused_after_its_lease_lapsed(tmp_path):
+    wall = [100.0]
+    store = TurnStore(tmp_path, clock=lambda: wall[0])
+    record = store.create("session", "entry", budget={"max_steps": 3, "timeout_s": 30})
+    record = store.claim(record.turn_id, expected_version=record.version, owner="old", lease_seconds=10)
+    fence = record.lease_epoch
+    wall[0] = 200.0
+    # Lapsed, nobody took it: the same owner and epoch may extend it.
+    record = store.renew(record.turn_id, expected_version=record.version, owner="old", fence=fence, lease_seconds=10)
+    assert record.lease_expires_at == 210.0
+    wall[0] = 300.0
+    taken = store.claim(record.turn_id, expected_version=record.version, owner="new", lease_seconds=10)
+    assert taken.lease_epoch != fence
+    with pytest.raises(TurnStoreError):
+        store.renew(taken.turn_id, expected_version=taken.version, owner="old", fence=fence, lease_seconds=10)

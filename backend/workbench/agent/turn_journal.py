@@ -49,6 +49,7 @@ class TurnJournal:
         self.record = None
         self.owner = "runtime_" + uuid4().hex
         self.started_at = None
+        self._active_since = None  # monotonic instant at which wall_s_used was zero
 
     def ownership(self):
         return self.store.execution_guard(self.session_id)
@@ -56,6 +57,11 @@ class TurnJournal:
     def _edit(self, method, **values):
         # External queue/cancel writes are legitimate; always reload their CAS.
         self.record = self.store.get(self.record.turn_id)
+        if self.record.lease_owner == self.owner and self.store.lease_lapsed(self.record):
+            # The wall clock ran while the machine slept; the turn's monotonic budget
+            # did not (IV Auto, 2026-10-31: 22 min asleep in one request, then HTTP 409).
+            self.record = self.store.renew(self.record.turn_id, expected_version=self.record.version,
+                owner=self.owner, fence=self.record.lease_epoch, lease_seconds=self.record.budget["timeout_s"] + 60)
         self.record = method(self.record.turn_id, expected_version=self.record.version,
                              owner=self.owner, fence=self.record.lease_epoch, **values)
         return self.record
@@ -65,6 +71,7 @@ class TurnJournal:
             raise TurnStoreError("durable commands require finite step and wall budgets")
         command = core._active_command_id
         self.started_at = time.time()
+        self._active_since = time.monotonic()
         turn_id = "turn_" + hashlib.sha256(json.dumps([self.session_id, command]).encode()).hexdigest()[:32]
         initial = self._payload(core, "initial", command_id=command, turn_id=turn_id,
                                 text=text, continuation=continuation)
@@ -100,7 +107,7 @@ class TurnJournal:
         entry = self.repository.append_once(self.session_id, "turn_state", payload,
                                             key=self.record.command_id, stage=f"checkpoint:{states}")
         self._edit(self.store.checkpoint, steps_used=core._steps_used,
-                   wall_s_used=max(self.record.wall_s_used, time.time() - self.started_at),
+                   wall_s_used=max(self.record.wall_s_used, time.monotonic() - self._active_since),
                    checkpoint={"state_entry_id": entry.entry_id})
         return entry
 
@@ -293,6 +300,7 @@ class TurnJournal:
         core._user_text = state["user_text"]
         core._budget = type(core._budget).from_value(state["budget"])
         elapsed = max(self.record.wall_s_used, time.time() - self.started_at)
+        self._active_since = time.monotonic() - elapsed
         core._turn_started_at = asyncio.get_running_loop().time() - elapsed
         for kind, queue in (("steer", core._steer_queue), ("follow_up", core._follow_up_queue)):
             queue.clear()

@@ -190,3 +190,19 @@ def test_agent_cannot_expand_contract_without_user_request_or_change_its_source(
         'playbooks': ['ols'], 'source': other}))
     assert not result['saved']
     assert runtime.orchestrator.plan_store.current('chain-session') == previous
+
+
+def test_a_target_the_person_did_not_ask_for_is_refused_and_a_requested_one_is_kept(tmp_path):
+    # IV Auto, 2026-10-31: the Agent volunteered ATE on an IV question; no producer can certify it.
+    runtime = _Fixture(tmp_path)
+    runtime.repository.append('chain-session', 'message', {'role': 'user', 'content': 'Can this sentence be written?'})
+    source = {'run_id': runtime.run_id, 'artifact_id': runtime.artifact_id}
+    target = {'estimand': 'ATE', 'outcome': 'y', 'treatment': 'x'}
+    result = _call(runtime, _arguments(runtime, completion={'scope': 'question', 'playbooks': [], 'source': source,
+                                                            'target': target}))
+    assert not result['saved'] and 'was not requested' in result['error']
+    runtime = _Fixture(tmp_path / 'requested')
+    runtime.repository.append('chain-session', 'message', {'role': 'user', 'content': 'Estimate the ATE.'})
+    source = {'run_id': runtime.run_id, 'artifact_id': runtime.artifact_id}
+    assert _call(runtime, _arguments(runtime, completion={'scope': 'question', 'playbooks': [], 'source': source,
+                                                          'target': target}))['saved']
