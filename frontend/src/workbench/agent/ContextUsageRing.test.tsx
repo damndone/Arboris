@@ -24,4 +24,10 @@ describe("context ring", () => {
     expect(onCompact).toHaveBeenCalledOnce();
     expect(ring).toHaveAttribute("aria-expanded", "false");
   });
+
+  it("offers summarizing on hover, the same as when pinned", () => {
+    render(<ContextUsageRing used={30_000} remaining={34_000} total={64_000} onCompact={() => undefined} />);
+    fireEvent.mouseEnter(screen.getByTestId("agent-context-ring"));
+    expect(screen.getByRole("button", { name: "Summarize earlier conversation" })).toBeInTheDocument();
+  });
 });

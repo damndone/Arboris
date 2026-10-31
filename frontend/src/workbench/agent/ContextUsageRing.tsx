@@ -184,7 +184,7 @@ export function ContextUsageRing({
           ) : (
             <div className="wb-context-ring-tooltip-head">Context capacity unknown</div>
           )}
-          {pinned && onCompact && (
+          {onCompact && (
             <button
               type="button"
               className="wb-context-ring-action"

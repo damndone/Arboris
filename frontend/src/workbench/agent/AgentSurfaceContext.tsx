@@ -818,10 +818,15 @@ export function AgentSurfaceProvider({
       setProviders((current) => current.map((provider) => provider.id === updated.id ? updated : provider));
       // The config's window is the working one: the model's, capped by the limit just saved.
       setLlmConfig(await fetchLlmConfig());
+      // The summary point follows the limit, so the ring must not keep the old one.
+      if (sessionId) {
+        const session = await getAgentSession(projectRoot, sessionId);
+        setServerContext(session.context ?? null);
+      }
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Unable to update the model settings");
     }
-  }, [activeProvider, llmConfig?.model]);
+  }, [activeProvider, llmConfig?.model, projectRoot, sessionId]);
 
   const latestAdmissionRef = useRef({isSubmitting, sessionStatus, durableTurns, executionMode});
   latestAdmissionRef.current = {isSubmitting, sessionStatus, durableTurns, executionMode};
