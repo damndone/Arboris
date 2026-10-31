@@ -1053,7 +1053,7 @@ def test_global_numeric_summary_and_linear_interaction_effect_are_bounded(
     }
 
 
-def test_workflow_step_contract_is_rejected_before_direct_inspection(
+def test_workflow_step_contract_is_read_through_the_multi_step_contract(
     tmp_path: Path,
 ) -> None:
     project_root = tmp_path / "project"
@@ -1088,22 +1088,9 @@ def test_workflow_step_contract_is_rejected_before_direct_inspection(
         )
     )
 
-    assert result.ok is False
-    assert result.error == "invalid_tool_arguments"
-    assert result.error_details is not None
-    assert any(
-        "model.joint_f_test" in detail["message"]
-        and "is a workflow step" in detail["message"]
-        and detail["constraint"] == "enum"
-        for detail in result.error_details
-    )
-    assert result.error_details[0]["retry_hint"] == {
-        "tool_id": "inspect_operation_contract",
-        "arguments_patch": {
-            "operation_id": "operation.multi_step",
-            "step_operation_ids": ["model.joint_f_test"],
-        },
-    }
+    assert result.ok is True
+    assert "is a workflow step" in result.output["workbench_notes"][0]
+    assert list(result.output["contract"]["step_vocabulary"]["step_operations"]) == ["model.joint_f_test"]
 
 
 def test_operation_contract_tool_only_advertises_top_level_operations(

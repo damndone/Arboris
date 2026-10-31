@@ -150,7 +150,7 @@ def test_workflow_step_as_root_keeps_refusal_and_points_to_its_workflow_contract
     assert len(json.dumps(detail)) <= MAX_VALIDATION_DETAIL_CHARS
 
 
-def test_workflow_step_inspection_refusal_has_the_same_read_only_retry_hint(tmp_path):
+def test_a_workflow_step_named_as_the_operation_is_read_as_that_step(tmp_path):
     from tests.test_agent_context_tools import _load_provider_type, _write_project_run
     from workbench.agent.operations import OperationRegistry
 
@@ -164,14 +164,12 @@ def test_workflow_step_inspection_refusal_has_the_same_read_only_retry_hint(tmp_
                  "operation_id": "model.genesis"}
     original = copy.deepcopy(arguments)
 
-    refused = asyncio.run(registry.execute({"tool_call_id": "wrong-inspect", "tool_id": "inspect_operation_contract",
-                                           "arguments": arguments}, session_id="s"))
+    # What the refusal's retry hint used to ask for is simply done, with a note.
+    read = asyncio.run(registry.execute({"tool_call_id": "wrong-inspect", "tool_id": "inspect_operation_contract",
+                                         "arguments": arguments}, session_id="s"))
 
-    assert not refused.ok and refused.error == "invalid_tool_arguments"
-    (detail,) = refused.error_details
-    assert detail["retry_hint"]["arguments_patch"] == {
-        "operation_id": "operation.multi_step", "step_operation_ids": ["model.genesis"]}
-    assert "step_operation_ids" in detail["message"] and "model.rerun" not in detail["message"]
+    assert read.ok and "workflow step" in read.output["workbench_notes"][0]
+    assert list(read.output["contract"]["step_vocabulary"]["step_operations"]) == ["model.genesis"]
     assert arguments == original
 
 

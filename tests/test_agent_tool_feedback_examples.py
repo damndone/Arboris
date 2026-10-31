@@ -55,18 +55,18 @@ def test_control_changes_are_not_silently_removed_to_manufacture_a_valid_example
     assert any('model_options' in d.get('allowed_fields',[]) for d in result.error_details)
 
 
-def test_json_text_changes_get_an_object_example_without_execution_or_target_rewrite():
+def test_json_text_changes_with_one_meaning_are_decoded_with_a_note_and_nothing_else_is_rewritten():
     arguments = request()
     intended = copy.deepcopy(arguments['changes'])
     arguments['changes'] = json.dumps(intended)
     saved = copy.deepcopy(arguments)
-    result, schema = execute(arguments)
-    assert not result.ok and result.error == 'invalid_tool_arguments'
-    assert any(d.get('path') == 'changes' and d.get('expected_type') == 'object'
-               and d.get('actual_type') == 'string' for d in result.error_details)
-    example = next(d['example_arguments'] for d in result.error_details if 'example_arguments' in d)
-    assert Draft202012Validator(schema).is_valid(example)
-    assert example == {**arguments, 'changes': intended}
+    calls = []
+    registry = ToolRegistry()
+    registry.register(ToolDefinition(tool_id='run_operation',version='v1',input_schema=OperationRegistry().proposal_tool_schema(),
+        side_effect='proposal',handler=lambda args,ctx:calls.append(args) or {'saved':True}))
+    result = asyncio.run(registry.execute({'tool_call_id':'text','tool_id':'run_operation','arguments':arguments},session_id='s'))
+    assert result.ok and calls == [{**saved, 'changes': intended}]
+    assert 'JSON text' in result.output['workbench_notes'][0]
     assert arguments == saved
 
 

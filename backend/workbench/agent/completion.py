@@ -693,14 +693,28 @@ def _missing_label(code, language):
     return label + '：缺少真实拟合、改变点估计设定的敏感性对照。'
 
 
+def _verification_scope(result, language):
+    """What the check covered, in the Workbench's words: Agents have widened "the sources
+    verified" into "every step and conclusion verified" (Leverage Ask, 2026-10-31)."""
+    question = result.get('scope') == 'question'
+    if language == 'zh':
+        return ('\n\nWorkbench 核验范围：只核对了结果的来源绑定和交付项'
+                + ('（按单一问题交付，计划里未执行的步骤不在其中）' if question else '')
+                + '，不认证方法选择、识别假设、推断有效性或科学结论。')
+    return ('\n\nWorkbench verification scope: result provenance and delivery items only'
+            + (' (delivered as a focused question; plan steps that did not run are not covered)' if question else '')
+            + '. Method choice, identification, inference validity and scientific conclusions are not certified.')
+
+
 def publication(content: str, result: dict, language: str, *, final=True, request_text=""):
     """Publish the machine state; a rejected completion claim is not a result."""
     result = enforce_request_scope(result, request_text)
     active = result['missing'] != ['completion_contract:select_playbooks_and_source']
     claim = claims_completion(content, request_text) or bool(active and _GENERIC_CLAIM.search(content))
-    if (result['status'] == 'requirements_met'
-            or (not claim and not _PARTIAL_NOTICE.search(content)
-                and (not final or result['missing'] == ['completion_contract:select_playbooks_and_source']))):
+    if result['status'] == 'requirements_met':
+        return content + _verification_scope(result, language) if claim else content
+    if not claim and not _PARTIAL_NOTICE.search(content) and (
+            not final or result['missing'] == ['completion_contract:select_playbooks_and_source']):
         return content
     notice = partial_notice(result, language)
     # Keep useful findings rather than replacing an entire answer because its

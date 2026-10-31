@@ -363,6 +363,24 @@ def _discriminated_branch(schema: dict[str, Any], instance: Any) -> dict[str, An
     return None
 
 
+def _strict_json(text: str) -> Any:
+    """JSON with one meaning: no duplicate keys, no NaN or Infinity, no overflow to infinity."""
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate JSON key")
+            result[key] = value
+        return result
+
+    def reject_constant(value):
+        raise ValueError("non-JSON constant")
+
+    decoded = json.loads(text, object_pairs_hook=unique_object, parse_constant=reject_constant)
+    json.dumps(decoded, ensure_ascii=False, allow_nan=False)
+    return decoded
+
+
 def _operation_change_example(schema, arguments):
     """Suggest shape only: preserve source/intent and leave opaque options alone."""
     if not isinstance(arguments, dict) or not isinstance(arguments.get("changes"), (dict, str)):
@@ -379,19 +397,8 @@ def _operation_change_example(schema, arguments):
     if not isinstance(contract, dict):
         return None
     if isinstance(example["changes"], str):
-        def unique_object(pairs):
-            result = {}
-            for key, value in pairs:
-                if key in result:
-                    raise ValueError("duplicate JSON key")
-                result[key] = value
-            return result
-        def reject_constant(value):
-            raise ValueError("non-JSON constant")
         try:
-            decoded = json.loads(example["changes"], object_pairs_hook=unique_object,
-                                 parse_constant=reject_constant)
-            json.dumps(decoded, ensure_ascii=False, allow_nan=False)
+            decoded = _strict_json(example["changes"])
         except (ValueError, RecursionError):
             return None
         if not isinstance(decoded, dict):
@@ -705,6 +712,38 @@ def _split_leaked_markers(arguments: dict[str, Any]) -> dict[str, Any]:
     return repaired
 
 
+def _decode_encoded_fields(definition: "ToolDefinition", arguments: dict[str, Any]) -> dict[str, Any]:
+    """A whole object or list sent as its JSON text means that object or list.
+
+    29 of 206 refusals in the NVIDIA rounds (2026-10-28..31) were `changes` or `completion`
+    sent this way, and the correction cost a full model call. Only a field the schema declares
+    as object or array, never as string, and only text with one meaning (see _strict_json); the
+    decoded value then passes the same validation and permissions as any other.
+    """
+    schema = definition.input_schema
+    declared: dict[str, list[dict[str, Any]]] = {}
+    for branch in [schema, *(schema.get("oneOf") or ()), *(schema.get("anyOf") or ())]:
+        for name, field_schema in (branch.get("properties") or {}).items():
+            declared.setdefault(name, []).append(field_schema)
+    decoded = dict(arguments)
+    for name, value in arguments.items():
+        schemas = declared.get(name)
+        if not schemas or not isinstance(value, str) or value[:1] not in {"{", "["}:
+            continue
+        kinds = {item.get("type") for item in schemas if isinstance(item, dict)}
+        if "string" in kinds or not kinds & {"object", "array"}:
+            continue
+        try:
+            parsed = _strict_json(value)
+        except (ValueError, RecursionError):
+            continue
+        if (isinstance(parsed, dict) and "object" in kinds) or (isinstance(parsed, list) and "array" in kinds):
+            decoded[name] = parsed
+            tool_note(f"{name} arrived as JSON text; read as the {type(parsed).__name__} it encodes. "
+                      "Send it as a JSON value, not a string.")
+    return decoded
+
+
 def _drop_unused_read_identity(definition: "ToolDefinition", arguments: dict[str, Any]) -> dict[str, Any]:
     schema = definition.input_schema
     if definition.side_effect != "none" or schema.get("additionalProperties") is not False:
@@ -825,7 +864,7 @@ class ToolRegistry:
         caller_supplied_changes_string = (tool_id == "run_operation" and isinstance(arguments, dict)
                                           and isinstance(arguments.get("changes"), str))
         if isinstance(arguments, dict):
-            arguments = _split_leaked_markers(arguments)
+            arguments = _decode_encoded_fields(definition, _split_leaked_markers(arguments))
         arguments = _drop_unused_read_identity(definition, arguments)
         if definition.normalize is not None and isinstance(arguments, dict):
             arguments = definition.normalize(arguments)

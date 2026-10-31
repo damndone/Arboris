@@ -131,6 +131,10 @@ def _normalize_steps(arguments: dict[str, Any]) -> dict[str, Any]:
     steps = changes.get("steps") if isinstance(changes, dict) else None
     if not isinstance(steps, list):
         return arguments
+    if "step_operation_ids" in changes:
+        # inspect_operation_contract's argument, copied into the proposal (12 refusals, NVIDIA rounds).
+        changes = {key: value for key, value in changes.items() if key != "step_operation_ids"}
+        tool_note("changes.step_operation_ids belongs to inspect_operation_contract; ignored here.")
     normalized = []
     for step in steps:
         if not isinstance(step, dict) or not isinstance(step.get("spec"), dict):
@@ -154,6 +158,16 @@ def _normalize_steps(arguments: dict[str, Any]) -> dict[str, Any]:
             if alias:
                 tool_note(f"step {label}{where}: covariance {holder['covariance']} is called {alias} here; used as that.")
                 holder["covariance"] = alias
+        for index, branch in enumerate(spec.get("branches") or ()):
+            # An endogenous regressor is in the structural equation by definition, so listing it
+            # as a predictor as well says the same thing twice (IV_INVALID_PARTITION, 5 refusals).
+            endogenous = (branch.get("iv_endog") or spec.get("iv_endog")) if isinstance(branch, dict) else None
+            if (isinstance(endogenous, list) and isinstance(branch.get("predictors"), list)
+                    and set(map(str, endogenous)) & set(map(str, branch["predictors"]))):
+                kept = [item for item in branch["predictors"] if str(item) not in set(map(str, endogenous))]
+                spec["branches"][index] = {**branch, "predictors": kept}
+                tool_note(f"step {label} branch {index}: an endogenous regressor enters through iv_endog; "
+                          "removed it from predictors.")
         options = spec.get("model_options")
         family = MODEL_FAMILY_CONTRACTS.get(spec.get("model_family"))
         if isinstance(options, dict) and family is not None:

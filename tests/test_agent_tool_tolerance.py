@@ -305,3 +305,47 @@ def test_nonrobust_covariance_is_the_workbenchs_unadjusted():
     assert spec["covariance"] == "unadjusted" and spec["branches"][0]["covariance"] == "unadjusted"
     assert arguments["changes"]["steps"][0]["spec"]["branches"][0]["covariance"] == "nonrobust"  # input untouched
     assert len(notes) == 2 and all("unadjusted" in note for note in notes)
+
+
+def _object_tool(seen):
+    return ToolDefinition(tool_id="plan_z", version="v1", side_effect="proposal",
+        input_schema={"type": "object", "properties": {"note": {"type": "string"}, "changes": {"type": "object"}},
+                      "additionalProperties": False},
+        handler=lambda arguments, context: seen.setdefault("arguments", arguments) and {"saved": True})
+
+
+def test_an_object_sent_as_complete_json_text_is_that_object_and_a_string_field_stays_a_string():
+    seen = {}
+    result = asyncio.run(_registry(_object_tool(seen)).execute({"tool_call_id": "c", "tool_id": "plan_z",
+        "arguments": {"changes": '{"steps": []}', "note": '{"steps": []}'}}, session_id="s"))
+    assert result.ok and seen["arguments"] == {"changes": {"steps": []}, "note": '{"steps": []}'}
+    assert "JSON text" in result.output["workbench_notes"][0]
+    cut = asyncio.run(_registry(_object_tool({})).execute({"tool_call_id": "c", "tool_id": "plan_z",
+        "arguments": {"changes": '{"steps": ['}}, session_id="s"))
+    assert not cut.ok and cut.error == "invalid_tool_arguments"
+
+
+def test_a_stray_contract_argument_and_an_endogenous_predictor_are_corrected_with_a_note():
+    arguments = _genesis_step({"model_family": "iv_2sls", "iv_endog": ["education"], "iv_instruments": ["z"],
+                               "branches": [{"branch_id": "a", "outcome": "y", "predictors": ["education", "age"]}]})
+    arguments["changes"]["step_operation_ids"] = ["model.genesis"]
+    normalized, notes = _normalize(arguments)
+    assert "step_operation_ids" not in normalized["changes"]
+    assert normalized["changes"]["steps"][0]["spec"]["branches"][0]["predictors"] == ["age"]
+    assert len(notes) == 2
+
+
+def test_a_workflow_step_named_as_the_operation_reads_that_step():
+    from workbench.agent.context_tools_support.registration import _workflow_step_contract_request as redirect
+
+    assert redirect({"operation_id": "report.compose"})["step_operation_ids"] == ["report.compose"]
+    assert redirect({"operation_id": "report.compose"})["operation_id"] == "operation.multi_step"
+    assert redirect({"operation_id": "model.rerun"}) == {"operation_id": "model.rerun"}
+    assert redirect({"operation_id": "no.such"}) == {"operation_id": "no.such"}
+
+
+def test_the_protocol_names_required_model_options_by_family():
+    from workbench.agent.protocol import chain_agent_protocol
+
+    assert "survival_cox: " in chain_agent_protocol(OperationRegistry())
+    assert "(required: event_column)" in chain_agent_protocol(OperationRegistry())

@@ -124,6 +124,13 @@ def step_vocabulary_lines() -> str:
     )
     for operation_id, spec in step_reference(vocabulary).items():
         lines.append(f"      {operation_id}: " + json.dumps(spec, ensure_ascii=False, separators=(",", ":")))
+    # survival_cox without event_column was the largest single refusal in the NVIDIA rounds (18 of 206).
+    from ..contracts.model.family import MODEL_FAMILY_CONTRACTS
+    options = [f"{name}: {', '.join(contract.model_options_fields)}"
+               + (f" (required: {', '.join(contract.model_options_required_fields)})"
+                  if contract.model_options_required_fields else "")
+               for name, contract in MODEL_FAMILY_CONTRACTS.items() if contract.model_options_fields]
+    lines.append("  - model.genesis model_options by model_family: " + "; ".join(options) + ".")
     return "\n".join(lines)
 
 

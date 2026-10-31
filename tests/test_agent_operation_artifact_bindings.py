@@ -82,10 +82,12 @@ def test_execution_receipt_supplies_exact_read_arguments_and_model_run(tmp_path)
     assert _inspect(root, request)["artifact_evidence"]["result"] == item["result"]
 
 
-def test_short_id_is_rejected_with_bounded_exact_declarations(tmp_path):
+def test_a_bare_id_naming_one_declaration_reads_it_and_any_other_is_refused_with_declarations(tmp_path):
     root, record, artifact_id = _completed_branch(tmp_path)
+    evidence = _inspect(root, _request(record, artifact_id))["artifact_evidence"]
+    assert evidence["evidence_ref"]["artifact_id"] == f"run-child:{artifact_id}"
     with pytest.raises(ToolVisibleError, match="OPERATION_ARTIFACT_NOT_DECLARED") as error:
-        _inspect(root, _request(record, artifact_id))
+        _inspect(root, _request(record, "no_such_artifact"))
     message = str(error.value)
     assert f"run-child:{artifact_id}" in message
     assert "inspect_completed_operations" in message

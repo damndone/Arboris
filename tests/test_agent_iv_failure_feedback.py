@@ -32,7 +32,9 @@ def test_long_string_changes_reports_expected_and_actual_types_before_the_excerp
     ))
     request = _workflow_request()
     request["changes"]["steps"][0]["spec"]["selected_columns"] = ["column_" + "x" * 1200]
-    request["changes"] = json.dumps(request["changes"])
+    # Text that does not parse: complete JSON text is decoded with a note instead.
+    intended = request["changes"]
+    request["changes"] = json.dumps(intended)[:-1]
     original = copy.deepcopy(request)
 
     refused = _execute(registry, "run_operation", request)
@@ -45,8 +47,8 @@ def test_long_string_changes_reports_expected_and_actual_types_before_the_excerp
     assert detail["message"].startswith("changes: expected object, got string")
     assert len(detail["message"]) <= MAX_VALIDATION_MESSAGE_CHARS
     assert len(json.dumps(detail)) < 1200
-    # Correction keeps the same tool/strict schema; strings are never auto-decoded.
-    request["changes"] = json.loads(request["changes"])
+    # Correction keeps the same tool/strict schema.
+    request["changes"] = intended
     accepted = _execute(registry, "run_operation", request, call_id="corrected")
     assert accepted.ok and executed == [request]
 

@@ -1,6 +1,8 @@
 """Workflow results: bounded read-only context projection."""
 
 from __future__ import annotations
+
+import dataclasses
 import json
 from pathlib import Path
 from typing import Any
@@ -264,14 +266,24 @@ class WorkflowResultsMixin:
             )
         declared_artifacts = _operation_artifact_ids(record)
         allowed_artifacts = set(declared_artifacts)
-        if request.artifact_id not in allowed_artifacts:
+        artifact_id = request.artifact_id
+        if artifact_id not in allowed_artifacts:
+            # A bare id naming exactly one declared artifact (13 refusals, NVIDIA rounds).
+            matches = [item for item in declared_artifacts if str(item).endswith(":" + artifact_id)]
+            if len(matches) == 1:
+                from ..tools import tool_note
+                artifact_id = matches[0]
+                tool_note(f"artifact {request.artifact_id} is {artifact_id} of this operation; read that.")
+                # Everything downstream, including the evidence reference, names the exact id.
+                request = dataclasses.replace(request, artifact_id=artifact_id)
+        if artifact_id not in allowed_artifacts:
             raise ToolVisibleError(
                 "OPERATION_ARTIFACT_NOT_DECLARED: the artifact was not emitted "
                 "by this completed operation. Do not remove a run prefix or guess a replacement. "
                 "Use an exact artifact_id returned by inspect_completed_operations. "
                 "Declared ids (bounded): " + json.dumps(declared_artifacts[:16], ensure_ascii=False)[:2400]
             )
-        source_run_id, registered_id, artifact = _resolve_operation_artifact(self.project_root, record, request.artifact_id)
+        source_run_id, registered_id, artifact = _resolve_operation_artifact(self.project_root, record, artifact_id)
         if artifact is None:
             suffix = registered_artifact_suffix(self.project_root / "runs" / source_run_id, registered_id)
             if suffix not in {None, ".json"}:

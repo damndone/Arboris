@@ -470,7 +470,8 @@ class RegistrationMixin:
             ToolDefinition(**specs["inspect_analysis_loop_context"], handler=inspect_analysis_loop_context_tool),
             ToolDefinition(**specs["submit_analysis_loop_intent"], handler=submit_analysis_loop_intent),
             ToolDefinition(**specs["inspect_node_context"], handler=inspect_node_context),
-            ToolDefinition(**specs["inspect_operation_contract"], handler=inspect_operation_contract),
+            ToolDefinition(**specs["inspect_operation_contract"], handler=inspect_operation_contract,
+                           normalize=_workflow_step_contract_request),
             ToolDefinition(**specs["inspect_diagnostics"], handler=inspect_diagnostics),
             ToolDefinition(**specs["inspect_design_advisories"], handler=inspect_design_advisories),
             ToolDefinition(**specs["inspect_statistical_evidence"], handler=inspect_statistical_evidence),
@@ -841,3 +842,17 @@ class RegistrationMixin:
             ToolDefinition(**specs["inspect_project_statistical_evidence"], handler=inspect_project_statistical_evidence),
         ]
 
+
+def _workflow_step_contract_request(arguments: dict[str, Any]) -> dict[str, Any]:
+    """A workflow step named as the operation means that step of operation.multi_step (8 refusals)."""
+
+    from ..tools import tool_note
+    from ..workflow_contracts import workflow_step_vocabulary
+
+    named = arguments.get("operation_id")
+    if (not isinstance(named, str) or named in OperationRegistry().natural_language_operation_ids()
+            or named not in workflow_step_vocabulary()["step_operations"]):
+        return arguments
+    tool_note(f"{named} is a workflow step; read as operation.multi_step with step_operation_ids [{named}].")
+    return {**arguments, "operation_id": "operation.multi_step",
+            "step_operation_ids": [named, *(arguments.get("step_operation_ids") or ())]}
