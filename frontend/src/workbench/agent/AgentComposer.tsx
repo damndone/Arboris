@@ -4,7 +4,7 @@ import { useAgentSurfaceOptional } from "./AgentSurfaceContext";
 import { AgentCapabilityPopover } from "./AgentCapabilityPopover";
 import { ContextUsageRing } from "./ContextUsageRing";
 import { useAgentSlashCommands } from "./useAgentSlashCommands";
-import { activeToolActivityLabel } from "./toolActivity";
+import { activeToolActivityLabel, observableActivity } from "./toolActivity";
 import "./agent.css";
 
 export function AgentComposer({
@@ -85,7 +85,7 @@ function CompactAgentComposer({
   };
 
   const activityText = isActive
-    ? `Working · ${elapsedSeconds === null ? "time unavailable" : `${elapsedSeconds}s`} · ${activeToolActivityLabel(agent.activeToolCalls) ?? compactActivityLabel(agent.lastEventType)}`
+    ? `Working · ${elapsedSeconds === null ? "time unavailable" : `${elapsedSeconds}s`} · ${activeToolActivityLabel(agent.activeToolCalls) ?? observableActivity(agent.lastEventType)}`
     : `${compactTurn?.stopped || agent.error ? "Stopped" : "Processed"} · ${elapsedSeconds === null ? "time unavailable" : `${elapsedSeconds}s`}`;
 
   return (
@@ -201,18 +201,6 @@ function CompactAgentComposer({
       {feedback && <p role={feedback.error ? "alert" : "status"} className="wb-agent-command-feedback">{feedback.text}</p>}
     </div>
   );
-}
-
-function compactActivityLabel(lastEventType: string | null): string {
-  const eventType = lastEventType?.toLowerCase() ?? "";
-  if (eventType === "tool_execution_start") return "Executing tool";
-  if (eventType === "tool_execution_end") return "Tool receipt recorded";
-  if (eventType.includes("tool")) return "Checking evidence";
-  if (eventType.includes("proposal")) return "Preparing proposal";
-  if (eventType === "message_start") return "Waiting for model output";
-  if (eventType === "message_update") return "Receiving model output";
-  if (eventType.includes("response") || eventType.includes("message")) return "Processing the model response";
-  return "Working";
 }
 
 function AgentComposerContent({

@@ -366,20 +366,20 @@ describe("AgentSurfaceProvider", () => {
     mount();
 
     await waitFor(() => expect(screen.getByTestId("agent-event-cursor")).toHaveTextContent("events #8"));
-    expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent("Executing 2 tools");
-    expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent("inspect node context");
-    expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent("inspect data schema");
+    expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent(" · ");
+    expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent("Read node context");
+    expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent("Read data schema");
 
     events = recordedParallelTools.slice(0, 3);
     await waitFor(() => expect(screen.getByTestId("agent-event-cursor")).toHaveTextContent("events #9"));
-    expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent("Executing tool");
-    expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent("inspect data schema");
-    expect(screen.getByTestId("agent-execution-trace")).not.toHaveTextContent("inspect node context");
+    expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent("Read");
+    expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent("Read data schema");
+    expect(screen.getByTestId("agent-execution-trace")).not.toHaveTextContent("Read node context");
 
     events = recordedParallelTools;
     await waitFor(() => expect(screen.getByTestId("agent-event-cursor")).toHaveTextContent("events #10"));
-    expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent("Tool receipt recorded");
-    expect(screen.getByTestId("agent-execution-trace")).not.toHaveTextContent("inspect data schema");
+    expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent("Working");
+    expect(screen.getByTestId("agent-execution-trace")).not.toHaveTextContent("Read data schema");
     expect(mocks.sendAgentTurn).not.toHaveBeenCalled();
     expect(mocks.resumeAgentTurn).not.toHaveBeenCalled();
     expect(mocks.confirmAgentProposal).not.toHaveBeenCalled();
@@ -396,9 +396,9 @@ describe("AgentSurfaceProvider", () => {
     ] });
     mount();
     await waitFor(() => expect(screen.getByTestId("agent-event-cursor")).toHaveTextContent("events #10"));
-    expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent("Executing 2 tools");
-    expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent("inspect node context");
-    expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent("inspect data schema");
+    expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent(" · ");
+    expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent("Read node context");
+    expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent("Read data schema");
   });
 
   it("keeps old command completions from ending a reused call id in the next command", async () => {
@@ -413,8 +413,8 @@ describe("AgentSurfaceProvider", () => {
     ] });
     mount();
     await waitFor(() => expect(screen.getByTestId("agent-event-cursor")).toHaveTextContent("events #10"));
-    expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent("inspect result summary");
-    expect(screen.getByTestId("agent-execution-trace")).not.toHaveTextContent("inspect node context");
+    expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent("Read the result summary");
+    expect(screen.getByTestId("agent-execution-trace")).not.toHaveTextContent("Read node context");
   });
 
   it.each(["turn_end", "error", "aborted"])("clears the working tool on the matching %s boundary without asserting success", async eventType => {
@@ -424,10 +424,10 @@ describe("AgentSurfaceProvider", () => {
     let events: AgentEvent[] = [start];
     mocks.getAgentEvents.mockImplementation(async () => ({ events }));
     mount();
-    await waitFor(() => expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent("inspect node context"));
+    await waitFor(() => expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent("Read node context"));
     events = [start, { ...start, seq: 8, event_type: eventType, payload: {} }];
     await waitFor(() => expect(screen.getByTestId("agent-event-cursor")).toHaveTextContent("events #8"));
-    expect(screen.getByTestId("agent-execution-trace")).not.toHaveTextContent("inspect node context");
+    expect(screen.getByTestId("agent-execution-trace")).not.toHaveTextContent("Read node context");
     expect(screen.getByTestId("agent-execution-trace")).not.toHaveTextContent("completed");
   });
 
@@ -438,10 +438,10 @@ describe("AgentSurfaceProvider", () => {
     mocks.getAgentSession.mockImplementation(async (_root, id) => ({ ...session(id), status: "running" }));
     mocks.getAgentEvents.mockImplementation(async (_root, id) => ({ events: id === start.session_id ? [start] : [] }));
     const view = mount();
-    await waitFor(() => expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent("inspect node context"));
+    await waitFor(() => expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent("Read node context"));
     view.rerender(<MemoryRouter><AgentSurfaceProvider projectRoot="/proj" runId="run-b"><AgentPanel projectRoot="/proj" runId="run-b" /></AgentSurfaceProvider></MemoryRouter>);
     await waitFor(() => expect(mocks.getAgentPlan).toHaveBeenCalledWith("/proj", "other"));
-    expect(screen.getByTestId("agent-execution-trace")).not.toHaveTextContent("inspect node context");
+    expect(screen.getByTestId("agent-execution-trace")).not.toHaveTextContent("Read node context");
     expect(mocks.sendAgentTurn).not.toHaveBeenCalled();
   });
 
@@ -455,7 +455,7 @@ describe("AgentSurfaceProvider", () => {
     ] });
     mount();
     await waitFor(() => expect(screen.getByTestId("agent-event-cursor")).toHaveTextContent("events #2"));
-    expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent("Executing tool");
+    expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent("Read");
   });
 
   it("sends the selected mode and explicitly queues follow-ups without starting a second turn", async () => {
@@ -614,7 +614,7 @@ describe("AgentSurfaceProvider", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send to Agent" }));
     await waitFor(() => expect(mocks.getAgentSession).toHaveBeenCalledWith("/proj", "agent_chain_new"));
     if (!lateRead) {
-      expect(await screen.findByTestId("agent-message-tool")).toHaveTextContent("inspect_model_result ✓ ok");
+      expect(await screen.findByTestId("agent-message-tool")).toHaveTextContent("Read model result");
       expect(screen.getByTestId("agent-reasoning-u1")).toHaveAttribute("open");
       expect(screen.getByRole("button", { name: "Stop Agent" })).toBeInTheDocument();
       expect(screen.getByTestId("agent-message-tool")).not.toHaveTextContent("LARGE_RAW_OUTPUT");
@@ -1098,18 +1098,18 @@ describe("AgentSurfaceProvider", () => {
         <AgentPanel projectRoot="/proj" runId="run-a" composer={<AgentComposer variant="compact" />} />
       </AgentSurfaceProvider></MemoryRouter>);
       await waitFor(() => expect(screen.getByLabelText("Agent execution progress")).toHaveTextContent("42 s"));
-      expect(screen.getByLabelText("Agent execution progress")).toHaveTextContent("Waiting for model output");
-      expect(screen.getByRole("button", { name: "View Agent activity" })).toHaveTextContent("42s · Waiting for model output");
+      expect(screen.getByLabelText("Agent execution progress")).toHaveTextContent("Waiting for the model");
+      expect(screen.getByRole("button", { name: "View Agent activity" })).toHaveTextContent("42s · Waiting for the model");
 
       events = [...events,
         { ...events[5], event_id: "validation-progress", seq: 7, event_type: "message_progress", payload: { request_id: "public-request", stage: "receiving", validation_pending: true } },
         { ...events[5], event_id: "usage-observation", seq: 8, event_type: "provider_step", payload: {} },
       ];
       await waitFor(() => expect(screen.getByTestId("agent-event-cursor")).toHaveTextContent("events #8"));
-      expect(screen.getByLabelText("Agent execution progress")).toHaveTextContent("Processing the model response");
+      expect(screen.getByLabelText("Agent execution progress")).toHaveTextContent("Working");
       expect(screen.getByLabelText("Agent execution progress")).toHaveTextContent("42 s");
-      expect(screen.getByRole("button", { name: "View Agent activity" })).toHaveTextContent("42s · Processing the model response");
-      expect(screen.queryByText("Waiting for model output")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "View Agent activity" })).toHaveTextContent("42s · Working");
+      expect(screen.queryByText("Waiting for the model")).not.toBeInTheDocument();
       expect(screen.queryByTestId("agent-live-response")).not.toBeInTheDocument();
       expect(screen.queryByTestId("agent-message-assistant")).not.toBeInTheDocument();
       expect(screen.getByRole("log", { name: /Agent transcript/ })).not.toHaveTextContent(/public-request|validation_pending|reasoning_content/);

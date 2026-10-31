@@ -568,23 +568,20 @@ def _missing_label(code, language):
     family, _, requirement = code.partition(':')
     special = {
         'plan:approved_criteria_unverified': (
-            'The approved criteria or expected outputs are not fully verified. Keep existing findings; '
-            'bind the original confirmed requests and registered artifacts, or retain partial completion for human takeover. '
-            'Do not rerun completed work or remove commitments to obtain a pass.',
-            '已批准的判据或预期产物尚未全部核验。保留已有结果，绑定原始已确认请求和注册产物；'
-            '无法核验时保持部分完成并交由用户接管，不要重复执行或删去承诺来取得通过。'),
+            'The plan you approved is not fully covered by verified results yet.',
+            '批准的计划里还有内容没有对应到已核验的结果。'),
         'task_requirements:unverified': (
             'The original user task requirements are unverified. Restore the user-message evidence or explicitly revise the plan as a person before certifying completion.',
             '原始用户任务要求尚未核验。需恢复真实用户消息证据，或由用户明确修订计划后才能确认完成。'),
         'target:requested_estimand_unbound': (
-            'Fix the requested causal target in completion.target; do not substitute a regression coefficient.',
-            '需固定请求的因果目标估计量，不能用普通回归系数替代。'),
+            'The causal quantity you asked for has not been estimated; a regression coefficient does not stand in for it.',
+            '你要求的因果目标量还没有估计出来，普通回归系数不能代替它。'),
         'target:computed_estimand_not_bound': (
-            'No verified result matches the target estimand and variable bindings. Estimate that target with an applicable method, or report it as unverified and keep a takeover state; do not relabel ATT as ATC/ATE.',
-            '没有已核验产物匹配目标估计量与变量绑定。需用适用方法计算，或明确未验证并保留可接管状态，不能将 ATT 改称 ATC／ATE。'),
+            'No result estimates the causal quantity you asked for with its variables.',
+            '还没有结果估计出你要求的因果目标量。'),
         'question:computed_source_bound_result': (
-            'Bind a successful computed answer artifact to the verified dataset source.',
-            '缺少与已核验数据来源绑定、成功计算的回答产物。'),
+            'This answer is not yet tied to a result computed from this dataset.',
+            '这个回答还没有对应到一个从这份数据算出来的结果。'),
         'task_scope:full_analysis_required': (
             'The request requires a full analysis; a focused-question contract cannot satisfy it.',
             '用户要求完整分析，单项问题合同不能替代完整分析验收。'),
@@ -664,7 +661,7 @@ def _missing_label(code, language):
         return special[code][1 if language == 'zh' else 0]
 
     if language != 'zh':
-        labels = {'completion_contract': 'Select the analysis playbooks and verify the dataset source.',
+        labels = {'completion_contract': 'No analysis plan is saved, so results are not yet tied to a dataset source.',
                   'source': 'The dataset source changed or is unavailable.',
                   'report': 'A report with verified result sources is missing.'}
         if family in labels:
@@ -675,7 +672,7 @@ def _missing_label(code, language):
                                else 'a source-bound primary fit is missing.' if requirement.startswith('model:')
                                else 'computed, model-bound diagnostics are missing.' if requirement.startswith('diagnostics:')
                                else 'a fitted sensitivity comparison is missing.')
-    labels = {'completion_contract': '尚未固定分析剧本和核验数据来源。',
+    labels = {'completion_contract': '还没有保存分析计划，结果也还没有对应到数据来源。',
               'source': '数据来源已改变或当前不可用。',
               'report': '缺少引用已核验结果的报告。'}
     if family in labels:
@@ -721,8 +718,7 @@ def publication(content: str, result: dict, language: str, *, final=True, reques
     # closing sentence claimed completion. The remaining prose is still a draft,
     # not newly certified evidence; final answers retain the numeric check below
     # this publication boundary in the turn loop.
-    content = content.removeprefix(notice).strip()
-    content = _PARTIAL_NOTICE.sub('', content).strip()
+    content = _PREVIOUS_DRAFT_HEADING.sub('', _PARTIAL_NOTICE.sub('', content)).strip()
     if claim:
         # Keep a claim spanning newlines together. Splitting it first would
         # leave two unmatched fragments that join back into a completion claim.
@@ -740,48 +736,59 @@ def publication(content: str, result: dict, language: str, *, final=True, reques
         content = ''.join(sentence for sentence in sentences
                           if not claims_completion(sentence, request_text)
                           and not _GENERIC_CLAIM.search(sentence)).strip()
-    draft_heading = '阶段性说明（仍需核验）' if language == 'zh' else 'Interim findings (still require verification)'
-    content = content.removeprefix(draft_heading).strip()
-    return notice if not content else notice + '\n\n' + draft_heading + '\n\n' + content
+    return notice if not content else content + '\n\n' + notice
 
 
 _PARTIAL_BOUNDARIES = {
     'zh': '当前仍为部分交付；阶段性说明与最终核验结论须分开阅读。',
     'en': 'The full analysis is not complete; interim prose and final verification are separate.',
 }
+_PREVIOUS_DRAFT_HEADING = re.compile(r'(?:阶段性说明（仍需核验）|Interim findings \(still require verification\))\s*')
 _PARTIAL_NOTICE = re.compile(
+    r'\*\*(?:部分完成，还缺：|Partially complete, still missing:)\*\*[\s\S]*$|'
     r'(?:部分完成：以下必需证据尚未核验。|Partially complete: required evidence remains unverified\.)'
     r'(?:[\s\S]*?(?:' + '|'.join(re.escape(text) for text in _PARTIAL_BOUNDARIES.values())
     + r')\n\n---\n*|[ \t]*(?:\n[ \t]*- [^\n]*)*\n*)')
 
 
+_BOUND_NAMES = {'primary': ('primary model', '主模型'), 'diagnostics': ('diagnostics', '诊断'),
+                'sensitivity': ('sensitivity fits', '敏感性拟合'), 'report': ('report', '报告')}
+_NEXT_STEPS = (
+    ('completion_contract:', 'Save the analysis plan and bind its dataset source; existing results stay and nothing is refitted.',
+     '保存分析计划并绑定数据来源；已有结果保留，不需要重算。'),
+    (':model:', 'Fit the primary model, or choose among the fits already run.', '拟合主模型，或从已有拟合里选定一个。'),
+    (':diagnostics:', 'Run the missing diagnostics on the primary model.', '对主模型补上缺少的诊断。'),
+    (':sensitivity:', 'Fit a sensitivity specification that changes the point estimate.', '补一个会改变点估计的敏感性拟合。'),
+    ('question:', 'Tie the answer to a result computed from this dataset.', '把回答对应到一个从这份数据算出来的结果。'),
+    ('report:', 'Compose the report from the verified results.', '用已核验的结果生成报告。'),
+    ('target:', 'Estimate the quantity you asked for with a method that identifies it, or tell me to report without it.',
+     '用能识别该目标量的方法估计，或者告诉我不做这一项、直接汇报。'),
+)
+
+
 def partial_notice(result, language):
-    heading = '部分完成：以下必需证据尚未核验。' if language == 'zh' else 'Partially complete: required evidence remains unverified.'
+    """What is still missing and what happens next, in the reader's terms, after the answer itself.
+
+    Internal instructions (next_step, sensitivity_options) reach the Agent through the
+    completion tool and the recovery message; ids reach the reader as message sources.
+    """
+    zh = language == 'zh'
     missing = list(dict.fromkeys(_missing_label(item, language) for item in result['missing']))
-    notice = heading + '\n' + '\n'.join('- ' + item for item in missing[:32])
-    # These are the completion check's actual registered artifacts, never model
-    # prose or a claim that merely having a file certifies the analysis.
-    refs = [f"{item['run_id']}/{item['artifact_id']}" for item in result.get('verified_artifacts', [])[:4]]
-    if refs:
-        title = '已核验的产物引用（不代表整项分析已通过）' if language == 'zh' else 'Verified artifact references (not whole-analysis certification)'
-        notice += '\n\n' + title + '\n' + '\n'.join('- ' + ref for ref in refs)
-    if language == 'zh':
-        advice = ('由 Agent 先保存与当前问题匹配的分析计划并绑定数据来源；已有结果保留，'
-                  '不要为补计划重复计算。然后绑定已执行结果，重新检查缺项。'
-                  if 'completion_contract:select_playbooks_and_source' in result['missing'] else
-                  '先补齐上列缺项，再重新核验；缺报告时应引用已有的已核验结果，避免重复拟合。'
-                  '若需要额外数据、权限或预算，明确列出并等待接管。')
-        if result.get('next_step'):
-            advice += '\n' + str(result['next_step'])[:4000]
-        return notice + '\n\n下一步建议\n' + advice + '\n\n' + _PARTIAL_BOUNDARIES['zh'] + '\n\n---'
-    advice = ('Save a plan matching the question and bind its dataset source. Keep existing results; '
-              'do not rerun computations just to create plan history. Bind the executed evidence and recheck.'
-              if 'completion_contract:select_playbooks_and_source' in result['missing'] else
-              'Address the missing evidence, then recheck. Compose missing reports from verified results rather '
-              'than refitting. State any additional data, permission or budget needed and pause for takeover.')
-    if result.get('next_step'):
-        advice += '\n' + str(result['next_step'])[:4000]
-    return notice + '\n\nRecommended next steps\n' + advice + '\n\n' + _PARTIAL_BOUNDARIES['en'] + '\n\n---'
+    lines = ['**部分完成，还缺：**' if zh else '**Partially complete, still missing:**']
+    lines += ['- ' + item for item in missing[:8]]
+    if len(missing) > 8:
+        lines.append(f'- 另有 {len(missing) - 8} 项' if zh else f'- {len(missing) - 8} more')
+    have = [(zh and _BOUND_NAMES[key][1]) or _BOUND_NAMES[key][0] for key in _BOUND_NAMES
+            if any(str(item).split(':')[-1] == key for item in result.get('bound_by_workbench') or ())]
+    if have:
+        lines += ['', ('已有：' + '、'.join(have) + '。') if zh else ('Already in place: ' + ', '.join(have) + '.')]
+    steps = [(zh and text[2]) or text[1] for text in _NEXT_STEPS
+             if any(text[0] in code for code in result['missing'])][:2]
+    steps = steps or ['补齐上面这些。' if zh else 'Fill the gaps above.']
+    close = '回复「继续」我就接着做；不需要的项告诉我，我按现有范围收尾。' if zh else (
+        'Say "continue" and I will carry on; tell me if any of this is not needed and I will finish with what exists.')
+    lines += ['', ('**下一步：**' if zh else '**Next:** ') + ''.join(steps) + (' ' if not zh else '') + close]
+    return '\n'.join(lines)
 
 
 _DIAGNOSTIC_TYPES = frozenset({'model_diagnostic', 'lmm_analysis_evidence', 'analysis_completion_evidence'})

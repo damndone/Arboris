@@ -1,6 +1,6 @@
 import { AgentUsagePanel } from "./AgentUsagePanel";
 import { AgentPlanPanel } from "./AgentPlanPanel";
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { Children, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { buildTurns, duration, messageTime } from "./transcript/turns";
 import { MessageActions } from "./transcript/MessageActions";
 import { useAgentSurface } from "./AgentSurfaceContext";
@@ -15,7 +15,7 @@ import "./agent.css";
 import { formatPValue } from "../../format/numbers";
 import { AgentApprovalBar } from "./AgentApprovalBar";
 import { AgentProposalReceipt, receiptsByTurn } from "./AgentProposalReceipt";
-import { activeToolActivityLabel } from "./toolActivity";
+import { activeToolActivityLabel, observableActivity, toolStep, type ToolStep } from "./toolActivity";
 
 function roleMarker(role: string): string {
   if (role === "user") return "❯";
@@ -47,21 +47,6 @@ function formatAgentResultValue(value: unknown): string {
   if (Array.isArray(value)) return value.map(formatAgentResultValue).join(", ");
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
-}
-
-function observableActivity(eventType: string | null): string {
-  if (!eventType) return "Preparing the bounded context";
-  const normalized = eventType.toLowerCase();
-  if (normalized === "provider_retry") return "The provider connection dropped; retrying";
-  if (normalized === "compaction_start") return "Summarizing the earlier conversation to stay within the model's context";
-  if (normalized === "tool_execution_start") return "Executing tool";
-  if (normalized === "tool_execution_end") return "Tool receipt recorded";
-  if (normalized.includes("tool")) return "Checking evidence";
-  if (normalized.includes("proposal")) return "Preparing a reviewable proposal";
-  if (normalized === "message_start") return "Waiting for model output";
-  if (normalized === "message_update") return "Receiving model output";
-  if (normalized.includes("message") || normalized.includes("response")) return "Processing the model response";
-  return "Processing the current request";
 }
 
 function terminalFailureMessage(
@@ -259,10 +244,26 @@ function CompactionMarker({ message }: { message: AgentMessage }) {
   );
 }
 
+/** A step of the work: what it did and how it ended; its sources open from the row. */
+function ToolStepRow({ step, children }: { step: ToolStep; children: ReactNode }) {
+  const row = (
+    <span className={`wb-agent-step wb-agent-step--${step.state}`}>
+      <span className="wb-agent-step__mark" aria-hidden="true">{step.state === "failed" ? "✗" : step.state === "waiting" ? "…" : "✓"}</span>
+      <span>{step.title}{step.detail && <span className="wb-agent-step__detail"> — {step.detail}</span>}</span>
+    </span>
+  );
+  const hasMore = Children.toArray(children).length > 0;
+  return (
+    <div className="wb-agent-terminal-content">
+      {hasMore ? <details className="wb-agent-tool-details"><summary>{row}</summary>{children}</details> : row}
+    </div>
+  );
+}
+
 export function workSummary(steps: number, drafts: number): string {
   const parts = [];
-  if (steps > 0) parts.push(`Worked through ${steps} ${steps === 1 ? "step" : "steps"}`);
-  if (drafts > 0) parts.push(`${steps > 0 ? "rewrote" : "Rewrote"} the answer ${drafts === 1 ? "once" : `${drafts} times`} after checking its numbers`);
+  if (steps > 0) parts.push(`${steps} ${steps === 1 ? "step" : "steps"}`);
+  if (drafts > 0) parts.push(`${drafts} ${drafts === 1 ? "draft" : "drafts"} rewritten`);
   return parts.join(" · ");
 }
 
@@ -416,17 +417,10 @@ export function AgentPanel({
           {roleMarker(message.role)}
         </span>
         {message.role === "tool" ? (
-          <div className="wb-agent-terminal-content">
-            <span className="wb-agent-tool-receipt__status">
-              <small className="wb-agent-tool-receipt__label">Tool receipt</small>
-              {toolStatusLine(message.content, message.name)}
-            </span>
-            {(messageNavigation || messageActions) && <details className="wb-agent-tool-details">
-              <summary>Sources and actions{references?.length ? ` · ${references.length} ${references.length === 1 ? "reference" : "references"}` : ""}</summary>
-              {messageNavigation}
-              {messageActions}
-            </details>}
-          </div>
+          <ToolStepRow step={toolStep(toolStatusLine(message.content, message.name))}>
+            {messageNavigation}
+            {messageActions}
+          </ToolStepRow>
         ) : message.role === "assistant" ? (
           <div className="wb-agent-terminal-content wb-agent-terminal-markdown">
             {message.stop_reason === "revised" && (
@@ -490,24 +484,6 @@ export function AgentPanel({
       </header>}
       {!compactHeader && <AgentUsagePanel events={agent.providerSteps ?? []} />}
       <AgentPlanPanel key={agent.sessionId ?? "new"} />
-      {terminalFailure && (
-        <div data-testid="agent-turn-error" role="status" className="wb-agent-callout">
-          <span>{terminalFailure}</span>
-          {inspectCurrentTurn && stoppedReceipts.length === 0 && <small className="wb-agent-stop-note">No tool receipts are recorded in this turn.</small>}
-          {stoppedResult.unreadable && <small className="wb-agent-stop-note">Some receipt details could not be read. Review the recorded text before continuing.</small>}
-          {(stoppedReceipts.length > 0 || (inspectCurrentTurn && stoppedReply?.content.trim())) && <div className="wb-agent-stop-actions">
-            {stoppedReceipts.length > 0
-              ? <button type="button" className="wb-agent-message-link" onClick={() => reviewStoppedContent("steps")}>Review recorded steps</button>
-              : <button type="button" className="wb-agent-message-link" onClick={() => reviewStoppedContent("reply")}>Review stopped reply</button>}
-            {stoppedResult.ref && <button type="button" className="wb-agent-message-link" disabled={!agent.openNavigation}
-              title={!agent.openNavigation ? "Navigation is unavailable in this view" : stoppedResult.ref.label}
-              onClick={() => {
-                setReviewProblem(agent.openNavigation?.(stoppedResult.ref!) ? null : "The recorded operation could not be opened. Review its source link in the recorded steps.");
-              }}>Open recorded operation</button>}
-          </div>}
-          {reviewProblem && <small role="alert" className="wb-agent-stop-note">{reviewProblem}</small>}
-        </div>
-      )}
       <div
         ref={transcriptRef}
         role="log"
@@ -535,20 +511,11 @@ export function AgentPanel({
           </nav>
         )}
         {agent.messages.length === 0 && !turnActive ? (
-          <div data-testid="agent-empty" className="wb-agent-terminal-empty">
-            <div style={{ fontWeight: 600, marginBottom: 4 }}>Start a task</div>
-            <div>Ask about the selected node, active head, or model output.</div>
-          </div>
+          <div data-testid="agent-empty" className="wb-agent-terminal-empty" />
         ) : turns.map((turn, index) => {
           const latest = index === turns.length - 1;
           const live = turnActive && latest;
-          const lastToolStep = [...turn.steps].reverse().find(message => message.role === "tool");
-          const lastToolStatus = lastToolStep ? toolStatusLine(lastToolStep.content, lastToolStep.name) : null;
           const lastReply = turn.responses[turn.responses.length - 1];
-          const activityStatus = live ? "in progress"
-            : lastReply?.stop_reason === "error" ? "stopped"
-            : latest && agent.sessionStatus !== "idle" ? agent.sessionStatus.replace(/_/g, " ")
-            : turn.responses.some(message => message.stop_reason === "stop") ? "completed" : "recorded";
           if (turn.summary) return <CompactionMarker key={turn.id} message={turn.summary} />;
           return (
             <div key={turn.id} className="wb-agent-turn">
@@ -557,9 +524,8 @@ export function AgentPanel({
                 <details ref={latest && inspectCurrentTurn ? stoppedWorkRef : undefined} data-testid={`agent-reasoning-${turn.id}`} className="wb-agent-reasoning" open={turn === lastActivityTurn}>
                   <summary>
                     <span>
-                      {live ? `${turn.steps.length} recorded steps` : workSummary(turn.steps.length, turn.drafts.length)}
-                      {` · Execution ${activityStatus}`}
-                      {lastToolStatus && <small className="wb-agent-activity-summary">Latest: {lastToolStatus.length > 180 ? `${lastToolStatus.slice(0, 177)}…` : lastToolStatus}</small>}
+                      {live ? "Working" : lastReply?.stop_reason === "error" ? "Stopped" : "Worked"}
+                      <span className="wb-agent-work-count"> · {workSummary(turn.steps.length, turn.drafts.length)}</span>
                     </span>
                     {turn.seconds !== null && <span>{duration(turn.seconds)}</span>}
                   </summary>
@@ -584,6 +550,24 @@ export function AgentPanel({
           );
         })}
         {receipts.get("")?.map((proposal) => <AgentProposalReceipt key={proposal.proposal_id} proposal={proposal} />)}
+        {terminalFailure && (
+          <div data-testid="agent-turn-error" role="status" className="wb-agent-callout">
+            <span>{terminalFailure}</span>
+            {inspectCurrentTurn && stoppedReceipts.length === 0 && <small className="wb-agent-stop-note">No tool receipts are recorded in this turn.</small>}
+            {stoppedResult.unreadable && <small className="wb-agent-stop-note">Some receipt details could not be read. Review the recorded text before continuing.</small>}
+            {(stoppedReceipts.length > 0 || (inspectCurrentTurn && stoppedReply?.content.trim())) && <div className="wb-agent-stop-actions">
+              {stoppedReceipts.length > 0
+                ? <button type="button" className="wb-agent-message-link" onClick={() => reviewStoppedContent("steps")}>Review recorded steps</button>
+                : <button type="button" className="wb-agent-message-link" onClick={() => reviewStoppedContent("reply")}>Review stopped reply</button>}
+              {stoppedResult.ref && <button type="button" className="wb-agent-message-link" disabled={!agent.openNavigation}
+                title={!agent.openNavigation ? "Navigation is unavailable in this view" : stoppedResult.ref.label}
+                onClick={() => {
+                  setReviewProblem(agent.openNavigation?.(stoppedResult.ref!) ? null : "The recorded operation could not be opened. Review its source link in the recorded steps.");
+                }}>Open recorded operation</button>}
+            </div>}
+            {reviewProblem && <small role="alert" className="wb-agent-stop-note">{reviewProblem}</small>}
+          </div>
+        )}
         {turnActive && (
           /* The turn in progress lives in the conversation, where its reply
            * will land, instead of in boxes above that push it away. */

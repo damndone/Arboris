@@ -74,7 +74,8 @@ def test_question_partial_reports_actionable_binding_repair_without_accepting_al
     assert checked['repair_steps'][0]['replacement_ref']==ref
     text=completion.publication('Estimate 2.0 from the existing result. 问题导向完成（scope=question）。',checked,'zh')
     assert 'Estimate 2.0' in text and '问题导向完成' not in text
-    assert 'fit_1' in text and 'update_plan' in text and 'cleaned_dataset' in text
+    # Repair instructions go to the Agent (repair_steps); the reader gets plain language.
+    assert 'update_plan' not in text and '下一步' in text
     assert checked['scientific_validity']=='not_certified'
 
 
@@ -104,8 +105,8 @@ def test_partial_gate_removes_focused_completion_claim_and_keeps_useful_takeover
            'next_step':'Call update_plan with the registered result artifact; retain earlier computed results.'}
     text=completion.publication('Existing source remains verified.\n'+claim,check,'zh')
     assert claim not in text
-    assert 'Existing source remains verified' in text and 'cleaned_dataset' in text
-    assert 'update_plan' in text and '部分完成' in text
+    assert text.startswith('Existing source remains verified') and 'cleaned_dataset' not in text
+    assert 'update_plan' not in text and '部分完成' in text
 
 
 def test_completed_step_or_explicit_partial_scope_is_not_a_global_completion_claim():
@@ -237,8 +238,8 @@ def test_recorded_shape_judgment_completion_line_cannot_survive_partial_binding_
     text=completion.publication(draft,checked,'zh')
     assert '判断标准全部满足' not in text
     assert 'Existing estimate: 2.0; source sample/fit_1.' in text
-    assert 'Keep the computed result' in text and 'update_plan' in text and 'fit_1' in text
-    assert text.startswith('部分完成') and checked['status']=='partial'
+    assert 'Keep the computed result' in text and 'update_plan' not in text
+    assert '部分完成' in text and checked['status']=='partial'
     for partial in ('当前仅一个诊断子步骤的判断标准全部满足，其余仍待核验。',
                     '判断标准尚未全部满足，结果仍待核验。'):
         assert not completion.claims_completion(partial)

@@ -123,6 +123,6 @@ export function AgentPlanPanel() {
       </>}
       <button disabled={agent.planBusy} onClick={() => void agent.refreshPlan?.()}>Reload current plan</button>
     </div>
-    {agent.planVersions && agent.planVersions.length > 1 && <details><summary>Plan versions</summary><ul>{agent.planVersions.map(v => <li key={v.version}>v{v.version} · {v.status} · {v.updated_at}</li>)}</ul></details>}
+    {agent.planVersions && agent.planVersions.length > 1 && <details><summary>Plan versions</summary><ul>{agent.planVersions.map((v, index) => <li key={`${v.version}:${index}`}>v{v.version} · {v.status} · {v.updated_at}</li>)}</ul></details>}
   </details>;
 }

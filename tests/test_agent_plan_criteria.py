@@ -317,8 +317,8 @@ def test_an_empty_legacy_plan_cannot_claim_full_analysis_with_no_machine_definit
 
 
 @pytest.mark.parametrize('language,claim,kept,label', [
-    ('en', 'Analysis complete.', 'Existing findings are retained.', 'approved criteria'),
-    ('zh', '分析完成。', '已有结果保留。', '已批准的判据'),
+    ('en', 'Analysis complete.', 'Existing findings are retained.', 'plan you approved'),
+    ('zh', '分析完成。', '已有结果保留。', '批准的计划'),
 ])
 def test_final_publication_keeps_findings_and_explains_unverified_obligations(tmp_path, language, claim, kept, label):
     from workbench.agent.completion import publication

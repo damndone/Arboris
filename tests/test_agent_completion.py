@@ -212,7 +212,7 @@ def test_final_reply_is_replaced_with_visible_missing_items_before_streaming(tmp
     agent, adapter, repo, events = _agent(tmp_path, ['分析完成。'])
     agent.completion_check = lambda: api().evaluate(tmp_path, contract, evidence)
     answer = asyncio.run(agent.prompt('请做完整分析'))
-    assert answer.startswith('部分完成') and 'OLS 主模型' in answer
+    assert '部分完成' in answer and 'OLS 主模型' in answer
     assert '分析完成' not in answer
     assert len(adapter.requests) == 1
     visible = [e.payload for e in events.replay('s') if e.event_type in {'message_update', 'message_end'}]
@@ -225,7 +225,7 @@ def test_no_contract_does_not_silently_certify_a_completion_claim(tmp_path):
     agent, _, _, _ = _agent(tmp_path, ['Analysis complete.'])
     agent.completion_check = lambda: api().evaluate(tmp_path, None, None)
     answer = asyncio.run(agent.prompt('Perform the full analysis'))
-    assert answer.startswith('Partially complete') and 'dataset source' in answer
+    assert 'Partially complete' in answer and 'dataset source' in answer
 
 
 def test_focused_question_verifies_its_result_without_an_unrequested_model(tmp_path):
@@ -280,7 +280,7 @@ def test_focused_question_offline_turn_preserves_answer_and_cannot_downgrade_ful
         agent, _, _, _ = _agent(tmp_path / str(allowed), ['Answer: categorical. FINAL ANSWER: categorical'])
         agent.completion_check = lambda: api().evaluate(tmp_path, contract, {'results': [result]})
         answer = asyncio.run(agent.prompt(question))
-        assert answer.startswith('Partially complete') != allowed
+        assert ('Partially complete' in answer) != allowed
         if allowed:
             assert 'FINAL ANSWER: categorical' in answer
 
@@ -412,7 +412,7 @@ def test_tool_call_narration_cannot_claim_a_missing_model_complete(tmp_path):
     agent, adapter, _, events = _agent(tmp_path, [INSPECT, 'Analysis complete.'])
     agent.completion_check = lambda: api().evaluate(tmp_path, None, None)
     answer = asyncio.run(agent.prompt('Perform the analysis'))
-    assert answer.startswith('Partially complete')
+    assert 'Partially complete' in answer
     assert len(adapter.requests) == 2
     assert not any('Analysis complete' in json.dumps(e.payload) for e in events.replay('s')
                    if e.event_type in {'message_update', 'message_end'})
@@ -451,7 +451,7 @@ def test_m0_original_failures_replay_without_provider_or_heldout(tmp_path, case)
     agent, adapter, repo, events = _agent(tmp_path, [original])
     agent.completion_check = lambda: api().evaluate(project, case['contract'], case['evidence'])
     answer = asyncio.run(agent.prompt('请汇报这项完整分析的完成情况', budget={'max_steps': 1}))
-    assert answer.startswith('部分完成')
+    assert '部分完成' in answer
     assert len(adapter.requests) == 1
     assert all('分析完成' not in json.dumps(e.payload, ensure_ascii=False) for e in events.replay('s')
                if e.event_type in {'message_update', 'message_end'})
@@ -477,7 +477,7 @@ def test_resume_rechecks_products_before_publishing_an_old_final_payload(tmp_pat
         resumed, fresh, repo = setup(tmp_path, adapter, create=False)
         resumed.completion_check = lambda: api().evaluate(tmp_path / 'project', contract, evidence)
         answer = await resumed.resume(record.turn_id)
-        assert answer.startswith('Partially complete')
+        assert 'Partially complete' in answer
         assert not adapter.requests and fresh.get(record.turn_id).steps_used == 1
         last = [e for e in repo.get_branch('session-a') if e.entry_type == 'message'][-1]
         assert last.payload['completion_check']['status'] == 'partial'
@@ -521,7 +521,7 @@ def test_terminal_checkpoint_recovery_does_not_reissue_stale_completion(tmp_path
         adapter = ScriptedAdapter([])
         resumed, fresh, _ = setup(tmp_path, adapter, create=False)
         resumed.completion_check = lambda: api().evaluate(tmp_path / 'project', contract, evidence)
-        assert (await resumed.resume(record.turn_id)).startswith('Partially complete')
+        assert 'Partially complete' in (await resumed.resume(record.turn_id))
         assert not adapter.requests and fresh.get(record.turn_id).steps_used == 1
     asyncio.run(scenario())
 
@@ -594,7 +594,7 @@ def test_completion_phrasings_cannot_bypass_missing_contract(tmp_path, claim):
     agent, _, _, _ = _agent(tmp_path, [claim])
     agent.completion_check = lambda: api().evaluate(tmp_path, None, None)
     answer = asyncio.run(agent.prompt('Please perform the full analysis'))
-    assert answer.startswith('Partially complete')
+    assert 'Partially complete' in answer
 
 
 def test_completed_single_operation_is_not_a_full_analysis_claim(tmp_path):
@@ -611,7 +611,7 @@ def test_active_incomplete_plan_also_blocks_generic_done_after_continue(tmp_path
     agent, _, _, _ = _agent(tmp_path, ['全部完成。'])
     agent.completion_check = lambda: api().evaluate(tmp_path / 'project', contract, evidence)
     answer = asyncio.run(agent.prompt('继续'))
-    assert answer.startswith('部分完成') and '全部完成' not in answer
+    assert '部分完成' in answer and '全部完成' not in answer
 
 
 def test_recovering_the_same_partial_answer_does_not_duplicate_the_notice(tmp_path, monkeypatch):

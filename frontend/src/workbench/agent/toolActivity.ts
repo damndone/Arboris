@@ -44,6 +44,55 @@ export function updateActiveToolCalls(current: ActiveToolCall[], events: AgentEv
 
 export function activeToolActivityLabel(calls: ActiveToolCall[] = []): string | null {
   if (!calls.length) return null;
-  const label = calls.length === 1 ? "Executing tool" : `Executing ${calls.length} tools`;
-  return `${label} · ${calls.map(call => call.tool_id.replace(/[_\s]+/g, " ").trim()).join(", ")}`;
+  return calls.map(call => toolTitle(call.tool_id)).join(" · ");
+}
+
+/** What a step did, in the reader's words. Unlisted tools read from their id, so a new tool needs no entry here. */
+const TOOL_TITLES: Record<string, string> = {
+  update_plan: "Updated the plan",
+  run_operation: "Ran an operation",
+  plan_analysis: "Compared analysis plans",
+  calculate: "Calculated",
+  list_project_datasets: "Listed datasets",
+  inspect_analysis_completion: "Checked what is still missing",
+  inspect_operation_contract: "Read an operation's fields",
+  inspect_operation_artifact: "Read a result",
+  inspect_result_summary: "Read the result summary",
+  inspect_project_model_coefficients: "Read model coefficients",
+  inspect_completed_operations: "Listed completed operations",
+  check_model_claims: "Checked a claim against the model",
+  show_dataset_rows: "Showed dataset rows",
+  export_analysis_script: "Exported the analysis script",
+};
+
+export function toolTitle(toolId: string): string {
+  if (TOOL_TITLES[toolId]) return TOOL_TITLES[toolId];
+  const words = toolId.replace(/^inspect_(project_)?/, "").replace(/[_\s]+/g, " ").trim();
+  return toolId.startsWith("inspect_") ? `Read ${words}` : words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+export type ToolStep = { title: string; state: "done" | "failed" | "waiting"; detail: string };
+
+/** One readable step from the receipt's status line; an unparsed line stays visible as the detail. */
+export function toolStep(statusLine: string): ToolStep {
+  const match = /^(\S+) (✓|✗) ?([\s\S]*)$/.exec(statusLine);
+  if (!match) return { title: "Step", state: "done", detail: statusLine };
+  const [, toolId, mark, rest] = match;
+  const title = toolTitle(toolId);
+  if (mark === "✗") return { title, state: "failed", detail: rest.replace(/^(\w*Error|failed) — /, "") };
+  if (rest.startsWith("proposal ready")) return { title, state: "waiting", detail: "Waiting for your confirmation" };
+  const detail = rest === "ok" ? "" : rest.replace(/^read-only analysis ran without confirmation \(recorded\)( · )?/, "");
+  return { title, state: "done", detail };
+}
+
+export function observableActivity(eventType: string | null): string {
+  if (!eventType) return "Starting";
+  const normalized = eventType.toLowerCase();
+  if (normalized === "provider_retry") return "The provider connection dropped; retrying";
+  if (normalized === "compaction_start") return "Summarizing the earlier conversation to stay within the model's context";
+  if (normalized.includes("tool")) return "Working";
+  if (normalized.includes("proposal")) return "Preparing a proposal";
+  if (normalized === "message_start") return "Waiting for the model";
+  if (normalized === "message_update") return "Writing";
+  return "Working";
 }

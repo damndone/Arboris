@@ -54,9 +54,9 @@ function mount(context: AgentSurfaceContextValue) {
 
 describe("AgentComposer", () => {
   it.each([
-    ["tool_execution_start", "Executing tool"],
-    ["tool_execution_end", "Tool receipt recorded"],
-    ["message_progress", "Processing the model response"],
+    ["tool_execution_start", "Working"],
+    ["tool_execution_end", "Working"],
+    ["message_progress", "Working"],
   ])("keeps compact %s activity distinct", (lastEventType, expected) => {
     render(<AgentSurfaceContext.Provider value={value({ sessionStatus: "running", lastEventType })}>
       <AgentComposer variant="compact" />
@@ -74,10 +74,9 @@ describe("AgentComposer", () => {
       <AgentComposer variant="compact" />
     </AgentSurfaceContext.Provider>);
     const activity = screen.getByRole("button", { name: "View Agent activity" });
-    expect(activity).toHaveTextContent("Executing 2 tools");
-    expect(activity).toHaveTextContent("inspect data schema");
-    expect(activity).toHaveTextContent("inspect result summary");
-    expect(activity).not.toHaveTextContent("Tool receipt recorded");
+    expect(activity).toHaveTextContent("Read data schema");
+    expect(activity).toHaveTextContent("Read data schema");
+    expect(activity).toHaveTextContent("Read the result summary");
   });
 
   it("keeps the full long tool activity accessible when the compact row is truncated", () => {
@@ -87,7 +86,7 @@ describe("AgentComposer", () => {
     })}>
       <AgentComposer variant="compact" />
     </AgentSurfaceContext.Provider>);
-    expect(screen.getByRole("button", { name: "View Agent activity" })).toHaveAttribute("title", expect.stringContaining(toolId.replace(/_/g, " ")));
+    expect(screen.getByRole("button", { name: "View Agent activity" })).toHaveAttribute("title", expect.stringContaining(toolId.replace("inspect_", "").replace(/_/g, " ")));
   });
 
   it("does not invent elapsed time for externally started compact activity", () => {
@@ -95,7 +94,7 @@ describe("AgentComposer", () => {
       <AgentComposer variant="compact" />
     </AgentSurfaceContext.Provider>);
     expect(screen.getByRole("button", { name: "View Agent activity" })).toHaveTextContent("time unavailable");
-    expect(screen.getByRole("button", { name: "View Agent activity" })).toHaveTextContent("Waiting for model output");
+    expect(screen.getByRole("button", { name: "View Agent activity" })).toHaveTextContent("Waiting for the model");
     expect(screen.getByRole("button", { name: "View Agent activity" })).not.toHaveTextContent("0s");
   });
 
@@ -156,8 +155,7 @@ describe("AgentComposer", () => {
 
     const activity = screen.getByRole("button", { name: "View Agent activity" });
     expect(activity).toHaveTextContent(/working/i);
-    expect(activity).toHaveTextContent(/checking evidence/i);
-    expect(screen.getByTestId("agent-compact-composer")).not.toContainElement(activity);
+        expect(screen.getByTestId("agent-compact-composer")).not.toContainElement(activity);
 
     fireEvent.click(activity);
 

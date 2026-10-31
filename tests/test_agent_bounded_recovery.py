@@ -46,7 +46,7 @@ def test_second_failure_stops_without_a_third_provider_or_tool_call(tmp_path, re
         answer = await core.prompt('完成分析', budget={'max_steps': 6, 'timeout_s': 30})
         assert runtime.calls == adapter.calls == 2
         assert '2' in answer and ('原因' in answer or '失败' in answer)
-        assert '选项' in answer and '部分完成' in answer
+        assert '下一步' in answer and '部分完成' in answer
         failures = [e for e in repo.get_branch('session-a') if e.entry_type == 'analysis_step_failure']
         assert len(failures) == 2
         assert core.phase == 'idle'

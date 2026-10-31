@@ -525,10 +525,7 @@
 
 .wb-agent-reasoning {
   min-width: 0;
-  margin: 5px 0 6px 18px;
-  border: 1px solid color-mix(in oklch, var(--separator) 72%, transparent);
-  border-radius: 8px;
-  background: color-mix(in oklch, var(--bg-card-2) 72%, transparent);
+  margin: 2px 0 6px;
 }
 
 .wb-agent-reasoning > summary {
@@ -536,8 +533,8 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  min-height: 28px;
-  padding: 0 9px;
+  min-height: 24px;
+  padding: 0;
   color: var(--label-secondary);
   cursor: pointer;
   list-style: none;
@@ -565,8 +562,8 @@
   min-width: 0;
   overflow-wrap: anywhere;
   margin-right: auto;
-  color: var(--label);
-  font-weight: 600;
+  color: var(--label-secondary);
+  font-weight: 500;
 }
 
 .wb-agent-reasoning > summary > span:last-of-type {
@@ -583,15 +580,9 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 2px;
-  padding: 6px 9px 8px;
-  border-top: 1px solid color-mix(in oklch, var(--separator) 62%, transparent);
-}
-
-.wb-agent-activity-summary {
-  display: block;
-  color: var(--label-secondary);
-  font-weight: 400;
-  overflow-wrap: anywhere;
+  padding: 2px 0 4px 12px;
+  border-left: 1px solid var(--separator);
+  margin-left: 3px;
 }
 
 .wb-agent-withdrawn-draft {
@@ -700,28 +691,22 @@
   white-space: nowrap;
 }
 
-.wb-agent-tool-receipt {
-  border-left: 2px solid var(--separator);
-  padding-left: 8px;
-}
-.wb-agent-tool-receipt__label {
-  display: block;
-  margin-bottom: 2px;
-  color: var(--label-tertiary);
-  font: 10px/1.35 var(--font-sans, system-ui, sans-serif);
-}
+.wb-agent-tool-receipt > .wb-agent-terminal-marker { display: none; }
+.wb-agent-step { display: inline-flex; gap: 6px; align-items: baseline; min-width: 0; color: var(--label-secondary); }
+.wb-agent-step__mark { flex: 0 0 auto; color: var(--status-success-fg, var(--label-tertiary)); }
+.wb-agent-step--failed .wb-agent-step__mark { color: var(--status-error-fg, var(--status-caution-fg)); }
+.wb-agent-step--waiting .wb-agent-step__mark { color: var(--tint); }
+.wb-agent-step__detail { color: var(--label-tertiary); overflow-wrap: anywhere; }
+.wb-agent-work-count { color: var(--label-tertiary); font-weight: 400; }
 
-.wb-agent-tool-details {
-  min-width: 0;
-  margin-top: 4px;
-}
+.wb-agent-tool-details { min-width: 0; }
 
 .wb-agent-tool-details > summary {
-  color: var(--label-tertiary);
-  font-size: var(--text-caption);
   overflow-wrap: anywhere;
   cursor: pointer;
+  list-style: none;
 }
+.wb-agent-tool-details > summary::-webkit-details-marker { display: none; }
 
 .wb-agent-tool-details > summary:focus-visible {
   outline: 2px solid var(--tint);
@@ -1288,7 +1273,7 @@
 .wb-agent-usage--compact[open] > .wb-agent-usage__body { position: absolute; z-index: 20; top: calc(100% + 4px); left: 8px; right: 8px; max-height: min(60vh, 420px); overflow: auto; padding: 10px; border: 1px solid var(--border, var(--separator)); border-radius: 10px; background: var(--bg-card); box-shadow: var(--shadow-pop); color: var(--label-secondary); }
 
 /* A stopped turn: a callout in the flow, never drawn over the conversation. */
-.wb-agent-callout { flex: 0 0 auto; margin: 6px 12px; padding: 8px 10px; border: 1px solid color-mix(in oklch, var(--status-fails-fg) 30%, transparent); border-radius: 8px; background: color-mix(in oklch, var(--status-fails-fg) 7%, var(--bg-card)); color: var(--status-fails-fg); font-size: 12px; line-height: 1.4; }
+.wb-agent-callout { flex: 0 0 auto; margin: 6px 0; padding: 8px 10px; border: 1px solid color-mix(in oklch, var(--status-fails-fg) 30%, transparent); border-radius: 8px; background: color-mix(in oklch, var(--status-fails-fg) 7%, var(--bg-card)); color: var(--status-fails-fg); font-size: 12px; line-height: 1.4; }
 .wb-agent-stop-note { display: block; margin-top: 4px; }
 .wb-agent-stop-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 
@@ -1328,3 +1313,4 @@
 .wb-agent-receipt__time { flex: 0 0 auto; margin-left: auto; color: var(--label-tertiary); font-variant-numeric: tabular-nums; }
 .wb-agent-receipt > :not(summary) { margin: 4px 0 4px 18px; }
 .wb-agent-receipt ol { padding-left: 16px; }
+.wb-agent-terminal-line[data-role="assistant"] > .wb-agent-terminal-marker { display: none; }

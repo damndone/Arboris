@@ -39,8 +39,8 @@ def test_checked_analysis_signals_activity_before_publication_only_once(tmp_path
     public = json.dumps([event.to_dict() for event in core.events.replay("session-a")])
     assert "PRIVATE_REASONING_SENTINEL" not in public
     assert "draft awaiting verification" not in json.dumps([event.to_dict() for event in observed])
-    assert answer.startswith("Partially complete")
-    assert "source-run" in answer
+    assert 'Partially complete' in answer
+    assert "source-run" not in answer
 
 
 @pytest.mark.parametrize("meaningful", [True, False])

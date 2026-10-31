@@ -42,10 +42,10 @@ def test_output_truncation_publishes_checked_gaps_without_certifying_the_draft(t
     core, store, repository = setup(tmp_path, adapter)
     core.completion_check = partial
     answer = asyncio.run(core.prompt('请完整分析并汇报。', budget={'max_steps': 3, 'timeout_s': 30}))
-    assert answer.startswith('部分完成')
-    assert 'registered_data' in answer and '缺少已计算且绑定主模型的诊断' in answer
+    assert '部分完成' in answer
+    assert 'registered_data' not in answer and '缺少已计算且绑定主模型的诊断' in answer
     assert 'IV 草稿' in answer and '数字尚未核验' in answer
-    assert '输出上限' in answer and '下一步建议' in answer
+    assert '输出上限' in answer and '下一步' in answer
     assert adapter.requests == 1 and not store.list_active()
     message = next(e.payload for e in reversed(repository.get_branch('session-a'))
                    if e.payload.get('role') == 'assistant')
@@ -86,8 +86,8 @@ def test_bounded_failure_receipts_leave_a_source_bound_takeover(tmp_path, family
     core, store, repository = setup(tmp_path, adapter, runtime=runtime)
     core.completion_check = lambda: partial(family)
     answer = asyncio.run(core.prompt('请完整分析并汇报。', budget={'max_steps': 5, 'timeout_s': 30}))
-    assert '同一步已失败 2 次' in answer and failure in answer
-    assert 'registered_data' in answer and '下一步建议' in answer
+    assert '连续失败 2 次' in answer and failure in answer
+    assert 'registered_data' not in answer and '下一步' in answer
     assert adapter.requests == runtime.calls == 2
     message = next(e.payload for e in reversed(repository.get_branch('session-a'))
                    if e.payload.get('role') == 'assistant')

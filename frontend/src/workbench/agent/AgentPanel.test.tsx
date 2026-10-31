@@ -286,9 +286,9 @@ describe("AgentPanel — declared post-estimation results", () => {
 
 describe("AgentPanel", () => {
   it.each([
-    ["tool_execution_start", "Executing tool"],
-    ["tool_execution_end", "Tool receipt recorded"],
-    ["message_update", "Receiving model output"],
+    ["tool_execution_start", "Working"],
+    ["tool_execution_end", "Working"],
+    ["message_update", "Writing"],
   ])("distinguishes observable activity for %s", (lastEventType, expected) => {
     render(<AgentSurfaceContext.Provider value={value({ sessionStatus: "running", lastEventType })}>
       <AgentPanel runId="run-a" projectRoot="/proj" />
@@ -323,7 +323,7 @@ describe("AgentPanel", () => {
     })}>
       <AgentPanel runId="run-a" projectRoot="/proj" />
     </AgentSurfaceContext.Provider>);
-    expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent(toolId.replace(/_/g, " "));
+    expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent(toolId.replace("inspect_", "").replace(/_/g, " "));
   });
 
   it("keeps a previous turn's terminal failure visible after a follow-up is recorded", () => {
@@ -336,15 +336,15 @@ describe("AgentPanel", () => {
     ] })}>
       <AgentPanel runId="run-a" projectRoot="/proj" />
     </AgentSurfaceContext.Provider>);
-    expect(screen.getByTestId("agent-reasoning-u1")).toHaveTextContent("Execution stopped");
-    expect(screen.getByTestId("agent-reasoning-u1")).not.toHaveTextContent("Execution completed");
+    expect(screen.getByTestId("agent-reasoning-u1")).toHaveTextContent("Stopped");
+    expect(screen.getByTestId("agent-reasoning-u1")).not.toHaveTextContent("Worked ·");
   });
 
   it("does not invent zero elapsed time or a final-answer phase for external model requests", () => {
     render(<AgentSurfaceContext.Provider value={value({ sessionStatus: "running", lastEventType: "message_start" })}>
       <AgentPanel runId="run-a" projectRoot="/proj" />
     </AgentSurfaceContext.Provider>);
-    expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent("Waiting for model output");
+    expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent("Waiting for the model");
     expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent("Elapsed time unavailable");
     expect(screen.getByTestId("agent-turn-progress")).not.toHaveTextContent("0s");
   });
@@ -362,7 +362,7 @@ describe("AgentPanel", () => {
 
     expect(screen.getByTestId("agent-turn-progress")).toHaveTextContent(/Working · 4s/);
     expect(screen.queryByText(/private reasoning is not displayed/i)).not.toBeInTheDocument();
-    expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent("Checking evidence");
+    expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent("Working");
   });
 
   it("shows an actionable provider failure without leaving the turn marked as working", () => {
@@ -515,7 +515,7 @@ describe("AgentPanel", () => {
     ]})}><AgentPanel runId="run-a" projectRoot="/proj" /></AgentSurfaceContext.Provider>);
     expect(screen.getByTestId("agent-turn-error")).toHaveTextContent("Completed operations and results remain recorded");
     expect(screen.getByTestId("agent-turn-error")).not.toHaveTextContent(/nothing.*was changed/i);
-    expect(screen.getByTestId("agent-reasoning-u1")).toHaveTextContent("run_operation");
+    expect(screen.getByTestId("agent-reasoning-u1")).toHaveTextContent("Ran an operation");
   });
 
   it.each(["running", "working", "cancelling"])("does not describe an unconfirmed stop as terminal while the restored turn is %s", (sessionStatus) => {
@@ -745,9 +745,9 @@ describe("AgentPanel", () => {
     );
 
     const reasoning = screen.getByTestId("agent-reasoning-u1");
-    expect(reasoning).toHaveTextContent("Worked through 2 steps");
+    expect(reasoning).toHaveTextContent("2 steps");
     expect(reasoning).toHaveTextContent("我会先核对模型和诊断证据。");
-    expect(reasoning).toHaveTextContent("inspect_model_result ✓ ok");
+    expect(reasoning).toHaveTextContent("Read model result");
     expect(reasoning).not.toContainElement(screen.getByText("模型结果已核对：系数为正。"));
   });
 
@@ -772,13 +772,13 @@ describe("AgentPanel", () => {
 
     const latest = screen.getByTestId("agent-reasoning-u1");
     expect(latest).toHaveAttribute("open");
-    expect(latest).toHaveTextContent("calculate ✓ Difference: 8 - 3 = 5");
-    expect(latest).toHaveTextContent("inspect_result ✗ artifact_unavailable");
-    expect(latest.querySelector("summary")).toHaveTextContent(sessionStatus === "running" ? "in progress" : sessionStatus);
+    expect(latest).toHaveTextContent("Calculated — Difference: 8 - 3 = 5");
+    expect(latest).toHaveTextContent("Read result — artifact_unavailable");
+    expect(latest.querySelector("summary")).toHaveTextContent(sessionStatus === "running" ? "Working" : "Worked");
     expect(latest).not.toHaveTextContent("LARGE_RAW_OUTPUT");
     const previous = screen.getByTestId("agent-reasoning-u0");
     expect(previous).not.toHaveAttribute("open");
-    expect(previous.querySelector("summary")).toHaveTextContent("inspect_data ✗ missing_column");
+    expect(previous.querySelector("summary")).toHaveTextContent(/1 step/);
     fireEvent.click(screen.getByRole("button", { name: "Open result model" }));
     expect(openNavigation).toHaveBeenCalledWith(resultLink);
     expect(screen.queryByText(/recent steps/)).not.toBeInTheDocument();
@@ -823,7 +823,7 @@ describe("AgentPanel", () => {
       "Earlier draft, withdrawn by the number check: 0.099 matched no result",
     );
     expect(reasoning).not.toContainElement(screen.getByText("p 值为 0.098。"));
-    expect(reasoning).toHaveTextContent("Rewrote the answer once after checking its numbers");
+    expect(reasoning).toHaveTextContent("1 draft rewritten");
   });
 
   it("leaves hierarchy browsing to AI activity so the terminal owns the panel space", () => {
@@ -904,10 +904,10 @@ describe("AgentPanel", () => {
       <AgentPanel runId="run-a" projectRoot="/proj" />
     </AgentSurfaceContext.Provider>);
     const tool = screen.getByTestId("agent-message-tool");
-    const summary = within(tool).getByText("Sources and actions · 8 references");
+    const summary = tool.querySelector<HTMLElement>("summary")!;
     const details = summary.closest("details");
     expect(details).not.toHaveAttribute("open");
-    expect(tool).toHaveTextContent("inspect_completed_operations ✓ ok");
+    expect(tool).toHaveTextContent("Listed completed operations");
     expect(within(tool).getByRole("toolbar", { name: "Message actions", hidden: true })).not.toBeVisible();
     expect(tool.querySelectorAll(".wb-agent-message-link")).toHaveLength(8);
     tool.querySelectorAll(".wb-agent-message-link").forEach(link => expect(link).not.toBeVisible());
@@ -941,7 +941,7 @@ describe("AgentPanel", () => {
       expect(toolbar).not.toBeVisible();
       expect(getComputedStyle(ordinaryToolbar).opacity).toBe("0");
 
-      fireEvent.click(within(tool).getByText("Sources and actions · 8 references"));
+      fireEvent.click(tool.querySelector<HTMLElement>("summary")!);
       expect(toolbar.parentElement).toHaveAttribute("open");
       expect(toolbar.contains(document.activeElement)).toBe(false);
       expect(getComputedStyle(toolbar).opacity).toBe("1");
@@ -971,8 +971,8 @@ describe("AgentPanel", () => {
       <AgentPanel runId="run-a" projectRoot="/proj" />
     </AgentSurfaceContext.Provider>);
     const tool = screen.getByTestId("agent-message-tool");
-    expect(within(tool).getByText(/inspect_model_result ✗ RESULT_UNAVAILABLE.*The recorded artifact is missing/)).toBeVisible();
-    expect(within(tool).getByText("Sources and actions · 8 references").closest("details")).not.toHaveAttribute("open");
+    expect(within(tool).getByText(/The recorded artifact is missing/)).toBeVisible();
+    expect(tool.querySelector<HTMLElement>("summary")!.closest("details")).not.toHaveAttribute("open");
   });
 
   it("keeps a tool's context fork in its message actions with the source binding", () => {
@@ -987,8 +987,8 @@ describe("AgentPanel", () => {
       <AgentPanel runId="run-a" projectRoot="/proj" />
     </AgentSurfaceContext.Provider>);
     const tool = screen.getByTestId("agent-message-tool");
-    expect(tool).toHaveTextContent("Tool receipt");
-    fireEvent.click(within(tool).getByText("Sources and actions · 1 reference"));
+    expect(tool).not.toHaveTextContent("Tool receipt");
+    fireEvent.click(tool.querySelector<HTMLElement>("summary")!);
     const fork = within(tool).getByRole("button", { name: "Fork from Agent message t1" });
     expect(within(tool).getByRole("toolbar", { name: "Message actions" })).toContainElement(fork);
     fireEvent.click(fork);
@@ -1004,7 +1004,7 @@ describe("AgentPanel", () => {
     })] })}>
       <AgentPanel runId="run-a" projectRoot="/proj" />
     </AgentSurfaceContext.Provider>);
-    fireEvent.click(screen.getByText("Sources and actions · 1 reference"));
+    fireEvent.click(screen.getByTestId("agent-message-tool").querySelector<HTMLElement>("summary")!);
     const fork = screen.getByRole("button", { name: "Fork from Agent message t1" });
     expect(fork).toBeDisabled();
     expect(fork).toHaveAttribute("title", "The source node is no longer available");
@@ -1078,12 +1078,10 @@ describe("AgentPanel", () => {
     );
 
     const toolLines = screen.getAllByTestId("agent-message-tool");
-    expect(toolLines[0]).toHaveTextContent("inspect_node_context");
-    expect(toolLines[0]).toHaveTextContent("ok");
-    expect(toolLines[0]).not.toHaveTextContent("node-operation-context/v1");
-    expect(toolLines[1]).toHaveTextContent(/proposal ready/i);
-    expect(toolLines[1]).toHaveTextContent("p-1");
-    expect(toolLines[2]).toHaveTextContent("inspect_diagnostics");
+    expect(toolLines[0]).toHaveTextContent("Read node context");
+        expect(toolLines[0]).not.toHaveTextContent("node-operation-context/v1");
+    expect(toolLines[1]).toHaveTextContent(/Waiting for your confirmation/);
+    expect(toolLines[2]).toHaveTextContent("Read diagnostics");
     expect(toolLines[2]).toHaveTextContent("tool_runtime_error");
   });
 
@@ -1093,7 +1091,7 @@ describe("AgentPanel", () => {
         <AgentPanel runId="run-a" projectRoot="/proj" />
       </AgentSurfaceContext.Provider>,
     );
-    expect(screen.getByTestId("agent-empty")).toHaveTextContent("Start a task");
+    expect(screen.getByTestId("agent-empty")).toBeEmptyDOMElement();
   });
 
   it("renders a pending proposal as an explicit confirmation card", () => {

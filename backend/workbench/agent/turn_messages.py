@@ -69,14 +69,12 @@ def budget_exhausted_message(
 
     if error == "analysis_recovery_limit":
         if language == "zh":
-            return ("部分完成：同一步已失败 2 次，已暂停自动尝试。\n"
-                + "已记录原因：" + (last_failure or "工具未能完成该步骤。")[:300]
-                + "\n修正选项：根据该错误核对数据、变量和方法条件，修订方案后明确继续；或保留缺项并结束。"
-                + "已完成的操作与证据保留，不自动切换方法或降低标准。")
-        return ("Partial completion: this step failed 2 times; automatic attempts have stopped.\n"
-            + "Recorded failure: " + (last_failure or "The tool could not complete this step.")[:300]
-            + "\nCorrection options: check the data, variables and method conditions, then explicitly continue with a revised plan; or finish with the gap recorded."
-            + " Completed operations and evidence are retained; no automatic method substitution or relaxed criteria.")
+            return ("部分完成：这一步连续失败 2 次，我先停下，没有换方法或放宽标准。\n\n"
+                + "**原因：**" + (last_failure or "工具未能完成该步骤。")[:300]
+                + "\n\n已完成的结果都保留。**下一步：**告诉我要改的变量或方法，或者让我跳过这一步，带着这个缺口收尾。")
+        return ("Partially complete: this step failed twice, so I stopped without switching method or relaxing the criteria.\n\n"
+            + "**Why:** " + (last_failure or "The tool could not complete this step.")[:300]
+            + "\n\nCompleted results are kept. **Next:** tell me which variable or method to change, or to skip this step and finish with the gap.")
     distinct = list(dict.fromkeys(tools_used))
     if language == "zh":
         reason = "步数预算已用完" if error == "max_steps_exceeded" else "检测到重复调用同一工具"

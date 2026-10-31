@@ -76,7 +76,7 @@ export function AgentColumnComposer() {
       {unfinished.map((turn) => (
         <div key={turn.turn_id} className="ws-composer__banner" role="status">
           <span>
-            Previous turn unfinished{turn.requires_reconcile ? " · needs reconciliation" : ""}
+            Turn unfinished{turn.requires_reconcile ? " · needs reconciliation" : ""}
           </span>
           <button
             type="button"
@@ -119,7 +119,7 @@ export function AgentColumnComposer() {
           aria-label="Ask Agent"
           rows={2}
           value={prompt}
-          placeholder="Ask about this result, or tell Arboris what to do…"
+          placeholder="Ask Arboris…"
           onChange={(event) => setPrompt(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Tab" && event.shiftKey && !busy) {

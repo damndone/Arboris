@@ -790,7 +790,7 @@ export function AgentSurfaceProvider({
     node.opNodeId === linkedTarget.node_ref && node.runs.includes(String(linkedTarget.run_id)),
   );
   const scopeLabel = linkedSessionId
-    ? linkedNode ? `Linked chain · ${linkedNode.title}` : "Linked Agent session"
+    ? linkedNode ? linkedNode.title : "Linked Agent session"
     : isGlobalScope && resolvedFocus.focus.kind === "project"
     ? `Global Agent · ${forest?.forest.familyRunCount ?? 0} runs · ${forest?.forest.familyCount ?? 0} families`
     : resolvedFocus.label;

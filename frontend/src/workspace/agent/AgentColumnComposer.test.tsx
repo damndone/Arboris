@@ -105,7 +105,7 @@ describe("AgentColumnComposer", () => {
     const resumeTurn = vi.fn();
     Object.assign(surface, { durableTurns: [{ turn_id: "t1", status: "running", requires_reconcile: false }], resumeTurn });
     render(<AgentColumnComposer />);
-    expect(screen.getByText("Previous turn unfinished")).toBeInTheDocument();
+    expect(screen.getByText("Turn unfinished")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Resume" }));
     expect(resumeTurn).toHaveBeenCalledWith("t1");
     Object.assign(surface, { durableTurns: [] });
