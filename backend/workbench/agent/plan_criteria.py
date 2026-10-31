@@ -591,6 +591,21 @@ def verify(project_root, plan, products, selected_evidence=None):
         result['requirements'].append({'id': '', 'status': 'unverified',
             'reason': 'No machine-checkable approved deliverable definitions were saved; retain partial completion for human takeover.',
             'verified_artifacts': []})
-    if result['unbound_slots'] or any(r['status'] != 'verified' for r in result['requirements']):
+    # Only evidence that contradicts an approved definition blocks delivery. A criterion in free
+    # text, an operation with no typed verifier, or a proof the Agent did not hand-copy cannot be
+    # satisfied by any further analysis: 8 nudges each on panel and survival Auto (2026-10-31),
+    # with the playbook's fit, diagnostics, sensitivity and report all checked separately.
+    unchecked = [r for r in result['requirements'] if r['status'] != 'verified' and _not_checkable(r['reason'])]
+    result['unchecked_requirements'] = [r['id'] for r in unchecked if r['id']]
+    if any(r['status'] != 'verified' and not _not_checkable(r['reason']) for r in result['requirements']):
         result['status'] = 'partial'
+    elif plan.status == 'needs_approval':
+        result['status'] = 'partial'  # a plan waiting for the person is never delivered
+    elif unchecked or result['unbound_slots']:
+        result['status'] = 'not_machine_checked'
     return result
+
+
+def _not_checkable(reason):
+    return (reason.startswith('typed_artifact_verifier_not_available') or reason == 'unique_execution_evidence_required'
+            or reason.startswith('No machine-checkable'))

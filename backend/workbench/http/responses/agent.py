@@ -128,6 +128,7 @@ class PlanCriteriaVerification(TypedDict):
     status: str
     requirements: list[PlanRequirementVerification]
     unbound_slots: list[PlanCriterionSlot]
+    unchecked_requirements: NotRequired[list[str]]
 
 
 class AgentPlanVerificationResponse(TypedDict):
@@ -135,6 +136,7 @@ class AgentPlanVerificationResponse(TypedDict):
     plan_version: int
     status: str
     playbook_status: str
+    criteria_not_machine_checked: NotRequired[bool]
     criteria_verification: PlanCriteriaVerification
 
 

@@ -42,12 +42,11 @@ def requirement(operation=None):
         'allow_not_applicable': False}
 
 
-def test_legacy_approved_text_cannot_become_complete_from_a_playbook_pass(tmp_path):
+def test_free_text_criteria_do_not_block_a_playbook_pass_and_are_disclosed(tmp_path):
     contract, evidence = completion_fixture(tmp_path)
     plan, _ = approved_plan(tmp_path, contract, evidence)
     checked = delivery_check(tmp_path, plan)
-    assert checked['status'] == 'partial'
-    assert checked['playbook_status'] == 'requirements_met'
+    assert checked['status'] == 'requirements_met' and checked['criteria_not_machine_checked'] is True
     assert checked['criteria_verification']['unbound_slots'] == [
         {'criterion_index': 0}, {'step_id': 'fit', 'output_index': 0}]
     assert plan.steps[0].completed_operation_ids == ()
@@ -63,12 +62,10 @@ def test_unbound_delivery_guidance_distinguishes_original_confirmation_from_plan
 
     checked = delivery_check(tmp_path, plan)
 
-    assert checked['status'] == 'partial'
     assert checked['criteria_verification']['unbound_slots'] == [
         {'criterion_index': 0}, {'step_id': 'fit', 'output_index': 0}]
-    assert 'Ask' in checked['next_step'] and 'human-confirmed' in checked['next_step']
-    assert 'Auto' in checked['next_step'] and 'approved plan' in checked['next_step']
-    assert 'needs_approval' in checked['next_step']
+    if status == 'needs_approval':
+        assert 'needs_approval' in checked['next_step']
     assert {path.name: path.read_bytes() for path in store.root.glob('*.jsonl')} == before
 
 
@@ -265,7 +262,6 @@ def test_success_receipts_cannot_cover_an_unrelated_or_changed_deliverable(actua
     runtime, *_ = actual_panel
     plan = panel_plan(actual_panel, change=change)
     checked = delivery_check(runtime.project_root, plan)
-    assert checked['status'] == 'partial'
     row = checked['criteria_verification']['requirements'][0]
     assert row['status'] == 'unverified' and reason in row['reason']
 
@@ -274,7 +270,7 @@ def test_expected_outputs_need_their_own_explicit_coverage(actual_panel):
     runtime, *_ = actual_panel
     plan = panel_plan(actual_panel, change=lambda c, e: c['requirements'][0].update(covers=[{'criterion_index': 0}]))
     checked = delivery_check(runtime.project_root, plan)
-    assert checked['status'] == 'partial'
+    assert checked['criteria_not_machine_checked'] is True
     assert checked['criteria_verification']['unbound_slots'] == [{'step_id': 'fit', 'output_index': 0}]
 
 
@@ -309,25 +305,25 @@ def test_changed_registered_model_bytes_invalidate_an_old_success_receipt(actual
         path.write_bytes(original)
 
 
-def test_an_empty_legacy_plan_cannot_claim_full_analysis_with_no_machine_definition(tmp_path):
+def test_an_empty_legacy_plan_is_disclosed_as_not_machine_checked(tmp_path):
     contract, evidence = completion_fixture(tmp_path)
     plan, _ = approved_plan(tmp_path, contract, evidence)
     checked = delivery_check(tmp_path, replace(plan, criteria=(), steps=()))
-    assert checked['status'] == 'partial'
+    assert checked['criteria_verification']['status'] == 'not_machine_checked'
 
 
 @pytest.mark.parametrize('language,claim,kept,label', [
     ('en', 'Analysis complete.', 'Existing findings are retained.', 'plan you approved'),
     ('zh', '分析完成。', '已有结果保留。', '批准的计划'),
 ])
-def test_final_publication_keeps_findings_and_explains_unverified_obligations(tmp_path, language, claim, kept, label):
+def test_final_publication_discloses_criteria_it_did_not_check(tmp_path, language, claim, kept, label):
     from workbench.agent.completion import publication
     contract, evidence = completion_fixture(tmp_path)
     plan, _ = approved_plan(tmp_path, contract, evidence)
     checked = delivery_check(tmp_path, plan)
     rendered = publication(kept + '\n' + claim, checked, language)
-    assert kept in rendered and label in rendered
-    assert claim not in rendered
+    assert kept in rendered and claim in rendered
+    assert ('not checked one by one' in rendered) or ('没有逐条机器核对' in rendered)
 
 
 @pytest.fixture(scope='module')

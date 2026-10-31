@@ -3392,6 +3392,8 @@ export interface components {
         };
         /** AgentPlanVerificationResponse */
         AgentPlanVerificationResponse: {
+            /** Criteria Not Machine Checked */
+            criteria_not_machine_checked?: boolean;
             criteria_verification: components["schemas"]["PlanCriteriaVerification"];
             /** Plan Id */
             plan_id: string;
@@ -9189,6 +9191,8 @@ export interface components {
             status: string;
             /** Unbound Slots */
             unbound_slots: (components["schemas"]["PlanCriterionTextSlot"] | components["schemas"]["PlanOutputSlot"])[];
+            /** Unchecked Requirements */
+            unchecked_requirements?: string[];
         };
         /** PlanCriterionTextSlot */
         PlanCriterionTextSlot: {

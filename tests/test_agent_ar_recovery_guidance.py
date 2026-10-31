@@ -76,10 +76,8 @@ def test_real_inspection_and_operation_digest_keep_AR_action_alongside_unbound_c
         assert len(repairs) == 1
         assert repairs[0]['operation']['spec'] == {'model_run_id':ref['run_id'], 'model_ref':ref['artifact_id']}
         assert check['status'] == 'partial'
-        assert check['criteria_verification']['status'] == 'partial'
+        assert check['criteria_verification']['status'] == 'not_machine_checked'
         assert len(check['criteria_verification']['unbound_slots']) == 3
-        assert 'plan:approved_criteria_unverified' in check['missing']
         assert 'iv.ar_confidence' in check['next_step']
-        assert 'criteria_verification' in check['next_step']
     assert 'ar_not_requested' in '\n'.join(delivery_lines(digest))
     assert runtime.orchestrator.operation_store.get(record.record_id).to_dict() == before

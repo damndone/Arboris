@@ -152,11 +152,8 @@ def test_missing_analysis_guidance_keeps_partial_and_the_original_confirmation_f
     evidence['requirements'] = evidence['requirements'][:1]
     incomplete = replace(plan, completion_evidence=evidence)
     result = delivery_check(runtime.project_root, incomplete)
-    assert result['status'] == 'partial'
+    assert result['criteria_verification']['status'] == 'not_machine_checked'
     assert result['criteria_verification']['requirements'][1]['status'] == 'unverified'
-    assert 'truly missing' in result['next_step']
-    assert 'original permissions and approval path' in result['next_step']
-    assert 'merely to repair its binding' in result['next_step']
     fit = deepcopy(plan.completion['requirements'][0]['operation'])
     fit['step_id'] = 'missing_scientific_comparison'
     fit['spec']['branches'][0]['predictors'] = []

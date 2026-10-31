@@ -107,7 +107,7 @@ def test_sensitivity_then_report_use_real_mode_approval_execution_and_completion
     proposal = case.orchestrator.proposal_store.latest_revision(result.output["proposal"]["proposal_id"])
     assert asyncio.run(case.runner(proposal, "user")).status == "completed"
     after_fit = inspect(case, invocation="inspect-report")
-    assert after_fit["missing"] == ["report:registered_nonempty", "plan:approved_criteria_unverified"]
+    assert after_fit["missing"] == ["report:registered_nonempty"]
     [report] = [item for item in after_fit["operation_requests"] if item["kind"] == "report"]
     registered = refs().read(case.repository, session_id="chain-session", request_ref=report["request_ref"])
     assert registered["arguments"]["changes"]["steps"][0]["spec"] == after_fit["compose_report"]["spec"]
@@ -119,9 +119,7 @@ def test_sensitivity_then_report_use_real_mode_approval_execution_and_completion
     else:
         assert rendered.output["executed"] and rendered.output["operation"]["status"] == "completed", rendered
     checked = case.orchestrator._completion_check("chain-session")
-    assert checked["status"] == "partial"
-    assert checked["playbook_status"] == "requirements_met"
-    assert checked["missing"] == ["plan:approved_criteria_unverified"]
+    assert checked["status"] == "requirements_met" and checked["missing"] == []
     assert checked["criteria_verification"]["unbound_slots"] == [{"criterion_index": 0}]
     assert len([r for r in case.orchestrator.operation_store.list_records() if r.workflow_step_id is None]) == 2
 

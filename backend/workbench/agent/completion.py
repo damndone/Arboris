@@ -697,9 +697,11 @@ def _verification_scope(result, language):
     if language == 'zh':
         return ('\n\nWorkbench 核验范围：只核对了结果的来源绑定和交付项'
                 + ('（按单一问题交付，计划里未执行的步骤不在其中）' if question else '')
+                + ('；计划里的判据没有逐条机器核对' if result.get('criteria_not_machine_checked') else '')
                 + '，不认证方法选择、识别假设、推断有效性或科学结论。')
     return ('\n\nWorkbench verification scope: result provenance and delivery items only'
             + (' (delivered as a focused question; plan steps that did not run are not covered)' if question else '')
+            + ('; the plan\'s criteria were not checked one by one by machine' if result.get('criteria_not_machine_checked') else '')
             + '. Method choice, identification, inference validity and scientific conclusions are not certified.')
 
 

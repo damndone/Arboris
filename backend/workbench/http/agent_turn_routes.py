@@ -67,6 +67,7 @@ def verify_agent_plan(session_id: str, project_root: str) -> AgentPlanVerificati
                                 message="This conversation has no plan.")
     check = delivery_check(root, plan)
     return {"plan_id": plan.plan_id, "plan_version": plan.version,
+            **({"criteria_not_machine_checked": True} if check.get("criteria_not_machine_checked") else {}),
             "status": check["status"], "playbook_status": check["playbook_status"],
             "criteria_verification": check["criteria_verification"]}
 

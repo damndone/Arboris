@@ -74,6 +74,6 @@ def test_actual_registered_playbook_pass_does_not_hide_unbound_plan_criteria(tmp
     assert response.status_code == 200, response.text
     result = response.json()
     assert result["playbook_status"] == "requirements_met"
-    assert result["status"] == "partial"
+    assert result["status"] == "requirements_met" and result["criteria_not_machine_checked"] is True
     assert result["criteria_verification"]["unbound_slots"] == [{"criterion_index": 0}]
     assert store.current("session-a") == plan

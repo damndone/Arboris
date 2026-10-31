@@ -408,7 +408,9 @@ class NvidiaOverloadRecovery(FreeRouteGuard):
         with self._change() as state:
             entry = state["tickets"].get(ticket)
             if (state["stopped"] or state["pending"] != ticket or entry is None
-                    or entry["status"] != "waiting" or time.time() < entry["ready_at"]):
+                    or entry["status"] != "waiting"
+                    # The ticket is on the wall clock; a timer can wake just before it (lane 2, 2026-10-31).
+                    or time.time() < entry["ready_at"] - 1.0):
                 refused = "NVIDIA pending recovery ticket cannot resume"
                 state.update(stopped=True, reason=refused)
             else:

@@ -45,6 +45,8 @@ def delivery_state(project_root, plan, *, suggest=False):
     if checked['status'] == 'partial':
         result['status'] = 'partial'
         result['missing'] = list(dict.fromkeys([*result['missing'], 'plan:approved_criteria_unverified']))
+    elif checked['status'] == 'not_machine_checked':
+        result['criteria_not_machine_checked'] = True
     result['verified_manifest_sha256'] = sha256_canonical({
         'products': result['verified_manifest_sha256'],
         'criteria': {key: value for key, value in checked.items() if key != 'plan_version'}})
@@ -102,14 +104,8 @@ def delivery_state(project_root, plan, *, suggest=False):
             from ..canonical import sha256_canonical
             result['recovery_question_sha256'] = sha256_canonical(plan.question)
     if checked['status'] == 'partial':
-        criteria_guidance = ('Approved criteria or expected outputs remain unverified. Inspect criteria_verification; '
-            'bind existing producer records and registered artifacts without repeating an execution merely to repair its binding. '
-            'If an analysis is truly missing, propose a scientifically justified supported new specification under '
-            'the original permissions and approval path; if none is feasible, keep partial status and state the '
-            'human takeover needed. Do not repeat the same fit to manufacture evidence or select by significance. Missing machine definitions '
-            'need a visible plan revision. Auto requires its approved plan basis; Ask may reuse the exact '
-            'human-confirmed executed request. A plan marked needs_approval still requires approval. '
-            'Unsupported claims remain partial for human takeover; do not erase promises or invent receipts.')
+        criteria_guidance = ('A plan marked needs_approval still requires approval; otherwise an executed result '
+            'contradicts an approved definition (see criteria_verification): revise the plan visibly rather than refit.')
         result['next_step'] = ((result['next_step'] + ' ') if result.get('next_step') else '') + criteria_guidance
     return result, evidence
 
