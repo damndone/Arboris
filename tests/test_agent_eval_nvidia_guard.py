@@ -529,3 +529,23 @@ def test_nvidia_sse_overload_preserves_original_error_and_stops_after_taping(tmp
     assert record['content_type'] == 'text/event-stream'
     assert record['transport_error'] == 'CancelledError'
     assert record['response_raw'] == raw.decode() and record['usage'] is None
+
+
+def test_under_the_record_and_retry_rule_unknown_usage_is_kept_not_settled_and_credit_still_stops(tmp_path, monkeypatch):
+    monkeypatch.setattr(budget, 'ACCEPT_UNKNOWN_USAGE', True)
+    guard = budget.NvidiaFreeEndpointGuard(tmp_path / 'ledger.json', provider_id='nvidia-nemotron-free', base_url=BASE,
+                                           model=budget.NVIDIA_MODEL, round_kind='dev8')
+    with guard._change() as state:
+        state['reservations']['k1'] = {'output_bound': 8192}
+    guard.settle('k1', None)
+    state = guard.state
+    assert not state['stopped'] and state['calls'] == 0 and state['charges'] == []
+    assert state['accepted_unknown_requests'][0]['key'] == 'k1'
+    with guard._change() as state:
+        state['reservations']['k2'] = {'output_bound': 8192}
+    assert guard.tolerate_transport_interruption('ReadTimeout') is True
+    assert [item['key'] for item in guard.state['accepted_unknown_requests']] == ['k1', 'k2']
+    with guard._change() as state:
+        state['reservations']['k3'] = {'output_bound': 8192}
+    with pytest.raises(budget.BudgetStop):
+        guard.settle('k3', {'prompt_tokens': 1, 'completion_tokens': 1, 'credit': 0.5})

@@ -304,6 +304,9 @@ NVIDIA_MODEL = "nvidia/nemotron-3-ultra-550b-a55b"
 RETRY_DELAYS_S = [int(item) for item in os.environ.get("WORKBENCH_EVAL_RETRY_DELAYS_S", "60,120").split(",")]
 
 
+ACCEPT_UNKNOWN_USAGE = os.environ.get("WORKBENCH_EVAL_ACCEPT_UNKNOWN_USAGE") == "1"
+
+
 class NvidiaOverloadRetry(BaseException):
     """Consumed only by the explicitly installed evaluation stream wrapper."""
 
@@ -559,6 +562,10 @@ class NvidiaFreeEndpointGuard(FreeRouteGuard):
             self.serial_coordinator.release(preserve_unknown=bool(self.state["reservations"] or pending))
 
     def tolerate_transport_interruption(self, error, task=None):
+        if ACCEPT_UNKNOWN_USAGE:
+            for key in list(self.state["reservations"]):
+                self._keep_unknown(key, f"transport interruption: {error}")
+            return True
         try:
             return super().tolerate_transport_interruption(error, task)
         except BudgetStop as exc:
@@ -711,7 +718,7 @@ class NvidiaFreeEndpointGuard(FreeRouteGuard):
         self._recover_unknown(raw, key, "user-authorized complete error-only SSE 503 recovery; usage and billing remain unknown")
 
     def end_incomplete_stream_task(self, *, status, content_type, raw, key, task):
-        if not self.skip_incomplete_stream_task or status != 200 or "text/event-stream" not in content_type:
+        if ACCEPT_UNKNOWN_USAGE or not self.skip_incomplete_stream_task or status != 200 or "text/event-stream" not in content_type:
             return
         public_output = False
         for line in raw.splitlines():
@@ -788,10 +795,22 @@ class NvidiaFreeEndpointGuard(FreeRouteGuard):
             self.overload_recovery.stop(reason)
             raise
 
+    def _keep_unknown(self, key, reason):
+        """User decision 2026-10-31: on the free route an unknown usage is recorded and the
+        request retried by the product, not a stop. Nothing is settled as zero."""
+        with self._change() as state:
+            reservation = state["reservations"].pop(key, None)
+            state.setdefault("accepted_unknown_requests", []).append({"key": key, "reservation": reservation,
+                "reason": reason, "accepted": "user 2026-10-31: record and retry"})
+        self.close_request_slot()
+
     def settle(self, key, usage):
         reason = None
         if not isinstance(usage, dict) or any(type(usage.get(field)) is not int or usage[field] < 0
                 for field in ("prompt_tokens", "completion_tokens")):
+            if ACCEPT_UNKNOWN_USAGE:
+                self._keep_unknown(key, "missing token usage")
+                return
             reason = "NVIDIA missing or invalid token usage; unknown usage stops the round"
         elif "credit" in usage and (type(usage["credit"]) not in (int, float) or usage["credit"] != 0):
             reason = f"NVIDIA reported credit {usage['credit']!r}; no further request authorized"
