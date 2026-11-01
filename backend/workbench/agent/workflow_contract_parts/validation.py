@@ -441,7 +441,8 @@ def _validate_step_spec(operation_id: str, spec: Mapping[str, Any]) -> None:
                 raise OperationValidationError("each derive_numeric recipe must be an object")
             if set(recipe) != {"operator", "input_columns", "output_name"}:
                 raise OperationValidationError(
-                    "derive_numeric recipe must contain only operator, input_columns, output_name"
+                    "derive_numeric recipe must contain only operator, input_columns, output_name "
+                    f"(got: {', '.join(sorted(map(str, recipe)))}); operator is natural_log or multiply"
                 )
             operator = recipe.get("operator")
             inputs = recipe.get("input_columns")

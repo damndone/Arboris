@@ -46,6 +46,17 @@ _UPDATE_PLAN_SCHEMA: dict[str, Any] = {
 }
 
 
+def _question_scope_has_no_playbooks(arguments: dict[str, Any]) -> dict[str, Any]:
+    """A question-scope plan may only have an empty playbook list, so leaving it out says the same (24 refusals)."""
+    from .tools import tool_note
+
+    completion = arguments.get("completion")
+    if not isinstance(completion, dict) or completion.get("scope") != "question" or "playbooks" in completion:
+        return arguments
+    tool_note("completion.playbooks is empty for a question-scope plan; filled in.")
+    return {**arguments, "completion": {**completion, "playbooks": []}}
+
+
 def build_chain_tool_registry(
     *,
     context_tools: Iterable[ToolDefinition],
@@ -74,6 +85,7 @@ def build_chain_tool_registry(
             side_effect="proposal",
             scope_requirements=("chain",),
             handler=update_plan,
+            normalize=_question_scope_has_no_playbooks,
             description=(
                 "Write or revise the analysis plan: the research question, the judgement criteria fixed "
                 "before any result is seen, and typed steps (workflow operation ids, dependencies, expected "

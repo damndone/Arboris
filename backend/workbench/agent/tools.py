@@ -363,6 +363,56 @@ def _discriminated_branch(schema: dict[str, Any], instance: Any) -> dict[str, An
     return None
 
 
+def _bracket_scan(text: str) -> tuple[list[str], int | None]:
+    """The brackets still open at the end of JSON text, and where a closing bracket first fails to match."""
+    closing = {"{": "}", "[": "]"}
+    open_brackets: list[str] = []
+    in_string = escaped = False
+    for index, char in enumerate(text):
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+        elif char == '"':
+            in_string = True
+        elif char in closing:
+            open_brackets.append(char)
+        elif char in "}]":
+            if not open_brackets or closing[open_brackets[-1]] != char:
+                return open_brackets, index
+            open_brackets.pop()
+    return (["unterminated string"] if in_string else open_brackets), None
+
+
+def _close_open_brackets(text: str) -> str | None:
+    """Text complete but for closing brackets has one way to close; anything else has no repair.
+
+    Ending on an opening bracket or a separator means the text was cut, and closing it would invent
+    an empty plan. It must end on a finished value.
+    """
+    stripped = text.rstrip()
+    open_brackets, mismatch = _bracket_scan(stripped)
+    if mismatch is not None or not open_brackets or open_brackets == ["unterminated string"] or stripped[-1] in "{[,:":
+        return None
+    return stripped + "".join("}" if bracket == "{" else "]" for bracket in reversed(open_brackets))
+
+
+def _json_text_problem(text: str) -> dict[str, Any]:
+    """Where JSON text breaks, so a model can correct it instead of resending it blind."""
+    _, mismatch = _bracket_scan(text)
+    position = mismatch
+    if position is None:
+        try:
+            json.loads(text)
+            return {}
+        except ValueError as exc:
+            position = getattr(exc, "pos", 0)
+    return {"text_breaks_at": position, "text_before_break": text[max(0, position - 40):position + 1]}
+
+
 def _strict_json(text: str) -> Any:
     """JSON with one meaning: no duplicate keys, no NaN or Infinity, no overflow to infinity."""
     def unique_object(pairs):
@@ -736,7 +786,14 @@ def _decode_encoded_fields(definition: "ToolDefinition", arguments: dict[str, An
         try:
             parsed = _strict_json(value)
         except (ValueError, RecursionError):
-            continue
+            # 19 of 46 such refusals in the fb0a6b53 round were complete but for closing brackets.
+            closed = _close_open_brackets(value)
+            try:
+                parsed = _strict_json(closed) if closed else None
+            except (ValueError, RecursionError):
+                parsed = None
+            if parsed is None:
+                continue
         if (isinstance(parsed, dict) and "object" in kinds) or (isinstance(parsed, list) and "array" in kinds):
             decoded[name] = parsed
             tool_note(f"{name} arrived as JSON text; read as the {type(parsed).__name__} it encodes. "
@@ -894,6 +951,8 @@ class ToolRegistry:
                             "The server did not convert an object to string. Put a JSON object at arguments.changes; "
                             "inspect_operation_contract lists fields."
                         )
+                        if isinstance(arguments.get("changes"), str):
+                            detail.update(_json_text_problem(arguments["changes"]))
             envelope = _operation_envelope_example(definition.input_schema, arguments)
             if envelope is not None:
                 example, patch = envelope

@@ -32,9 +32,10 @@ def test_long_string_changes_reports_expected_and_actual_types_before_the_excerp
     ))
     request = _workflow_request()
     request["changes"]["steps"][0]["spec"]["selected_columns"] = ["column_" + "x" * 1200]
-    # Text that does not parse: complete JSON text is decoded with a note instead.
+    # Text that does not parse: complete JSON text is decoded with a note instead,
+    # and so is text missing only its closing brackets.
     intended = request["changes"]
-    request["changes"] = json.dumps(intended)[:-1]
+    request["changes"] = json.dumps(intended)[:-1] + "]}"
     original = copy.deepcopy(request)
 
     refused = _execute(registry, "run_operation", request)

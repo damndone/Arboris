@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import re
 from typing import Any
 
 # Definitions, proposal schemas/validators and records live in operation_*;
@@ -63,6 +64,7 @@ def normalize_operation_target(registry: "OperationRegistry", arguments: dict[st
     """
     from .tools import tool_note
 
+    arguments = _step_as_workflow(registry, arguments)
     target = arguments.get("target")
     if not isinstance(target, dict):
         return arguments
@@ -112,6 +114,22 @@ def _with_known_version(registry: "OperationRegistry", arguments: dict[str, Any]
 COVARIANCE_ALIASES = {"nonrobust": "unadjusted"}
 
 
+def _step_as_workflow(registry: "OperationRegistry", arguments: dict[str, Any]) -> dict[str, Any]:
+    """A workflow step named as the operation, with its spec as changes, is a workflow of that one step."""
+    from .tools import tool_note
+    from .workflow_contracts import workflow_step_vocabulary
+
+    named, changes = arguments.get("operation_id"), arguments.get("changes")
+    if (not isinstance(named, str) or not isinstance(changes, dict) or "steps" in changes
+            or named in registry.natural_language_operation_ids()
+            or named not in workflow_step_vocabulary()["step_operations"]):
+        return arguments
+    tool_note(f"{named} is a workflow step; read as operation.multi_step with this one step.")
+    step = {"step_id": re.sub(r"[^a-z0-9_]", "_", named.lower()), "operation_id": named, "spec": changes, "depends_on": []}
+    return {**{key: value for key, value in arguments.items() if key != "operation_version"},
+            "operation_id": "operation.multi_step", "changes": {"steps": [step]}}
+
+
 def _normalize_steps(arguments: dict[str, Any]) -> dict[str, Any]:
     """Workflow steps written in an unambiguous variant of their contract, corrected with a note.
 
@@ -135,11 +153,20 @@ def _normalize_steps(arguments: dict[str, Any]) -> dict[str, Any]:
         # inspect_operation_contract's argument, copied into the proposal (12 refusals, NVIDIA rounds).
         changes = {key: value for key, value in changes.items() if key != "step_operation_ids"}
         tool_note("changes.step_operation_ids belongs to inspect_operation_contract; ignored here.")
+    # A workflow's identity is the server's, and dependencies belong to each step.
+    for field in ("workflow_id", "depends_on"):
+        if field in changes:
+            changes = {key: value for key, value in changes.items() if key != field}
+            tool_note(f"changes.{field} is not part of a workflow; ignored here.")
     normalized = []
     for step in steps:
         if not isinstance(step, dict) or not isinstance(step.get("spec"), dict):
             normalized.append(step)
             continue
+        if "source" in step and "source" not in step["spec"]:
+            # The contract says source goes inside spec; written beside it, it can mean only that.
+            step = {**{key: value for key, value in step.items() if key != "source"}, "spec": {**step["spec"], "source": step["source"]}}
+            tool_note(f"step {step.get('step_id') or step.get('operation_id')}: source belongs inside spec; moved there.")
         spec, label = dict(step["spec"]), step.get("step_id") or step.get("operation_id")
         branches = spec.get("branches")
         if isinstance(branches, list) and branches and all(isinstance(item, dict) for item in branches):
