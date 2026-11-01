@@ -272,4 +272,5 @@ def test_a_number_read_from_an_image_of_this_turn_says_what_to_compare_it_with()
     findings = grounding.check("The image shows 7316.", [image, asked])
     assert findings
     assert "Compare them with the image" in grounding.unverified_note(findings, "en", image=True)
+    assert "closest" not in grounding.unverified_note((grounding.Finding("7316", ("2026",)),), "en", image=True)
     assert "do not rely on them" in grounding.unverified_note(findings, "en")

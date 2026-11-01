@@ -447,6 +447,8 @@ def unverified_note(findings: Sequence[Finding], language: str, *, image: bool =
     items = "; ".join(_finding_line(finding, language) for finding in findings)
     prefix = (" ".join(notes) + " ") if notes else ""
     if image:
+        # The closest computed value says nothing about what a picture shows.
+        items = "; ".join(finding.text for finding in findings)
         if language == "zh":
             return f"{prefix}⚠️ Workbench 数字核对：以下数字不是计算结果，从图片读取的数字无法自动核对，请对照图片确认：{items}。"
         return f"{prefix}⚠️ Workbench numeric check: these numbers are not computed results, and a number read from an image cannot be checked. Compare them with the image: {items}."

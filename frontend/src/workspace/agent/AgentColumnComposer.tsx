@@ -74,6 +74,7 @@ export function AgentColumnComposer() {
     if (!busy) {
       void sendPrompt(prompt, attached);
       setAttached([]);
+      setAttachError(null);
     }
     else if (canQueue) void agent.queueTurnMessage?.(steer ? "steer" : "follow_up", prompt);
   };

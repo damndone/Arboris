@@ -442,9 +442,10 @@ export function AgentPanel({
             {message.attachments?.length ? (
               <span className="wb-agent-attachments" data-testid="agent-message-attachments">
                 {message.attachments.map((item) => (
-                  item.kind === "image" && agent.attachmentUrl
-                    ? <img key={item.attachment_id} src={agent.attachmentUrl(item.attachment_id)} alt={item.name} title={item.name} className="wb-agent-attachment-image" />
-                    : <span key={item.attachment_id} className="wb-agent-attachment-chip">{item.name}</span>
+                  <a key={item.attachment_id} href={agent.attachmentUrl?.(item.attachment_id)} target="_blank" rel="noreferrer" title={item.name}
+                    className={item.kind === "image" && agent.attachmentUrl ? "wb-agent-attachment-image" : "wb-agent-attachment-file"}>
+                    {item.kind === "image" && agent.attachmentUrl ? <img src={agent.attachmentUrl(item.attachment_id)} alt={item.name} /> : item.name}
+                  </a>
                 ))}
               </span>
             ) : null}

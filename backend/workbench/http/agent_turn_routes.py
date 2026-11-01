@@ -1,7 +1,9 @@
 """agent turn routes: extracted HTTP responsibility."""
 from __future__ import annotations
+import asyncio
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 from fastapi import Query, Request
 from ..agent.context_tools import NodeOperationContextProvider
 from ..agent.compaction import CompactionPolicy
@@ -40,7 +42,8 @@ async def upload_agent_attachment(project_root: str = Form(...), file: UploadFil
     if not (root / "workbench").is_dir():
         raise WorkbenchAPIError(status_code=404, code="PROJECT_NOT_FOUND", message="No such project.")
     try:
-        return store_attachment(root, file.filename or "attachment", await file.read(MAX_ATTACHMENT_BYTES + 1))
+        # Reading a long PDF takes seconds; turns in progress keep streaming meanwhile.
+        return await asyncio.to_thread(store_attachment, root, file.filename or "attachment", await file.read(MAX_ATTACHMENT_BYTES + 1))
     except AttachmentError as exc:
         code, _, message = str(exc).partition(": ")
         raise WorkbenchAPIError(status_code=422, code=code, message=message) from exc
@@ -53,7 +56,8 @@ def read_agent_attachment(attachment_id: str, project_root: str) -> Response:
     except AttachmentError as exc:
         raise WorkbenchAPIError(status_code=404, code="ATTACHMENT_NOT_FOUND", message=str(exc)) from exc
     # Text is served as plain text and images by their sniffed type, so nothing here runs in the page.
-    return Response(content=data, media_type=record["media_type"], headers={"X-Content-Type-Options": "nosniff"})
+    return Response(content=data, media_type=record["media_type"], headers={"X-Content-Type-Options": "nosniff",
+        "Content-Disposition": f"inline; filename*=UTF-8''{quote(record['name'])}"})
 
 @router.post("/agent/sessions/{session_id}/turns")
 async def run_agent_turn(

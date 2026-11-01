@@ -33,4 +33,8 @@ describe("raw usage to visible values", () => {
     expect(screen.getByTestId("agent-usage")).toHaveTextContent('"total_tokens": 99');
     expect(screen.getByTestId("agent-usage")).toHaveTextContent("reported subtotal");
   });
+  test("the compact summary leaves out what the provider did not report", () => {
+    render(<AgentUsagePanel compact events={[event(null,1)]} />);
+    expect(screen.getByTestId("agent-usage").querySelector("summary")?.textContent).toBe("1 step");
+  });
 });
