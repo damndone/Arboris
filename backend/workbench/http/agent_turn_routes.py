@@ -2,7 +2,7 @@
 from __future__ import annotations
 import asyncio
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import quote
 from fastapi import Query, Request
 from ..agent.context_tools import NodeOperationContextProvider
@@ -17,7 +17,7 @@ from ..agent.orchestrator import WorkbenchOrchestrator
 from ..agent.tools import ToolRegistry
 from ..api_errors import WorkbenchAPIError
 from fastapi import File, Form, Response, UploadFile
-from ..agent.attachments import MAX_BYTES as MAX_ATTACHMENT_BYTES, AttachmentError, load as load_attachment, message_payload, store as store_attachment
+from ..agent.attachments import MAX_BYTES as MAX_ATTACHMENT_BYTES, AttachmentError, load as load_attachment, message_payload, store as store_attachment, text_of as attachment_text
 from ..agent.protocol import CONTINUATION_NOTE
 from .responses.agent import AgentAttachment
 from ..agent.turn_runtime import turn_budget, turn_registry
@@ -50,9 +50,12 @@ async def upload_agent_attachment(project_root: str = Form(...), file: UploadFil
 
 
 @router.get("/agent/attachments/{attachment_id}", response_class=Response, response_model=None)
-def read_agent_attachment(attachment_id: str, project_root: str) -> Response:
+def read_agent_attachment(attachment_id: str, project_root: str, view: Literal["original", "text"] = "original") -> Response:
+    root = Path(project_root).expanduser().resolve()
     try:
-        record, data = load_attachment(Path(project_root).expanduser().resolve(), attachment_id)
+        if view == "text":
+            return Response(content=attachment_text(root, attachment_id), media_type="text/plain; charset=utf-8", headers={"X-Content-Type-Options": "nosniff"})
+        record, data = load_attachment(root, attachment_id)
     except AttachmentError as exc:
         raise WorkbenchAPIError(status_code=404, code="ATTACHMENT_NOT_FOUND", message=str(exc)) from exc
     # Text is served as plain text and images by their sniffed type, so nothing here runs in the page.

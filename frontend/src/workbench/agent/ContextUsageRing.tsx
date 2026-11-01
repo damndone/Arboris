@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
 
 export interface ContextUsageRingProps {
   used: number;
@@ -56,10 +57,25 @@ export function ContextUsageRing({
   const [hover, setHover] = useState(false);
   const [pinned, setPinned] = useState(false);
   const root = useRef<HTMLDivElement>(null);
+  const details = useRef<HTMLDivElement>(null);
+  const open = hover || pinned;
+  const [placement, setPlacement] = useState<CSSProperties>({ visibility: "hidden" });
+  // On the page itself, so the Agent column cannot cut it off; above the ring and inside the window.
+  useLayoutEffect(() => {
+    if (!open) return undefined;
+    const place = () => {
+      const ring = root.current?.getBoundingClientRect();
+      const width = details.current?.offsetWidth ?? 0;
+      if (ring) setPlacement({ left: Math.max(8, Math.min(ring.right - width, window.innerWidth - width - 8)), bottom: window.innerHeight - ring.top + 8 });
+    };
+    place();
+    window.addEventListener("resize", place);
+    return () => window.removeEventListener("resize", place);
+  }, [open]);
   useEffect(() => {
     if (!pinned) return undefined;
     const close = (event: Event) => {
-      if (event instanceof KeyboardEvent ? event.key === "Escape" : !root.current?.contains(event.target as Node)) setPinned(false);
+      if (event instanceof KeyboardEvent ? event.key === "Escape" : !root.current?.contains(event.target as Node) && !details.current?.contains(event.target as Node)) setPinned(false);
     };
     document.addEventListener("pointerdown", close);
     document.addEventListener("keydown", close);
@@ -137,9 +153,11 @@ export function ContextUsageRing({
       {level !== "normal" && level !== "empty" && (
         <span className="wb-context-ring-left" aria-hidden="true">{leftUntilSummary}%</span>
       )}
-      {(hover || pinned) && (
+      {open && createPortal(
         <div
+          ref={details}
           className="wb-context-ring-tooltip"
+          style={placement}
           role={pinned ? "dialog" : "tooltip"}
           aria-label={pinned ? "Context" : undefined}
           data-testid="agent-context-tooltip"
@@ -197,7 +215,8 @@ export function ContextUsageRing({
               {compacting ? "Summarizing…" : "Summarize earlier conversation"}
             </button>
           )}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

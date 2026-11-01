@@ -1247,7 +1247,7 @@ describe("AgentPanel", () => {
       </AgentSurfaceContext.Provider>,
     );
 
-    const link = screen.getByRole("link", { name: "Export Agent audit" });
+    const link = screen.getByRole("link", { name: "Agent audit" });
     expect(link).toHaveAttribute(
       "href",
       expect.stringContaining("/agent/sessions/agent_chain/audit?project_root=%2Fproj&format=html"),

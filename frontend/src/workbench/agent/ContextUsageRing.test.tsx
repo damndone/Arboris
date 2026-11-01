@@ -25,6 +25,18 @@ describe("context ring", () => {
     expect(ring).toHaveAttribute("aria-expanded", "false");
   });
 
+  it("lives on the page, so the Agent column cannot cut it off, and clicking inside keeps it open", () => {
+    const { container } = render(<ContextUsageRing used={10} remaining={90} total={100} onCompact={() => undefined} />);
+    const ring = screen.getByRole("button", { name: /Context usage: 10%/ });
+    fireEvent.click(ring);
+    const details = screen.getByTestId("agent-context-tooltip");
+    expect(container).not.toContainElement(details);
+    fireEvent.pointerDown(details);
+    expect(ring).toHaveAttribute("aria-expanded", "true");
+    fireEvent.pointerDown(document.body);
+    expect(ring).toHaveAttribute("aria-expanded", "false");
+  });
+
   it("offers summarizing on hover, the same as when pinned", () => {
     render(<ContextUsageRing used={30_000} remaining={34_000} total={64_000} onCompact={() => undefined} />);
     fireEvent.mouseEnter(screen.getByTestId("agent-context-ring"));

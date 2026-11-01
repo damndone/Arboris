@@ -11189,6 +11189,7 @@ export interface operations {
         parameters: {
             query: {
                 project_root: string;
+                view?: "original" | "text";
             };
             header?: never;
             path: {

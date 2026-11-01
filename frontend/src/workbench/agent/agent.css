@@ -919,11 +919,11 @@
   box-shadow: 0 0 0 2px color-mix(in oklch, var(--tint) 40%, transparent);
 }
 .wb-context-ring-tooltip {
-  position: absolute;
-  bottom: calc(100% + 8px);
-  right: 0;
+  position: fixed;
   z-index: 1000;
   min-width: 168px;
+  width: 320px;
+  max-width: calc(100vw - 16px);
   padding: 8px 10px;
   border: 1px solid var(--separator);
   border-radius: 8px;
@@ -1322,3 +1322,17 @@
   color: var(--label-secondary); font-size: var(--text-small); text-decoration: none; text-overflow: ellipsis; white-space: nowrap;
 }
 a.wb-agent-attachment-file:hover { color: var(--label); }
+
+.wb-agent-audit-link { color: var(--label-secondary); }
+
+.wb-file-viewer { position: fixed; inset: 0; z-index: 1300; display: flex; align-items: center; justify-content: center; padding: var(--space-4); background: var(--scrim); }
+.wb-file-viewer__card { display: flex; flex-direction: column; overflow: hidden; width: min(960px, 100%); height: min(860px, 100%); border-radius: var(--radius-md); background: var(--bg-card-2); box-shadow: var(--shadow-pop); }
+.wb-file-viewer__head { display: flex; flex: 0 0 auto; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-3); border-bottom: var(--hairline) solid var(--separator); color: var(--label); font-size: var(--text-ui); }
+.wb-file-viewer__title { flex: 1; overflow: hidden; min-width: 0; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.wb-file-viewer__head a { color: var(--label-secondary); }
+.wb-file-viewer__head button { width: 28px; height: 28px; min-height: 0; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--label-secondary); font-size: 18px; line-height: 1; cursor: pointer; }
+.wb-file-viewer__head button:hover { background: var(--bg-elev); color: var(--label); }
+.wb-file-viewer__frame { flex: 1; min-height: 0; width: 100%; border: 0; background: var(--bg-canvas); }
+.wb-file-viewer__image { display: flex; flex: 1; align-items: center; justify-content: center; overflow: auto; min-height: 0; padding: var(--space-3); background: var(--bg-canvas); }
+.wb-file-viewer__image img { max-width: 100%; max-height: 100%; }
+.wb-file-viewer__text { flex: 1; overflow: auto; min-height: 0; margin: 0; padding: var(--space-3); background: var(--bg-canvas); color: var(--label); font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }

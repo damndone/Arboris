@@ -5,6 +5,7 @@ import { buildTurns, duration, messageTime } from "./transcript/turns";
 import { MessageActions } from "./transcript/MessageActions";
 import { useAgentSurface } from "./AgentSurfaceContext";
 import { agentAuditExportUrl } from "./agentApi";
+import { AgentAttachmentLink, AgentAuditLink } from "./AgentFileViewer";
 import { AgentComposer } from "./AgentComposer";
 import { agentTurnActive } from "./AgentRunControls";
 import type { AgentMessage, AgentNavigationRef } from "./agentTypes";
@@ -442,10 +443,7 @@ export function AgentPanel({
             {message.attachments?.length ? (
               <span className="wb-agent-attachments" data-testid="agent-message-attachments">
                 {message.attachments.map((item) => (
-                  <a key={item.attachment_id} href={agent.attachmentUrl?.(item.attachment_id)} target="_blank" rel="noreferrer" title={item.name}
-                    className={item.kind === "image" && agent.attachmentUrl ? "wb-agent-attachment-image" : "wb-agent-attachment-file"}>
-                    {item.kind === "image" && agent.attachmentUrl ? <img src={agent.attachmentUrl(item.attachment_id)} alt={item.name} /> : item.name}
-                  </a>
+                  <AgentAttachmentLink key={item.attachment_id} attachment={item} url={agent.attachmentUrl?.(item.attachment_id)} />
                 ))}
               </span>
             ) : null}
@@ -467,9 +465,7 @@ export function AgentPanel({
         <div className="wb-agent-meta">
           <AgentUsagePanel events={agent.providerSteps ?? []} compact />
           {auditSessionId && (
-            <a href={agentAuditExportUrl(projectRoot, auditSessionId)} target="_blank" rel="noreferrer" aria-label="Export Agent audit" title="Export Agent audit">
-              Audit ↗
-            </a>
+            <AgentAuditLink url={agentAuditExportUrl(projectRoot, auditSessionId)} title="Agent audit">Audit</AgentAuditLink>
           )}
         </div>
       ) : null}
@@ -489,14 +485,7 @@ export function AgentPanel({
           events #{agent.eventCursor}
         </span>}
         {auditSessionId && (
-          <a
-            href={agentAuditExportUrl(projectRoot, auditSessionId)}
-            target="_blank"
-            rel="noreferrer"
-            style={{ color: "var(--label-secondary)" }}
-          >
-            Export Agent audit
-          </a>
+          <AgentAuditLink url={agentAuditExportUrl(projectRoot, auditSessionId)} title="Agent audit" className="wb-agent-audit-link">Agent audit</AgentAuditLink>
         )}
       </header>}
       {!compactHeader && <AgentUsagePanel events={agent.providerSteps ?? []} />}

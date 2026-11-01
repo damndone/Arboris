@@ -136,6 +136,21 @@ def test_what_cannot_be_read_is_refused_by_its_content_not_its_name(tmp_path, na
         attachments.store(tmp_path, name, data)
 
 
+def test_the_text_view_shows_what_the_model_reads_and_the_original_stays_downloadable(tmp_path):
+    from fastapi.testclient import TestClient
+    from workbench.api import app
+
+    record = attachments.store(tmp_path, "收入 draft.docx", DOCX)
+    client = TestClient(app)
+    url = f"/agent/attachments/{record['attachment_id']}"
+    text = client.get(url, params={"project_root": str(tmp_path), "view": "text"})
+    assert text.status_code == 200 and "beta\t0.33" in text.text and text.headers["content-type"].startswith("text/plain")
+    original = client.get(url, params={"project_root": str(tmp_path)})
+    assert original.content == DOCX and "filename*=UTF-8''" in original.headers["content-disposition"]
+    image = attachments.store(tmp_path, "plot.png", PNG)
+    assert client.get(f"/agent/attachments/{image['attachment_id']}", params={"project_root": str(tmp_path), "view": "text"}).status_code == 404
+
+
 def test_an_id_cannot_leave_the_attachment_directory(tmp_path):
     with pytest.raises(attachments.AttachmentError, match="NOT_FOUND"):
         attachments.load(tmp_path, "../../../etc/passwd".ljust(32, "a"))
