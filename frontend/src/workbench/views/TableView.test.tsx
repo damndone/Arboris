@@ -376,10 +376,10 @@ describe("TableView", () => {
     );
     expect(screen.getByText("Quadratic stationary point")).toBeTruthy();
     expect(screen.getByText("stationary point")).toBeTruthy();
-    expect(screen.getByText("211.5934")).toBeTruthy();
+    expect(screen.getByText("211.6")).toBeTruthy();
     // The out-of-range flag is the difference between a number and a claim.
     expect(screen.getByText("stationary point within observed range")).toBeTruthy();
-    expect(screen.getByText("no")).toBeTruthy();
+    expect(screen.getByText("No")).toBeTruthy();
     // Provenance, not decoration: it says which model the result describes.
     expect(screen.getByText(/stationary_point/)).toBeTruthy();
     // Internal schema tags are not reader-facing.

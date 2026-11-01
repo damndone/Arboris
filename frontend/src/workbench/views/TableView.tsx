@@ -59,6 +59,7 @@ import { StatisticalExplorationTable } from "./StatisticalExplorationTable";
 import { resolveTableRunScope } from "./tableRunScope";
 import { PredictionResearchEvidenceCard } from "../../runResult/PredictionResearchEvidenceCard";
 import { formatEstimate, formatPValue } from "../../format/numbers";
+import { PostEstimationFields } from "../../workspace/result/PostEstimationResults";
 import { describeInference, describeSuppressedInference, nobsBasis } from "../../format/inference";
 
 /** Run ids look like 20260703_065622_030010_92222fe1 — the last hex segment is
@@ -125,7 +126,6 @@ const POST_ESTIMATION_LABELS: Record<string, string> = {
 };
 
 /** Keys that identify the payload format rather than tell the reader anything. */
-const POST_ESTIMATION_HIDDEN_KEYS = new Set(["schema_version"]);
 
 /**
  * The current GET /runs/{id} response only exposes model_results. Keep the
@@ -469,44 +469,16 @@ function StatisticalEvidenceTable({ packet }: { packet: StatisticalEvidencePacke
   );
 }
 
-function postEstimationValue(value: unknown): string {
-  if (value === null || value === undefined) return "—";
-  if (typeof value === "boolean") return value ? "yes" : "no";
-  if (typeof value === "number") {
-    if (!Number.isFinite(value)) return "—";
-    return Number.isInteger(value) ? String(value) : value.toFixed(4);
-  }
-  if (Array.isArray(value)) return value.map(postEstimationValue).join(", ");
-  if (typeof value === "object") return JSON.stringify(value);
-  return String(value);
-}
-
 function PostEstimationResultTable({ entry }: { entry: PostEstimationResult }) {
-  const rows = Object.entries(entry.result).filter(
-    ([key]) => !POST_ESTIMATION_HIDDEN_KEYS.has(key),
-  );
   return (
-    <div style={{ marginBottom: 12 }} data-testid={`post-estimation-${entry.artifact_id}`}>
-      <div style={{ fontSize: 13, fontWeight: 600, color: "var(--label)" }}>
+    <div className="wb-table-post-estimation" data-testid={`post-estimation-${entry.artifact_id}`}>
+      <div className="wb-table-post-estimation__title">
         {POST_ESTIMATION_LABELS[entry.operation_id] ?? entry.operation_id}
       </div>
-      <div style={{ fontSize: 11, color: "var(--label)", marginBottom: 6 }}>
+      <div className="wb-table-post-estimation__source">
         step {entry.workflow_step_id} · model run {entry.model_run_id}
       </div>
-      <table style={{ borderCollapse: "collapse", fontSize: 12 }}>
-        <tbody>
-          {rows.map(([key, value]) => (
-            <tr key={key}>
-              <td style={{ padding: "2px 12px 2px 0", color: "var(--label)" }}>
-                {key.replace(/_/g, " ")}
-              </td>
-              <td style={{ padding: "2px 0", fontVariantNumeric: "tabular-nums" }}>
-                {postEstimationValue(value)}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <PostEstimationFields entry={entry} />
     </div>
   );
 }
