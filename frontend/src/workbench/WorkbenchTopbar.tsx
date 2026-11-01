@@ -77,7 +77,7 @@ export function ProjectSwitcher({ projectRoot }: { projectRoot: string }) {
           fontWeight: 600,
         }}
       >
-        {projectName(projectRoot)}
+        <span className="wb-project-name">{projectName(projectRoot)}</span>
         <span aria-hidden="true" style={{ fontSize: 10 }}>
           ▾
         </span>
