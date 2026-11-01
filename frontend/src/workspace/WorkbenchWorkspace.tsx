@@ -237,6 +237,8 @@ export function WorkbenchWorkspace({
   }
 
   const analysis = state.view === "graph";
+  // A report's review belongs beside the report; elsewhere its tab just waits.
+  const documentPanelKind = stagePanelKind === "report-review" && state.view !== "report" ? null : stagePanelKind;
   const hasOpenItem = stagePanel !== null;
   const stageOpen = stageIsOpen({ analyzing, analysisView: analysis, hasOpenItem, folded: stageFolded });
   const bottomTabs: BottomTab[] = [
@@ -279,7 +281,7 @@ export function WorkbenchWorkspace({
           ) : (
             <div className="ws-document-inspector">
               <div className="ws-document-inspector__main">{main}</div>
-              <PanelHost projectRoot={projectRoot} activeKind={stagePanelKind} tabs={stageTabs} nodePanel={stagePanelKind === "node" ? stagePanel : null} reportPanel={stagePanelKind === "report-review" ? stagePanel : null} collapseLabel={stagePanelKind === "report-review" ? "report review" : "node panel"} />
+              <PanelHost projectRoot={projectRoot} activeKind={documentPanelKind} tabs={stageTabs} nodePanel={documentPanelKind === "node" ? stagePanel : null} reportPanel={documentPanelKind === "report-review" ? stagePanel : null} collapseLabel={documentPanelKind === "report-review" ? "report review" : "node panel"} />
             </div>
           )
         }

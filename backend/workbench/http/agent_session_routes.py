@@ -26,6 +26,12 @@ from .typed_routes import TypedAPIRoute
 
 router = APIRouter(route_class=TypedAPIRoute)
 
+#: Which tools answer for this kind of object; the rest of the Agent is the same everywhere.
+FOCUS_HINTS = {
+    "report": " read_reports shows this run's report and its versions; save_report_version saves a new one.",
+    "plan": " inspect_notebook_state shows the options being compared.",
+}
+
 @router.post("/agent/sessions")
 def create_agent_session(
     project_root: str,
@@ -139,6 +145,7 @@ def create_agent_session(
                     + (f" (id {body.focus.id})" if body.focus.id and body.focus.id != body.focus.label else "")
                     + (f" in run {body.focus.run_id}" if body.focus.run_id else "")
                     + ". Act on it unless the user names another object."
+                    + FOCUS_HINTS.get(body.focus.kind, "")
                 ),
                 "metadata": {"focus": body.focus.model_dump()},
             },

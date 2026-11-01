@@ -1,13 +1,14 @@
 import type { CitableFact } from "./factTable";
 import type { ReportFigure } from "./reportClient";
 import type { ReportRecord } from "./reportHistory";
-import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { artifactDownloadUrl } from "../api";
 import { CiteChip, parseCiteSegments } from "./citeMarkup";
 import { renderMarkdown } from "./markdown";
 import { useReportWorkspace } from "./ReportWorkspaceContext";
 import { displayEvidenceLabel, groupFacts } from "./reportEvidence";
 import { PanelWindowControls, PanelWindowDragHandle } from "../workbench/PanelWindowControls";
+import { ReportVersionPicker, SavedVersionBody, restoreWritten, useReportVersions, type ReportVersion } from "./ReportVersions";
 import "./report.css";
 
 export interface ReportReviewPanelProps {
@@ -45,6 +46,36 @@ export function ReportReviewPanel({
   const { current } = workspace;
   const currentIncludedFacts = workspace.currentIncludedFacts ?? current?.facts ?? [];
   const currentIncludedFigures = workspace.currentIncludedFigures ?? current?.figures ?? [];
+  const { versions, refresh } = useReportVersions(workspace.projectRoot, workspace.activeRunId ?? null, workspace.history ?? []);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
+  // Nothing chosen, or the choice is gone: the newest version. An edit in progress stays on its own version.
+  const selected: ReportVersion | null = versions.find((version) => version.key === selectedKey)
+    ?? (current && versions.find((version) => version.kind === "generated" && version.record.id === current.id && selectedKey === null && !versions[0]?.key.startsWith("written")))
+    ?? versions[0] ?? null;
+  const saved = selected && selected.kind !== "generated" ? selected : null;
+  const isNewest = selected !== null && selected.key === versions[0]?.key;
+  useEffect(() => {
+    setRestoreError(null);
+    if (selected?.kind === "generated" && selected.record.id !== current?.id) workspace.openReport(selected.record);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only a new choice opens a record
+  }, [selected?.key]);
+  const restore = async () => {
+    if (!selected || !workspace.projectRoot || !workspace.activeRunId) return;
+    setRestoreError(null);
+    try {
+      if (selected.kind === "written") {
+        const newest = versions.find((version): version is Extract<ReportVersion, { kind: "written" }> => version.kind === "written")?.record ?? null;
+        await restoreWritten(workspace.projectRoot, workspace.activeRunId, selected.record, newest);
+        await refresh();
+      } else if (selected.kind === "generated") {
+        await workspace.restoreReport(selected.record);
+      }
+      setSelectedKey(null);
+    } catch (problem) {
+      setRestoreError(problem instanceof Error ? problem.message : "This version could not be restored.");
+    }
+  };
 
   return (
     <aside
@@ -66,10 +97,8 @@ export function ReportReviewPanel({
         />
         <div className="report-review-panel__heading">
           <h2 className="report-review-panel__title">Report review</h2>
-          {current && (
-            <div className="report-review-panel__meta">
-              Run <code>{current.scope.run_id}</code> · {current.model ?? "unknown model"} · {current.generatedAt}
-            </div>
+          {versions.length > 0 && selected && (
+            <ReportVersionPicker versions={versions} selected={selected.key} onSelect={setSelectedKey} />
           )}
         </div>
         <PanelWindowControls
@@ -86,7 +115,16 @@ export function ReportReviewPanel({
         />
       </header>
 
-      {!collapsed && (!current ? (
+      {!collapsed && selected && !isNewest && selected.kind !== "workflow" && (
+        <div className="report-review-panel__old-version">
+          <span>An earlier version.</span>
+          <button type="button" onClick={() => void restore()}>Restore as newest</button>
+          {restoreError && <span role="alert">{restoreError}</span>}
+        </div>
+      )}
+      {!collapsed && saved && workspace.projectRoot && workspace.activeRunId ? (
+        <SavedVersionBody version={saved} projectRoot={workspace.projectRoot} runId={workspace.activeRunId} />
+      ) : !collapsed && (!current ? (
         <div
           data-testid={workspace.reportLoadError ? "report-review-load-error" : "report-review-empty"}
           className="report-review-panel__empty"

@@ -7722,9 +7722,9 @@ export interface components {
         ManualReportRecord: {
             /**
              * Author
-             * @constant
+             * @enum {string}
              */
-            author: "user";
+            author: "user" | "agent";
             /** Created At */
             created_at: string;
             /** Document Id */

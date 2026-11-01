@@ -45,7 +45,7 @@ MAX_REPAIRS = 1
 # 1.984×10⁻³⁸, 1.98 × 10^-38, 3.3*10**-38 -- one number, not "1.984".
 _REPLY_NUMBER = re.compile(
     r"(?<![A-Za-z0-9_.,])"
-    r"(?P<number>(?P<mantissa>(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+(?:[eE][-+]?\d+)?)?)"
+    r"(?P<number>(?P<mantissa>(?:\d{1,3}(?:[,\u00a0\u2009\u202f]\d{3})+|\d+)(?:\.\d+(?:[eE][-+]?\d+)?)?)"
     r"(?:\s*[×xX*·]\s*10\s*(?:"
     r"(?P<superscript>[⁻⁺]?[⁰¹²³⁴⁵⁶⁷⁸⁹]+)"
     r"|(?:\^|\*\*)\s*\(?\s*(?P<exponent>[-+−]?\d+)\s*\)?"
@@ -165,7 +165,7 @@ def _plain(value: Decimal) -> str:
 
 def _decimal(text: str) -> Decimal | None:
     try:
-        value = Decimal(text.replace(",", ""))
+        value = Decimal(re.sub(r"[,\u00a0\u2009\u202f]", "", text))
     except (InvalidOperation, ArithmeticError):
         return None
     if not value.is_finite() or not -400 < value.adjusted() < 400:

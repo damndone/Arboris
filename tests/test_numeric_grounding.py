@@ -61,6 +61,11 @@ def test_wrong_rounding_arithmetic_and_invention_are_found(reply: str, bad: str)
     assert [finding.text for finding in findings] == [bad]
 
 
+def test_a_thin_space_in_a_large_number_is_a_thousands_separator() -> None:
+    evidence = [{"role": "tool", "name": "get_model", "content": '{"nobs": 1500}'}]
+    assert grounding.check("Sample: 1\u202f500 observations.", evidence) == ()
+
+
 def test_findings_name_the_closest_real_values() -> None:
     (finding,) = grounding.check("p = 0.099", [RESULT])
     assert finding.closest[0] == "0.098491234"

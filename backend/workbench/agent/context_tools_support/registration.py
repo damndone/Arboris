@@ -10,6 +10,7 @@ from ..skill_tools import skill_tool_definitions
 from ..extension_tools import extension_tool
 from ..statistical_claim_tools import statistical_claim_tool
 from ..chart_tool import chart_tool
+from ..report_tools import report_read_tool, report_save_tool
 from .analysis_loop import (
     AnalysisLoopContextError,
     inspect_analysis_loop_context,
@@ -460,6 +461,8 @@ class RegistrationMixin:
             extension_tool(self.project_root, session_id=session_id),
             statistical_claim_tool(self, session_id=session_id),
             chart_tool(self.project_root, session_id=session_id),
+            report_read_tool(self.project_root, session_id=session_id),
+            report_save_tool(self.project_root, session_id=session_id),
             self.calculate_tool(session_id=session_id, scope_requirements=("project", "chain")),
             *self.conversation_recall_tools(session_id=session_id, scope_requirements=("project", "chain")),
             ToolDefinition(**specs["export_analysis_script"], handler=export_analysis_script),
@@ -832,6 +835,7 @@ class RegistrationMixin:
             extension_tool(self.project_root, session_id=session_id),
             statistical_claim_tool(self, session_id=session_id),
             chart_tool(self.project_root, session_id=session_id),
+            report_read_tool(self.project_root, session_id=session_id),
             self.show_dataset_rows_tool(session_id=session_id, scope_requirements=("project",)),
             self.calculate_tool(session_id=session_id, scope_requirements=("project",)),
             *self.conversation_recall_tools(session_id=session_id, scope_requirements=("project",)),

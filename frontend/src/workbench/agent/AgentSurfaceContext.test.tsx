@@ -862,7 +862,7 @@ describe("AgentSurfaceProvider", () => {
     await screen.findByRole("listbox", { name: "Agent model" });
     fireEvent.change(screen.getByRole("textbox", { name: "Ask Agent" }), { target: { value: "Inspect current focus" } });
     fireEvent.click(screen.getByRole("button", { name: "Send to Agent" }));
-    await waitFor(() => expect(mocks.createAgentSession).toHaveBeenCalledWith("/proj", expect.objectContaining({ focus: expect.objectContaining({kind, id: kind === "report" ? "run-a" : "notebook-a", label: expect.stringMatching(kind === "report" ? /^Report/ : /^Plan/)}) })));
+    await waitFor(() => expect(mocks.createAgentSession).toHaveBeenCalledWith("/proj", expect.objectContaining({ focus: expect.objectContaining({kind, id: kind === "report" ? "run-a" : "notebook-a", label: expect.stringMatching(kind === "report" ? /^Report/ : /^Comparing plans/)}) })));
     expect(mocks.getAgentSession).not.toHaveBeenCalledWith("/proj", "old_graph_session");
   });
 

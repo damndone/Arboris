@@ -135,7 +135,7 @@ export interface ReduceResult {
   nextClock: number;
 }
 
-/** Add the permanent Report review tab without changing the active tab. */
+/** Add the Report review tab without changing the active tab. */
 export function ensureReportReviewTab(
   prev: TabsSlice,
   openedAt = maxOpenedAt(prev.tabs) + 1,
@@ -197,7 +197,7 @@ export function reduceOpenTab(
  *  one that took its slot, else its left neighbour, else first). */
 export function reduceCloseTab(prev: TabsSlice, id: string): TabsSlice {
   const index = prev.tabs.findIndex((t) => t.id === id);
-  if (index === -1 || !isNodeTab(prev.tabs[index])) return prev;
+  if (index === -1) return prev;
   const tabs = prev.tabs.filter((t) => t.id !== id);
   let activeTabId = prev.activeTabId;
   if (prev.activeTabId === id) {

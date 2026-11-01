@@ -14,7 +14,7 @@ const SRC = "src";
 const TOKENS = "src/theme/tokens.css";
 // Only goes down (v1.9.0: 934 -> 856). When a change removes inline styles,
 // lower this to the new count so the saving is kept.
-const INLINE_STYLE_CEILING = 804;
+const INLINE_STYLE_CEILING = 753;
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {

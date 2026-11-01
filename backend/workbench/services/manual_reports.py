@@ -14,7 +14,7 @@ import stat
 from pathlib import Path
 import re
 from tempfile import TemporaryDirectory
-from typing import Any
+from typing import Any, Literal
 
 from filelock import FileLock
 from pydantic import BaseModel, ConfigDict, Field
@@ -385,7 +385,7 @@ def _request_identity(record: dict) -> dict:
             "parent_report_id": record["parent_report_id"]}
 
 
-def save_manual_report(run_root: Path, request: ManualReportRequest) -> dict:
+def save_manual_report(run_root: Path, request: ManualReportRequest, *, author: Literal["user", "agent"] = "user") -> dict:
     directory = _reports_dir(run_root)
     directory.mkdir(exist_ok=True)
     # All manual writers, including distinct server workers, serialize the
@@ -423,7 +423,7 @@ def save_manual_report(run_root: Path, request: ManualReportRequest) -> dict:
             raise _error("MANUAL_REPORT_SELECTION_INVALID",
                          "The text shows values of facts that are not in the selected evidence, or a marker that "
                          f"names more than one fact: {', '.join(sorted(set(unknown))[:5])}.")
-        record = {"id": request.id, "run_id": run_root.name, "author": "user", "draft_origin": "deterministic",
+        record = {"id": request.id, "run_id": run_root.name, "author": author, "draft_origin": "deterministic",
                   "created_at": datetime.now(timezone.utc).isoformat(), "document_id": parent["document_id"] if parent else request.id,
                   "revision_number": parent["revision_number"] + 1 if parent else 1, "parent_report_id": request.parent_report_id,
                   "title": request.title, "text": request.text, "source_fingerprint": request.source_fingerprint,

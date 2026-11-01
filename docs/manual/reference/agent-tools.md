@@ -53,8 +53,10 @@ Tool-result content classes, including historical persisted tool names. Retired 
 | `list_project_datasets` | `metadata` |
 | `plan_analysis` | `workbench_state` |
 | `read_project_conversation` | `workbench_state` |
+| `read_reports` | `model_result` |
 | `request_notebook_inspections` | `aggregate` |
 | `run_operation` | `workbench_state` |
+| `save_report_version` | `workbench_state` |
 | `search_project_conversations` | `workbench_state` |
 | `show_chart` | `model_result` |
 | `show_dataset_rows` | `rows` |

@@ -113,6 +113,7 @@ export interface WorkbenchDispatch {
   /** Sends focus back to selected (or null when no tab is active). */
   unpinFocus(): void;
   closeTab(tabId: string): void;
+  openReportReview(): void;
   // View / panel / search ────────────────────────────────────────
   setView(view: ViewMode): void;
   setBottomPanel(panel: BottomPanelId): void;
@@ -262,6 +263,7 @@ export function WorkbenchStateProvider({
   const paramsRef = useRef(params);
   paramsRef.current = params;
   const lastNodeTabIdRef = useRef<string | null>(null);
+  const reportReviewClosedRef = useRef(false);
 
   // Last evicted tab id (transient — cleared by the next non-overflow
   // openTab. Plan §11 wiring uses this for "Closed oldest tab to make
@@ -435,6 +437,7 @@ export function WorkbenchStateProvider({
       const prevTabs = tabsRef.current;
       const next = reduceCloseTab(prevTabs, tabId);
       if (next === prevTabs) return; // unknown id, no-op
+      if (tabId === REPORT_REVIEW_TAB_ID) reportReviewClosedRef.current = true;
 
       if (lastNodeTabIdRef.current === tabId) {
         const nextNode =
@@ -467,11 +470,14 @@ export function WorkbenchStateProvider({
       if (view === "report") {
         const activeNode = findNodeTab(tabs.tabs, tabs.activeTabId);
         if (activeNode !== null) lastNodeTabIdRef.current = activeNode.id;
-        if (!tabs.tabs.some((tab) => tab.id === REPORT_REVIEW_TAB_ID)) {
-          clockRef.current += 1;
-          tabs = ensureReportReviewTab(tabs, clockRef.current);
+        // Closed by the person: it stays closed until they open it again.
+        if (!reportReviewClosedRef.current) {
+          if (!tabs.tabs.some((tab) => tab.id === REPORT_REVIEW_TAB_ID)) {
+            clockRef.current += 1;
+            tabs = ensureReportReviewTab(tabs, clockRef.current);
+          }
+          tabs = reduceSetActive(tabs, REPORT_REVIEW_TAB_ID);
         }
-        tabs = reduceSetActive(tabs, REPORT_REVIEW_TAB_ID);
       } else if (urlRef.current.view === "report") {
         const restore =
           findNodeTab(tabs.tabs, tabs.activeTabId) ??
@@ -489,6 +495,15 @@ export function WorkbenchStateProvider({
     },
     [commit],
   );
+
+  // The report, its versions and any unsaved edit live in the report workspace,
+  // not in this tab: closing and reopening it loses nothing.
+  const openReportReview = useCallback(() => {
+    reportReviewClosedRef.current = false;
+    clockRef.current += 1;
+    const tabs = reduceSetActive(ensureReportReviewTab(tabsRef.current, clockRef.current), REPORT_REVIEW_TAB_ID);
+    commit({ tabs, slice: urlRef.current });
+  }, [commit]);
 
   const setBottomPanel = useCallback(
     (panel: BottomPanelId) => {
@@ -564,6 +579,7 @@ export function WorkbenchStateProvider({
         setFocusOnly,
         unpinFocus,
         closeTab,
+        openReportReview,
         setView,
         setBottomPanel,
         clearSearch,
@@ -596,6 +612,7 @@ export function WorkbenchStateProvider({
       setFocusOnly,
       unpinFocus,
       closeTab,
+      openReportReview,
       setView,
       setBottomPanel,
       clearSearch,

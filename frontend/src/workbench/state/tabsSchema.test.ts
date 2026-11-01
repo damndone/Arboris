@@ -173,7 +173,7 @@ describe("reduceCloseTab", () => {
     expect(reduceCloseTab(prev, "ghost")).toBe(prev);
   });
 
-  it("does not close the permanent Report review tab", () => {
+  it("closes the Report review tab like any other", () => {
     const prev: TabsSlice = {
       tabs: [
         nodeTabOf("a", 1),
@@ -182,7 +182,7 @@ describe("reduceCloseTab", () => {
       activeTabId: REPORT_REVIEW_TAB_ID,
     };
 
-    expect(reduceCloseTab(prev, REPORT_REVIEW_TAB_ID)).toBe(prev);
+    expect(reduceCloseTab(prev, REPORT_REVIEW_TAB_ID)).toEqual({ tabs: [nodeTabOf("a", 1)], activeTabId: "a" });
   });
 
   it("promotes the right-neighbour when closing the active tab", () => {

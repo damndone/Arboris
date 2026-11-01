@@ -28,6 +28,7 @@ import {
 } from "./ReportWorkspaceContext";
 import type { CitableFact } from "./factTable";
 import type { ReportRecord } from "./reportHistory";
+import { useAgentSurfaceOptional } from "../workbench/agent/AgentSurfaceContext";
 import "./report.css";
 import { ReportSources } from "./ReportSources";
 import { ManualReportPanel } from "../manual/ManualReportPanel";
@@ -53,6 +54,9 @@ export function ReportView({ projectRoot, focusRequest = 0 }: { projectRoot?: st
         <button type="button" aria-pressed={writer === "ai"} title="Draft with the Agent from the same evidence" onClick={() => setWriter("ai")}>
           With AI
         </button>
+        {wb && !wb.state.tabs?.some((tab) => tab.kind === "report-review") && (
+          <button type="button" className="report-writer__review" onClick={wb.dispatch.openReportReview}>Review</button>
+        )}
       </div>
       {writer === "ai" ? (
         <AIReportView projectRoot={projectRoot} focusRequest={focusRequest} />
@@ -77,6 +81,7 @@ function AIReportView({ projectRoot, focusRequest = 0 }: { projectRoot?: string;
 
 /** Center-column report writing surface. Review prose is rendered by ReportReviewPanel. */
 export function ReportViewContent({ focusRequest = 0 }: { focusRequest?: number } = {}) {
+  const agent = useAgentSurfaceOptional();
   const forest = useForest();
   const wb = useWorkbenchOptional();
   const workspace = useReportWorkspace();
@@ -107,9 +112,16 @@ export function ReportViewContent({ focusRequest = 0 }: { focusRequest?: number 
   const promptChange = hasCurrentReport
     ? workspace.onRevisionInstructionChange
     : workspace.onInstructionChange;
-  const promptSubmit = hasCurrentReport
+  // With the Agent beside the report, the request is the Agent's: same tools, model,
+  // attachments and record as everywhere else. Left-out evidence goes along with it.
+  const agentSubmit = agent ? () => {
+    const omitted = workspace.excludedFactIds.length ? ` Leave out these facts: ${workspace.excludedFactIds.join(", ")}.` : "";
+    void agent.sendPrompt(`${promptValue.trim() || "Write this run's report from its evidence."}${omitted}`);
+    promptChange("");
+  } : null;
+  const promptSubmit = agentSubmit ?? (hasCurrentReport
     ? () => void workspace.reviseReport()
-    : () => void workspace.generateReport();
+    : () => void workspace.generateReport());
 
   return (
     <div

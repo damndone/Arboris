@@ -54,6 +54,8 @@ const TOOL_TITLES: Record<string, string> = {
   plan_analysis: "Compared analysis plans",
   calculate: "Calculated",
   show_chart: "Drew a chart",
+  read_reports: "Read the report",
+  save_report_version: "Saved a report version",
   list_project_datasets: "Listed datasets",
   inspect_analysis_completion: "Checked what is still missing",
   inspect_operation_contract: "Read an operation's fields",

@@ -490,10 +490,9 @@ describe("WorkbenchRouteContainer", () => {
 
     await waitFor(() => {
       expect(screen.getByTestId("node-panel-floating")).toBeInTheDocument();
-      expect(screen.getByTestId("panel-host")).toHaveAttribute("data-active-kind", "report-review");
+      // The review's tab waits here; its panel opens beside the report, not over this document.
+      expect(screen.getByTestId("panel-host")).toHaveAttribute("data-active-kind", "none");
     });
-    expect(within(screen.getByTestId("panel-host-tabs")).queryByRole("tab", { name: "Original OLS" })).toBeNull();
-    expect(within(screen.getByTestId("panel-host-tabs")).getByRole("tab", { name: "Report review" })).toBeInTheDocument();
     expect(within(screen.getByTestId("node-panel-floating")).getByRole("tab", { name: "Original OLS" })).toBeInTheDocument();
     expect(within(screen.getByTestId("node-panel-floating")).queryByRole("tab", { name: "Report review" })).toBeNull();
 

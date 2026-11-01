@@ -71,16 +71,14 @@ export function DetailDrawerTabs({
               >
                 {label}
               </button>
-              {tab.kind === "node" && (
-                <button
-                  type="button"
-                  className="detail-tabs__close"
-                  aria-label={`Close ${label} tab`}
-                  onClick={() => onClose(tab.id)}
-                >
-                  x
-                </button>
-              )}
+              <button
+                type="button"
+                className="detail-tabs__close"
+                aria-label={`Close ${label} tab`}
+                onClick={() => onClose(tab.id)}
+              >
+                x
+              </button>
             </span>
           );
         })}

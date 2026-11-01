@@ -1463,6 +1463,7 @@ def test_main_role_turn_exposes_project_evidence_and_permissioned_operation_tool
         "inspect_extensions",
         "check_model_claims",
         "show_chart",
+        "read_reports",
         "inspect_analysis_completion",
     }
     operation_tools = {"run_operation", "update_plan", "plan_analysis"}
