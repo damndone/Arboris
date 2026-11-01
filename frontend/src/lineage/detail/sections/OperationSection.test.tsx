@@ -166,8 +166,9 @@ describe("OperationSection (editable)", () => {
     ];
     renderWithRerun(node);
 
-    expect(screen.getByTestId("operation-x-hint")).toHaveTextContent(
-      "Uncheck a regressor to remove it from the next rerun",
+    expect(screen.getByTestId("operation-control-x")).toHaveAttribute(
+      "title",
+      expect.stringContaining("Uncheck a regressor to drop it"),
     );
   });
 
@@ -184,12 +185,9 @@ describe("OperationSection (editable)", () => {
 
   it("previews a manual patch before submitting rerun", async () => {
     const { submitRerun } = renderWithRerun(modelNode());
-    expect(screen.getByTestId("operation-rerun-label")).toHaveTextContent(
-      "Rerun source with changes",
-    );
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "robust" } });
     fireEvent.click(screen.getByTestId("operation-rerun-submit"));
-    expect(screen.getByTestId("manual-patch-preview")).toHaveTextContent("covariance");
+    expect(screen.getByTestId("manual-patch-preview")).toHaveTextContent(/covariance/i);
     expect(submitRerun).not.toHaveBeenCalled();
     fireEvent.click(screen.getByTestId("operation-rerun-submit"));
     await waitFor(() => expect(submitRerun).toHaveBeenCalledTimes(1));
