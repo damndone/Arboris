@@ -55,7 +55,7 @@ def build_node_index(
     clean_h = node_hashes.get("cleaning")
     if clean_h:
         idx["stage:cleaned"] = _entry(clean_h, "cleaning", "processed/cleaned_dataset.parquet")
-        for var in [normalized_y, *normalized_x]:
+        for var in filter(None, [normalized_y, *normalized_x]):
             idx[f"var:{var}:cleaned"] = _entry(
                 clean_h, "cleaning", "processed/cleaned_dataset.parquet"
             )

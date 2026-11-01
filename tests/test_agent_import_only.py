@@ -4,6 +4,7 @@ import json
 import pandas as pd
 import pytest
 
+from workbench.lineage.node_write_validation import build_rerun_operation_context
 from workbench.orchestrator import run_workflow
 from workbench.projects import create_project
 
@@ -27,6 +28,12 @@ def test_import_only_persists_source_profile_and_lineage_without_fitting(tmp_pat
     manifest = json.loads((root / 'run_manifest.json').read_text())
     assert manifest['status'] == 'completed' and manifest['mode'] == 'import'
     assert (root / 'graph.json').exists()
+    # Every imported node stays addressable: the Agent's node tools read through this.
+    for node in ('stage:raw', 'stage:cleaned'):
+        target = build_rerun_operation_context(project.root / 'runs', request_id='r', owner_run_id=run['run_id'],
+                                               op_node_id=node, active_head_run_id=run['run_id'])
+        assert target.node_hash
+    assert not [key for key in json.loads((root / 'node_index.json').read_text()) if key.startswith('var:')]
 
 
 def test_import_failure_remains_failed_and_retains_source(tmp_path):

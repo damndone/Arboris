@@ -832,6 +832,11 @@ def _run_workflow(
                                summary=f'{len(ctx.data.frame)} rows × {len(ctx.data.frame.columns)} cols')
         _recorder.record_edge(edge_id='raw:cleaned', source_id='stage:raw', target_id='stage:cleaned', op='clean')
         _recorder.flush()
+        # Without an identity the nodes exist but no node tool can address them.
+        if ctx.artifacts.get('_node_hashes'):
+            from ..lineage.node_index import write_node_index
+            write_node_index(run_root, ctx.artifacts['_node_hashes'], normalized_y='', normalized_x=[],
+                             model_results=[], upload_hash=ctx.artifacts.get('_upload_hash', ''))
         _write_manifest(run_root, run_id, mode, 'completed', _lineage(input_files),
                         started_at=started_at, y='', x=[], requested_model_type='auto')
         ctx.terminal_status = 'completed'
